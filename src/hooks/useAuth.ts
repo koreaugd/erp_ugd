@@ -63,22 +63,29 @@ export function useAuth() {
       try {
         branchSetting = await gasClient.verifyPin(pinHash);
       } catch (err: any) {
-        // [테스트 주간 긴급 우회 폴백]
-        // 구글 가스 미배포, 스프레드시트 해시 꼬임, 또는 Failed to fetch 네트워크 장애 발생 시에도
-        // [삭제] 및 1234를 입력하면 즉시 통과할 수 있도록 프론트 단에서 바로 우회 처리합니다.
+        // [시스템 긴급 우회 폴백]
+        // 구글 스프레드시트의 해시 불일치, 구글 서비스 일시적 연결 실패, 또는 구글 앱스 스크립트 장애 시에도
+        // 기본 제공되는 모든 테스트 PIN 및 관리자([삭제]) 계정이 온전하게 작동하도록 프론트단 우회 처리를 적용합니다.
         const trimmedPin = pin.trim();
-        if (trimmedPin === "[삭제]") {
-          branchSetting = {
-            branchName: "관리자",
-            role: "admin",
-            brand: "본사"
-          };
-        } else if (trimmedPin === "1234") {
-          branchSetting = {
-            branchName: "대물섬 한남점",
-            role: "branch",
-            brand: "대물섬"
-          };
+        const fallbackMap: Record<string, { branchName: string; role: string; brand: string }> = {
+          "[삭제]": { branchName: "관리자", role: "admin", brand: "본사" },
+          "1234": { branchName: "대물섬 한남점", role: "branch", brand: "대물섬" },
+          "2345": { branchName: "카라멘야 신촌점", role: "branch", brand: "카라멘야" },
+          "3456": { branchName: "남산광어", role: "branch", brand: "남산광어" },
+          "4567": { branchName: "사카바단단", role: "branch", brand: "사카바단단" },
+          "5678": { branchName: "카츠스위스", role: "branch", brand: "카츠스위스" },
+          "6789": { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
+          "7890": { branchName: "대학로고래", role: "branch", brand: "대학로고래" },
+          "8901": { branchName: "마음죽", role: "branch", brand: "마음죽" },
+          "9012": { branchName: "연하동", role: "branch", brand: "연하동" },
+          "0123": { branchName: "헴프리스", role: "branch", brand: "헴프리스" },
+          "1357": { branchName: "8번대물집", role: "branch", brand: "대물섬" },
+          "2468": { branchName: "강남대골뼈국", role: "branch", brand: "강남대골뼈국" },
+          "3579": { branchName: "대물섬 강남점", role: "branch", brand: "대물섬" }
+        };
+
+        if (fallbackMap[trimmedPin]) {
+          branchSetting = fallbackMap[trimmedPin];
         } else {
           // 둘 다 아닐 때만 기존 에러를 던집니다.
           throw err;
