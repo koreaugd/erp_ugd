@@ -91,11 +91,19 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
       headers["Content-Type"] = "application/json";
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ action, ...params })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action, ...params }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
     
     if (!response.ok) {
       throw new Error(`HTTP Error ${response.status}`);

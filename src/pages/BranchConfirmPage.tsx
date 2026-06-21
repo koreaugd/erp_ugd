@@ -103,7 +103,25 @@ export default function BranchConfirmPage() {
   const [branches, setBranches] = useState<any[]>([]);
   const [loadingBranches, setLoadingBranches] = useState<boolean>(false);
 
-  // 1. Fetch available branches for selection (세션 캐시 우선, 없으면 GAS 호출)
+  // GAS 연결 불가 또는 시트 데이터 오류 시 사용할 로컬 지점 목록
+  const LOCAL_BRANCH_FALLBACK = [
+    { branchName: "대물섬 한남점", role: "branch", brand: "대물섬" },
+    { branchName: "대물섬 종로점", role: "branch", brand: "대물섬" },
+    { branchName: "대물섬 강남점", role: "branch", brand: "대물섬" },
+    { branchName: "8번대물집", role: "branch", brand: "대물섬" },
+    { branchName: "남산광어", role: "branch", brand: "남산광어" },
+    { branchName: "카라멘야 신촌점", role: "branch", brand: "카라멘야" },
+    { branchName: "사카바단단", role: "branch", brand: "사카바단단" },
+    { branchName: "카츠스위스", role: "branch", brand: "카츠스위스" },
+    { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
+    { branchName: "대학로고래", role: "branch", brand: "대학로고래" },
+    { branchName: "마음죽", role: "branch", brand: "마음죽" },
+    { branchName: "연하동", role: "branch", brand: "연하동" },
+    { branchName: "헴프리스", role: "branch", brand: "헴프리스" },
+    { branchName: "강남대골뼈국", role: "branch", brand: "강남대골뼈국" },
+  ];
+
+  // 1. Fetch available branches (세션 캐시 → GAS → 로컬 fallback 순서)
   const BRANCH_LIST_CACHE_KEY = "erp_branch_list_cache";
 
   useEffect(() => {
@@ -112,16 +130,28 @@ export default function BranchConfirmPage() {
         try {
           const cached = sessionStorage.getItem(BRANCH_LIST_CACHE_KEY);
           if (cached) {
-            setBranches(JSON.parse(cached));
-            return;
+            const parsed = JSON.parse(cached);
+            if (parsed.length > 0) {
+              setBranches(parsed);
+              return;
+            }
           }
           setLoadingBranches(true);
-          const list = await gasClient.getBranchList();
-          const filtered = list.filter((b: any) => b.role === "branch");
+          let filtered: any[] = [];
+          try {
+            const list = await gasClient.getBranchList();
+            filtered = list.filter((b: any) => b.role === "branch");
+          } catch {
+            // GAS 호출 실패 시 로컬 fallback 사용
+          }
+          if (filtered.length === 0) {
+            filtered = LOCAL_BRANCH_FALLBACK;
+          }
           sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify(filtered));
           setBranches(filtered);
         } catch (e) {
           console.error("지점 목록 로드 실패:", e);
+          setBranches(LOCAL_BRANCH_FALLBACK);
         } finally {
           setLoadingBranches(false);
         }
