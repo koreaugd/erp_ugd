@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Setting": {
+      "title": "Setting",
+      "description": "영업 지점의 보안 식별 PIN 및 설정 정보",
+      "type": "object",
+      "properties": {
+        "branch_name": {
+          "type": "string",
+          "description": "영업지점 고유 명치"
+        },
+        "pin_hash": {
+          "type": "string",
+          "description": "비밀번호 단방향 해시값"
+        },
+        "role": {
+          "type": "string",
+          "description": "지점 권한 등급"
+        },
+        "is_active": {
+          "type": "boolean",
+          "description": "지점 가동 여부"
+        },
+        "brand": {
+          "type": "string",
+          "description": "브랜드 구분"
+        },
+        "_updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "최종 동기화 시각"
+        }
+      },
+      "required": ["branch_name", "pin_hash", "role", "is_active", "brand"]
+    },
+    "DailySettle": {
+      "title": "DailySettle",
+      "description": "지점 일일 영업정산 일체화 아카이빙 패키지",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "영업일-지점명 형태의 마감 레코드 고유 ID"
+        },
+        "master": {
+          "type": "object",
+          "description": "정산 총괄 수치 정보 (매출액 총합, 현금 시점 등)"
+        },
+        "expenses": {
+          "type": "array",
+          "description": "정산 시 발생한 지출 경비 원장 백업배열"
+        },
+        "staff": {
+          "type": "array",
+          "description": "마감 시점 투입 근무 일지 및 체크리스트 백업배열"
+        },
+        "_updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "클라우드 최종 가동/수정 기록 시각"
+        }
+      },
+      "required": ["recordId"]
+    }
+  },
+  "firestore": {
+    "settings": {
+      "schema": "Setting",
+      "description": "영업 지점 정보 클라우드 보존 저장소"
+    },
+    "daily_settles": {
+      "schema": "DailySettle",
+      "description": "일일 마감 정산 원장 보존 대장 저장소"
+    }
+  }
+}

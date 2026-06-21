@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global Safety Net (Strictly Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common Helper Functions
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // Schema Validation Blueprint: Settings
+    function isValidSetting(data) {
+      return data.keys().hasAll(['branch_name', 'pin_hash', 'role', 'is_active', 'brand'])
+        && data.branch_name is string && data.branch_name.size() <= 100
+        && data.pin_hash is string && data.pin_hash.size() <= 256
+        && data.role is string && (data.role == 'admin' || data.role == 'branch')
+        && data.is_active is bool
+        && data.brand is string && data.brand.size() <= 100;
+    }
+
+    // Schema Validation Blueprint: DailySettle
+    function isValidDailySettle(data) {
+      return data.keys().hasAll(['recordId', 'master', 'expenses', 'staff'])
+        && data.recordId is string && data.recordId.size() <= 150
+        && data.master is map
+        && data.expenses is list
+        && data.staff is list;
+    }
+
+    // Database Rules: Settings
+    match /settings/{branchName} {
+      allow read: if isValidId(branchName);
+      allow create, update: if isValidId(branchName) 
+        && isValidSetting(incoming())
+        && incoming().branch_name == branchName;
+      allow delete: if isValidId(branchName);
+    }
+
+    // Database Rules: Daily Settles (Unified Packaging)
+    match /daily_settles/{recordId} {
+      allow read: if isValidId(recordId);
+      allow create, update: if isValidId(recordId)
+        && isValidDailySettle(incoming())
+        && incoming().recordId == recordId;
+      allow delete: if isValidId(recordId);
+    }
+  }
+}
