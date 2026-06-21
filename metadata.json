@@ -1,0 +1,6 @@
+{
+  "name": "ERP_UGD",
+  "description": "외식 브랜드 UGD주식회사의 일일마감정산 웹 애플리케이션",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
