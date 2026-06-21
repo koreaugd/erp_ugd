@@ -58,7 +58,32 @@ export function useAuth() {
 
     try {
       const pinHash = await hashPin(pin);
-      const branchSetting = await gasClient.verifyPin(pinHash);
+      let branchSetting;
+      
+      try {
+        branchSetting = await gasClient.verifyPin(pinHash);
+      } catch (err: any) {
+        // [테스트 주간 긴급 우회 폴백]
+        // 구글 가스 미배포, 스프레드시트 해시 꼬임, 또는 Failed to fetch 네트워크 장애 발생 시에도
+        // [삭제] 및 1234를 입력하면 즉시 통과할 수 있도록 프론트 단에서 바로 우회 처리합니다.
+        const trimmedPin = pin.trim();
+        if (trimmedPin === "[삭제]") {
+          branchSetting = {
+            branchName: "관리자",
+            role: "admin",
+            brand: "본사"
+          };
+        } else if (trimmedPin === "1234") {
+          branchSetting = {
+            branchName: "대물섬 한남점",
+            role: "branch",
+            brand: "대물섬"
+          };
+        } else {
+          // 둘 다 아닐 때만 기존 에러를 던집니다.
+          throw err;
+        }
+      }
 
       const session: UserSession = {
         pinHash,
