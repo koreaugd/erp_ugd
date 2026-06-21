@@ -113,6 +113,36 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
   }
 }
 
+// Helper to safely write to direct Firebase in the background (used for Netlify / local offline static modes)
+async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id: string, payload?: any) {
+  try {
+    const isServerEnv = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+    
+    // In Netlify/static environments (where server.ts is non-existent), we mirror directly from the browser.
+    if (!isServerEnv) {
+      const { isFirebaseConfigValid, getDirectDb, backupSettleDirect, backupSettingDirect, deleteSettingDirect } = await import("./firebaseDirect");
+      if (isFirebaseConfigValid()) {
+        const db = getDirectDb();
+        if (db) {
+          if (type === "settle") {
+            await backupSettleDirect(id, payload);
+          } else if (type === "setting") {
+            await backupSettingDirect(id, payload);
+          } else if (type === "delete_setting") {
+            await deleteSettingDirect(id);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[Firebase Direct Mirror Error] Failed during live direct browser backup:", err);
+  }
+}
+
 export const gasClient = {
   /**
    * PIN 검증 및 지점 정보 반환
@@ -132,7 +162,12 @@ export const gasClient = {
    * 마감 정산 데이터 신규 저장
    */
   async submitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]): Promise<{ recordId: string }> {
-    return await callApi("submitDaily", { master, expenses, staff });
+    const result = await callApi("submitDaily", { master, expenses, staff });
+    if (result && result.recordId) {
+      // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
+      await tryDirectBackup("settle", result.recordId, { master, expenses, staff });
+    }
+    return result;
   },
 
   /**
@@ -145,7 +180,17 @@ export const gasClient = {
     staff?: StaffRecord[],
     modifiedBy?: string
   ): Promise<{ success: boolean }> {
-    return await callApi("updateDaily", { recordId, masterData, expenses, staff, modifiedBy });
+    const result = await callApi("updateDaily", { recordId, masterData, expenses, staff, modifiedBy });
+    if (result && result.success !== false) {
+      // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화
+      try {
+        const freshDetail = await this.getDailyDetail(recordId);
+        await tryDirectBackup("settle", recordId, freshDetail);
+      } catch (err) {
+        console.warn("[Firebase Mirror Update Warn] Failed to fetch updated detail to backup:", err);
+      }
+    }
+    return result;
   },
 
   /**
@@ -192,52 +237,122 @@ export const gasClient = {
    * 관리자용: 신규 지점 등록
    */
   async addBranch(branchName: string, pinHash: string, brand: string, role?: string): Promise<{ success: boolean }> {
-    return await callApi("addBranch", { branchName, pinHash, brand, role });
+    const result = await callApi("addBranch", { branchName, pinHash, brand, role });
+    if (result && result.success !== false) {
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, is_active: true });
+    }
+    return result;
   },
 
   /**
    * 관리자용: 지점 활성화/비활성화 상태 변경
    */
   async toggleBranchActive(branchName: string, isActive: boolean): Promise<{ success: boolean }> {
-    return await callApi("toggleBranchActive", { branchName, isActive });
+    const result = await callApi("toggleBranchActive", { branchName, isActive });
+    if (result && result.success !== false) {
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, is_active: isActive });
+    }
+    return result;
   },
 
   /**
    * 관리자용: 지점 PIN 비밀번호 해시 교체
    */
   async updateBranchPin(branchName: string, pinHash: string): Promise<{ success: boolean }> {
-    return await callApi("updateBranchPin", { branchName, pinHash });
+    const result = await callApi("updateBranchPin", { branchName, pinHash });
+    if (result && result.success !== false) {
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash });
+    }
+    return result;
   },
 
   /**
    * 관리자용: 지점 삭제 (데이터행 완전히 제거)
    */
   async deleteBranch(branchName: string): Promise<{ success: boolean }> {
-    return await callApi("deleteBranch", { branchName });
+    const result = await callApi("deleteBranch", { branchName });
+    if (result && result.success !== false) {
+      await tryDirectBackup("delete_setting", branchName);
+    }
+    return result;
   },
 
   /**
-   * 관리자용: Firebase 연동 상태 모니터링
+   * 관리자용: Firebase 연동 상태 모니터링 (서버 헬스체크 우선, 실패 시 혹은 정적 Netlify 호스팅 시 다이렉트 Firestore 헬스 측정)
    */
   async getFirebaseStatus(): Promise<{ success: boolean; connected: boolean; projectId: string; totalSettles: number; totalSettings: number; error?: string }> {
-    const response = await fetch("/api/firebase/status");
-    return await response.json();
+    const isServerEnvironment = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+
+    if (!isServerEnvironment) {
+      const { getDirectFirebaseStatus } = await import("./firebaseDirect");
+      return await getDirectFirebaseStatus();
+    }
+
+    try {
+      const response = await fetch("/api/firebase/status");
+      if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+      return await response.json();
+    } catch (err) {
+      console.warn("[Firebase API] Server status route failed. Utilizing direct browser connector.", err);
+      const { getDirectFirebaseStatus } = await import("./firebaseDirect");
+      return await getDirectFirebaseStatus();
+    }
   },
 
   /**
-   * 관리자용: 로컬 전체 데이터를 Firebase Firestore로 동기화 업로드
+   * 관리자용: 로컬 또는 구글시트 전체 데이터를 Firebase Firestore로 수점 백업
    */
-  async syncToFirebase(): Promise<{ success: boolean; message: string; error?: string }> {
-    const response = await fetch("/api/firebase/sync-to-cloud", { method: "POST" });
-    return await response.json();
+  async syncToFirebase(): Promise<{ success: boolean; message?: string; error?: string }> {
+    const isServerEnvironment = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+
+    if (!isServerEnvironment) {
+      const { syncDirectToFirebase } = await import("./firebaseDirect");
+      return await syncDirectToFirebase();
+    }
+
+    try {
+      const response = await fetch("/api/firebase/sync-to-cloud", { method: "POST" });
+      if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+      return await response.json();
+    } catch (err) {
+      console.warn("[Firebase API] Server sync route failed. Utilizing direct browser syncer.", err);
+      const { syncDirectToFirebase } = await import("./firebaseDirect");
+      return await syncDirectToFirebase();
+    }
   },
 
   /**
-   * 관리자용: Firebase Firestore 클라우드 수집본 기준으로 로컬 환경 강제 복조(Restore)
+   * 관리자용: Firebase Firestore 클라우드 보존재를 기반으로 현업 및 로컬 데이터 강제 복조(Restore)
    */
-  async restoreFromFirebase(): Promise<{ success: boolean; message: string; error?: string }> {
-    const response = await fetch("/api/firebase/restore-from-cloud", { method: "POST" });
-    return await response.json();
+  async restoreFromFirebase(): Promise<{ success: boolean; message?: string; error?: string }> {
+    const isServerEnvironment = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+
+    if (!isServerEnvironment) {
+      const { restoreDirectFromFirebase } = await import("./firebaseDirect");
+      return await restoreDirectFromFirebase();
+    }
+
+    try {
+      const response = await fetch("/api/firebase/restore-from-cloud", { method: "POST" });
+      if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+      return await response.json();
+    } catch (err) {
+      console.warn("[Firebase API] Server restore route failed. Utilizing direct browser restorer.", err);
+      const { restoreDirectFromFirebase } = await import("./firebaseDirect");
+      return await restoreDirectFromFirebase();
+    }
   }
 };
 
