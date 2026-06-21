@@ -2,17 +2,19 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
-import { gasClient, DailySettleDetail } from "../api/gasClient";
+import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
 import * as XLSX from "xlsx";
 import { 
   Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
   CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText, 
   ShoppingCart, Landmark, Info, CheckCircle2, AlertTriangle, ShieldAlert, Lock,
-  Users, ClipboardList, Coins, Briefcase, Pencil, Check, TrendingUp, Settings, X
+  Users, ClipboardList, Coins, Briefcase, Pencil, Check, TrendingUp, Settings, X,
+  Cloud, Database, UploadCloud, AlertCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { formatNumber } from "../utils/formatNumber";
+import { hashPin } from "../utils/hashPin";
 
 const formatWithCommas = (val: string | number | undefined | null) => {
   if (val === undefined || val === null || val === "") return "";
@@ -210,6 +212,12 @@ interface WorkspaceProps {
 }
 
 function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab }: WorkspaceProps) {
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const triggerToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const [mainCategory, setMainCategory] = useState<"daily" | "monthly">("daily");
   const [monthlyTab, setMonthlyTab] = useState<"purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
@@ -264,7 +272,39 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const [isPasscodeVerified, setIsPasscodeVerified] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
-  const [adminActiveTab, setAdminActiveTab] = useState<"image" | "color" | "text" | "excel" | "format" | "security">("image");
+  const [adminActiveTab, setAdminActiveTab] = useState<"image" | "color" | "text" | "excel" | "format" | "security" | "branches" | "firebase">("image");
+
+  // Branch management specific form states inside admin modal
+  const [adminBranches, setAdminBranches] = useState<any[]>([]);
+  const [loadingAdminBranches, setLoadingAdminBranches] = useState<boolean>(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchBrand, setNewBranchBrand] = useState("");
+  const [newBranchPin, setNewBranchPin] = useState("");
+  const [newBranchRole, setNewBranchRole] = useState("branch");
+  const [changingPinBranch, setChangingPinBranch] = useState<string | null>(null);
+  const [changingPinValue, setChangingPinValue] = useState("");
+  const [newBranchSubmitting, setNewBranchSubmitting] = useState(false);
+  const [deletingBranchName, setDeletingBranchName] = useState<string | null>(null);
+
+  // Firebase monitoring / syncing states
+  const [firebaseStatus, setFirebaseStatus] = useState<{ connected: boolean; projectId: string; totalSettles: number; totalSettings: number; error?: string } | null>(null);
+  const [loadingFirebase, setLoadingFirebase] = useState(false);
+  const [firebaseSyncing, setFirebaseSyncing] = useState(false);
+  const [firebaseRestoring, setFirebaseRestoring] = useState(false);
+
+  const fetchFirebaseStatus = async () => {
+    try {
+      setLoadingFirebase(true);
+      const res = await gasClient.getFirebaseStatus();
+      if (res) {
+        setFirebaseStatus(res);
+      }
+    } catch (e: any) {
+      console.error("Firebase 상태 수집 장치 장애:", e);
+    } finally {
+      setLoadingFirebase(false);
+    }
+  };
 
   // Form states
   const [formLogoUrl, setFormLogoUrl] = useState(adminSettings.logoUrl);
@@ -286,6 +326,29 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     cashManagement: true,
     cardExpenses: true
   });
+
+  const fetchAdminBranches = async () => {
+    try {
+      setLoadingAdminBranches(true);
+      const list = await gasClient.getBranchListAll();
+      setAdminBranches(list);
+    } catch (e: any) {
+      console.error("전체 지점 목록 로드 실패:", e);
+      triggerToast("전체 지점 목록을 불러오지 못했습니다. 스프레드시트 업데이트 상태를 체크해보세요.", "error");
+    } finally {
+      setLoadingAdminBranches(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdminModalOpen && isPasscodeVerified) {
+      if (adminActiveTab === "branches") {
+        fetchAdminBranches();
+      } else if (adminActiveTab === "firebase") {
+        fetchFirebaseStatus();
+      }
+    }
+  }, [isAdminModalOpen, isPasscodeVerified, adminActiveTab]);
 
   // Sync form when settings loads or modal triggers
   useEffect(() => {
@@ -686,6 +749,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                       { id: "text", label: "포탈 문구 수정" },
                       { id: "excel", label: "다운로드 엑셀 서식" },
                       { id: "format", label: "기타 정산 서식" },
+                      { id: "branches", label: "지점 등록 & 관리" },
+                      { id: "firebase", label: "Firebase 클라우드 연동" },
                       { id: "security", label: "보안 비밀번호 변경" },
                     ].map((tab) => {
                       const active = adminActiveTab === tab.id;
@@ -963,6 +1028,521 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                             * 주의: '어드민 설정' 입장 시에 요구되는 인증 비밀번호입니다. 저장 후 다음 번 입장 때부터 이 변경된 비밀번호를 입력해야 합니다.
                           </p>
                         </div>
+                      </div>
+                    )}
+
+                    {adminActiveTab === "branches" && (
+                      <div className="space-y-6" id="admin-branches-tab">
+                        {/* 1. Add Branch Section */}
+                        <div className="bg-gray-50 border border-gray-150 p-4 rounded-2xl space-y-3">
+                          <h4 className="text-xs font-black text-zinc-800 flex items-center gap-1.5">
+                            <Plus className="w-3.5 h-3.5 text-zinc-900" />
+                            신규 지점 추가 등록
+                          </h4>
+                          <p className="text-[10px] text-gray-400 font-bold leading-normal">
+                            지점명을 기입하고, 로그인 시 사용할 PIN(비밀번호) 및 브랜드 핵심 구성을 추가할 수 있습니다.
+                          </p>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1.5">
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-500 block mb-0.5">지점 성명 (예: 대물섬 마포점)</label>
+                              <input
+                                type="text"
+                                placeholder="지점명 입력"
+                                value={newBranchName}
+                                onChange={(e) => setNewBranchName(e.target.value)}
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold focus:border-zinc-900 bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-500 block mb-0.5">브랜드 키워드 (예: 대물섬)</label>
+                              <input
+                                type="text"
+                                placeholder="브랜드명 입력"
+                                value={newBranchBrand}
+                                onChange={(e) => setNewBranchBrand(e.target.value)}
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold focus:border-zinc-900 bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-500 block mb-0.5">지점 핀번호 (예: 1234)</label>
+                              <input
+                                type="text"
+                                placeholder="PIN 번호 숫자"
+                                value={newBranchPin}
+                                onChange={(e) => setNewBranchPin(e.target.value)}
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold focus:border-zinc-900 font-mono bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-500 block mb-0.5">역할 권한 등급</label>
+                              <select
+                                value={newBranchRole}
+                                onChange={(e) => setNewBranchRole(e.target.value)}
+                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold focus:border-zinc-900 bg-white"
+                              >
+                                <option value="branch">일반 지점 (branch)</option>
+                                <option value="admin">본사 관리자 (admin)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-1.5">
+                            <button
+                              disabled={newBranchSubmitting}
+                              onClick={async () => {
+                                const trimName = newBranchName.trim();
+                                const trimBrand = newBranchBrand.trim();
+                                const trimPin = newBranchPin.trim();
+                                if (!trimName || !trimBrand || !trimPin) {
+                                  triggerToast("지점명, 브랜드, PIN 번호 모두를 채워넣으세요.", "error");
+                                  return;
+                                }
+                                try {
+                                  setNewBranchSubmitting(true);
+                                  const phash = await hashPin(trimPin);
+                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole);
+                                  if (res && res.success !== false) {
+                                    triggerToast("신규 점포가 데이터베이스에 원활히 등록되었습니다!", "success");
+                                    setNewBranchName("");
+                                    setNewBranchBrand("");
+                                    setNewBranchPin("");
+                                    fetchAdminBranches();
+                                  } else {
+                                    triggerToast("지점 추가에 실패했습니다. 이미 존재하거나 에러가 발생했습니다.", "error");
+                                  }
+                                } catch (err: any) {
+                                  triggerToast(err.message || "지점 추가를 완료하지 못했습니다.", "error");
+                                } finally {
+                                  setNewBranchSubmitting(false);
+                                }
+                              }}
+                              className="px-4 py-1.5 bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-black text-[10px] rounded-lg transition cursor-pointer flex items-center gap-1"
+                            >
+                              {newBranchSubmitting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                              신규 지점 추가 실행
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2. Branches List Section */}
+                        <div className="space-y-4">
+                          <h4 className="text-xs font-black text-zinc-800 flex items-center justify-between">
+                            <span>등록 지점 데이터베이스 총람 ({adminBranches.length}개 점포)</span>
+                            <button
+                              onClick={fetchAdminBranches}
+                              className="p-1 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-gray-800 transition"
+                              title="새로고침"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${loadingAdminBranches ? "animate-spin" : ""}`} />
+                            </button>
+                          </h4>
+
+                          {loadingAdminBranches ? (
+                            <div className="py-12 flex flex-col justify-center items-center gap-2">
+                              <LoadingSpinner size="sm" />
+                              <span className="text-[10px] font-bold text-gray-400">지점 정보를 시트로부터 기인해오는 중...</span>
+                            </div>
+                          ) : adminBranches.length === 0 ? (
+                            <div className="py-8 text-center text-xs font-bold text-gray-400 border border-dashed border-gray-200 rounded-xl">
+                              등록된 지점이 존재하지 않습니다. 첫 지점을 등록해주세요.
+                            </div>
+                          ) : (
+                            <div className="border border-gray-150 rounded-2xl overflow-hidden divide-y divide-gray-100 bg-white">
+                              {adminBranches.map((b: any, index: number) => {
+                                const isChangingPin = changingPinBranch === b.branchName;
+                                const isConfirmingDelete = deletingBranchName === b.branchName;
+
+                                return (
+                                  <div key={index} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-zinc-50/55 transition bg-white text-zinc-900">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-extrabold text-sm text-zinc-900">{b.branchName}</span>
+                                        <span className="px-2 py-0.5 bg-zinc-100 rounded-md text-[9px] font-black text-zinc-500 border border-zinc-200">
+                                          {b.brand}
+                                        </span>
+                                        {b.role === "admin" && (
+                                          <span className="px-1.5 py-0.5 bg-rose-50 text-rose-500 text-[9px] font-black rounded-sm border border-rose-100">
+                                            어드민 계정
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold">
+                                        <span>등급/권한: {b.role}</span>
+                                        <span>•</span>
+                                        <span className={`inline-flex items-center gap-1 ${b.isActive ? "text-emerald-600" : "text-gray-450"}`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full ${b.isActive ? "bg-emerald-500" : "bg-neutral-300 animate-pulse"}`}></span>
+                                          {b.isActive ? "가동 활성" : "폐점 / 비활성화"}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center gap-2 self-end sm:self-center">
+                                      {/* Password Change Sub-section */}
+                                      {isChangingPin ? (
+                                        <div className="flex items-center gap-1.5 bg-zinc-100 p-1 rounded-xl border border-zinc-200">
+                                          <input
+                                            type="password"
+                                            placeholder="새 PIN 숫자"
+                                            value={changingPinValue}
+                                            onChange={(e) => setChangingPinValue(e.target.value)}
+                                            className="w-24 px-2 py-1 bg-white border border-gray-200 rounded-md text-xs font-bold font-mono"
+                                          />
+                                          <button
+                                            onClick={async () => {
+                                              const trimVal = changingPinValue.trim();
+                                              if (!trimVal) {
+                                                triggerToast("비밀번호를 입력하세요.", "error");
+                                                return;
+                                              }
+                                              try {
+                                                const phash = await hashPin(trimVal);
+                                                const res = await gasClient.updateBranchPin(b.branchName, phash);
+                                                if (res && res.success !== false) {
+                                                  triggerToast(`${b.branchName} 지점의 비밀번호(PIN)가 성공적으로 갱신되었습니다.`, "success");
+                                                  setChangingPinBranch(null);
+                                                  setChangingPinValue("");
+                                                } else {
+                                                  triggerToast("오류가 생겼습니다.", "error");
+                                                }
+                                              } catch (err: any) {
+                                                triggerToast(err.message, "error");
+                                              }
+                                            }}
+                                            className="p-1 bg-emerald-500 hover:bg-emerald-600 rounded-md text-white cursor-pointer"
+                                            title="승인"
+                                          >
+                                            <Check className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setChangingPinBranch(null);
+                                              setChangingPinValue("");
+                                            }}
+                                            className="p-1 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-600 cursor-pointer"
+                                            title="취소"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => {
+                                            setChangingPinBranch(b.branchName);
+                                            setChangingPinValue("");
+                                          }}
+                                          className="text-[10px] font-black text-gray-650 hover:text-gray-950 border border-gray-300 py-1.5 px-2.5 rounded-lg hover:bg-gray-50 bg-white transition cursor-pointer"
+                                        >
+                                          PIN 변경
+                                        </button>
+                                      )}
+
+                                      {/* Active/Inactive toggle */}
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await gasClient.toggleBranchActive(b.branchName, !b.isActive);
+                                            if (res && res.success !== false) {
+                                              triggerToast(`${b.branchName} 지점의 영업 활성화 상태를 ${!b.isActive ? "가동 활성" : "폐점 / 비활성화"} 상태로 온전하게 제어 처리 완료하였습니다.`);
+                                              fetchAdminBranches();
+                                            } else {
+                                              triggerToast("상태 변경 오류가 발생했습니다.", "error");
+                                            }
+                                          } catch (err: any) {
+                                            triggerToast(err.message, "error");
+                                          }
+                                        }}
+                                        className={`text-[10px] font-extrabold border py-1.5 px-2.5 rounded-lg transition cursor-pointer ${
+                                          b.isActive
+                                            ? "text-rose-600 border-rose-200 hover:bg-rose-50"
+                                            : "text-emerald-650 border-emerald-250 hover:bg-emerald-50"
+                                        }`}
+                                      >
+                                        {b.isActive ? "폐점(비활성) 처리" : "영업 복구(활성화)"}
+                                      </button>
+
+                                      {/* Absolute Delete */}
+                                      {isConfirmingDelete ? (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            onClick={async () => {
+                                              try {
+                                                const res = await gasClient.deleteBranch(b.branchName);
+                                                if (res && res.success !== false) {
+                                                  triggerToast("해당 지점이 완벽하게 영구 삭제되었습니다.", "success");
+                                                  fetchAdminBranches();
+                                                } else {
+                                                  triggerToast("삭제 중 오류 발생", "error");
+                                                }
+                                              } catch (err: any) {
+                                                triggerToast(err.message, "error");
+                                              } finally {
+                                                setDeletingBranchName(null);
+                                              }
+                                            }}
+                                            className="bg-rose-650 hover:bg-rose-750 text-white border-0 text-[10px] font-black py-1.5 px-2 rounded-lg cursor-pointer"
+                                          >
+                                            확인(영구삭제)
+                                          </button>
+                                          <button
+                                            onClick={() => setDeletingBranchName(null)}
+                                            className="bg-gray-200 hover:bg-gray-300 text-gray-650 text-[10px] font-bold py-1.5 px-2 rounded-lg cursor-pointer"
+                                          >
+                                            취소
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => setDeletingBranchName(b.branchName)}
+                                          className="text-gray-400 hover:text-rose-600 p-1.5 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                          title="지점 완전삭제"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Firebase Cloud Tab Content */}
+                    {adminActiveTab === "firebase" && (
+                      <div className="flex-1 p-6 flex flex-col min-h-0 overflow-y-auto">
+                        <div className="mb-6">
+                          <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
+                            <Cloud className="w-5 h-5 text-blue-600" />
+                            Firebase 클라우드 연동 상태 및 원격 제어
+                          </h2>
+                          <p className="text-xs text-gray-400 font-semibold mt-1">
+                            보안 구글 클라우드 인프라 기반의 실시간 Firestore NoSQL DB를 가동하여, 실시간 마감 정정 내역 및 지점 설정을 클라우드 다중화 백업으로 보호합니다.
+                          </p>
+                        </div>
+
+                        {/* Connection status banner & stats */}
+                        {loadingFirebase ? (
+                          <div className="py-12 flex flex-col items-center justify-center border border-dashed border-gray-200 rounded-2xl bg-gray-50/40">
+                            <RefreshCw className="w-6 h-6 animate-spin text-gray-400 mb-2" />
+                            <span className="text-xs font-bold text-gray-400">클라우드 상태 조회 중...</span>
+                          </div>
+                        ) : !firebaseStatus ? (
+                          <div className="p-5 border border-amber-100 rounded-2xl bg-amber-50/20 text-center mb-6">
+                            <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+                            <h4 className="text-xs font-black text-amber-800">클라우드 구성을 읽을 수 없습니다</h4>
+                            <p className="text-[11px] text-amber-600 font-bold mt-1 max-w-md mx-auto">
+                              현재 프로젝트 루트에 <code className="bg-amber-100 px-1 py-0.5 rounded text-rose-700">firebase-applet-config.json</code>이 온전히 설정되어 가동될 때까지 마감 레코드 백업은 보류 중 상태입니다.
+                            </p>
+                            <button
+                              onClick={fetchFirebaseStatus}
+                              className="mt-3 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-black rounded-lg transition"
+                            >
+                              다시 불러오기
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {/* Status Card and details */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className={`p-4 border rounded-2xl ${
+                                firebaseStatus.connected
+                                  ? "bg-emerald-50/10 border-emerald-100"
+                                  : "bg-rose-50/10 border-rose-100"
+                              } flex items-start gap-3`}>
+                                <div className={`p-2 rounded-xl mt-0.5 ${
+                                  firebaseStatus.connected ? "bg-emerald-50 text-emerald-500" : "bg-rose-50 text-rose-500"
+                                }`}>
+                                  <Cloud className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-black text-gray-900 flex items-center gap-1.5">
+                                    연동 상태: 
+                                    {firebaseStatus.connected ? (
+                                      <span className="text-emerald-600 font-extrabold flex items-center gap-1">
+                                        ● 정상 가동 중
+                                      </span>
+                                    ) : (
+                                      <span className="text-rose-600 font-extrabold flex items-center gap-1">
+                                        ● 연결 안 됨
+                                      </span>
+                                    )}
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 font-semibold mt-1">
+                                    {firebaseStatus.connected 
+                                      ? `Firestore 백업 엔진 활성화: ${firebaseStatus.projectId}`
+                                      : "로컬 JSON 파일 대체 상태이며 실시간 백업이 대기 중입니다."}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="p-4 border border-gray-150 rounded-2xl bg-gray-50/40 flex items-start gap-3">
+                                <div className="p-2 bg-blue-50 text-blue-500 rounded-xl mt-0.5">
+                                  <Database className="w-5 h-5" />
+                                </div>
+                                <div className="flex-1 font-sans">
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-xs font-black text-gray-900">클라우드 수집 통계</h4>
+                                    <button
+                                      onClick={fetchFirebaseStatus}
+                                      className="p-1 hover:bg-gray-200/50 rounded text-gray-400 hover:text-gray-600 transition cursor-pointer"
+                                      title="통계 새로고침"
+                                    >
+                                      <RefreshCw className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 mt-2">
+                                    <div className="bg-white p-1.5 rounded-lg border border-gray-100 text-center">
+                                      <div className="text-[9px] text-gray-400 font-black">백업 마감 대장</div>
+                                      <div className="text-sm font-black text-gray-800">{firebaseStatus.totalSettles || 0}건</div>
+                                    </div>
+                                    <div className="bg-white p-1.5 rounded-lg border border-gray-100 text-center">
+                                      <div className="text-[9px] text-gray-400 font-black">등록된 영업 지점</div>
+                                      <div className="text-sm font-black text-gray-800">{firebaseStatus.totalSettings || 0}개</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Connection Details List */}
+                            {firebaseStatus.connected && (
+                              <div className="p-4 rounded-xl border border-gray-150 bg-white/50 space-y-2 font-sans">
+                                <div className="text-[10px] font-black text-gray-400 mb-1 tracking-wide uppercase">커넥션 세부 명세</div>
+                                <div className="flex justify-between items-center text-[10px] border-b border-gray-100 pb-1.5">
+                                  <span className="text-gray-400 font-bold">서비스 플랫폼</span>
+                                  <span className="font-extrabold text-blue-600 font-mono">Google Cloud Run & Cloud Firestore</span>
+                                </div>
+                                <div className="flex justify-between items-center text-[10px] border-b border-gray-100 pb-1.5">
+                                  <span className="text-gray-400 font-bold">프로젝트 식별자 (Project ID)</span>
+                                  <span className="font-extrabold text-gray-700 font-mono">{firebaseStatus.projectId}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-[10px]">
+                                  <span className="text-gray-400 font-bold">실시간 보존 규칙</span>
+                                  <span className="font-extrabold text-teal-600">제출/정정 시 실시간 Firestore 쓰기</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Control Actions Section */}
+                            <div className="border border-zinc-100 rounded-2xl p-5 bg-zinc-50/50 space-y-4 font-sans">
+                              <div>
+                                <h3 className="text-xs font-black text-zinc-900">클라우드 싱크 및 원격 구호 통제</h3>
+                                <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
+                                  스프레드시트 원격 관리 혹은 로컬 가상 파일에 존재하는 마감 정보를 Firestore와 정합하거나 원격으로부터 되돌릴 수 있습니다.
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                {/* Upload Backup Tool */}
+                                <div className="bg-white border border-gray-150 p-4 rounded-xl shadow-xs hover:border-blue-200 transition">
+                                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                                    <UploadCloud className="w-4 h-4 text-blue-500" />
+                                    클라우드 전체 수동 백업
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 leading-normal font-semibold mt-1">
+                                    현재 로컬 데이터베이스의 모든 지점 및 마감 결과를 Google Firestore 클라우드로 즉각 덮어쓰기 백업합니다.
+                                  </p>
+                                  <button
+                                    onClick={async () => {
+                                      if (firebaseSyncing) return;
+                                      try {
+                                        setFirebaseSyncing(true);
+                                        const res = await gasClient.syncToFirebase();
+                                        if (res && res.success !== false) {
+                                          triggerToast(res.message || "성공적으로 클라우드와 수시 백업 동조화를 이룩했습니다!", "success");
+                                          fetchFirebaseStatus();
+                                        } else {
+                                          triggerToast(res.error || "백업 실패", "error");
+                                        }
+                                      } catch (err: any) {
+                                        triggerToast(err.message || "연동 전송 중 치명적인 장애 발생", "error");
+                                      } finally {
+                                        setFirebaseSyncing(false);
+                                      }
+                                    }}
+                                    disabled={firebaseSyncing || !firebaseStatus?.connected}
+                                    className={`w-full mt-4 py-2 border rounded-lg font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer select-none ${
+                                      firebaseSyncing || !firebaseStatus?.connected
+                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed" 
+                                        : "bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200 hover:border-blue-300 shadow-xs"
+                                    }`}
+                                  >
+                                    {firebaseSyncing ? (
+                                      <>
+                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                        동기화 데이터 전송 중...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <UploadCloud className="w-3.5 h-3.5" />
+                                        Firestore 백업 동기화
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+
+                                {/* Restore Tool */}
+                                <div className="bg-white border border-gray-150 p-4 rounded-xl shadow-xs hover:border-rose-200 transition">
+                                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                                    <Database className="w-4 h-4 text-rose-500" />
+                                    클라우드로부터 환경 복구
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 leading-normal font-semibold mt-1">
+                                    로컬 캐시 삭제 등으로 마감기록이 소실된 경우, Firestore 클러스터에 누적 수집된 자료 전체를 내려받아 즉시 정상화 복구합니다.
+                                  </p>
+                                  <button
+                                    onClick={async () => {
+                                      if (firebaseRestoring) return;
+                                      const confirmRestore = window.confirm(
+                                        "⚠️ 경고: 정말로 Firestore 버전으로 로컬 마감 대장을 완전 오버라이트 덮어쓰기 복구하시겠습니까?\n현재 로컬에서만 기록된 최근 내역이 덮어쓰기 처리될 수 있습니다."
+                                      );
+                                      if (!confirmRestore) return;
+
+                                      try {
+                                        setFirebaseRestoring(true);
+                                        const res = await gasClient.restoreFromFirebase();
+                                        if (res && res.success !== false) {
+                                          triggerToast(res.message || "성공적으로 클라우드 구호 보존 완료!", "success");
+                                          fetchFirebaseStatus();
+                                          // 전체 지점 및 마감 리로딩
+                                          fetchAdminBranches();
+                                        } else {
+                                          triggerToast(res.error || "복원 실패", "error");
+                                        }
+                                      } catch (err: any) {
+                                        triggerToast(err.message || "클라우드 수하 전송 중 치명적인 장애 복원 실패", "error");
+                                      } finally {
+                                        setFirebaseRestoring(false);
+                                      }
+                                    }}
+                                    disabled={firebaseRestoring || !firebaseStatus?.connected}
+                                    className={`w-full mt-4 py-2 border rounded-lg font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer select-none ${
+                                      firebaseRestoring || !firebaseStatus?.connected
+                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed" 
+                                        : "bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200 hover:border-rose-300 shadow-xs"
+                                    }`}
+                                  >
+                                    {firebaseRestoring ? (
+                                      <>
+                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                        클라우드 복원 가동 중...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Database className="w-3.5 h-3.5" />
+                                        원격 복토 복구 가동
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
