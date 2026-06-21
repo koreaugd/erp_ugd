@@ -18,7 +18,7 @@ export function useAuth() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
-  const [lockoutTime, setLockoutTime] = useState<number>(0); // seconds left
+  const lockoutTime = 0;
 
   // 1. 세션 불러오기 + 잠금 상태 복구
   useEffect(() => {
@@ -38,45 +38,14 @@ export function useAuth() {
         setFailedAttempts(parseInt(attempts, 10));
       }
 
-      
-      const lockedUntil = localStorage.getItem(LOCK_KEY);
-      if (lockedUntil) {
-        const remaining = Math.ceil((parseInt(lockedUntil, 10) - Date.now()) / 1000);
-        if (remaining > 0) {
-          setLockoutTime(remaining);
-        } else {
-          // 잠금 해제
-          localStorage.removeItem(LOCK_KEY);
-          localStorage.setItem(ATTEMPTS_KEY, "0");
-          setFailedAttempts(0);
-        }
-      }
+      // 항상 잠금 관련 localStorage 값들을 제거 기화
+      localStorage.removeItem(LOCK_KEY);
     } catch (e) {
       console.error("Auth 복구 실패:", e);
     } finally {
       setLoading(false);
     }
   }, []);
-
-  // 2. 잠금 카운트다운 타이머
-  useEffect(() => {
-    if (lockoutTime <= 0) return;
-
-    const timer = setInterval(() => {
-      setLockoutTime((prev) => {
-        if (prev <= 1) {
-          localStorage.removeItem(LOCK_KEY);
-          localStorage.setItem(ATTEMPTS_KEY, "0");
-          setFailedAttempts(0);
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [lockoutTime]);
 
   const login = useCallback(async (pin: string): Promise<boolean> => {
     if (lockoutTime > 0) {
@@ -109,14 +78,7 @@ export function useAuth() {
       setFailedAttempts(nextAttempts);
       localStorage.setItem(ATTEMPTS_KEY, String(nextAttempts));
 
-      if (nextAttempts >= 3) {
-        const lockUntil = Date.now() + 30000; // 30초 잠금
-        localStorage.setItem(LOCK_KEY, String(lockUntil));
-        setLockoutTime(30);
-        setError("PIN 번호 입력 실패 3회 누적으로 로그인이 30초 동안 잠깁니다.");
-      } else {
-        setError(err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요.");
-      }
+      setError(err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요.");
       return false;
     } finally {
       setLoading(false);

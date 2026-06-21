@@ -133,9 +133,9 @@ export default function LoginPage() {
               <AlertOctagon className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
               <div className="grow">
                 <span>{error}</span>
-                {lockoutTime <= 0 && failedAttempts > 0 && (
+                {failedAttempts > 0 && (
                   <p className="mt-0.5 text-rose-600/70 font-normal">
-                    (현재 실패 횟수: {failedAttempts}/3회 | 3회 실패 시 잠금)
+                    (현재 실패 횟수: {failedAttempts}회)
                   </p>
                 )}
               </div>
