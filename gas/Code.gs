@@ -75,7 +75,8 @@ function doPost(e) {
                          .setMimeType(ContentService.MimeType.JSON);
 
   } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: error.message }))
+    const msg = (error && error.message) ? error.message : String(error);
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: msg }))
                          .setMimeType(ContentService.MimeType.JSON);
   }
 }
@@ -418,98 +419,95 @@ function checkDuplicate(branchName, settleDate) {
  * 4. 마감 데이터 전체 저장 (마스터_일일마감, 지출_상세, 인원_기록)
  */
 function submitDaily(master, expenses, staff) {
-  // 데이터 무결성 검사
   if (!master) {
     throw new Error("마감 데이터(master)가 누락되었습니다. 새로고침 후 다시 시도해 주세요.");
   }
-  if (!master.branchName) {
+  if (!master.branchName && !master.branch_name) {
     throw new Error("지점명이 누락된 마감 데이터입니다. 로그아웃 후 다시 로그인해 주세요.");
   }
 
-  const ss = getSpreadsheet();
-  const masterSheet = ss.getSheetByName(SHEETS.MASTER);
-  const expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);
-  const staffSheet = ss.getSheetByName(SHEETS.STAFF);
-
-  // Safety fallback if master is completely missing or malformed
-  const m = master || {};
-  const bName = m.branchName || m.branch_name || "Unknown Branch";
-  const sDate = m.settleDate || m.settle_date || formatDate(new Date());
-
-  // 먼저 중복이 있는지 확인
-  const dupCheck = checkDuplicate(bName, sDate);
-  if (dupCheck.exists) {
-    // 중복 존재 시 해당 recordId로 수정 처리
-    return updateDaily(dupCheck.recordId, m, expenses || [], staff || [], "system_overwrite");
+  // 동시 제출 충돌 방지
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    throw new Error("서버가 다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.");
   }
 
-  const recordId = m.recordId || m.record_id || generateUUID();
-  const submittedAt = new Date();
-  const totalSales = Number(m.cashSales || m.cash_sales || 0) + 
-                     Number(m.cardSales || m.card_sales || 0) + 
-                     Number(m.transferSales || m.transfer_sales || 0) + 
-                     Number(m.deliverySales || m.delivery_sales || 0);
+  try {
+    const ss = getSpreadsheet();
+    const masterSheet = ss.getSheetByName(SHEETS.MASTER);
+    const expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);
+    const staffSheet = ss.getSheetByName(SHEETS.STAFF);
 
-  // 마스터 행 삽입
-  masterSheet.appendRow([
-    recordId,
-    bName,
-    sDate,
-    Number(m.cashSales || m.cash_sales || 0),
-    Number(m.cardSales || m.card_sales || 0),
-    Number(m.transferSales || m.transfer_sales || 0),
-    Number(m.deliverySales || m.delivery_sales || 0),
-    totalSales,
-    m.memo || "",
-    submittedAt,
-    m.submittedBy || m.submitted_by || "branch",
-    "",  // modified_at
-    ""   // modified_by
-  ]);
+    const m = master || {};
+    const bName = m.branchName || m.branch_name || "Unknown Branch";
+    const sDate = m.settleDate || m.settle_date || formatDate(new Date());
 
-  // 지출 내역 삽입
-  expenses.forEach(exp => {
-    if (exp.itemName && exp.amount) {
-      expenseSheet.appendRow([
-        recordId,
-        exp.expenseType, // "현금지출" 또는 "카드지출"
-        exp.itemName,
-        Number(exp.amount)
-      ]);
+    const dupCheck = checkDuplicate(bName, sDate);
+    if (dupCheck.exists) {
+      // 락을 이미 보유한 상태이므로 _updateDailyCore 직접 호출 (데드락 방지)
+      return _updateDailyCore(dupCheck.recordId, m, expenses || [], staff || [], "system_overwrite");
     }
-  });
 
-  // 인원 및 근무형태 기록 삽입
-  staff.forEach(st => {
-    if (st.staffName && st.workHours) {
-      staffSheet.appendRow([
-        recordId,
-        st.staffName,
-        Number(st.workHours)
-      ]);
-    }
-  });
+    const recordId = m.recordId || m.record_id || generateUUID();
+    const submittedAt = new Date();
+    const totalSales = Number(m.cashSales || m.cash_sales || 0) +
+                       Number(m.cardSales || m.card_sales || 0) +
+                       Number(m.transferSales || m.transfer_sales || 0) +
+                       Number(m.deliverySales || m.delivery_sales || 0);
 
-  return { recordId: recordId };
+    masterSheet.appendRow([
+      recordId,
+      bName,
+      sDate,
+      Number(m.cashSales || m.cash_sales || 0),
+      Number(m.cardSales || m.card_sales || 0),
+      Number(m.transferSales || m.transfer_sales || 0),
+      Number(m.deliverySales || m.delivery_sales || 0),
+      totalSales,
+      m.memo || "",
+      submittedAt,
+      m.submittedBy || m.submitted_by || "branch",
+      "",
+      ""
+    ]);
+
+    (expenses || []).forEach(function(exp) {
+      if (exp && exp.itemName && exp.amount) {
+        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount)]);
+      }
+    });
+
+    (staff || []).forEach(function(st) {
+      if (st && st.staffName && st.workHours) {
+        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours)]);
+      }
+    });
+
+    return { recordId: recordId };
+
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
- * 5. 기존 데이터 관리자 수정 (마스터 UPDATE, 지출/인원 재생성, 수정_로그 기록)
+ * 5-내부. 락 없이 수정 처리 (submitDaily 내부의 중복 처리용)
  */
-function updateDaily(recordId, masterData, expenses, staff, modifiedBy) {
+function _updateDailyCore(recordId, masterData, expenses, staff, modifiedBy) {
   const ss = getSpreadsheet();
   const masterSheet = ss.getSheetByName(SHEETS.MASTER);
   const expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);
   const staffSheet = ss.getSheetByName(SHEETS.STAFF);
   const logSheet = ss.getSheetByName(SHEETS.LOG);
 
-  const masterDataRange = masterSheet.getDataRange();
-  const masterValues = masterDataRange.getValues();
-  
+  const masterValues = masterSheet.getDataRange().getValues();
+
   let targetRowIndex = -1;
   for (let i = 1; i < masterValues.length; i++) {
     if (masterValues[i][0] === recordId) {
-      targetRowIndex = i + 1; // 1-based index
+      targetRowIndex = i + 1;
       break;
     }
   }
@@ -526,17 +524,14 @@ function updateDaily(recordId, masterData, expenses, staff, modifiedBy) {
   const oldMemo = oldRow[8];
 
   const mData = masterData || {};
-
   const newCash = Number(mData.cashSales !== undefined ? mData.cashSales : (mData.cash_sales !== undefined ? mData.cash_sales : oldCash));
   const newCard = Number(mData.cardSales !== undefined ? mData.cardSales : (mData.card_sales !== undefined ? mData.card_sales : oldCard));
   const newTransfer = Number(mData.transferSales !== undefined ? mData.transferSales : (mData.transfer_sales !== undefined ? mData.transfer_sales : oldTransfer));
   const newDelivery = Number(mData.deliverySales !== undefined ? mData.deliverySales : (mData.delivery_sales !== undefined ? mData.delivery_sales : oldDelivery));
   const newMemo = mData.memo !== undefined ? mData.memo : oldMemo;
   const newTotal = newCash + newCard + newTransfer + newDelivery;
-  
   const modifiedAt = new Date();
 
-  // 변경 사항 수정 및 로그 축적
   const fieldsToCheck = [
     { name: "cash_sales", oldVal: oldCash, newVal: newCash, colNum: 4 },
     { name: "card_sales", oldVal: oldCard, newVal: newCard, colNum: 5 },
@@ -545,69 +540,61 @@ function updateDaily(recordId, masterData, expenses, staff, modifiedBy) {
     { name: "memo", oldVal: oldMemo, newVal: newMemo, colNum: 9 }
   ];
 
-  fieldsToCheck.forEach(f => {
+  fieldsToCheck.forEach(function(f) {
     if (f.oldVal !== f.newVal) {
-      logSheet.appendRow([
-        generateUUID(),
-        recordId,
-        f.name,
-        String(f.oldVal),
-        String(f.newVal),
-        modifiedBy,
-        modifiedAt
-      ]);
+      logSheet.appendRow([generateUUID(), recordId, f.name, String(f.oldVal), String(f.newVal), modifiedBy, modifiedAt]);
       masterSheet.getCell(targetRowIndex, f.colNum).setValue(f.newVal);
     }
   });
 
-  // 총매출 및 수정 정보 업데이트
-  masterSheet.getCell(targetRowIndex, 8).setValue(newTotal); // total_sales
-  masterSheet.getCell(targetRowIndex, 12).setValue(modifiedAt); // modified_at
-  masterSheet.getCell(targetRowIndex, 13).setValue(modifiedBy); // modified_by
+  masterSheet.getCell(targetRowIndex, 8).setValue(newTotal);
+  masterSheet.getCell(targetRowIndex, 12).setValue(modifiedAt);
+  masterSheet.getCell(targetRowIndex, 13).setValue(modifiedBy);
 
-  // 지출_상세 교체
   if (expenses) {
-    const expRange = expenseSheet.getDataRange();
-    const expValues = expRange.getValues();
-    // 해당 recordId인 것 뒤에서부터 지우기
+    const expValues = expenseSheet.getDataRange().getValues();
     for (let i = expValues.length - 1; i >= 1; i--) {
-      if (expValues[i][0] === recordId) {
-        expenseSheet.deleteRow(i + 1);
-      }
+      if (expValues[i][0] === recordId) expenseSheet.deleteRow(i + 1);
     }
-    expenses.forEach(exp => {
-      if (exp.itemName && exp.amount) {
-        expenseSheet.appendRow([
-          recordId,
-          exp.expenseType,
-          exp.itemName,
-          Number(exp.amount)
-        ]);
+    expenses.forEach(function(exp) {
+      if (exp && exp.itemName && exp.amount) {
+        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount)]);
       }
     });
   }
 
-  // 인원_기록 교체
   if (staff) {
-    const staffRange = staffSheet.getDataRange();
-    const staffValues = staffRange.getValues();
+    const staffValues = staffSheet.getDataRange().getValues();
     for (let i = staffValues.length - 1; i >= 1; i--) {
-      if (staffValues[i][0] === recordId) {
-        staffSheet.deleteRow(i + 1);
-      }
+      if (staffValues[i][0] === recordId) staffSheet.deleteRow(i + 1);
     }
-    staff.forEach(st => {
-      if (st.staffName && st.workHours) {
-        staffSheet.appendRow([
-          recordId,
-          st.staffName,
-          Number(st.workHours)
-        ]);
+    staff.forEach(function(st) {
+      if (st && st.staffName && st.workHours) {
+        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours)]);
       }
     });
   }
 
   return { success: true };
+}
+
+/**
+ * 5. 기존 데이터 관리자 수정 (마스터 UPDATE, 지출/인원 재생성, 수정_로그 기록)
+ */
+function updateDaily(recordId, masterData, expenses, staff, modifiedBy) {
+  // 동시 수정 충돌 방지
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    throw new Error("서버가 다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.");
+  }
+
+  try {
+    return _updateDailyCore(recordId, masterData, expenses, staff, modifiedBy);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
