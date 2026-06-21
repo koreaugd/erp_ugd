@@ -20,8 +20,11 @@ function doPost(e) {
     const requestData = JSON.parse(jsonString);
     const action = requestData.action;
     
-    // 스프레드시트 초기화 자동 처리
-    initSheets();
+    // 스프레드시트 초기화 최초 1회만 실행 (이후 Property 캐시로 건너뜀)
+    if (!PROPERTIES.getProperty("SHEETS_INITIALIZED")) {
+      initSheets();
+      PROPERTIES.setProperty("SHEETS_INITIALIZED", "true");
+    }
 
     let result;
     switch (action) {

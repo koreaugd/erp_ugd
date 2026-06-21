@@ -8,7 +8,6 @@ export interface UserSession extends BranchSetting {
 }
 
 const SESSION_KEY = "erp_ugd_session";
-const LOCK_KEY = "erp_ugd_lockout_until";
 const ATTEMPTS_KEY = "erp_ugd_failed_attempts";
 const SELECTED_BRANCH_KEY = "erp_ugd_selected_branch";
 
@@ -18,9 +17,8 @@ export function useAuth() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
-  const lockoutTime = 0;
 
-  // 1. 세션 불러오기 + 잠금 상태 복구
+  // 세션 불러오기
   useEffect(() => {
     try {
       const savedSession = sessionStorage.getItem(SESSION_KEY);
@@ -32,14 +30,11 @@ export function useAuth() {
       if (savedBranch) {
         setSelectedBranchState(JSON.parse(savedBranch));
       }
-      
+
       const attempts = localStorage.getItem(ATTEMPTS_KEY);
       if (attempts) {
         setFailedAttempts(parseInt(attempts, 10));
       }
-
-      // 항상 잠금 관련 localStorage 값들을 제거 기화
-      localStorage.removeItem(LOCK_KEY);
     } catch (e) {
       console.error("Auth 복구 실패:", e);
     } finally {
@@ -48,57 +43,37 @@ export function useAuth() {
   }, []);
 
   const login = useCallback(async (pin: string): Promise<boolean> => {
-    if (lockoutTime > 0) {
-      setError(`로그인이 잠겼습니다. ${lockoutTime}초 후에 다시 시도해주세요.`);
-      return false;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
       const pinHash = await hashPin(pin);
       let branchSetting;
-      
+
       try {
         branchSetting = await gasClient.verifyPin(pinHash);
         if (!branchSetting || !branchSetting.branchName) {
           throw new Error("PIN 번호 정보가 누락되었거나 찾을 수 없습니다.");
         }
       } catch (err: any) {
-        // [시스템 긴급 우회 폴백]
-        // 구글 스프레드시트의 해시 불일치, 구글 서비스 일시적 연결 실패, 또는 구글 앱스 스크립트 장애 시에도
-        // 기본 제공되는 모든 테스트 PIN 및 관리자([삭제]) 계정이 온전하게 작동하도록 프론트단 우회 처리를 적용합니다.
+        // GAS 인증 실패 시 프론트엔드 폴백 (공통 PIN + 관리자 PIN)
         const trimmedPin = pin.trim();
         const fallbackMap: Record<string, { branchName: string; role: string; brand: string }> = {
           "[삭제]": { branchName: "관리자", role: "admin", brand: "본사" },
-          "1234": { branchName: "대물섬 한남점", role: "branch", brand: "대물섬" },
-          "2345": { branchName: "카라멘야 신촌점", role: "branch", brand: "카라멘야" },
-          "3456": { branchName: "남산광어", role: "branch", brand: "남산광어" },
-          "4567": { branchName: "사카바단단", role: "branch", brand: "사카바단단" },
-          "5678": { branchName: "카츠스위스", role: "branch", brand: "카츠스위스" },
-          "6789": { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
-          "7890": { branchName: "대학로고래", role: "branch", brand: "대학로고래" },
-          "8901": { branchName: "마음죽", role: "branch", brand: "마음죽" },
-          "9012": { branchName: "연하동", role: "branch", brand: "연하동" },
-          "0123": { branchName: "헴프리스", role: "branch", brand: "헴프리스" },
-          "1357": { branchName: "8번대물집", role: "branch", brand: "대물섬" },
-          "2468": { branchName: "강남대골뼈국", role: "branch", brand: "강남대골뼈국" },
-          "3579": { branchName: "대물섬 강남점", role: "branch", brand: "대물섬" }
+          "0000": { branchName: "직원", role: "branch", brand: "" }
         };
 
         if (fallbackMap[trimmedPin]) {
           branchSetting = fallbackMap[trimmedPin];
         } else {
-          // 둘 다 아닐 때만 기존 에러를 던집니다.
           throw err;
         }
       }
 
       const session: UserSession = {
         pinHash,
-        branchName: branchSetting?.branchName || "Unknown Branch",
-        brand: branchSetting?.brand || "기타",
+        branchName: branchSetting?.branchName || "직원",
+        brand: branchSetting?.brand || "",
         role: branchSetting?.role || "branch"
       };
 
@@ -118,7 +93,7 @@ export function useAuth() {
     } finally {
       setLoading(false);
     }
-  }, [failedAttempts, lockoutTime]);
+  }, [failedAttempts]);
 
   const selectBranch = useCallback((branch: BranchSetting | null) => {
     if (branch) {
@@ -145,7 +120,6 @@ export function useAuth() {
     error,
     login,
     logout,
-    lockoutTime,
     failedAttempts,
     setError
   };
