@@ -32,10 +32,10 @@ function doPost(e) {
         result = checkDuplicate(requestData.branchName, requestData.settleDate);
         break;
       case "submitDaily":
-        result = submitDaily(requestData.master, requestData.expenses || [], requestData.staff || []);
+        result = submitDaily(requestData.master || requestData.masterData, requestData.expenses || [], requestData.staff || []);
         break;
       case "updateDaily":
-        result = updateDaily(requestData.recordId, requestData.masterData, requestData.expenses, requestData.staff, requestData.modifiedBy);
+        result = updateDaily(requestData.recordId, requestData.masterData || requestData.master, requestData.expenses, requestData.staff, requestData.modifiedBy);
         break;
       case "getDailyList":
         result = getDailyList(requestData.settleDate, requestData.adminPinHash);
@@ -420,33 +420,38 @@ function submitDaily(master, expenses, staff) {
   const expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);
   const staffSheet = ss.getSheetByName(SHEETS.STAFF);
 
+  // Safety fallback if master is completely missing or malformed
+  const m = master || {};
+  const bName = m.branchName || m.branch_name || "Unknown Branch";
+  const sDate = m.settleDate || m.settle_date || formatDate(new Date());
+
   // 먼저 중복이 있는지 확인
-  const dupCheck = checkDuplicate(master.branchName, master.settleDate);
+  const dupCheck = checkDuplicate(bName, sDate);
   if (dupCheck.exists) {
     // 중복 존재 시 해당 recordId로 수정 처리
-    return updateDaily(dupCheck.recordId, master, expenses, staff, "system_overwrite");
+    return updateDaily(dupCheck.recordId, m, expenses || [], staff || [], "system_overwrite");
   }
 
-  const recordId = master.recordId || generateUUID();
+  const recordId = m.recordId || m.record_id || generateUUID();
   const submittedAt = new Date();
-  const totalSales = Number(master.cashSales || 0) + 
-                     Number(master.cardSales || 0) + 
-                     Number(master.transferSales || 0) + 
-                     Number(master.deliverySales || 0);
+  const totalSales = Number(m.cashSales || m.cash_sales || 0) + 
+                     Number(m.cardSales || m.card_sales || 0) + 
+                     Number(m.transferSales || m.transfer_sales || 0) + 
+                     Number(m.deliverySales || m.delivery_sales || 0);
 
   // 마스터 행 삽입
   masterSheet.appendRow([
     recordId,
-    master.branchName,
-    master.settleDate,
-    Number(master.cashSales || 0),
-    Number(master.cardSales || 0),
-    Number(master.transferSales || 0),
-    Number(master.deliverySales || 0),
+    bName,
+    sDate,
+    Number(m.cashSales || m.cash_sales || 0),
+    Number(m.cardSales || m.card_sales || 0),
+    Number(m.transferSales || m.transfer_sales || 0),
+    Number(m.deliverySales || m.delivery_sales || 0),
     totalSales,
-    master.memo || "",
+    m.memo || "",
     submittedAt,
-    master.submittedBy || "branch",
+    m.submittedBy || m.submitted_by || "branch",
     "",  // modified_at
     ""   // modified_by
   ]);
@@ -509,11 +514,13 @@ function updateDaily(recordId, masterData, expenses, staff, modifiedBy) {
   const oldDelivery = Number(oldRow[6]);
   const oldMemo = oldRow[8];
 
-  const newCash = Number(masterData.cashSales !== undefined ? masterData.cashSales : oldCash);
-  const newCard = Number(masterData.cardSales !== undefined ? masterData.cardSales : oldCard);
-  const newTransfer = Number(masterData.transferSales !== undefined ? masterData.transferSales : oldTransfer);
-  const newDelivery = Number(masterData.deliverySales !== undefined ? masterData.deliverySales : oldDelivery);
-  const newMemo = masterData.memo !== undefined ? masterData.memo : oldMemo;
+  const mData = masterData || {};
+
+  const newCash = Number(mData.cashSales !== undefined ? mData.cashSales : (mData.cash_sales !== undefined ? mData.cash_sales : oldCash));
+  const newCard = Number(mData.cardSales !== undefined ? mData.cardSales : (mData.card_sales !== undefined ? mData.card_sales : oldCard));
+  const newTransfer = Number(mData.transferSales !== undefined ? mData.transferSales : (mData.transfer_sales !== undefined ? mData.transfer_sales : oldTransfer));
+  const newDelivery = Number(mData.deliverySales !== undefined ? mData.deliverySales : (mData.delivery_sales !== undefined ? mData.delivery_sales : oldDelivery));
+  const newMemo = mData.memo !== undefined ? mData.memo : oldMemo;
   const newTotal = newCash + newCard + newTransfer + newDelivery;
   
   const modifiedAt = new Date();

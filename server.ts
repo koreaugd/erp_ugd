@@ -390,29 +390,32 @@ app.post("/api/gas", async (req: Request, res: Response) => {
       }
 
       case "submitDaily": {
-        const { master, expenses, staff } = req.body;
-        const recordId = master.recordId || `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const { master, masterData, expenses, staff } = req.body;
+        const m = master || masterData || {};
+        const recordId = m.recordId || m.record_id || `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
         // 중복 체크 및 구글 시크릿 오버라이트 대응
-        const dupIdx = db.master.findIndex(m => m.branch_name === master.branchName && m.settle_date === master.settleDate);
+        const bName = m.branchName || m.branch_name || "Unknown Branch";
+        const sDate = m.settleDate || m.settle_date || new Date().toISOString().split('T')[0];
+        const dupIdx = db.master.findIndex(item => item.branch_name === bName && item.settle_date === sDate);
         
-        const totalSales = Number(master.cashSales || 0) + 
-                           Number(master.cardSales || 0) + 
-                           Number(master.transferSales || 0) + 
-                           Number(master.deliverySales || 0);
+        const totalSales = Number(m.cashSales || m.cash_sales || 0) + 
+                           Number(m.cardSales || m.card_sales || 0) + 
+                           Number(m.transferSales || m.transfer_sales || 0) + 
+                           Number(m.deliverySales || m.delivery_sales || 0);
 
         const masterEntry = {
           record_id: recordId,
-          branch_name: master.branchName,
-          settle_date: master.settleDate,
-          cash_sales: Number(master.cashSales || 0),
-          card_sales: Number(master.cardSales || 0),
-          transfer_sales: Number(master.transferSales || 0),
-          delivery_sales: Number(master.deliverySales || 0),
+          branch_name: bName,
+          settle_date: sDate,
+          cash_sales: Number(m.cashSales || m.cash_sales || 0),
+          card_sales: Number(m.cardSales || m.card_sales || 0),
+          transfer_sales: Number(m.transferSales || m.transfer_sales || 0),
+          delivery_sales: Number(m.deliverySales || m.delivery_sales || 0),
           total_sales: totalSales,
-          memo: master.memo || "",
+          memo: m.memo || "",
           submitted_at: new Date().toISOString(),
-          submitted_by: master.submittedBy || "branch",
+          submitted_by: m.submittedBy || m.submitted_by || "branch",
           modified_at: "",
           modified_by: ""
         };
@@ -461,7 +464,7 @@ app.post("/api/gas", async (req: Request, res: Response) => {
       }
 
       case "updateDaily": {
-        const { recordId, masterData, expenses, staff, modifiedBy } = req.body;
+        const { recordId, master, masterData, expenses, staff, modifiedBy } = req.body;
         const masterIdx = db.master.findIndex(m => m.record_id === recordId);
         if (masterIdx === -1) {
           return res.json({ success: false, error: "정산 레코드를 찾을 수 없습니다." });
@@ -472,19 +475,22 @@ app.post("/api/gas", async (req: Request, res: Response) => {
 
         // 필드 단위 모니터링하여 수정로그 주입
         const fields = ["cash_sales", "card_sales", "transfer_sales", "delivery_sales", "memo"];
-        const mapping: Record<string, string> = {
-          "cash_sales": "cashSales",
-          "card_sales": "cardSales",
-          "transfer_sales": "transferSales",
-          "delivery_sales": "deliverySales",
-          "memo": "memo"
+        const mapping: Record<string, string[]> = {
+          "cash_sales": ["cashSales", "cash_sales"],
+          "card_sales": ["cardSales", "card_sales"],
+          "transfer_sales": ["transferSales", "transfer_sales"],
+          "delivery_sales": ["deliverySales", "delivery_sales"],
+          "memo": ["memo"]
         };
 
+        const mData = masterData || master || {};
+
         fields.forEach(f => {
-          const payloadKey = mapping[f];
-          if (masterData[payloadKey] !== undefined) {
+          const payloadKeys = mapping[f];
+          const foundKey = payloadKeys.find(key => mData[key] !== undefined);
+          if (foundKey !== undefined) {
             const oldVal = oldRow[f];
-            const newVal = masterData[payloadKey];
+            const newVal = mData[foundKey];
             if (String(oldVal) !== String(newVal)) {
               db.logs.push({
                 log_id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
