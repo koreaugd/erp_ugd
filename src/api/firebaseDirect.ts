@@ -135,10 +135,10 @@ export async function backupSettingDirect(branchName: string, data: any) {
     const docRef = doc(db, "settings", branchName.trim());
     const payload = {
       branch_name: branchName.trim(),
-      pin_hash: data.pinHash || data.pin_hash || "",
-      brand: data.brand || "기타",
-      role: data.role || "branch",
-      is_active: data.isActive !== false && data.is_active !== false,
+      pin_hash: data?.pinHash || data?.pin_hash || "",
+      brand: data?.brand || "기타",
+      role: data?.role || "branch",
+      is_active: data?.isActive !== false && data?.is_active !== false,
       _updatedAt: new Date().toISOString()
     };
     await setDoc(docRef, payload);
@@ -172,33 +172,42 @@ export async function backupSettleDirect(recordId: string, payload: { master: an
     const db = getDirectDb();
     const docRef = doc(db, "daily_settles", recordId);
     
+    // EXTREMELY DEFENSIVE: Check if payload is defined
+    if (!payload) {
+      console.warn("[Firebase Direct] backupSettleDirect received null/undefined payload");
+      return;
+    }
+    
+    // EXTREMELY DEFENSIVE: Check if master exists
+    const masterData = payload.master || {};
+    
     const masterObj = {
       record_id: recordId,
-      branch_name: payload.master.branchName || payload.master.branch_name,
-      settle_date: payload.master.settleDate || payload.master.settle_date,
-      cash_sales: Number(payload.master.cashSales ?? payload.master.cash_sales ?? 0),
-      card_sales: Number(payload.master.cardSales ?? payload.master.card_sales ?? 0),
-      transfer_sales: Number(payload.master.transferSales ?? payload.master.transfer_sales ?? 0),
-      delivery_sales: Number(payload.master.deliverySales ?? payload.master.delivery_sales ?? 0),
-      total_sales: Number(payload.master.totalSales ?? payload.master.total_sales ?? 0),
-      memo: payload.master.memo || "",
-      submitted_at: payload.master.submittedAt || payload.master.submitted_at || new Date().toISOString(),
-      submitted_by: payload.master.submittedBy || payload.master.submitted_by || "branch",
-      modified_at: payload.master.modifiedAt || payload.master.modified_at || "",
-      modified_by: payload.master.modifiedBy || payload.master.modified_by || ""
+      branch_name: masterData.branchName || masterData.branch_name || "Unknown Branch",
+      settle_date: masterData.settleDate || masterData.settle_date || new Date().toISOString().split('T')[0],
+      cash_sales: Number(masterData.cashSales ?? masterData.cash_sales ?? 0),
+      card_sales: Number(masterData.cardSales ?? masterData.card_sales ?? 0),
+      transfer_sales: Number(masterData.transferSales ?? masterData.transfer_sales ?? 0),
+      delivery_sales: Number(masterData.deliverySales ?? masterData.delivery_sales ?? 0),
+      total_sales: Number(masterData.totalSales ?? masterData.total_sales ?? 0),
+      memo: masterData.memo || "",
+      submitted_at: masterData.submittedAt || masterData.submitted_at || new Date().toISOString(),
+      submitted_by: masterData.submittedBy || masterData.submitted_by || "branch",
+      modified_at: masterData.modifiedAt || masterData.modified_at || "",
+      modified_by: masterData.modifiedBy || masterData.modified_by || ""
     };
 
     const expensesArr = (payload.expenses || []).map((e: any) => ({
       record_id: recordId,
-      expense_type: e.expenseType || e.expense_type,
-      item_name: e.itemName || e.item_name,
-      amount: Number(e.amount)
+      expense_type: e?.expenseType || e?.expense_type || "현금지출",
+      item_name: e?.itemName || e?.item_name || "",
+      amount: Number(e?.amount || 0)
     }));
 
     const staffArr = (payload.staff || []).map((s: any) => ({
       record_id: recordId,
-      staff_name: s.staffName || s.staff_name,
-      work_hours: Number(s.workHours || s.work_hours)
+      staff_name: s?.staffName || s?.staff_name || "",
+      work_hours: Number(s?.workHours || s?.work_hours || 0)
     }));
 
     const finalBackup = {
