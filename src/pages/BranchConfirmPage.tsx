@@ -2036,6 +2036,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
+    if (!branchName) {
+      triggerToast("지점 정보를 불러올 수 없습니다. 로그아웃 후 다시 로그인해 주세요.", "error");
+      return;
+    }
+
     setSubmitting(true);
     setValidationErrors(false);
 
