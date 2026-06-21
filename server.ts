@@ -4,11 +4,62 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, getDocs, collection, writeBatch, getDoc, deleteDoc } from "firebase/firestore";
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// ----------------------------------------------------
+// 파이어베이스(Firebase) - Firestore 연동 및 초기화 
+// ----------------------------------------------------
+let dbFirebase: any = null;
+let firebaseProjectID = "";
+let isFirebaseConnected = false;
+
+try {
+  const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(firebaseConfigPath)) {
+    const rawConf = fs.readFileSync(firebaseConfigPath, "utf8");
+    const parsedConf = JSON.parse(rawConf);
+    firebaseProjectID = parsedConf.projectId;
+    
+    const firebaseApp = initializeApp({
+      apiKey: parsedConf.apiKey,
+      authDomain: parsedConf.authDomain,
+      projectId: parsedConf.projectId,
+      storageBucket: parsedConf.storageBucket,
+      messagingSenderId: parsedConf.messagingSenderId,
+      appId: parsedConf.appId
+    });
+    
+    dbFirebase = parsedConf.firestoreDatabaseId 
+      ? getFirestore(firebaseApp, parsedConf.firestoreDatabaseId)
+      : getFirestore(firebaseApp);
+    isFirebaseConnected = true;
+    console.log(`[Firebase Initialized] Cloud Firestore is ready! Project ID: ${firebaseProjectID}`);
+  } else {
+    console.warn("[Firebase Warn] firebase-applet-config.json not found. Live cloud backup is disabled until config is available.");
+  }
+} catch (error) {
+  console.error("[Firebase Error] Initialization failed:", error);
+}
+
+// 개별 데이터 Firestore 실시간 자동 백업 도구
+async function safeBackupToFirestore(collectionName: string, docId: string, data: any) {
+  if (!dbFirebase) return;
+  try {
+    const cleanData = JSON.parse(JSON.stringify(data));
+    cleanData._updatedAt = new Date().toISOString();
+    await setDoc(doc(dbFirebase, collectionName, docId), cleanData);
+    console.log(`[Firestore Live Backup] Saved: ${collectionName}/${docId}`);
+  } catch (err) {
+    console.error(`[Firestore Backup Fall] Failed to save ${collectionName}/${docId}:`, err);
+  }
+}
+
 
 // ----------------------------------------------------
 // 로컬 파일 기반 DB 시뮬레이션 설정
@@ -239,6 +290,78 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         return res.json({ success: true, data: list });
       }
 
+      case "getBranchListAll": {
+        const list = db.settings.map(s => ({
+          branchName: s.branch_name,
+          brand: s.brand,
+          role: s.role,
+          isActive: s.is_active !== false && String(s.is_active).toUpperCase() !== "FALSE"
+        }));
+        return res.json({ success: true, data: list });
+      }
+
+      case "addBranch": {
+        const { branchName, pinHash, brand, role } = req.body;
+        const exists = db.settings.find(s => String(s.branch_name).trim() === String(branchName).trim());
+        if (exists) {
+          return res.json({ success: false, error: "이미 존재하는 지점명입니다." });
+        }
+        const newBranchObj = {
+          branch_name: branchName.trim(),
+          pin_hash: pinHash.trim(),
+          role: role || "branch",
+          is_active: true,
+          brand: brand.trim()
+        };
+        db.settings.push(newBranchObj);
+        writeDB(db);
+        // Firebase Cloud Live Backup
+        safeBackupToFirestore("settings", branchName.trim(), newBranchObj);
+        return res.json({ success: true });
+      }
+
+      case "toggleBranchActive": {
+        const { branchName, isActive } = req.body;
+        const found = db.settings.find(s => String(s.branch_name).trim() === String(branchName).trim());
+        if (!found) {
+          return res.json({ success: false, error: "존재하지 않는 지점입니다." });
+        }
+        found.is_active = isActive;
+        writeDB(db);
+        // Firebase Cloud Live Backup
+        safeBackupToFirestore("settings", branchName.trim(), found);
+        return res.json({ success: true });
+      }
+
+      case "updateBranchPin": {
+        const { branchName, pinHash } = req.body;
+        const found = db.settings.find(s => String(s.branch_name).trim() === String(branchName).trim());
+        if (!found) {
+          return res.json({ success: false, error: "존재하지 않는 지점입니다." });
+        }
+        found.pin_hash = pinHash.trim();
+        writeDB(db);
+        // Firebase Cloud Live Backup
+        safeBackupToFirestore("settings", branchName.trim(), found);
+        return res.json({ success: true });
+      }
+
+      case "deleteBranch": {
+        const { branchName } = req.body;
+        const oLength = db.settings.length;
+        db.settings = db.settings.filter(s => String(s.branch_name).trim() !== String(branchName).trim());
+        if (db.settings.length === oLength) {
+          return res.json({ success: false, error: "존재하지 않는 지점입니다." });
+        }
+        writeDB(db);
+        // Firebase Delete Sync
+        if (dbFirebase) {
+          deleteDoc(doc(dbFirebase, "settings", branchName.trim())).catch(e => console.error(e));
+        }
+        return res.json({ success: true });
+      }
+
+
       case "checkDuplicate": {
         const { branchName, settleDate } = req.body;
         const record = db.master.find(m => m.branch_name === branchName && m.settle_date === settleDate);
@@ -324,6 +447,16 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         });
 
         writeDB(db);
+
+        // Firebase Cloud Live Backup (master, expenses, staff 묶어서 보관)
+        const liveBackup = {
+          recordId,
+          master: db.master.find(m => m.record_id === recordId),
+          expenses: db.expenses.filter(e => e.record_id === recordId),
+          staff: db.staff.filter(s => s.record_id === recordId)
+        };
+        safeBackupToFirestore("daily_settles", recordId, liveBackup);
+
         return res.json({ success: true, data: { recordId } });
       }
 
@@ -400,6 +533,16 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         }
 
         writeDB(db);
+
+        // Firebase Cloud Live Backup (수정본 묶어서 동시 업데이트)
+        const updatedBackup = {
+          recordId,
+          master: db.master.find(m => m.record_id === recordId),
+          expenses: db.expenses.filter(e => e.record_id === recordId),
+          staff: db.staff.filter(s => s.record_id === recordId)
+        };
+        safeBackupToFirestore("daily_settles", recordId, updatedBackup);
+
         return res.json({ success: true, data: { success: true } });
       }
 
@@ -523,6 +666,143 @@ app.post("/api/gas", async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ----------------------------------------------------
+// 파이어베이스(Firebase) - 전용 보조 모니터링 및 복구 API
+// ----------------------------------------------------
+app.get("/api/firebase/status", async (req: Request, res: Response) => {
+  if (!isFirebaseConnected) {
+    return res.json({
+      success: true,
+      connected: false,
+      projectId: "",
+      totalSettles: 0,
+      totalSettings: 0
+    });
+  }
+
+  try {
+    const settleSnap = await getDocs(collection(dbFirebase, "daily_settles"));
+    const settingSnap = await getDocs(collection(dbFirebase, "settings"));
+    
+    return res.json({
+      success: true,
+      connected: true,
+      projectId: firebaseProjectID,
+      totalSettles: settleSnap.size,
+      totalSettings: settingSnap.size
+    });
+  } catch (err: any) {
+    return res.json({
+      success: true,
+      connected: true,
+      projectId: firebaseProjectID,
+      error: "상태 조회 실패: " + err.message,
+      totalSettles: 0,
+      totalSettings: 0
+    });
+  }
+});
+
+app.post("/api/firebase/sync-to-cloud", async (req: Request, res: Response) => {
+  if (!dbFirebase) {
+    return res.json({ success: false, error: "Firebase Firestore가 연결되지 않았습니다." });
+  }
+  try {
+    const db = readDB();
+    let settingsCount = 0;
+    let settlesCount = 0;
+
+    // 1. settings 싱크
+    for (const s of db.settings) {
+      await safeBackupToFirestore("settings", s.branch_name, s);
+      settingsCount++;
+    }
+
+    // 2. master + expenses + staff 패키지 싱크
+    for (const m of db.master) {
+      const recordId = m.record_id;
+      const liveBackup = {
+        recordId,
+        master: m,
+        expenses: db.expenses.filter(e => e.record_id === recordId),
+        staff: db.staff.filter(s => s.record_id === recordId)
+      };
+      await safeBackupToFirestore("daily_settles", recordId, liveBackup);
+      settlesCount++;
+    }
+
+    return res.json({
+      success: true,
+      message: `클라우드 동기화 완료! 지점 설정 ${settingsCount}개, 일일 마감서 ${settlesCount}개가 Firestore에 무사 백업 보존되었습니다.`
+    });
+  } catch (err: any) {
+    return res.json({ success: false, error: "클라우드 싱크 실패: " + err.message });
+  }
+});
+
+app.post("/api/firebase/restore-from-cloud", async (req: Request, res: Response) => {
+  if (!dbFirebase) {
+    return res.json({ success: false, error: "Firebase Firestore가 연결되지 않았습니다." });
+  }
+  try {
+    const db = readDB();
+
+    // 1. Settings 원격 복조
+    const settingSnap = await getDocs(collection(dbFirebase, "settings"));
+    if (settingSnap.size > 0) {
+      const restoredSettings: any[] = [];
+      settingSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        restoredSettings.push({
+          branch_name: d.branch_name || docSnap.id,
+          pin_hash: d.pin_hash,
+          role: d.role || "branch",
+          is_active: d.is_active !== false,
+          brand: d.brand || "기타"
+        });
+      });
+      db.settings = restoredSettings;
+    }
+
+    // 2. Daily Settle 원격 복조
+    const settleSnap = await getDocs(collection(dbFirebase, "daily_settles"));
+    if (settleSnap.size > 0) {
+      const restoredMaster: any[] = [];
+      const restoredExpenses: any[] = [];
+      const restoredStaff: any[] = [];
+
+      settleSnap.forEach(docSnap => {
+        const d = docSnap.data();
+        if (d.master) {
+          restoredMaster.push(d.master);
+        }
+        if (d.expenses && Array.isArray(d.expenses)) {
+          restoredExpenses.push(...d.expenses);
+        }
+        if (d.staff && Array.isArray(d.staff)) {
+          restoredStaff.push(...d.staff);
+        }
+      });
+
+      if (restoredMaster.length > 0) {
+        db.master = restoredMaster;
+        db.expenses = restoredExpenses;
+        db.staff = restoredStaff;
+      }
+    }
+
+    writeDB(db);
+
+    return res.json({
+      success: true,
+      message: "Firestore 클라우드로부터 모든 영업 지정 설정과 마감 정산 보존 대장을 안전히 복토해 왔습니다!"
+    });
+  } catch (err: any) {
+    return res.json({ success: false, error: "원격 복원 중 치명적인 장애 발생: " + err.message });
+  }
+});
+
 
 // ----------------------------------------------------
 // Vite 및 프로덕션 정적 자원 가동 핸들러

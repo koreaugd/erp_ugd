@@ -49,6 +49,21 @@ function doPost(e) {
       case "getBranchList":
         result = getBranchList();
         break;
+      case "getBranchListAll":
+        result = getBranchListAll();
+        break;
+      case "addBranch":
+        result = addBranch(requestData.branchName, requestData.pinHash, requestData.brand, requestData.role);
+        break;
+      case "toggleBranchActive":
+        result = toggleBranchActive(requestData.branchName, requestData.isActive);
+        break;
+      case "updateBranchPin":
+        result = updateBranchPin(requestData.branchName, requestData.pinHash);
+        break;
+      case "deleteBranch":
+        result = deleteBranch(requestData.branchName);
+        break;
       default:
         throw new Error("정의되지 않은 액션명입니다: " + action);
     }
@@ -256,6 +271,112 @@ function getBranchList() {
     }
   }
   return list;
+}
+
+/**
+ * 2-A. 지점_설정 시트 비활성 포함 전체 목록 반환
+ */
+function getBranchListAll() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SETTING);
+  const data = sheet.getDataRange().getValues();
+  const list = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    list.push({
+      branchName: row[0],
+      role: row[2],
+      isActive: String(row[3]).toUpperCase() === "TRUE",
+      brand: row[4]
+    });
+  }
+  return list;
+}
+
+/**
+ * 2-B. 신규 지점 등록
+ */
+function addBranch(branchName, pinHash, brand, role) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SETTING);
+  const data = sheet.getDataRange().getValues();
+  
+  const cleanBranchName = String(branchName || "").trim();
+  const cleanBrand = String(brand || "").trim();
+  const cleanPinHash = String(pinHash || "").trim();
+  
+  if (!cleanBranchName || !cleanPinHash || !cleanBrand) {
+    throw new Error("지점명, 브랜드, PIN 번호 모두 필수 사양입니다.");
+  }
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toUpperCase() === cleanBranchName.toUpperCase()) {
+      throw new Error("이미 존재하는 지점명입니다.");
+    }
+  }
+  
+  sheet.appendRow([cleanBranchName, cleanPinHash, role || "branch", "TRUE", cleanBrand]);
+  return { success: true };
+}
+
+/**
+ * 2-C. 지점 활성/비활성 여부 토글
+ */
+function toggleBranchActive(branchName, isActive) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SETTING);
+  const data = sheet.getDataRange().getValues();
+  
+  const targetName = String(branchName || "").trim().toUpperCase();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toUpperCase() === targetName) {
+      sheet.getRange(i + 1, 4).setValue(isActive ? "TRUE" : "FALSE");
+      return { success: true };
+    }
+  }
+  throw new Error("지점을 찾을 수 없습니다: " + branchName);
+}
+
+/**
+ * 2-D. 지점 PIN 비밀번호 해시 업데이트
+ */
+function updateBranchPin(branchName, pinHash) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SETTING);
+  const data = sheet.getDataRange().getValues();
+  
+  const targetName = String(branchName || "").trim().toUpperCase();
+  const cleanPinHash = String(pinHash || "").trim();
+  if (!cleanPinHash) {
+    throw new Error("새로운 비밀번호(PIN) 해시는 공란일 수 없습니다.");
+  }
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toUpperCase() === targetName) {
+      sheet.getRange(i + 1, 2).setValue(cleanPinHash);
+      return { success: true };
+    }
+  }
+  throw new Error("지점을 찾을 수 없습니다: " + branchName);
+}
+
+/**
+ * 2-E. 지점 삭제 완전히 수행
+ */
+function deleteBranch(branchName) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SETTING);
+  const data = sheet.getDataRange().getValues();
+  
+  const targetName = String(branchName || "").trim().toUpperCase();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toUpperCase() === targetName) {
+      sheet.deleteRow(i + 1);
+      return { success: true };
+    }
+  }
+  throw new Error("지점을 찾을 수 없습니다: " + branchName);
 }
 
 /**

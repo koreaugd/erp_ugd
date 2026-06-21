@@ -179,5 +179,69 @@ export const gasClient = {
    */
   async getBranchList(): Promise<BranchSetting[]> {
     return await callApi("getBranchList");
+  },
+
+  /**
+   * 관리자용: 활성/비활성 포함 전체 지점 목록 조회
+   */
+  async getBranchListAll(): Promise<AdminBranchSetting[]> {
+    return await callApi("getBranchListAll");
+  },
+
+  /**
+   * 관리자용: 신규 지점 등록
+   */
+  async addBranch(branchName: string, pinHash: string, brand: string, role?: string): Promise<{ success: boolean }> {
+    return await callApi("addBranch", { branchName, pinHash, brand, role });
+  },
+
+  /**
+   * 관리자용: 지점 활성화/비활성화 상태 변경
+   */
+  async toggleBranchActive(branchName: string, isActive: boolean): Promise<{ success: boolean }> {
+    return await callApi("toggleBranchActive", { branchName, isActive });
+  },
+
+  /**
+   * 관리자용: 지점 PIN 비밀번호 해시 교체
+   */
+  async updateBranchPin(branchName: string, pinHash: string): Promise<{ success: boolean }> {
+    return await callApi("updateBranchPin", { branchName, pinHash });
+  },
+
+  /**
+   * 관리자용: 지점 삭제 (데이터행 완전히 제거)
+   */
+  async deleteBranch(branchName: string): Promise<{ success: boolean }> {
+    return await callApi("deleteBranch", { branchName });
+  },
+
+  /**
+   * 관리자용: Firebase 연동 상태 모니터링
+   */
+  async getFirebaseStatus(): Promise<{ success: boolean; connected: boolean; projectId: string; totalSettles: number; totalSettings: number; error?: string }> {
+    const response = await fetch("/api/firebase/status");
+    return await response.json();
+  },
+
+  /**
+   * 관리자용: 로컬 전체 데이터를 Firebase Firestore로 동기화 업로드
+   */
+  async syncToFirebase(): Promise<{ success: boolean; message: string; error?: string }> {
+    const response = await fetch("/api/firebase/sync-to-cloud", { method: "POST" });
+    return await response.json();
+  },
+
+  /**
+   * 관리자용: Firebase Firestore 클라우드 수집본 기준으로 로컬 환경 강제 복조(Restore)
+   */
+  async restoreFromFirebase(): Promise<{ success: boolean; message: string; error?: string }> {
+    const response = await fetch("/api/firebase/restore-from-cloud", { method: "POST" });
+    return await response.json();
   }
 };
+
+export interface AdminBranchSetting extends BranchSetting {
+  isActive: boolean;
+}
+
