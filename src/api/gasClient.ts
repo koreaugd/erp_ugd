@@ -162,7 +162,8 @@ export const gasClient = {
    * 마감 정산 데이터 신규 저장
    */
   async submitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]): Promise<{ recordId: string }> {
-    const result = await callApi("submitDaily", { master, expenses, staff });
+    // masterData는 구버전 GAS 호환용 별칭 (신버전은 master 우선, 구버전은 masterData 사용)
+    const result = await callApi("submitDaily", { master, masterData: master, expenses, staff });
     if (result && result.recordId) {
       // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
       await tryDirectBackup("settle", result.recordId, { master, expenses, staff });
