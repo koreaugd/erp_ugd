@@ -50,9 +50,12 @@ export interface DailyListRow {
 // REST actions helper
 async function callApi(action: string, params: Record<string, any> = {}): Promise<any> {
   try {
-    // 1. 빌드타임/정적 배포 환경(예: Netlify)에서 VITE_GAS_URL 환경변수가 있을 경우 우회(Proxy)없이 구글 시트 웹앱 직접 호출
+    // 1. Check localStorage first, then env variable, then fallback to proxy
+    const localGasUrl = typeof window !== "undefined" ? window.localStorage.getItem("custom_gas_url") : null;
     const directGasUrl = (import.meta as any).env?.VITE_GAS_URL;
-    const url = directGasUrl && directGasUrl.trim() !== "" ? directGasUrl : "/api/gas";
+    const url = (localGasUrl && localGasUrl.trim() !== "")
+      ? localGasUrl
+      : (directGasUrl && directGasUrl.trim() !== "" ? directGasUrl : "/api/gas");
 
     const response = await fetch(url, {
       method: "POST",
