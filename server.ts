@@ -178,6 +178,14 @@ app.post("/api/gas", async (req: Request, res: Response) => {
       } catch (e) {
         return res.status(500).json({ success: false, error: "GAS Web App이 JSON 형식이 아닌 에러를 반환했습니다. 브라우저 확인 필요\n" + resText });
       }
+
+      // [신공방어 폴백] 사용자의 구글 웹앱 버전이 낮아서 신규 핵심 액션인 getBranchHistory가 정의되어 있지 않은 경우,
+      // 오류를 뿜고 마감 차트나 마감 정산 화면이 깨지는 대신 빈 히스토리 배열을 제공하여 안정 가동되게 처리합니다.
+      if (resJson && !resJson.success && req.body.action === "getBranchHistory") {
+        console.warn("Google Apps Script getBranchHistory not implemented on spreadsheet, utilizing empty fallback array.");
+        return res.json({ success: true, data: [] });
+      }
+
       return res.json(resJson);
     } catch (e: any) {
       console.error("GAS Proxy error:", e);
