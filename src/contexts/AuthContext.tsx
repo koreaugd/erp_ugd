@@ -11,7 +11,6 @@ interface AuthContextType {
   error: string | null;
   login: (pin: string) => Promise<boolean>;
   logout: () => void;
-  lockoutTime: number;
   failedAttempts: number;
   setError: (msg: string | null) => void;
 }
@@ -35,4 +34,3 @@ export function useAuthContext() {
   }
   return context;
 }
-

@@ -103,15 +103,22 @@ export default function BranchConfirmPage() {
   const [branches, setBranches] = useState<any[]>([]);
   const [loadingBranches, setLoadingBranches] = useState<boolean>(false);
 
-  // 1. Fetch available branches for selection
+  // 1. Fetch available branches for selection (세션 캐시 우선, 없으면 GAS 호출)
+  const BRANCH_LIST_CACHE_KEY = "erp_branch_list_cache";
+
   useEffect(() => {
     if (user && !selectedBranch) {
       const fetchBranches = async () => {
         try {
+          const cached = sessionStorage.getItem(BRANCH_LIST_CACHE_KEY);
+          if (cached) {
+            setBranches(JSON.parse(cached));
+            return;
+          }
           setLoadingBranches(true);
           const list = await gasClient.getBranchList();
-          // Filter out main admin role if any
           const filtered = list.filter((b: any) => b.role === "branch");
+          sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify(filtered));
           setBranches(filtered);
         } catch (e) {
           console.error("지점 목록 로드 실패:", e);
