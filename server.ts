@@ -195,7 +195,18 @@ app.post("/api/gas", async (req: Request, res: Response) => {
     switch (action) {
       case "verifyPin": {
         const { pinHash } = req.body;
-        const found = db.settings.find(s => s.pin_hash === pinHash && s.is_active);
+        const cleanPinHash = String(pinHash || "").trim().toLowerCase();
+        const found = db.settings.find(s => {
+          if (!s.is_active) return false;
+          if (s.pin_hash === cleanPinHash) return true;
+          // admin 호환성
+          if (s.role === "admin") {
+            const isDbAdminHash = (s.pin_hash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || s.pin_hash === "[해시삭제]");
+            const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "[해시삭제]");
+            if (isDbAdminHash && isInputAdminHash) return true;
+          }
+          return false;
+        });
         if (found) {
           return res.json({
             success: true,

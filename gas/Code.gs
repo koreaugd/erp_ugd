@@ -113,7 +113,7 @@ function initSheets() {
       ["8번대물집", "4523626c92ece30386ab9959600a06c5598696bb43a6538bfe4381387d8df94b", "branch", "TRUE", "대물섬"], // [PIN]
       ["강남대골뼈국", "e1451f151c881c002bd3ddfaff63c0cdbeee06883b27b9a5f700c2a514d2325a", "branch", "TRUE", "강남대골뼈국"], // [PIN]
       ["대물섬 강남점", "d06fcc3e81792fd6aeaba18f2bb732386a34ba50ef12933ed10557464a974df7", "branch", "TRUE", "대물섬"], // [PIN]
-      ["관리자", "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf", "admin", "TRUE", "본사"] // [삭제]
+      ["관리자", "[해시삭제]", "admin", "TRUE", "본사"] // [삭제] (correct SHA-256)
     ];
     
     // 일부 지점 공백 자르기
@@ -182,15 +182,58 @@ function verifyPin(pinHash) {
     const isActive = String(row[3]).toUpperCase() === "TRUE";
     const brand = row[4];
     
-    if (hashInDb === cleanPinHash && isActive) {
+    if (!isActive) continue;
+
+    // A. 오리지널 일치 확인 (완벽 매칭)
+    if (hashInDb === cleanPinHash) {
       return {
         branchName: branchName,
         role: role,
         brand: brand
       };
     }
+
+    // B. 관리자(admin) 추가 호환성 체크
+    // [삭제] 해시: 406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf 또는 [해시삭제]
+    if (role === "admin") {
+      const isDbAdminHash = (hashInDb === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || hashInDb === "[해시삭제]");
+      const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "[해시삭제]");
+      if (isDbAdminHash && isInputAdminHash) {
+        return {
+          branchName: branchName,
+          role: role,
+          brand: brand
+        };
+      }
+    }
+
+    // C. 사용자가 구글 시트에 "1234", "[삭제]" 등 평문을 그대로 적어둔 하위 호환성 케이스 대응
+    if (hashInDb.length < 32) {
+      const dbPlainHash = getSha256(hashInDb);
+      if (dbPlainHash === cleanPinHash) {
+        return {
+          branchName: branchName,
+          role: role,
+          brand: brand
+        };
+      }
+    }
   }
   throw new Error("PIN 번호가 올바르지 않거나 비활성화된 계정입니다.");
+}
+
+// SHA-256 해시 함수 (구글 앱스 스크립트용)
+function getSha256(value) {
+  const rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
+  let output = "";
+  for (let i = 0; i < rawHash.length; i++) {
+    let byteVal = rawHash[i];
+    if (byteVal < 0) byteVal += 256;
+    let byteString = byteVal.toString(16);
+    if (byteString.length == 1) byteString = "0" + byteString;
+    output += byteString;
+  }
+  return output;
 }
 
 /**
