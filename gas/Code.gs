@@ -415,6 +415,14 @@ function checkDuplicate(branchName, settleDate) {
  * 4. 마감 데이터 전체 저장 (마스터_일일마감, 지출_상세, 인원_기록)
  */
 function submitDaily(master, expenses, staff) {
+  // 데이터 무결성 검사
+  if (!master) {
+    throw new Error("마감 데이터(master)가 누락되었습니다. 새로고침 후 다시 시도해 주세요.");
+  }
+  if (!master.branchName) {
+    throw new Error("지점명이 누락된 마감 데이터입니다. 로그아웃 후 다시 로그인해 주세요.");
+  }
+
   const ss = getSpreadsheet();
   const masterSheet = ss.getSheetByName(SHEETS.MASTER);
   const expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);

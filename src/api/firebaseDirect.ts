@@ -168,19 +168,16 @@ export async function deleteSettingDirect(branchName: string) {
  */
 export async function backupSettleDirect(recordId: string, payload: { master: any; expenses: any[]; staff: any[] }) {
   if (!isFirebaseConfigValid()) return;
+  if (!payload || !payload.master) {
+    console.warn("[backupSettleDirect] payload.master가 누락되어 Firebase 백업을 건너뜁니다.", { recordId, payload });
+    return;
+  }
   try {
     const db = getDirectDb();
     const docRef = doc(db, "daily_settles", recordId);
-    
-    // EXTREMELY DEFENSIVE: Check if payload is defined
-    if (!payload) {
-      console.warn("[Firebase Direct] backupSettleDirect received null/undefined payload");
-      return;
-    }
-    
-    // EXTREMELY DEFENSIVE: Check if master exists
+
     const masterData = payload.master || {};
-    
+
     const masterObj = {
       record_id: recordId,
       branch_name: masterData.branchName || masterData.branch_name || "Unknown Branch",
