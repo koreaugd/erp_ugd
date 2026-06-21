@@ -53,15 +53,47 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
     // 1. Check localStorage first, then env variable, then fallback to proxy
     const localGasUrl = typeof window !== "undefined" ? window.localStorage.getItem("custom_gas_url") : null;
     const directGasUrl = (import.meta as any).env?.VITE_GAS_URL;
-    const url = (localGasUrl && localGasUrl.trim() !== "")
-      ? localGasUrl
-      : (directGasUrl && directGasUrl.trim() !== "" ? directGasUrl : "/api/gas");
+
+    let url = "/api/gas";
+    const headers: Record<string, string> = {};
+
+    // Determine current environment
+    const isServerEnvironment = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+
+    if (localGasUrl && localGasUrl.trim() !== "" && localGasUrl.includes("script.google.com")) {
+      if (isServerEnvironment) {
+        // Node proxy environment: Route through /api/gas with the Custom GAS URL in x-custom-gas-url header.
+        // This solves all browser CORS/preflight (OPTIONS) limitations.
+        url = "/api/gas";
+        headers["Content-Type"] = "application/json";
+        headers["x-custom-gas-url"] = localGasUrl;
+      } else {
+        // Static production environments (Netlify, etc.) without Node proxy backend:
+        // Request directly from browser but use "text/plain" content-type to bypass OPTIONS preflight block.
+        url = localGasUrl;
+        headers["Content-Type"] = "text/plain";
+      }
+    } else if (directGasUrl && directGasUrl.trim() !== "" && directGasUrl.includes("script.google.com")) {
+      if (isServerEnvironment) {
+        url = "/api/gas";
+        headers["Content-Type"] = "application/json";
+      } else {
+        url = directGasUrl;
+        headers["Content-Type"] = "text/plain";
+      }
+    } else {
+      // Local simulation mode or default case
+      url = "/api/gas";
+      headers["Content-Type"] = "application/json";
+    }
 
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({ action, ...params })
     });
     
