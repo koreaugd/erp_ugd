@@ -237,6 +237,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       excelHeaderColorFill: "#E2E8F0",
       moneyFormatSuffix: "원",
       salaryTaxRate: "3.3%",
+      adminSecurityPasscode: "1234",
       excelIncludeSheets: {
         purchaseSales: true,
         partTimeSalary: true,
@@ -263,7 +264,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const [isPasscodeVerified, setIsPasscodeVerified] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
-  const [adminActiveTab, setAdminActiveTab] = useState<"image" | "color" | "text" | "excel" | "format">("image");
+  const [adminActiveTab, setAdminActiveTab] = useState<"image" | "color" | "text" | "excel" | "format" | "security">("image");
 
   // Form states
   const [formLogoUrl, setFormLogoUrl] = useState(adminSettings.logoUrl);
@@ -277,6 +278,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const [formExcelFilenamePattern, setFormExcelFilenamePattern] = useState(adminSettings.excelFilenamePattern);
   const [formMoneyFormatSuffix, setFormMoneyFormatSuffix] = useState(adminSettings.moneyFormatSuffix);
   const [formSalaryTaxRate, setFormSalaryTaxRate] = useState(adminSettings.salaryTaxRate);
+  const [formAdminSecurityPasscode, setFormAdminSecurityPasscode] = useState(adminSettings.adminSecurityPasscode || "1234");
   const [formExcelSheets, setFormExcelSheets] = useState(adminSettings.excelIncludeSheets || {
     purchaseSales: true,
     partTimeSalary: true,
@@ -299,6 +301,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       setFormExcelFilenamePattern(adminSettings.excelFilenamePattern);
       setFormMoneyFormatSuffix(adminSettings.moneyFormatSuffix);
       setFormSalaryTaxRate(adminSettings.salaryTaxRate);
+      setFormAdminSecurityPasscode(adminSettings.adminSecurityPasscode || "1234");
       setFormExcelSheets(adminSettings.excelIncludeSheets || {
         purchaseSales: true,
         partTimeSalary: true,
@@ -317,7 +320,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
   const handleVerifyPasscode = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passcode === "1234") {
+    const correctPasscode = (adminSettings.adminSecurityPasscode || "1234").trim();
+    if (passcode.trim() === correctPasscode) {
       setIsPasscodeVerified(true);
       setPasscodeError("");
     } else {
@@ -339,6 +343,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       excelHeaderColorFill: adminSettings.excelHeaderColorFill, // preserve
       moneyFormatSuffix: formMoneyFormatSuffix,
       salaryTaxRate: formSalaryTaxRate,
+      adminSecurityPasscode: formAdminSecurityPasscode,
       excelIncludeSheets: formExcelSheets,
     };
     localStorage.setItem("erp_admin_settings", JSON.stringify(updated));
@@ -644,7 +649,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   </div>
                   <h3 className="text-sm font-black text-gray-800 mb-1">어드민 보안 비밀번호 인증</h3>
                   <p className="text-xs text-gray-400 font-semibold mb-6">
-                    이 설정 영역은 브랜드 관리자 전용입니다. 비밀번호를 입력해주세요. (비밀번호: <span className="font-mono font-bold text-rose-600">1234</span>)
+                    이 설정 영역은 브랜드 관리자 전용입니다. 비밀번호를 입력해주세요. (현재 비밀번호: <span className="font-mono font-bold text-rose-600">{adminSettings.adminSecurityPasscode || "1234"}</span>)
                   </p>
 
                   <div className="w-full max-w-xs space-y-3">
@@ -681,6 +686,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                       { id: "text", label: "포탈 문구 수정" },
                       { id: "excel", label: "다운로드 엑셀 서식" },
                       { id: "format", label: "기타 정산 서식" },
+                      { id: "security", label: "보안 비밀번호 변경" },
                     ].map((tab) => {
                       const active = adminActiveTab === tab.id;
                       return (
@@ -938,6 +944,24 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                             />
                             <p className="text-[10px] text-gray-400 mt-1 font-semibold">* 급여정산 소득세 공제 문구 (기본: 3.3%)</p>
                           </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {adminActiveTab === "security" && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-gray-700 block mb-1 font-sans">어드민 설정 접속 보안 비밀번호</label>
+                          <input
+                            type="text"
+                            value={formAdminSecurityPasscode}
+                            onChange={(e) => setFormAdminSecurityPasscode(e.target.value)}
+                            placeholder="1234"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900"
+                          />
+                          <p className="text-[10px] text-gray-450 mt-1.5 leading-normal font-semibold">
+                            * 주의: '어드민 설정' 입장 시에 요구되는 인증 비밀번호입니다. 저장 후 다음 번 입장 때부터 이 변경된 비밀번호를 입력해야 합니다.
+                          </p>
                         </div>
                       </div>
                     )}
