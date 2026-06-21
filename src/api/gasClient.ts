@@ -166,7 +166,12 @@ export const gasClient = {
    * 특정 지점의 모든 마감 기록 조회 (히스토리)
    */
   async getBranchHistory(branchName: string): Promise<MasterDaily[]> {
-    return await callApi("getBranchHistory", { branchName });
+    try {
+      return await callApi("getBranchHistory", { branchName });
+    } catch (err) {
+      console.warn("getBranchHistory Action Failed. Returning empty fallback array.", err);
+      return [];
+    }
   },
 
   /**
