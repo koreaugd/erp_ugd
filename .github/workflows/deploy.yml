@@ -1,0 +1,42 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master # Run on push to main or master branch
+
+# Allow this job to run in parallel or queue up
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ⚙️
+        uses: actions/setup-node@v4
+        with:
+          node-size: 20
+          cache: 'npm'
+
+      - name: Install and Build 🔧
+        env:
+          VITE_GAS_URL: ${{ secrets.VITE_GAS_URL || vars.VITE_GAS_URL }}
+        run: |
+          npm ci || npm install
+          npx vite build
+
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist # Folder to publish
+          branch: gh-pages # Build output branch
+          clean: true
