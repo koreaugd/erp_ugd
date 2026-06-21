@@ -171,16 +171,18 @@ function verifyPin(pinHash) {
   const sheet = ss.getSheetByName(SHEETS.SETTING);
   const data = sheet.getDataRange().getValues();
   
+  const cleanPinHash = String(pinHash || "").trim().toLowerCase();
+  
   // 첫 행(헤더) 제외
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     const branchName = row[0];
-    const hashInDb = row[1];
+    const hashInDb = String(row[1] || "").trim().toLowerCase();
     const role = row[2];
     const isActive = String(row[3]).toUpperCase() === "TRUE";
     const brand = row[4];
     
-    if (hashInDb === pinHash && isActive) {
+    if (hashInDb === cleanPinHash && isActive) {
       return {
         branchName: branchName,
         role: role,
