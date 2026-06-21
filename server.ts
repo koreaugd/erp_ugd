@@ -157,7 +157,7 @@ function writeDB(db: LocalDB) {
 // API 라우터 구현 (GAS Proxy 및 로컬 DB 대체)
 // ----------------------------------------------------
 app.post("/api/gas", async (req: Request, res: Response) => {
-  const gasUrl = process.env.VITE_GAS_URL || process.env.GAS_URL;
+  const gasUrl = (req.headers["x-custom-gas-url"] as string) || process.env.VITE_GAS_URL || process.env.GAS_URL;
   
   // 구글 앱스 스크립트 웹 앱이 정상 연동된 상태라면, 실제 구글 시트를 사용
   if (gasUrl && gasUrl.trim() !== "" && gasUrl.includes("script.google.com")) {
