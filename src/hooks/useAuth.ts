@@ -62,6 +62,9 @@ export function useAuth() {
       
       try {
         branchSetting = await gasClient.verifyPin(pinHash);
+        if (!branchSetting || !branchSetting.branchName) {
+          throw new Error("PIN 번호 정보가 누락되었거나 찾을 수 없습니다.");
+        }
       } catch (err: any) {
         // [시스템 긴급 우회 폴백]
         // 구글 스프레드시트의 해시 불일치, 구글 서비스 일시적 연결 실패, 또는 구글 앱스 스크립트 장애 시에도
@@ -94,9 +97,9 @@ export function useAuth() {
 
       const session: UserSession = {
         pinHash,
-        branchName: branchSetting.branchName,
-        brand: branchSetting.brand,
-        role: branchSetting.role
+        branchName: branchSetting?.branchName || "Unknown Branch",
+        brand: branchSetting?.brand || "기타",
+        role: branchSetting?.role || "branch"
       };
 
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
