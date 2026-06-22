@@ -267,12 +267,20 @@ app.post("/api/gas", async (req: Request, res: Response) => {
           return false;
         });
         if (found) {
+          const branches = db.settings
+            .filter(s => s.is_active)
+            .map(s => ({
+              branchName: s.branch_name,
+              brand: s.brand,
+              role: s.role
+            }));
           return res.json({
             success: true,
             data: {
               branchName: found.branch_name,
               role: found.role,
-              brand: found.brand
+              brand: found.brand,
+              branches
             }
           });
         }

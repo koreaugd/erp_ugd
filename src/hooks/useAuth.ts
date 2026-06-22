@@ -10,6 +10,7 @@ export interface UserSession extends BranchSetting {
 const SESSION_KEY = "erp_ugd_session";
 const ATTEMPTS_KEY = "erp_ugd_failed_attempts";
 const SELECTED_BRANCH_KEY = "erp_ugd_selected_branch";
+const BRANCH_LIST_CACHE_KEY = "erp_branch_list_cache";
 
 // GAS 없이도 즉시 인증되는 PIN 목록 (fallback 우선 처리)
 const INSTANT_LOGIN_MAP: Record<string, { branchName: string; role: string; brand: string }> = {
@@ -84,6 +85,15 @@ export function useAuth() {
         brand: branchSetting.brand || "",
         role: branchSetting.role || "branch"
       };
+
+      // PIN 인증 응답에 포함된 최신 지점 목록을 먼저 캐시합니다.
+      // 지점 선택 화면은 별도 GAS 요청을 기다리지 않고 즉시 렌더링됩니다.
+      if (Array.isArray(branchSetting.branches) && branchSetting.branches.length > 0) {
+        const activeBranches = branchSetting.branches.filter((branch) => branch.role === "branch" && branch.branchName);
+        if (activeBranches.length > 0) {
+          sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify(activeBranches));
+        }
+      }
 
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
       localStorage.setItem(ATTEMPTS_KEY, "0");

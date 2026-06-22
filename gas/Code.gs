@@ -189,6 +189,7 @@ function verifyPin(pinHash) {
   const ss = getSpreadsheet();
   const sheet = ss.getSheetByName(SHEETS.SETTING);
   const data = sheet.getDataRange().getValues();
+  const activeBranches = getActiveBranchesFromSettingsData(data);
   
   const cleanPinHash = String(pinHash || "").trim().toLowerCase();
   
@@ -208,7 +209,8 @@ function verifyPin(pinHash) {
       return {
         branchName: branchName,
         role: role,
-        brand: brand
+        brand: brand,
+        branches: activeBranches
       };
     }
 
@@ -221,7 +223,8 @@ function verifyPin(pinHash) {
         return {
           branchName: branchName,
           role: role,
-          brand: brand
+          brand: brand,
+          branches: activeBranches
         };
       }
     }
@@ -233,12 +236,32 @@ function verifyPin(pinHash) {
         return {
           branchName: branchName,
           role: role,
-          brand: brand
+          brand: brand,
+          branches: activeBranches
         };
       }
     }
   }
   throw new Error("PIN 번호가 올바르지 않거나 비활성화된 계정입니다.");
+}
+
+/**
+ * 지점 설정 시트에서 활성화된 계정 목록을 순서대로 생성합니다.
+ * PIN 인증 응답에 함께 전달하여 로그인 직후의 별도 목록 조회를 없앱니다.
+ */
+function getActiveBranchesFromSettingsData(data) {
+  const list = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (String(row[3]).toUpperCase() === "TRUE") {
+      list.push({
+        branchName: row[0],
+        role: row[2],
+        brand: row[4]
+      });
+    }
+  }
+  return list;
 }
 
 // SHA-256 해시 함수 (구글 앱스 스크립트용)
