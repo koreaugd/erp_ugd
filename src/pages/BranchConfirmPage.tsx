@@ -174,8 +174,8 @@ export default function BranchConfirmPage() {
   // Render branch selector if none selected
   if (!selectedBranch || !selectedBranch.branchName) {
     return (
-      <div className="min-h-screen bg-[#F5F7FA] flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto w-full space-y-8" id="branch-select-container">
+      <div className="min-h-screen bg-white flex flex-col justify-between py-12 px-6">
+        <div className="max-w-md mx-auto w-full space-y-6" id="branch-select-container">
           <div className="text-center space-y-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-zinc-100 text-zinc-800 text-xs font-bold rounded-full border border-zinc-200">
               인증 완료 | 회사 보안 채널
@@ -201,25 +201,25 @@ export default function BranchConfirmPage() {
               <p className="text-xs text-gray-400 font-semibold font-mono">스프레드시트 원격 지점 목록 호출 중...</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4" id="branch-card-grid">
+            <div className="flex flex-col gap-2.5" id="branch-card-grid">
               {branches.filter((b) => b && b.branchName).map((b) => (
                 <motion.div
                   key={b.branchName}
-                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileHover={{ y: -1 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => handleSelectBranch(b)}
-                  className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm cursor-pointer hover:border-zinc-800 hover:shadow-md transition-all flex flex-col justify-between h-40 group relative overflow-hidden"
+                  className="bg-white px-5 py-4 rounded-xl border border-black cursor-pointer hover:bg-black hover:text-white transition-colors flex items-center justify-between min-h-16 group relative overflow-hidden"
                 >
-                  <div className="absolute right-0 top-0 w-24 h-24 bg-zinc-100/50 rounded-full translate-x-8 -translate-y-8 group-hover:bg-zinc-200/50 transition-colors" />
+                  <div className="hidden" />
                   <div>
-                    <span className="text-[10px] font-extrabold tracking-widest text-zinc-700 uppercase font-mono bg-zinc-100 px-2 py-0.5 rounded-md border border-zinc-200">
+                    <span className="hidden">
                       {b.brand}
                     </span>
-                    <h3 className="text-lg font-bold text-gray-800 mt-2.5 group-hover:text-zinc-950 transition-colors">
+                    <h3 className="text-base font-bold text-black group-hover:text-white transition-colors">
                       {b.branchName}
                     </h3>
                   </div>
-                  <div className="flex items-center text-xs font-bold text-gray-400 group-hover:text-zinc-950 transition-colors mt-4">
+                  <div className="flex items-center text-[0px] font-bold text-gray-400 group-hover:text-white transition-colors">
                     정산 채널 진입 <ArrowRight className="w-3.5 h-3.5 ml-1 transition-transform group-hover:translate-x-1" />
                   </div>
                 </motion.div>
