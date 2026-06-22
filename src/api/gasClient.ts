@@ -163,6 +163,9 @@ export const gasClient = {
    * 특정 날짜 특정 지점의 중복 제출 여부 확인
    */
   async checkDuplicate(branchName: string, settleDate: string): Promise<{ exists: boolean; recordId?: string; record: MasterDaily | null }> {
+    if (!branchName) {
+      return { exists: false, record: null };
+    }
     return await callApi("checkDuplicate", { branchName, settleDate });
   },
 
@@ -170,8 +173,11 @@ export const gasClient = {
    * 마감 정산 데이터 신규 저장
    */
   async submitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]): Promise<{ recordId: string }> {
+    if (!master || !(master.branchName || (master as any).branch_name)) {
+      throw new Error("지점 정보가 없습니다. 로그아웃 후 다시 로그인하고 지점을 선택해 주세요.");
+    }
     // masterData는 구버전 GAS 호환용 별칭 (신버전은 master 우선, 구버전은 masterData 사용)
-    const result = await callApi("submitDaily", { master, masterData: master, expenses, staff });
+    const result = await callApi("submitDaily", { master, masterData: master, expenses: expenses || [], staff: staff || [] });
     if (result && result.recordId) {
       // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
       await tryDirectBackup("settle", result.recordId, { master, expenses, staff });
