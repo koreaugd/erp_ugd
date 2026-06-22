@@ -4,6 +4,11 @@ export interface BranchSetting {
   branchName: string;
   brand: string;
   role: string | "branch" | "admin";
+  branches?: Array<{
+    branchName: string;
+    brand: string;
+    role: string | "branch" | "admin";
+  }>;
 }
 
 export interface MasterDaily {
