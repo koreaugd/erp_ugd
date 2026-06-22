@@ -390,7 +390,9 @@ app.post("/api/gas", async (req: Request, res: Response) => {
       }
 
       case "submitDaily": {
-        const { master, masterData, expenses, staff } = req.body;
+        const { master, masterData } = req.body;
+        const expenses = Array.isArray(req.body.expenses) ? req.body.expenses : [];
+        const staff = Array.isArray(req.body.staff) ? req.body.staff : [];
         const m = master || masterData || {};
         const recordId = m.recordId || m.record_id || `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
@@ -464,7 +466,9 @@ app.post("/api/gas", async (req: Request, res: Response) => {
       }
 
       case "updateDaily": {
-        const { recordId, master, masterData, expenses, staff, modifiedBy } = req.body;
+        const { recordId, master, masterData, modifiedBy } = req.body;
+        const expenses = Array.isArray(req.body.expenses) ? req.body.expenses : undefined;
+        const staff = Array.isArray(req.body.staff) ? req.body.staff : undefined;
         const masterIdx = db.master.findIndex(m => m.record_id === recordId);
         if (masterIdx === -1) {
           return res.json({ success: false, error: "정산 레코드를 찾을 수 없습니다." });

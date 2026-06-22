@@ -29,12 +29,22 @@ export function useAuth() {
     try {
       const savedSession = sessionStorage.getItem(SESSION_KEY);
       if (savedSession) {
-        setUser(JSON.parse(savedSession));
+        const parsedSession = JSON.parse(savedSession);
+        if (parsedSession && parsedSession.branchName) {
+          setUser(parsedSession);
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+        }
       }
 
       const savedBranch = sessionStorage.getItem(SELECTED_BRANCH_KEY);
       if (savedBranch) {
-        setSelectedBranchState(JSON.parse(savedBranch));
+        const parsedBranch = JSON.parse(savedBranch);
+        if (parsedBranch && parsedBranch.branchName) {
+          setSelectedBranchState(parsedBranch);
+        } else {
+          sessionStorage.removeItem(SELECTED_BRANCH_KEY);
+        }
       }
 
       const attempts = localStorage.getItem(ATTEMPTS_KEY);
@@ -93,10 +103,11 @@ export function useAuth() {
   }, [failedAttempts]);
 
   const selectBranch = useCallback((branch: BranchSetting | null) => {
-    if (branch) {
+    if (branch && branch.branchName) {
       sessionStorage.setItem(SELECTED_BRANCH_KEY, JSON.stringify(branch));
     } else {
       sessionStorage.removeItem(SELECTED_BRANCH_KEY);
+      branch = null;
     }
     setSelectedBranchState(branch);
   }, []);
