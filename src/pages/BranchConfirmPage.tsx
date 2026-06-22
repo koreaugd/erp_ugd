@@ -162,6 +162,9 @@ export default function BranchConfirmPage() {
 
   // Handle branch select action
   const handleSelectBranch = (branch: any) => {
+    if (!branch || !branch.branchName) {
+      return;
+    }
     selectBranch(branch);
     setActiveTab("settle");
   };
@@ -169,7 +172,7 @@ export default function BranchConfirmPage() {
   if (!user) return null;
 
   // Render branch selector if none selected
-  if (!selectedBranch) {
+  if (!selectedBranch || !selectedBranch.branchName) {
     return (
       <div className="min-h-screen bg-[#F5F7FA] flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto w-full space-y-8" id="branch-select-container">
@@ -199,7 +202,7 @@ export default function BranchConfirmPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4" id="branch-card-grid">
-              {branches.map((b) => (
+              {branches.filter((b) => b && b.branchName).map((b) => (
                 <motion.div
                   key={b.branchName}
                   whileHover={{ scale: 1.02, y: -2 }}
@@ -249,6 +252,9 @@ interface WorkspaceProps {
 }
 
 function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab }: WorkspaceProps) {
+  const activeBranchName = branch?.branchName || "";
+  const activeBranchBrand = branch?.brand || "";
+
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -483,10 +489,10 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               <span className={`text-[9px] font-extrabold uppercase tracking-widest font-mono block transition-colors ${
                 mainCategory === "monthly" ? "text-indigo-400" : "text-[#2E6DB4]"
               }`}>
-                {branch.brand}
+                {activeBranchBrand}
               </span>
               <h1 className="text-base font-black tracking-tight text-white flex items-center gap-1.5 mt-0.5">
-                {branch.branchName} 
+                {activeBranchName} 
                 <span className={`text-[9px] font-black font-mono tracking-tight transition-colors ${
                   mainCategory === "monthly" ? "text-indigo-400" : "text-[#2E6DB4]"
                 }`}>
@@ -690,18 +696,18 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 className="space-y-6"
                 id={`tab-view-${activeTab}`}
               >
-                {activeTab === "settle" && <DailySettleTab branchName={branch.branchName} />}
-                {activeTab === "orders" && <OrderManagementTab branchName={branch.branchName} />}
-                {activeTab === "roster" && <RosterTab branchName={branch.branchName} />}
-                {activeTab === "overtimeLog" && <OvertimeLogTab branchName={branch.branchName} />}
-                {activeTab === "partTimeLog" && <PartTimeLogTab branchName={branch.branchName} />}
+                {activeTab === "settle" && <DailySettleTab branchName={activeBranchName} />}
+                {activeTab === "orders" && <OrderManagementTab branchName={activeBranchName} />}
+                {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
+                {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} />}
+                {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} />}
               </motion.div>
             </AnimatePresence>
           )}
 
           {mainCategory === "monthly" && (
             <MonthlySettleTab
-              branchName={branch.branchName}
+              branchName={activeBranchName}
               activeSubTab={monthlyTab}
             />
           )}
