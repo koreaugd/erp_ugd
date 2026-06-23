@@ -36,6 +36,7 @@ export interface ExpenseDetail {
 export interface StaffRecord {
   staffName: string;
   workHours: number;
+  division?: string;
 }
 
 export interface RosterEmployee {
