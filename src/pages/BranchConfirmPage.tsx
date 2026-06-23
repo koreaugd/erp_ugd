@@ -5237,11 +5237,11 @@ function MonthlyPartTimeSalarySubTab({
       
       const calcSalary = String(Number(hourlyRate) * Number(accumulatedHours));
       // Forced empty string per "본사에서 입력해야 하는 칸이라 일단 공란으로 해두고"
-      const calcActualPaid = "";
+      const calcActualPaid = saved.actualPaidAmount || "";
 
       // Sorted days text - limited to maximum of 7 elements as requested
       const attendanceDates = saved.attendanceDates !== undefined
-        ? saved.attendanceDates
+        ? String(saved.attendanceDates).split(",").map((day) => day.trim()).filter(Boolean).slice(0, 7).join(",")
         : tel.dates.sort((a,b) => Number(a) - Number(b)).slice(0, 7).join(",");
 
       return {
@@ -5269,7 +5269,8 @@ function MonthlyPartTimeSalarySubTab({
     const loadSharedSalaries = async () => {
       try {
         const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(`part_time_salaries:${branchName}:${selectedMonth}`);
-        if (Array.isArray(remote)) setSalaries(remote);
+        // 빈 배열은 아직 저장된 급여대장이 없다는 뜻이므로, 일일마감에서 계산한 행을 유지합니다.
+        if (Array.isArray(remote) && remote.length > 0) setSalaries(remote);
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
       }
@@ -5303,6 +5304,62 @@ function MonthlyPartTimeSalarySubTab({
     };
     loadSharedProfiles();
   }, [branchName]);
+
+  // 다른 기기에서도 공통 직원현황을 기준으로 파트타이머 행을 생성합니다.
+  useEffect(() => {
+    const mergeRemotePartTimers = async () => {
+      try {
+        const roster = await gasClient.getStaffRoster(branchName);
+        const partTimers = roster.filter((employee) => employee.division === "파트타이머");
+        if (partTimers.length === 0) return;
+
+        const telemetry: Record<string, { hours: number; dates: string[] }> = {};
+        history.filter((record) => record.settleDate?.startsWith(selectedMonth)).forEach((record) => {
+          const metadata = String(record.memo || "").split("\n---\nMETADATA:")[1];
+          if (!metadata) return;
+          try {
+            JSON.parse(metadata).staffRows?.forEach((staff: any) => {
+              if (staff.division !== "파트타이머" || !staff.name || Number(staff.workHours || 0) <= 0) return;
+              const item = telemetry[staff.name] || { hours: 0, dates: [] };
+              item.hours += Number(staff.workHours || 0);
+              const day = String(record.settleDate).split("-")[2];
+              if (day && !item.dates.includes(day)) item.dates.push(day);
+              telemetry[staff.name] = item;
+            });
+          } catch {}
+        });
+
+        setSalaries((current) => {
+          const byEmployeeId = new Map(current.map((salary) => [salary.employeeId, salary]));
+          return partTimers.map((employee) => {
+            const existing = byEmployeeId.get(employee.id);
+            if (existing) return existing;
+            const work = telemetry[employee.name] || { hours: 0, dates: [] };
+            const hourlyRate = "15000";
+            return {
+              employeeId: employee.id,
+              name: employee.name,
+              residentNumber: "",
+              entryDate: "",
+              contractStatus: "미작성",
+              bank: "",
+              accountNumber: "",
+              hourlyRate,
+              accumulatedHours: String(work.hours),
+              calculatedSalary: String(Number(hourlyRate) * work.hours),
+              attendanceDates: work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(","),
+              actualPaidAmount: "",
+              payoutBranch: branchName,
+              memo: ""
+            } as PartTimeSalaryRow;
+          });
+        });
+      } catch (error) {
+        console.warn("공통 파트타이머 명단을 불러오지 못했습니다.", error);
+      }
+    };
+    mergeRemotePartTimers();
+  }, [branchName, selectedMonth, history]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     setSalaries(prev =>
@@ -5380,7 +5437,7 @@ function MonthlyPartTimeSalarySubTab({
 
         <button
           onClick={handleSave}
-          className="w-full sm:w-auto p-2 px-4 bg-[#2E6DB4] hover:bg-[#255D9D] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-subtle transition-all"
+          className="w-full sm:w-auto px-5 py-3 bg-[#2E6DB4] hover:bg-[#255D9D] text-white rounded-xl text-sm font-black flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
         >
           <Check className="w-4 h-4" />
           급여대장 / 프로필 일괄 저장
@@ -5529,9 +5586,9 @@ function MonthlyPartTimeSalarySubTab({
                     <input
                       type="text"
                       value={sal.actualPaidAmount}
-                      disabled={true}
+                      onChange={(e) => handleUpdate(sal.employeeId, "actualPaidAmount", e.target.value)}
                       placeholder="(본사 기입)"
-                      className="w-full p-1 bg-zinc-100 border border-zinc-200 rounded text-xs font-mono font-bold text-right text-gray-400 cursor-not-allowed"
+                      className="w-full p-1 bg-white border border-[#2E6DB4] rounded text-xs font-mono font-bold text-right text-[#1A3C6E]"
                     />
                   </td>
                   <td className="py-2.5 px-1.5">
