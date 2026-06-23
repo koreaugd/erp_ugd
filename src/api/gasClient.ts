@@ -38,6 +38,14 @@ export interface StaffRecord {
   workHours: number;
 }
 
+export interface RosterEmployee {
+  id: string;
+  name: string;
+  division: string;
+  rank?: string;
+  customRank?: string;
+}
+
 export interface DailySettleDetail {
   master: MasterDaily;
   expenses: ExpenseDetail[];
@@ -251,6 +259,14 @@ export const gasClient = {
    */
   async getBranchListAll(): Promise<AdminBranchSetting[]> {
     return await callApi("getBranchListAll");
+  },
+
+  async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
+    return await callApi("getStaffRoster", { branchName });
+  },
+
+  async saveStaffRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
+    return await callApi("saveStaffRoster", { branchName, employees });
   },
 
   /**
