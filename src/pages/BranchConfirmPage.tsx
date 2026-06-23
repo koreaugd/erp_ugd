@@ -1925,7 +1925,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                  clockIn: matchedS && matchedS.workHours > 0 ? "09:00" : "00:00",
                  clockOut: matchedS && matchedS.workHours > 0 ? (matchedS.workHours === 9 ? "18:00" : "19:00") : "00:00",
                  workHours: matchedS ? matchedS.workHours : 0,
-                 overtime: matchedS ? (matchedS.workHours - (emp.division === "정직원" ? defaultStandardHours : 0)) : 0,
+                 overtime: matchedS && emp.division === "정직원" ? (matchedS.workHours - defaultStandardHours) : 0,
                  overtimeReason: ""
                };
              });
@@ -2031,7 +2031,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       }
 
       const standard = row.division === "파트타이머" ? 0 : Number(row.standardHours) || 0;
-      let calculatedOvertime = calculatedWorkHours - standard;
+      // 파트타이머는 시급제이므로 실제 근무시간만 기록하고 초과근무로 계산하지 않습니다.
+      let calculatedOvertime = row.division === "파트타이머" ? 0 : calculatedWorkHours - standard;
 
       // Handle precision
       calculatedWorkHours = parseFloat(calculatedWorkHours.toFixed(1));
@@ -4081,7 +4082,8 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
         if (metadataParsed && metadataParsed.staffRows) {
           metadataParsed.staffRows.forEach((s: any) => {
             const overtimeVal = Number(s.overtime || 0);
-            if (overtimeVal !== 0) {
+            // 파트타이머는 시급제 실제 근무시간이므로 초과근무 대장에서 제외합니다.
+            if (s.division === "정직원" && overtimeVal !== 0) {
               parsedRecords.push({
                 settleDate: m.settleDate,
                 staffName: s.name,
@@ -4133,7 +4135,7 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
               초과 근무 대장기록 내역
             </h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">정직원/파트타이머 초과수당 근거 일지가 표시됩니다.</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
           <button
             onClick={loadData}
