@@ -310,6 +310,27 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     return () => window.removeEventListener("admin_settings_updated", handleUpdate);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const syncAdminSettings = async () => {
+      try {
+        const remote = await gasClient.getSharedData<any>("admin_settings");
+        if (cancelled) return;
+        if (remote) {
+          setAdminSettings(remote);
+          localStorage.setItem("erp_admin_settings", JSON.stringify(remote));
+          return;
+        }
+        const saved = localStorage.getItem("erp_admin_settings");
+        if (saved) await gasClient.saveSharedData("admin_settings", JSON.parse(saved));
+      } catch (error) {
+        console.warn("관리자 설정 원격 동기화에 실패했습니다.", error);
+      }
+    };
+    syncAdminSettings();
+    return () => { cancelled = true; };
+  }, []);
+
   // 2. Admin Settings Editor Modal states
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isPasscodeVerified, setIsPasscodeVerified] = useState(false);
@@ -435,7 +456,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     }
   };
 
-  const handleSaveAdminSettings = () => {
+  const handleSaveAdminSettings = async () => {
     const updated = {
       logoUrl: formLogoUrl,
       dailyAccentColor: formDailyAccentColor,
@@ -454,6 +475,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     };
     localStorage.setItem("erp_admin_settings", JSON.stringify(updated));
     setAdminSettings(updated);
+    await gasClient.saveSharedData("admin_settings", updated);
 
     // Dispatch custom event to trigger update in sibling subtabs
     window.dispatchEvent(new Event("admin_settings_updated"));
@@ -4854,9 +4876,22 @@ function MonthlyPurchaseSalesSubTab({
     }
   }, [branchName, selectedMonth]);
 
-  const handleSave = () => {
+  useEffect(() => {
+    const loadSharedPurchases = async () => {
+      try {
+        const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remote)) setRows(remote);
+      } catch (error) {
+        console.warn("월 매입 공통 데이터를 불러오지 못했습니다.", error);
+      }
+    };
+    loadSharedPurchases();
+  }, [branchName, selectedMonth]);
+
+  const handleSave = async () => {
     try {
       localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(rows));
+      await gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, rows);
       triggerToast("매입매출 대장 내용이 로컬 오프라인 데이터베이스에 성공적으로 안전 보존되었습니다!", "success");
     } catch {
       triggerToast("저장 중 부득이한 에러발생", "error");
@@ -5226,6 +5261,45 @@ function MonthlyPartTimeSalarySubTab({
     setSalaries(assembledRows);
   }, [branchName, selectedMonth, history]);
 
+  useEffect(() => {
+    const loadSharedSalaries = async () => {
+      try {
+        const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(`part_time_salaries:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remote)) setSalaries(remote);
+      } catch (error) {
+        console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
+      }
+    };
+    loadSharedSalaries();
+  }, [branchName, selectedMonth]);
+
+  useEffect(() => {
+    const loadSharedProfiles = async () => {
+      try {
+        const profiles = await gasClient.getSharedData<Record<string, any>>(`part_time_profiles:${branchName}`);
+        if (!profiles) return;
+        Object.entries(profiles).forEach(([employeeId, profile]) => {
+          localStorage.setItem(`erp_pt_profile_${branchName}_${employeeId}`, JSON.stringify(profile));
+        });
+        setSalaries((current) => current.map((salary) => {
+          const profile = profiles[salary.employeeId];
+          return profile ? {
+            ...salary,
+            residentNumber: salary.residentNumber || profile.residentNumber || "",
+            entryDate: salary.entryDate || profile.entryDate || "",
+            contractStatus: salary.contractStatus || profile.contractStatus || salary.contractStatus,
+            bank: salary.bank || profile.bank || "",
+            accountNumber: salary.accountNumber || profile.accountNumber || "",
+            hourlyRate: salary.hourlyRate || profile.hourlyRate || salary.hourlyRate
+          } : salary;
+        }));
+      } catch (error) {
+        console.warn("파트타이머 프로필 공통 데이터를 불러오지 못했습니다.", error);
+      }
+    };
+    loadSharedProfiles();
+  }, [branchName]);
+
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     setSalaries(prev =>
       prev.map(item => {
@@ -5243,7 +5317,7 @@ function MonthlyPartTimeSalarySubTab({
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     try {
       // 1. Maintain profiles in local database for long-term memoization
       salaries.forEach((sal) => {
@@ -5258,8 +5332,24 @@ function MonthlyPartTimeSalarySubTab({
         localStorage.setItem(`erp_pt_profile_${branchName}_${sal.employeeId}`, JSON.stringify(profile));
       });
 
+      const profiles = salaries.reduce((result: Record<string, any>, sal) => {
+        result[sal.employeeId] = {
+          residentNumber: sal.residentNumber,
+          entryDate: sal.entryDate,
+          contractStatus: sal.contractStatus,
+          bank: sal.bank,
+          accountNumber: sal.accountNumber,
+          hourlyRate: sal.hourlyRate
+        };
+        return result;
+      }, {});
+
       // 2. Save current month's specific transactions
       localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(salaries));
+      await Promise.all([
+        gasClient.saveSharedData(`part_time_salaries:${branchName}:${selectedMonth}`, salaries),
+        gasClient.saveSharedData(`part_time_profiles:${branchName}`, profiles)
+      ]);
       triggerToast("파트타이머 급여대장이 직원현황 연동 및 시각화 저장 성공하였습니다!", "success");
     } catch {
       triggerToast("급여지급 대장 등록 안됨", "error");

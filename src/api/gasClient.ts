@@ -269,6 +269,14 @@ export const gasClient = {
     return await callApi("saveStaffRoster", { branchName, employees });
   },
 
+  async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
+    return await callApi("getSharedData", { dataKey });
+  },
+
+  async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
+    return await callApi("saveSharedData", { dataKey, value });
+  },
+
   /**
    * 관리자용: 신규 지점 등록
    */

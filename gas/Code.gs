@@ -61,6 +61,12 @@ function doPost(e) {
       case "saveStaffRoster":
         result = saveStaffRoster(requestData.branchName, requestData.employees || []);
         break;
+      case "getSharedData":
+        result = getSharedData(requestData.dataKey);
+        break;
+      case "saveSharedData":
+        result = saveSharedData(requestData.dataKey, requestData.value);
+        break;
       case "addBranch":
         result = addBranch(requestData.branchName, requestData.pinHash, requestData.brand, requestData.role);
         break;
@@ -110,6 +116,7 @@ const SHEETS = {
   EXPENSE: "지출_상세",
   STAFF: "인원_기록",
   ROSTER: "직원_현황",
+  SHARED_DATA: "공통_설정",
   SETTING: "지점_설정",
   LOG: "수정_로그"
 };
@@ -275,6 +282,12 @@ function getActiveBranchesFromSettingsData(data) {
     rosterSheet = ss.insertSheet(SHEETS.ROSTER);
     rosterSheet.appendRow(["branch_name", "employee_id", "name", "division", "rank", "custom_rank", "updated_at"]);
   }
+
+  let sharedDataSheet = ss.getSheetByName(SHEETS.SHARED_DATA);
+  if (!sharedDataSheet) {
+    sharedDataSheet = ss.insertSheet(SHEETS.SHARED_DATA);
+    sharedDataSheet.appendRow(["data_key", "json_value", "updated_at"]);
+  }
   return list;
 }
 
@@ -411,6 +424,48 @@ function getOrCreateRosterSheet() {
     sheet.appendRow(["branch_name", "employee_id", "name", "division", "rank", "custom_rank", "updated_at"]);
   }
   return sheet;
+}
+
+function getOrCreateSharedDataSheet() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.SHARED_DATA);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.SHARED_DATA);
+    sheet.appendRow(["data_key", "json_value", "updated_at"]);
+  }
+  return sheet;
+}
+
+function getSharedData(dataKey) {
+  const key = String(dataKey || "").trim();
+  if (!key) throw new Error("데이터 키가 필요합니다.");
+  const data = getOrCreateSharedDataSheet().getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === key) {
+      try { return JSON.parse(data[i][1]); } catch (e) { throw new Error("저장된 공통 데이터 형식이 올바르지 않습니다."); }
+    }
+  }
+  return null;
+}
+
+function saveSharedData(dataKey, value) {
+  const key = String(dataKey || "").trim();
+  if (!key) throw new Error("데이터 키가 필요합니다.");
+  const json = JSON.stringify(value === undefined ? null : value);
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error("서버가 다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요."); }
+  try {
+    const sheet = getOrCreateSharedDataSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === key) {
+        sheet.getRange(i + 1, 2, 1, 2).setValues([[json, new Date()]]);
+        return { success: true };
+      }
+    }
+    sheet.appendRow([key, json, new Date()]);
+    return { success: true };
+  } finally { lock.releaseLock(); }
 }
 
 /**
