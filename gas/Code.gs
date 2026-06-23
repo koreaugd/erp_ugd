@@ -734,13 +734,13 @@ function _updateDailyCore(recordId, masterData, expenses, staff, modifiedBy) {
   fieldsToCheck.forEach(function(f) {
     if (f.oldVal !== f.newVal) {
       logSheet.appendRow([generateUUID(), recordId, f.name, String(f.oldVal), String(f.newVal), modifiedBy, modifiedAt]);
-      masterSheet.getCell(targetRowIndex, f.colNum).setValue(f.newVal);
+      masterSheet.getRange(targetRowIndex, f.colNum).setValue(f.newVal);
     }
   });
 
-  masterSheet.getCell(targetRowIndex, 8).setValue(newTotal);
-  masterSheet.getCell(targetRowIndex, 12).setValue(modifiedAt);
-  masterSheet.getCell(targetRowIndex, 13).setValue(modifiedBy);
+  masterSheet.getRange(targetRowIndex, 8).setValue(newTotal);
+  masterSheet.getRange(targetRowIndex, 12).setValue(modifiedAt);
+  masterSheet.getRange(targetRowIndex, 13).setValue(modifiedBy);
 
   if (expenses) {
     const expValues = expenseSheet.getDataRange().getValues();
