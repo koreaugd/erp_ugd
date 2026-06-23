@@ -25,6 +25,7 @@ function doPost(e) {
       initSheets();
       PROPERTIES.setProperty("SHEETS_INITIALIZED", "true");
     }
+    ensureSheetsSchema();
 
     let result;
     switch (action) {
@@ -118,7 +119,8 @@ const SHEETS = {
   ROSTER: "직원_현황",
   SHARED_DATA: "공통_설정",
   SETTING: "지점_설정",
-  LOG: "수정_로그"
+  LOG: "수정_로그",
+  STAFF_MOVEMENT: "직원_근무지_변동"
 };
 
 function initSheets() {
@@ -174,14 +176,14 @@ function initSheets() {
   let expenseSheet = ss.getSheetByName(SHEETS.EXPENSE);
   if (!expenseSheet) {
     expenseSheet = ss.insertSheet(SHEETS.EXPENSE);
-    expenseSheet.appendRow(["record_id", "expense_type", "item_name", "amount"]);
+    expenseSheet.appendRow(["record_id", "expense_type", "item_name", "amount", "branch_name"]);
   }
 
   // 4. 인원_기록 시트
   let staffSheet = ss.getSheetByName(SHEETS.STAFF);
   if (!staffSheet) {
     staffSheet = ss.insertSheet(SHEETS.STAFF);
-    staffSheet.appendRow(["record_id", "staff_name", "work_hours"]);
+    staffSheet.appendRow(["record_id", "staff_name", "work_hours", "branch_name", "division"]);
   }
 
   // 5. 수정_로그 시트
@@ -414,6 +416,25 @@ function saveStaffRoster(branchName, employees) {
   } finally {
     lock.releaseLock();
   }
+
+  let staffMovementSheet = ss.getSheetByName(SHEETS.STAFF_MOVEMENT);
+  if (!staffMovementSheet) {
+    staffMovementSheet = ss.insertSheet(SHEETS.STAFF_MOVEMENT);
+    staffMovementSheet.appendRow(["movement_id", "employee_id", "employee_name", "from_branch", "to_branch", "change_type", "effective_date", "recorded_at"]);
+  }
+}
+
+function ensureSheetsSchema() {
+  const ss = getSpreadsheet();
+  const expense = ss.getSheetByName(SHEETS.EXPENSE);
+  const staff = ss.getSheetByName(SHEETS.STAFF);
+  if (expense && expense.getRange(1, 5).getValue() !== "branch_name") expense.getRange(1, 5).setValue("branch_name");
+  if (staff && staff.getRange(1, 4).getValue() !== "branch_name") staff.getRange(1, 4).setValue("branch_name");
+  if (staff && staff.getRange(1, 5).getValue() !== "division") staff.getRange(1, 5).setValue("division");
+  if (!ss.getSheetByName(SHEETS.STAFF_MOVEMENT)) {
+    const sheet = ss.insertSheet(SHEETS.STAFF_MOVEMENT);
+    sheet.appendRow(["movement_id", "employee_id", "employee_name", "from_branch", "to_branch", "change_type", "effective_date", "recorded_at"]);
+  }
 }
 
 function getOrCreateRosterSheet() {
@@ -645,13 +666,13 @@ function submitDaily(master, expenses, staff) {
 
     (expenses || []).forEach(function(exp) {
       if (exp && exp.itemName && exp.amount) {
-        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount)]);
+        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount), bName]);
       }
     });
 
     (staff || []).forEach(function(st) {
       if (st && st.staffName && st.workHours) {
-        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours)]);
+        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours), bName, st.division || ""]);
       }
     });
 
@@ -728,7 +749,7 @@ function _updateDailyCore(recordId, masterData, expenses, staff, modifiedBy) {
     }
     expenses.forEach(function(exp) {
       if (exp && exp.itemName && exp.amount) {
-        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount)]);
+        expenseSheet.appendRow([recordId, exp.expenseType, exp.itemName, Number(exp.amount), oldRow[1]]);
       }
     });
   }
@@ -740,7 +761,7 @@ function _updateDailyCore(recordId, masterData, expenses, staff, modifiedBy) {
     }
     staff.forEach(function(st) {
       if (st && st.staffName && st.workHours) {
-        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours)]);
+        staffSheet.appendRow([recordId, st.staffName, Number(st.workHours), oldRow[1], st.division || ""]);
       }
     });
   }

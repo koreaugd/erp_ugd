@@ -2185,7 +2185,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       // 3. Format Staff matching legacy GAS DB row model properties (Total calculated hours per person)
       const formattedStaff = staffRows.map((s) => ({
         staffName: s.name,
-        workHours: s.workHours
+        workHours: s.workHours,
+        division: s.division
       }));
 
       // 4. Primary Master Object payload
