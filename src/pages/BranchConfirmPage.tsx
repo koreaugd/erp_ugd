@@ -5345,7 +5345,7 @@ function MonthlyPartTimeSalarySubTab({
         });
 
         setSalaries((current) => {
-          const byEmployeeId = new Map(current.map((salary) => [salary.employeeId, salary]));
+          const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
           return allPartTimers.map((employee) => {
             const existing = byEmployeeId.get(employee.id);
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
