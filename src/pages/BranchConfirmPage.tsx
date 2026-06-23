@@ -5440,7 +5440,7 @@ function MonthlyPartTimeSalarySubTab({
           className="w-full sm:w-auto px-5 py-3 bg-[#2E6DB4] hover:bg-[#255D9D] text-white rounded-xl text-sm font-black flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
         >
           <Check className="w-4 h-4" />
-          급여대장 / 프로필 일괄 저장
+          저장하기
         </button>
       </div>
 
