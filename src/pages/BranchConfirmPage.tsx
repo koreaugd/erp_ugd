@@ -1782,6 +1782,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
   
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [submissionDelayNotice, setSubmissionDelayNotice] = useState<boolean>(false);
   const [submittedResult, setSubmittedResult] = useState<any | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [validationErrors, setValidationErrors] = useState<boolean>(false);
@@ -1798,6 +1799,18 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // Google Sheets/GAS가 시트 잠금 또는 콜드 스타트로 지연될 수 있습니다.
+  // 제출은 계속 한 번만 유지하고, 30초 뒤에는 오류가 아닌 진행 상태를 안내합니다.
+  useEffect(() => {
+    if (!submitting) {
+      setSubmissionDelayNotice(false);
+      return;
+    }
+
+    const delayTimer = window.setTimeout(() => setSubmissionDelayNotice(true), 30000);
+    return () => window.clearTimeout(delayTimer);
+  }, [submitting]);
 
   // Prepopulate standard worker checklist
   const initRosterInForm = useCallback(() => {
@@ -2078,6 +2091,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
   // Submit flow
   const handleSettleSubmit = async () => {
+    if (submitting) return;
+
     if (!writer.trim()) {
       setValidationErrors(true);
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
@@ -3190,7 +3205,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           id="btn-settle-final-submit"
         >
           {submitting ? (
-            <LoadingSpinner size="sm" light={true} />
+            <>
+              <LoadingSpinner size="sm" light={true} />
+              <span>저장 중...</span>
+            </>
           ) : (
             <>
               마감 제출 <CheckCircle className="w-4 h-4" />
@@ -3198,6 +3216,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           )}
         </button>
       </div>
+      {submitting && (
+        <p className="mt-3 text-right text-xs font-semibold text-slate-500" role="status" aria-live="polite">
+          {submissionDelayNotice
+            ? "저장 처리가 길어지고 있습니다. 화면을 닫거나 새로고침하지 말고 잠시만 기다려 주세요."
+            : "마감 내역을 저장하고 있습니다. 화면을 닫거나 새로고침하지 말아 주세요."}
+        </p>
+      )}
     </>
     )}
   </div>
