@@ -55,6 +55,12 @@ function doPost(e) {
       case "getBranchListAll":
         result = getBranchListAll();
         break;
+      case "getStaffRoster":
+        result = getStaffRoster(requestData.branchName);
+        break;
+      case "saveStaffRoster":
+        result = saveStaffRoster(requestData.branchName, requestData.employees || []);
+        break;
       case "addBranch":
         result = addBranch(requestData.branchName, requestData.pinHash, requestData.brand, requestData.role);
         break;
@@ -103,6 +109,7 @@ const SHEETS = {
   MASTER: "마스터_일일마감",
   EXPENSE: "지출_상세",
   STAFF: "인원_기록",
+  ROSTER: "직원_현황",
   SETTING: "지점_설정",
   LOG: "수정_로그"
 };
@@ -261,6 +268,13 @@ function getActiveBranchesFromSettingsData(data) {
       });
     }
   }
+
+  // 4-A. 직원_현황 시트 (모든 기기 공통 직원 명단)
+  let rosterSheet = ss.getSheetByName(SHEETS.ROSTER);
+  if (!rosterSheet) {
+    rosterSheet = ss.insertSheet(SHEETS.ROSTER);
+    rosterSheet.appendRow(["branch_name", "employee_id", "name", "division", "rank", "custom_rank", "updated_at"]);
+  }
   return list;
 }
 
@@ -319,6 +333,84 @@ function getBranchListAll() {
     });
   }
   return list;
+}
+
+/**
+ * 지점별 직원 명단 조회
+ */
+function getStaffRoster(branchName) {
+  const targetBranch = String(branchName || "").trim();
+  if (!targetBranch) throw new Error("지점명이 필요합니다.");
+
+  const sheet = getOrCreateRosterSheet();
+  const data = sheet.getDataRange().getValues();
+  const employees = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (String(row[0]).trim() === targetBranch) {
+      employees.push({
+        id: row[1],
+        name: row[2],
+        division: row[3],
+        rank: row[4] || "",
+        customRank: row[5] || ""
+      });
+    }
+  }
+  return employees;
+}
+
+/**
+ * 지점별 직원 명단 전체 저장
+ */
+function saveStaffRoster(branchName, employees) {
+  const targetBranch = String(branchName || "").trim();
+  if (!targetBranch) throw new Error("지점명이 필요합니다.");
+  if (!Array.isArray(employees)) throw new Error("직원 목록 형식이 올바르지 않습니다.");
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    throw new Error("서버가 다른 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.");
+  }
+
+  try {
+    const sheet = getOrCreateRosterSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === targetBranch) sheet.deleteRow(i + 1);
+    }
+
+    const now = new Date();
+    const rows = employees
+      .filter(function(emp) { return emp && String(emp.name || "").trim(); })
+      .map(function(emp) {
+        return [
+          targetBranch,
+          String(emp.id || generateUUID()),
+          String(emp.name).trim(),
+          String(emp.division || ""),
+          String(emp.rank || ""),
+          String(emp.customRank || emp.custom_rank || ""),
+          now
+        ];
+      });
+    if (rows.length > 0) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+    return { success: true, employees: getStaffRoster(targetBranch) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getOrCreateRosterSheet() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName(SHEETS.ROSTER);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.ROSTER);
+    sheet.appendRow(["branch_name", "employee_id", "name", "division", "rank", "custom_rank", "updated_at"]);
+  }
+  return sheet;
 }
 
 /**

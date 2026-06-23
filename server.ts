@@ -71,6 +71,7 @@ interface LocalDB {
   master: any[];
   expenses: any[];
   staff: any[];
+  staff_roster: any[];
   logs: any[];
 }
 
@@ -184,7 +185,7 @@ function initLocalDB(): LocalDB {
 
   const logs: any[] = [];
 
-  const db = { settings, master, expenses, staff, logs };
+  const db = { settings, master, expenses, staff, staff_roster: [], logs };
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
   return db;
 }
@@ -194,7 +195,9 @@ function readDB(): LocalDB {
     return initLocalDB();
   }
   try {
-    return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+    const db = JSON.parse(fs.readFileSync(DB_PATH, "utf8")) as LocalDB;
+    if (!Array.isArray(db.staff_roster)) db.staff_roster = [];
+    return db;
   } catch (e) {
     return initLocalDB();
   }
@@ -296,6 +299,23 @@ app.post("/api/gas", async (req: Request, res: Response) => {
             role: s.role
           }));
         return res.json({ success: true, data: list });
+      }
+
+      case "getStaffRoster": {
+        const { branchName } = req.body;
+        const roster = db.staff_roster || [];
+        return res.json({ success: true, data: roster.filter((employee: any) => employee.branch_name === branchName) });
+      }
+
+      case "saveStaffRoster": {
+        const { branchName } = req.body;
+        const employees = Array.isArray(req.body.employees) ? req.body.employees : [];
+        db.staff_roster = (db.staff_roster || []).filter((employee: any) => employee.branch_name !== branchName);
+        db.staff_roster.push(...employees
+          .filter((employee: any) => employee && String(employee.name || "").trim())
+          .map((employee: any) => ({ ...employee, branch_name: branchName })));
+        writeDB(db);
+        return res.json({ success: true, data: { success: true, employees } });
       }
 
       case "getBranchListAll": {
