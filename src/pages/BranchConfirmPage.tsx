@@ -4400,8 +4400,10 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
               <div key={idx} className="py-2.5 flex justify-between items-center">
                 <span className="text-gray-800 font-extrabold">{item.name}</span>
                 <div className="flex gap-3 text-right">
-                  <span className="text-gray-400 font-medium">({item.days}일 출근)</span>
-                  <span className="text-[#2E6DB4] font-black font-mono">{item.hours} hr</span>
+                  <span className="text-gray-400 font-medium" title={item.workedDaysList}>
+                    ({item.daysCount}일 출근 · {item.workedDaysList})
+                  </span>
+                  <span className="text-[#2E6DB4] font-black font-mono">{item.totalHours} hr</span>
                 </div>
               </div>
             ))
