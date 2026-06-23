@@ -5348,8 +5348,17 @@ function MonthlyPartTimeSalarySubTab({
           const byEmployeeId = new Map(current.map((salary) => [salary.employeeId, salary]));
           return allPartTimers.map((employee) => {
             const existing = byEmployeeId.get(employee.id);
-            if (existing) return existing;
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
+            const attendanceDates = work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(",");
+            if (existing) {
+              const calculatedSalary = String((Number(existing.hourlyRate) || 0) * work.hours);
+              return {
+                ...existing,
+                accumulatedHours: String(work.hours),
+                attendanceDates,
+                calculatedSalary
+              };
+            }
             const hourlyRate = "15000";
             return {
               employeeId: employee.id,
@@ -5362,7 +5371,7 @@ function MonthlyPartTimeSalarySubTab({
               hourlyRate,
               accumulatedHours: String(work.hours),
               calculatedSalary: String(Number(hourlyRate) * work.hours),
-              attendanceDates: work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(","),
+              attendanceDates,
               actualPaidAmount: "",
               payoutBranch: branchName,
               memo: ""
