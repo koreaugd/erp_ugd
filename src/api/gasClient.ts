@@ -63,8 +63,8 @@ export interface DailyListRow {
 // REST actions helper
 async function callApi(action: string, params: Record<string, any> = {}): Promise<any> {
   try {
-    // 1. Check localStorage first, then env variable, then fallback to proxy
-    const localGasUrl = typeof window !== "undefined" ? window.localStorage.getItem("custom_gas_url") : null;
+    // 모든 기기가 동일한 백엔드를 사용하도록 배포 시 주입된 URL만 사용합니다.
+    // 이전 기기에 남아 있는 custom_gas_url은 구버전 웹앱을 호출할 수 있어 무시합니다.
     const directGasUrl = (import.meta as any).env?.VITE_GAS_URL;
 
     let url = "/api/gas";
@@ -77,20 +77,7 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
       window.location.hostname.includes("run.app")
     );
 
-    if (localGasUrl && localGasUrl.trim() !== "" && localGasUrl.includes("script.google.com")) {
-      if (isServerEnvironment) {
-        // Node proxy environment: Route through /api/gas with the Custom GAS URL in x-custom-gas-url header.
-        // This solves all browser CORS/preflight (OPTIONS) limitations.
-        url = "/api/gas";
-        headers["Content-Type"] = "application/json";
-        headers["x-custom-gas-url"] = localGasUrl;
-      } else {
-        // Static production environments (Netlify, etc.) without Node proxy backend:
-        // Request directly from browser but use "text/plain" content-type to bypass OPTIONS preflight block.
-        url = localGasUrl;
-        headers["Content-Type"] = "text/plain";
-      }
-    } else if (directGasUrl && directGasUrl.trim() !== "" && directGasUrl.includes("script.google.com")) {
+    if (directGasUrl && directGasUrl.trim() !== "" && directGasUrl.includes("script.google.com")) {
       if (isServerEnvironment) {
         url = "/api/gas";
         headers["Content-Type"] = "application/json";
