@@ -5329,9 +5329,23 @@ function MonthlyPartTimeSalarySubTab({
           } catch {}
         });
 
+        // 기존 파트타이머 일지에만 있는 직원도 급여대장에 포함합니다.
+        // 직원현황에 등록되지 않은 과거 기록은 이름 기반 임시 ID를 사용합니다.
+        const allPartTimers = [...partTimers];
+        const rosterNames = new Set(allPartTimers.map((employee) => employee.name));
+        Object.keys(telemetry).forEach((name) => {
+          if (!rosterNames.has(name)) {
+            allPartTimers.push({
+              id: `legacy-${branchName}-${name}`,
+              name,
+              division: "파트타이머"
+            });
+          }
+        });
+
         setSalaries((current) => {
           const byEmployeeId = new Map(current.map((salary) => [salary.employeeId, salary]));
-          return partTimers.map((employee) => {
+          return allPartTimers.map((employee) => {
             const existing = byEmployeeId.get(employee.id);
             if (existing) return existing;
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
