@@ -92,8 +92,11 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
       headers["Content-Type"] = "application/json";
     }
 
+    // Apps Script는 콜드 스타트·시트 잠금 상황에서 수 초 더 걸릴 수 있습니다.
+    // 7초에 요청을 취소하면 정상 저장 처리 중에도 브라우저가 "signal is aborted"를
+    // 표시하므로, 마감 데이터를 안전하게 처리할 수 있는 시간으로 여유를 둡니다.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -118,6 +121,9 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
     }
   } catch (error: any) {
     console.error("API Call failed:", error);
+    if (error?.name === "AbortError" || /aborted/i.test(String(error?.message || ""))) {
+      throw new Error("서버 응답이 지연되고 있습니다. 잠시 후 마감 내역을 확인한 뒤 다시 시도해 주세요.");
+    }
     throw error;
   }
 }
