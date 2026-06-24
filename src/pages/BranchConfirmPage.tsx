@@ -1847,8 +1847,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       division: emp.division,
       name: emp.name,
       standardHours: emp.division === "정직원" ? defaultStandardHours : 0,
-      clockIn: "00:00",
-      clockOut: "00:00",
+      clockIn: "",
+      clockOut: "",
       workHours: 0,
       overtime: 0,
       overtimeReason: ""
@@ -3059,8 +3059,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 rank: newStaffInputDivision === "정직원" ? newStaffInputRank : undefined,
                 entryDate: newStaffInputEntryDate,
                 standardHours: newStaffInputDivision === "정직원" ? defaultStandardHours : 0,
-                clockIn: "00:00",
-                clockOut: "00:00",
+                clockIn: "",
+                clockOut: "",
                 workHours: 0,
                 overtime: 0,
                 overtimeReason: ""
