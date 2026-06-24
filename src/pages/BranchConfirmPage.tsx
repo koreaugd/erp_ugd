@@ -27,6 +27,12 @@ const cleanNumeric = (val: string) => {
   return val.replace(/[^0-9]/g, "");
 };
 
+const toDateInputValue = (value: string) => {
+  const match = String(value || "").match(/^(\d{4})[.\-/\s]+(\d{1,2})[.\-/\s]+(\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+};
+
 // ----------------------------------------------------
 // Constants & Types
 // ----------------------------------------------------
@@ -2567,13 +2573,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="sales-section">
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <CircleDollarSign className="w-4 h-4 text-[#2E6DB4]" />
-          실시간 매출 거래 기록 (원자릿수 필수 기입)
+          매출
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="compact-sales-grid">
           {[
-            { label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "현금 수납액" },
             { label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "카드 단말기 집계" },
+            { label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "현금 수납액" },
             { label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "송금 수납액" },
             { label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "배달앱(배민/요기요)" },
             { label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "실제 마감 금고시재" }
@@ -4369,7 +4375,7 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
   const fetchHistory = useCallback(async () => {
     try {
       setLoading(true);
-      const h = await gasClient.getBranchHistory(branchName);
+      const h = await gasClient.getBranchHistory(branchName, selectedMonth);
       setHistory(h || []);
     } catch (e) {
       console.error("월말 정산용 이력 가져오기 실패:", e);
@@ -5230,7 +5236,7 @@ function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedProfiles();
-  }, [branchName]);
+  }, [branchName, selectedMonth]);
 
   // 다른 기기에서도 공통 직원현황을 기준으로 파트타이머 행을 생성합니다.
   useEffect(() => {
@@ -5430,13 +5436,12 @@ function MonthlyPartTimeSalarySubTab({
 
       {/* Ledger Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1100px]">
+        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1000px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
               <th className="py-3 px-3">성명 (사원)</th>
               <th className="py-3 px-3 w-36">주민등록번호</th>
               <th className="py-3 px-3 w-28">입사일자</th>
-              <th className="py-3 px-3 w-24">근로계약</th>
               <th className="py-3 px-3 w-24">은행</th>
               <th className="py-3 px-3 w-40">입금 계좌번호</th>
               <th className="py-3 px-3 w-24 text-right">시급 (원)</th>
@@ -5450,7 +5455,7 @@ function MonthlyPartTimeSalarySubTab({
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
             {visibleSalaries.length === 0 ? (
               <tr>
-                <td colSpan={12} className="py-16 text-center text-gray-400 font-bold">
+                <td colSpan={11} className="py-16 text-center text-gray-400 font-bold">
                   이번 달 근무시간이 기록된 파트타이머가 없습니다.
                 </td>
               </tr>
@@ -5465,36 +5470,22 @@ function MonthlyPartTimeSalarySubTab({
                       type="text"
                       value={sal.residentNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "residentNumber", e.target.value)}
-                      placeholder="[주민번호삭제]"
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-bold text-gray-800 tracking-tighter text-center"
                     />
                   </td>
                   <td className="py-2.5 px-1.5">
                     <input
-                      type="text"
-                      value={sal.entryDate}
+                      type="date"
+                      value={toDateInputValue(sal.entryDate)}
                       onChange={(e) => handleUpdate(sal.employeeId, "entryDate", e.target.value)}
-                      placeholder="2025. 4. 20"
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs text-gray-800 text-center"
                     />
-                  </td>
-                  <td className="py-2.5 px-1.5">
-                    <select
-                      value={sal.contractStatus}
-                      onChange={(e) => handleUpdate(sal.employeeId, "contractStatus", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-bold text-center"
-                    >
-                      <option value="4대보험">4대보험</option>
-                      <option value="3.3%">3.3%</option>
-                      <option value="미작성">미작성</option>
-                    </select>
                   </td>
                   <td className="py-2.5 px-1.5">
                     <input
                       type="text"
                       value={sal.bank}
                       onChange={(e) => handleUpdate(sal.employeeId, "bank", e.target.value)}
-                      placeholder="국민"
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-bold text-gray-800 text-center"
                     />
                   </td>
@@ -5503,7 +5494,6 @@ function MonthlyPartTimeSalarySubTab({
                       type="text"
                       value={sal.accountNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "accountNumber", e.target.value)}
-                      placeholder="024802-04-246556"
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-medium text-gray-850"
                     />
                   </td>
@@ -5531,7 +5521,6 @@ function MonthlyPartTimeSalarySubTab({
                       type="text"
                       value={sal.attendanceDates}
                       onChange={(e) => handleUpdate(sal.employeeId, "attendanceDates", e.target.value)}
-                      placeholder="일자 구분 콤마"
                       className="w-full p-1 bg-zinc-50 border border-gray-200 rounded text-[10px] font-mono text-zinc-600 truncate focus:outline-none focus:bg-white"
                       title={sal.attendanceDates}
                     />
@@ -5541,7 +5530,6 @@ function MonthlyPartTimeSalarySubTab({
                       type="text"
                       value={sal.memo}
                       onChange={(e) => handleUpdate(sal.employeeId, "memo", e.target.value)}
-                      placeholder="기타 특이 사항 기재"
                       className="w-full p-2 bg-white border border-gray-200 rounded text-xs font-medium placeholder-gray-300"
                     />
                   </td>
