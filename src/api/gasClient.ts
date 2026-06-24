@@ -312,13 +312,29 @@ export const gasClient = {
     const summary = new Map<string, { hours: number; overtime: number; dates: Set<string> }>();
     for (const item of history) {
       const detail = await firebaseGetDailyDetail(item.recordId!);
-      for (const staff of detail.staff as any[]) {
+      // 일일마감 화면의 출·퇴근 시각과 초과시간은 상세 METADATA에 보존됩니다.
+      // 요약 staff 배열에는 근무시간만 있으므로, 수정 후에도 일지에 정확히
+      // 표시되도록 METADATA를 우선 사용하고 구형 데이터만 요약 배열로 보완합니다.
+      let detailedStaff: any[] = [];
+      try {
+        const metadataText = String(item.memo || "").split("\n---\nMETADATA:")[1];
+        const metadata = metadataText ? JSON.parse(metadataText.trim()) : null;
+        detailedStaff = Array.isArray(metadata?.staffRows) ? metadata.staffRows.map((row: any) => ({
+          ...row,
+          staffName: row.staffName || row.name
+        })) : [];
+      } catch (error) {
+        console.warn("근무 일지 메타데이터를 읽지 못해 요약 데이터로 대체합니다.", error);
+      }
+      const sourceStaff = detailedStaff.length > 0 ? detailedStaff : (detail.staff as any[]);
+      for (const staff of sourceStaff) {
         const isPartTime = staff.division === "파트타이머" && Number(staff.workHours || 0) > 0;
         const isOvertime = staff.division === "정직원" && Number(staff.overtime || 0) !== 0;
         if ((logType === "partTime" && !isPartTime) || (logType === "overtime" && !isOvertime)) continue;
-        records.push({ settleDate: item.settleDate, staffName: staff.staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", writer: item.submittedBy || "점장" });
-        const aggregate = summary.get(staff.staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
-        aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staff.staffName, aggregate);
+        const staffName = staff.staffName || staff.name;
+        records.push({ settleDate: item.settleDate, staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", writer: item.submittedBy || "점장" });
+        const aggregate = summary.get(staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
+        aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staffName, aggregate);
       }
     }
     records.sort((a, b) => b.settleDate.localeCompare(a.settleDate));

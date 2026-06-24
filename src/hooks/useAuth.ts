@@ -69,7 +69,15 @@ export function useAuth() {
       };
 
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      if (branch) sessionStorage.setItem(SELECTED_BRANCH_KEY, JSON.stringify(branchSetting));
+      if (branch) {
+        // 로그인 직후에도 React 상태를 즉시 맞춰야 지점 선택 화면이 한 번 더
+        // 표시되지 않습니다. (새로고침 시에는 위의 sessionStorage 복구가 담당)
+        sessionStorage.setItem(SELECTED_BRANCH_KEY, JSON.stringify(branchSetting));
+        setSelectedBranchState(branchSetting);
+      } else {
+        sessionStorage.removeItem(SELECTED_BRANCH_KEY);
+        setSelectedBranchState(null);
+      }
       localStorage.setItem(ATTEMPTS_KEY, "0");
       setFailedAttempts(0);
       setUser(session);
