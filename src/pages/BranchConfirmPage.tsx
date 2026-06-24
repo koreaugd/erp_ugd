@@ -2095,7 +2095,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const handleSettleSubmit = async () => {
     if (submitting) return;
 
-    if (!writer.trim()) {
+    if (!writer.trim() && !hasExistingRecord) {
       setValidationErrors(true);
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
       return;
