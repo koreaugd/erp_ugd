@@ -45,6 +45,9 @@ export interface RosterEmployee {
   division: string;
   rank?: string;
   customRank?: string;
+  residentNumber?: string;
+  contractType?: "4대보험" | "3.3%";
+  entryDate?: string;
 }
 
 export interface DailySettleDetail {
