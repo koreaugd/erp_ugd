@@ -2611,11 +2611,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="compact-sales-grid">
           {[
-            { label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "카드 단말기 집계" },
-            { label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "현금 수납액" },
-            { label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "송금 수납액" },
-            { label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "배달앱(배민/요기요)" },
-            { label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "실제 마감 금고시재" }
+            { label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "" },
+            { label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "" },
+            { label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "" },
+            { label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
+            { label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
           ].map((field, idx) => (
             <div key={idx} className="flex flex-col space-y-1.5">
               <span className="text-xs font-semibold text-gray-500">{field.label}</span>
