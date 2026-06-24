@@ -3735,7 +3735,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const partTimeCount = employees.filter((e) => e.division === "파트타이머").length;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-6" id="roster-tab-view">
+    <div className="space-y-6" id="roster-tab-view">
       {/* Deletion Modal */}
       <AnimatePresence>
         {showDeleteModal && employeeToDelete && (
@@ -3993,14 +3993,14 @@ function RosterTab({ branchName }: { branchName: string }) {
       </AnimatePresence>
 
       {/* Addition Left Form */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-fit space-y-4">
+      <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3">
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <UserPlus className="w-4 h-4 text-[#2E6DB4]" />
           새 구성원 명부 개설
         </h3>
 
-        <form onSubmit={handleAddEmployee} className="space-y-4 text-xs">
-          <div className="flex flex-col space-y-1.5">
+        <form onSubmit={handleAddEmployee} className="flex flex-wrap items-end gap-3 text-xs">
+          <div className="flex w-44 flex-col space-y-1.5">
             <span className="font-bold text-gray-500">성명 (이름)</span>
             <input
               type="text"
@@ -4132,8 +4132,8 @@ function RosterTab({ branchName }: { branchName: string }) {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-left text-xs border-collapse">
+        <div className="overflow-hidden">
+          <table className="w-full table-fixed text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
                 <th className="py-2.5 px-3 w-16 whitespace-nowrap">근무자 번호</th>
