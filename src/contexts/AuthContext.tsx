@@ -2,6 +2,7 @@
 import React, { createContext, useContext, ReactNode } from "react";
 import { useAuth, UserSession } from "../hooks/useAuth";
 import { BranchSetting } from "../api/gasClient";
+import type { LoginBranch } from "../api/firebaseAuth";
 
 interface AuthContextType {
   user: UserSession | null;
@@ -9,7 +10,7 @@ interface AuthContextType {
   selectBranch: (branch: BranchSetting | null) => void;
   loading: boolean;
   error: string | null;
-  login: (pin: string) => Promise<boolean>;
+  login: (branch: LoginBranch | null, pin: string) => Promise<boolean>;
   logout: () => void;
   failedAttempts: number;
   setError: (msg: string | null) => void;

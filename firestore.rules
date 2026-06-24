@@ -1,60 +1,48 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // 1. Global Safety Net (Strictly Default-Deny Catch-All)
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Firebase 내부 관리자 계정입니다. 실제 로그인 화면에는 노출하지 않습니다.
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == 'admin@ugd-erp.example';
+    }
+
+    // 로그인 전 지점 선택 화면에 필요한 공개 정보만 둡니다. PIN·해시값은 포함하지 않습니다.
+    match /public_branches/{branchId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 지점 설정 및 PIN 관련 데이터는 인증 후에만 읽고, 관리 계정만 변경합니다.
+    match /settings/{branchId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 일일마감 원본 데이터입니다. 공통 지점 PIN 정책이므로 로그인한 사용자가 조회·저장합니다.
+    match /daily_settles/{recordId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.recordId is string
+        && request.resource.data.master is map
+        && request.resource.data.expenses is list
+        && request.resource.data.staff is list;
+      allow delete: if isAdmin();
+    }
+
+    match /staff_rosters/{branchId} {
+      allow read, write: if signedIn();
+    }
+
+    match /shared_data/{dataKey} {
+      allow read, write: if signedIn();
+    }
+
     match /{document=**} {
       allow read, write: if false;
-    }
-
-    // Common Helper Functions
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128;
-    }
-
-    // Schema Validation Blueprint: Settings
-    function isValidSetting(data) {
-      return data.keys().hasAll(['branch_name', 'pin_hash', 'role', 'is_active', 'brand'])
-        && data.branch_name is string && data.branch_name.size() <= 100
-        && data.pin_hash is string && data.pin_hash.size() <= 256
-        && data.role is string && (data.role == 'admin' || data.role == 'branch')
-        && data.is_active is bool
-        && data.brand is string && data.brand.size() <= 100;
-    }
-
-    // Schema Validation Blueprint: DailySettle
-    function isValidDailySettle(data) {
-      return data.keys().hasAll(['recordId', 'master', 'expenses', 'staff'])
-        && data.recordId is string && data.recordId.size() <= 150
-        && data.master is map
-        && data.expenses is list
-        && data.staff is list;
-    }
-
-    // Database Rules: Settings
-    match /settings/{branchName} {
-      allow read: if isValidId(branchName);
-      allow create, update: if isValidId(branchName) 
-        && isValidSetting(incoming())
-        && incoming().branch_name == branchName;
-      allow delete: if isValidId(branchName);
-    }
-
-    // Database Rules: Daily Settles (Unified Packaging)
-    match /daily_settles/{recordId} {
-      allow read: if isValidId(recordId);
-      allow create, update: if isValidId(recordId)
-        && isValidDailySettle(incoming())
-        && incoming().recordId == recordId;
-      allow delete: if isValidId(recordId);
     }
   }
 }
