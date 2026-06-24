@@ -1812,6 +1812,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [hasExistingRecord, setHasExistingRecord] = useState<boolean>(false);
   const [existingRecordId, setExistingRecordId] = useState<string | null>(null);
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
+  const [timeErrors, setTimeErrors] = useState<Record<string, string>>({});
   
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submissionDelayNotice, setSubmissionDelayNotice] = useState<boolean>(false);
@@ -2038,8 +2039,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
   const normalizeTimeInput = (index: number, field: "clockIn" | "clockOut", value: string) => {
     const match = value.trim().match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
-    if (!match) { triggerToast("시간은 24시간제로 09:00 또는 1530 형식으로 입력해 주세요.", "error"); return; }
+    const key = `${index}-${field}`;
+    if (!match) { setTimeErrors((current) => ({ ...current, [key]: "24시간제 예: 09:00 또는 1530" })); return; }
     const hour = (match[1] || match[3]).padStart(2, "0");
+    setTimeErrors((current) => { const next = { ...current }; delete next[key]; return next; });
     executeStaffCalculation(index, { [field]: `${hour}:${match[2] || match[4]}` });
   };
 
@@ -2138,6 +2141,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
     if (!branchName) {
       triggerToast("지점 정보를 불러올 수 없습니다. 로그아웃 후 다시 로그인해 주세요.", "error");
+      return;
+    }
+
+    if (Object.keys(timeErrors).length > 0) {
+      triggerToast("출퇴근 시간 입력 오류를 수정한 뒤 마감 제출해 주세요.", "error");
       return;
     }
 
@@ -2568,6 +2576,17 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 className="px-3.5 py-2 bg-white hover:bg-gray-100 text-red-600 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
               >
                 ✏️ 수정모드로 진행할 것을 승인함
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm("현재 화면의 마감 입력 내용을 비우고 처음부터 다시 작성할까요? 기존 저장 기록은 마감 제출 전까지 유지됩니다.")) return;
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); initRosterInForm(); setIsEditApproved(true);
+                  triggerToast("정산 입력을 초기화했습니다. 새 내용으로 마감 제출해 주세요.", "success");
+                }}
+                className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+              >
+                ↺ 정산 리셋
               </button>
               <button
                 type="button"
@@ -3083,7 +3102,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                       <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
                       
                       {/* Division Dropdown */}
-                      <td className="py-3.5 px-2">
+                      <td className="py-3.5 px-2 relative">
                         <select
                           value={s.division}
                           onChange={(e) => {
@@ -3129,20 +3148,22 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
                           placeholder="24시간"
-                          className="w-16 px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
+                          className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
+                        {timeErrors[`${idx}-clockIn`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockIn`]}</span>}
                       </td>
 
                       {/* Clock Out */}
-                      <td className="py-3.5 px-2">
+                      <td className="py-3.5 px-2 relative">
                         <input
                           type="text"
                           value={s.clockOut}
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
                           placeholder="24시간"
-                          className="w-16 px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
+                          className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
+                        {timeErrors[`${idx}-clockOut`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockOut`]}</span>}
                       </td>
 
                       {/* Work Hours calculated */}
