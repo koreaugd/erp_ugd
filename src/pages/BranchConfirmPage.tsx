@@ -108,7 +108,7 @@ export default function BranchConfirmPage() {
   // ----------------------------------------------------
   // Tabs State
   // ----------------------------------------------------
-  const [activeTab, setActiveTab] = useState<"settle" | "orders" | "roster" | "overtimeLog" | "partTimeLog">("settle");
+  const [activeTab, setActiveTab] = useState<"settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("settle");
 
   // ----------------------------------------------------
   // Branch Selector State
@@ -260,8 +260,8 @@ interface WorkspaceProps {
   branch: { branchName: string; brand: string; role: string };
   logout: () => void;
   selectBranch: (branch: any) => void;
-  activeTab: "settle" | "orders" | "roster" | "overtimeLog" | "partTimeLog";
-  setActiveTab: (tab: "settle" | "orders" | "roster" | "overtimeLog" | "partTimeLog") => void;
+  activeTab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
+  setActiveTab: (tab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
 }
 
 function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab }: WorkspaceProps) {
@@ -693,6 +693,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   { id: "orders", label: "발주관리", icon: ShoppingCart },
                   { id: "roster", label: "직원현황", icon: User },
                   { id: "overtimeLog", label: "초과근무일지", icon: Clock },
+                  { id: "annualLeave", label: "연차관리", icon: Calendar },
                   { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
                 ].map((t) => {
                   const IconComp = t.icon;
@@ -782,6 +783,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeTab === "orders" && <OrderManagementTab branchName={activeBranchName} />}
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} />}
+                {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
                 {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} />}
               </motion.div>
             </AnimatePresence>
@@ -2683,7 +2685,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                       ))}
                     </select>
                   </div>
-                  <div className="flex flex-col space-y-1">
+                  {exp.classification !== "현금입금" && <div className="flex flex-col space-y-1">
                     <span className="text-[10px] font-bold text-gray-400">사용처</span>
                     <select
                       value={exp.usage}
@@ -2694,7 +2696,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                         <option key={item} value={item}>{item}</option>
                       ))}
                     </select>
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -2985,14 +2987,17 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               ))}
             </select>
           )}
+          <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
+            <span>입사일자</span>
           <input
             type="date"
             value={newStaffInputEntryDate}
             onChange={(e) => setNewStaffInputEntryDate(e.target.value)}
             onClick={(e) => e.currentTarget.showPicker?.()}
-            aria-label="입사일"
-            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono cursor-pointer"
+            aria-label="입사일자"
+            className="min-w-0 bg-transparent focus:outline-hidden font-mono cursor-pointer"
           />
+          </label>
           <button
             type="button"
             onClick={() => {
@@ -4083,7 +4088,7 @@ function RosterTab({ branchName }: { branchName: string }) {
           </div>
 
           {division === "정직원" && (
-            <div className="flex flex-col space-y-1.5 p-3 bg-zinc-50 rounded-xl border border-gray-200/60 animate-in fade-in duration-200">
+            <div className="flex flex-col space-y-1.5 animate-in fade-in duration-200">
               <span className="font-bold text-gray-600 flex items-center gap-1">
                 <Briefcase className="w-3.5 h-3.5 text-[#2E6DB4]" /> 직급 선택 (정직원 필수)
               </span>
@@ -4124,7 +4129,7 @@ function RosterTab({ branchName }: { branchName: string }) {
               type="text"
               value={newResidentNumber}
               onChange={(e) => setNewResidentNumber(e.target.value)}
-              placeholder="000000-0000000"
+              placeholder=""
               className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
             />
           </div>
@@ -4208,7 +4213,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                         value={emp.residentNumber || ""}
                         onChange={(e) => updateEmployeeField(emp.id, "residentNumber", e.target.value)}
                         onBlur={() => saveEmployees(employees)}
-                        placeholder="000000-0000000"
+                        placeholder=""
                         className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
                       />
                     </td>
@@ -4297,6 +4302,16 @@ function RosterTab({ branchName }: { branchName: string }) {
   );
 }
 
+function AnnualLeaveTab({ branchName }: { branchName: string }) {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [entries, setEntries] = useState<any[]>([]);
+  const [employeeId, setEmployeeId] = useState(""); const [days, setDays] = useState("1"); const [reason, setReason] = useState(""); const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const load = useCallback(async () => { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees(roster as Employee[]); setEntries(saved || []); }, [branchName]);
+  useEffect(() => { void load(); }, [load]);
+  const save = async () => { if (!employeeId || !Number(days) || !reason.trim()) return; const next = [{ id: `leave-${Date.now()}`, employeeId, days: Number(days), reason: reason.trim(), date }, ...entries]; await gasClient.saveSharedData(`annual_leave:${branchName}`, next); setEntries(next); setReason(""); };
+  return <div className="space-y-5"><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800">연차관리</h3><p className="text-xs text-gray-400 mt-1">직원 ID 기준으로 공용 DB에 저장됩니다. 지점 이동 시에도 동일 직원 ID의 연차 이력이 이어집니다.</p><div className="flex flex-wrap gap-2 mt-4"><select value={employeeId} onChange={e=>setEmployeeId(e.target.value)} className="border rounded px-3 py-2 text-sm"><option value="">직원 선택</option>{employees.filter(e=>e.division === "정직원").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="border rounded px-2"/><input value={days} onChange={e=>setDays(e.target.value)} className="w-16 border rounded px-2"/><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="사용 사유" className="border rounded px-3"/><button onClick={()=>void save()} className="bg-[#2E6DB4] text-white rounded px-4 text-sm font-bold">연차 사용 등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">직원</th><th>입사일</th><th>부여</th><th>사용</th><th>잔여</th></tr></thead><tbody>{employees.filter(e=>e.division === "정직원").map(e=>{const used=entries.filter(x=>x.employeeId===e.id).reduce((s,x)=>s+Number(x.days||0),0);return <tr key={e.id} className="border-t"><td className="p-3 font-bold">{e.name}</td><td>{e.entryDate||"-"}</td><td>15일</td><td>{used}일</td><td className="font-bold text-[#2E6DB4]">{15-used}일</td></tr>})}</tbody></table></div></div>;
+}
+
 // ----------------------------------------------------
 // TAB 4: Overtime Log Tab (초과근무일지)
 // ----------------------------------------------------
@@ -4304,13 +4319,22 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
+  const [manualName, setManualName] = useState("");
+  const [manualHours, setManualHours] = useState("");
+  const [manualReason, setManualReason] = useState("");
+  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const log = await gasClient.getAttendanceLog(branchName, "overtime");
-      setRecords(log.records || []);
-      setSummaryList(log.summaryList || []);
+      const [log, manual] = await Promise.all([gasClient.getAttendanceLog(branchName, "overtime"), gasClient.getSharedData<any[]>(`manual_overtime:${branchName}`)]);
+      const manualRows = (manual || []).map((item) => ({ ...item, clockIn: "수기", clockOut: "수기", workHours: "-", standardHours: "-", overtimeReason: item.reason, manual: true }));
+      const all = [...(log.records || []), ...manualRows].sort((a, b) => String(b.settleDate).localeCompare(String(a.settleDate)));
+      setRecords(all);
+      const month = new Date().toISOString().slice(0, 7);
+      const totals = new Map<string, { previous: number; current: number }>();
+      all.forEach((item) => { const current = totals.get(item.staffName) || { previous: 0, current: 0 }; if (String(item.settleDate).slice(0, 7) < month) current.previous += Number(item.overtime) || 0; else if (String(item.settleDate).slice(0, 7) === month) current.current += Number(item.overtime) || 0; totals.set(item.staffName, current); });
+      setSummaryList(Array.from(totals, ([name, value]) => ({ name, ...value, totalOvertime: value.previous + value.current })));
 
     } catch (e) {
       console.error("Overtime database read error:", e);
@@ -4322,6 +4346,15 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const saveManualOvertime = async () => {
+    const hours = Number(manualHours);
+    if (!manualName.trim() || !hours || !manualReason.trim()) return;
+    const key = `manual_overtime:${branchName}`;
+    const previous = (await gasClient.getSharedData<any[]>(key)) || [];
+    await gasClient.saveSharedData(key, [{ id: `manual-${Date.now()}`, staffName: manualName.trim(), settleDate: manualDate, overtime: hours, reason: manualReason.trim(), createdAt: new Date().toISOString() }, ...previous]);
+    setManualName(""); setManualHours(""); setManualReason(""); await loadData();
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -4341,6 +4374,13 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
           >
             <RefreshCw className="w-3 h-3" /> 새로고침
           </button>
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
+            <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
+            <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
+            <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
+            <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
+            <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">수기 입력</button>
+          </div>
         </div>
 
         {loading ? (
@@ -4423,7 +4463,7 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
                     ? "bg-gray-105 bg-gray-100 text-gray-500" 
                     : "bg-emerald-50 text-emerald-800 font-extrabold"
                 }`}>
-                  {item.totalOvertime < 0 ? `${item.totalOvertime} 시간 (단축)` : `총 ${item.totalOvertime} 시간 초과`}
+                  {`전월누적 ${item.previous || 0}h · 이번달 ${item.current || 0}h · 총 ${item.totalOvertime}h`}
                 </span>
               </div>
             ))
