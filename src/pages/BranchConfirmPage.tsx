@@ -2178,7 +2178,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         if (rosterUpdated) {
           localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(updatedRoster));
-          await gasClient.saveStaffRoster(branchName, updatedRoster);
+          await gasClient.saveBranchOwnRoster(branchName, updatedRoster);
         }
       } catch (e) {
         console.error("Local roster automatic registration failed:", e);
@@ -3583,12 +3583,13 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editEntryDate, setEditEntryDate] = useState("");
 
   // 원격 직원 명단을 우선 사용합니다. 기존 기기에만 있던 명단은
-  // 서버에 데이터가 없을 때 한 번 자동 이전합니다.
+  // 지점 전용 branch_own_rosters 컬렉션을 우선 사용합니다.
+  // 관리자 직원명부(staff_rosters)와 분리되어 관리자 수정사항이 지점 화면에 영향을 주지 않습니다.
   useEffect(() => {
     let cancelled = false;
     const syncRoster = async () => {
       try {
-        const remoteEmployees = await gasClient.getStaffRoster(branchName);
+        const remoteEmployees = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
         if (remoteEmployees.length > 0) {
           setEmployees(remoteEmployees as Employee[]);
@@ -3599,7 +3600,7 @@ function RosterTab({ branchName }: { branchName: string }) {
         const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
         const localEmployees = saved ? JSON.parse(saved) : [];
         if (Array.isArray(localEmployees) && localEmployees.length > 0) {
-          await gasClient.saveStaffRoster(branchName, localEmployees);
+          await gasClient.saveBranchOwnRoster(branchName, localEmployees);
         }
       } catch (error) {
         console.warn("직원 명단 원격 동기화에 실패했습니다.", error);
@@ -3678,7 +3679,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const saveEmployees = (updated: Employee[]) => {
     setEmployees(updated);
     localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(updated));
-    gasClient.saveStaffRoster(branchName, updated).catch((error) => {
+    gasClient.saveBranchOwnRoster(branchName, updated).catch((error) => {
       console.error("직원 명단 저장에 실패했습니다.", error);
     });
   };
@@ -5528,7 +5529,7 @@ function MonthlyPartTimeSalarySubTab({
   useEffect(() => {
     const mergeRemotePartTimers = async () => {
       try {
-        const roster = await gasClient.getStaffRoster(branchName);
+        const roster = await gasClient.getBranchOwnRoster(branchName);
         const partTimers = roster.filter((employee) => employee.division === "파트타이머");
         if (partTimers.length === 0) return;
 

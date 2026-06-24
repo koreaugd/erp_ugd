@@ -360,6 +360,18 @@ export const gasClient = {
     return result;
   },
 
+  async getBranchOwnRoster(branchName: string): Promise<RosterEmployee[]> {
+    const { firebaseGetBranchOwnRoster } = await import("./firebaseDirect");
+    return await firebaseGetBranchOwnRoster(branchName);
+  },
+
+  async saveBranchOwnRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
+    const { firebaseSaveBranchOwnRoster } = await import("./firebaseDirect");
+    const result = await firebaseSaveBranchOwnRoster(branchName, employees);
+    clearReadCache();
+    return result;
+  },
+
   async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
     const { firebaseGetSharedData } = await import("./firebaseDirect");
     return await firebaseGetSharedData(dataKey);

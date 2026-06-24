@@ -102,6 +102,18 @@ export async function firebaseSaveStaffRoster(branchName: string, employees: any
   return { success: true, employees };
 }
 
+// 지점이 직접 등록·관리하는 직원 명단 (관리자 직원명부와 분리된 컬렉션)
+export async function firebaseGetBranchOwnRoster(branchName: string) {
+  const snapshot = await getDocs(collection(getDirectDb(), "branch_own_rosters"));
+  const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
+  return entry?.employees || [];
+}
+
+export async function firebaseSaveBranchOwnRoster(branchName: string, employees: any[]) {
+  await setDoc(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)), { branchName, employees, updatedAt: new Date().toISOString() });
+  return { success: true, employees };
+}
+
 export async function firebaseGetSharedData(dataKey: string) {
   const snapshot = await getDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)));
   return snapshot.exists() ? snapshot.data().value ?? null : null;
