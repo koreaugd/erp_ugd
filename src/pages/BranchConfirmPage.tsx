@@ -5703,20 +5703,20 @@ function MonthlyPartTimeSalarySubTab({
 
       {/* Ledger Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1000px]">
+        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1320px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
-              <th className="py-3 px-3">성명 (사원)</th>
-              <th className="py-3 px-3 w-36">주민등록번호</th>
-              <th className="py-3 px-3 w-28">입사일자</th>
-              <th className="py-3 px-3 w-24">은행</th>
-              <th className="py-3 px-3 w-40">입금 계좌번호</th>
-              <th className="py-3 px-3 w-24 text-right">시급 (원)</th>
-              <th className="py-3 px-3 w-20 text-right">누적시간</th>
-              <th className="py-3 px-3 w-28 text-right">기본급여</th>
-              <th className="py-3 px-3 w-40">근무일정 (출근일)</th>
-              <th className="py-3 px-3 w-[360px]">기타 비고 내용 (퇴사일 등)</th>
-              <th className="py-3 px-3 w-20 text-center">제외</th>
+              <th className="py-3 px-3 w-20 whitespace-nowrap">성명 (사원)</th>
+              <th className="py-3 px-3 w-32 whitespace-nowrap">주민등록번호</th>
+              <th className="py-3 px-3 w-36 whitespace-nowrap">입사일자</th>
+              <th className="py-3 px-3 w-20 whitespace-nowrap">은행</th>
+              <th className="py-3 px-3 w-32 whitespace-nowrap">입금 계좌번호</th>
+              <th className="py-3 px-3 w-20 text-right whitespace-nowrap">시급 (원)</th>
+              <th className="py-3 px-3 w-20 text-right whitespace-nowrap">누적시간</th>
+              <th className="py-3 px-3 w-24 text-right whitespace-nowrap">기본급여</th>
+              <th className="py-3 px-3 w-28 whitespace-nowrap">근무일정 (출근일)</th>
+              <th className="py-3 px-3 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
+              <th className="py-3 px-3 w-20 text-center whitespace-nowrap">제외</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
@@ -5729,7 +5729,7 @@ function MonthlyPartTimeSalarySubTab({
             ) : (
               visibleSalaries.map((sal) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
-                  <td className="py-3 px-3 font-extrabold text-zinc-900 text-xs">
+                  <td className="py-3 px-3 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
                     {sal.name}
                   </td>
                   <td className="py-2.5 px-1.5">
@@ -5792,7 +5792,7 @@ function MonthlyPartTimeSalarySubTab({
                       title={sal.attendanceDates}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 min-w-[360px]">
+                  <td className="py-2.5 px-1.5 min-w-[260px]">
                     <input
                       type="text"
                       value={sal.memo}
