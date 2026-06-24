@@ -16,13 +16,32 @@ import { gasClient, MasterDaily, ExpenseDetail, StaffRecord } from "./gasClient"
 const firebaseRecordId = (branchName: string, settleDate: string) => `${encodeURIComponent(branchName)}--${settleDate}`;
 
 function toMaster(data: any): MasterDaily {
-  return data as MasterDaily;
+  // Firebase 전환 전의 백업은 snake_case, 전환 후 저장본은 camelCase입니다.
+  // 두 형식을 모두 같은 화면에서 읽을 수 있도록 경계에서 하나로 정규화합니다.
+  return {
+    ...data,
+    recordId: data?.recordId || data?.record_id || "",
+    branchName: data?.branchName || data?.branch_name || "",
+    settleDate: data?.settleDate || data?.settle_date || "",
+    cashSales: Number(data?.cashSales ?? data?.cash_sales ?? 0),
+    cardSales: Number(data?.cardSales ?? data?.card_sales ?? 0),
+    transferSales: Number(data?.transferSales ?? data?.transfer_sales ?? 0),
+    deliverySales: Number(data?.deliverySales ?? data?.delivery_sales ?? 0),
+    totalSales: Number(data?.totalSales ?? data?.total_sales ?? 0),
+    memo: data?.memo || "",
+    submittedAt: data?.submittedAt || data?.submitted_at || "",
+    submittedBy: data?.submittedBy || data?.submitted_by || "",
+    modifiedAt: data?.modifiedAt || data?.modified_at || "",
+    modifiedBy: data?.modifiedBy || data?.modified_by || ""
+  } as MasterDaily;
 }
 
 async function findDailyDocs(branchName?: string) {
   const snapshot = await getDocs(collection(getDirectDb(), "daily_settles"));
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() as any }))
-    .filter((item: any) => !branchName || item.master?.branchName === branchName);
+  return snapshot.docs.map((item) => {
+    const data: any = item.data();
+    return { id: item.id, ...data, master: toMaster(data.master || {}) };
+  }).filter((item: any) => !branchName || item.master.branchName === branchName);
 }
 
 export async function firebaseGetDailyFormBootstrap(branchName: string, settleDate: string) {
@@ -59,7 +78,7 @@ export async function firebaseGetDailyDetail(recordId: string) {
 }
 
 export async function firebaseGetBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
-  return (await findDailyDocs(branchName)).map((item: any) => item.master as MasterDaily)
+  return (await findDailyDocs(branchName)).map((item: any) => toMaster(item.master))
     .filter((master) => !month || master.settleDate.startsWith(month))
     .sort((a, b) => b.settleDate.localeCompare(a.settleDate));
 }

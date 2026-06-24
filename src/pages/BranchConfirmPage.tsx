@@ -1847,6 +1847,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setCardSales(String(detail.master.cardSales || "0"));
           setTransferSales(String(detail.master.transferSales || "0"));
           setDeliverySales(String(detail.master.deliverySales || "0"));
+          // 새 마감에서는 작성자를 비워 두되, 기존 마감을 수정할 때는
+          // 당시 작성자를 반드시 되살립니다.
+          setWriter(detail.master.submittedBy || "");
 
           // Metadata extraction from memo
           const divider = "\n---\nMETADATA:";
