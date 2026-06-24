@@ -622,6 +622,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           })}
         </nav>
 
+        <div className="px-3 md:px-4 pb-3">
+          <button
+            onClick={() => { setMainCategory("daily"); setActiveTab("annualLeave"); }}
+            className={`w-full flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer ${activeTab === "annualLeave" ? "bg-white/15 text-white" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+          >
+            <Calendar className="w-4 h-4" /> 연차관리
+          </button>
+        </div>
+
         {/* Change Branch / Signout Section Bottom */}
         <div className={`p-4 border-t hidden md:block space-y-2 transition-colors duration-300`}
           style={{
@@ -693,7 +702,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   { id: "orders", label: "발주관리", icon: ShoppingCart },
                   { id: "roster", label: "직원현황", icon: User },
                   { id: "overtimeLog", label: "초과근무일지", icon: Clock },
-                  { id: "annualLeave", label: "연차관리", icon: Calendar },
                   { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
                 ].map((t) => {
                   const IconComp = t.icon;
@@ -4045,7 +4053,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3">
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <UserPlus className="w-4 h-4 text-[#2E6DB4]" />
-          새 구성원 명부 개설
+          신규 등록
         </h3>
 
         <form onSubmit={handleAddEmployee} className="flex flex-wrap items-end gap-3 text-xs">
@@ -4089,9 +4097,7 @@ function RosterTab({ branchName }: { branchName: string }) {
 
           {division === "정직원" && (
             <div className="flex flex-col space-y-1.5 animate-in fade-in duration-200">
-              <span className="font-bold text-gray-600 flex items-center gap-1">
-                <Briefcase className="w-3.5 h-3.5 text-[#2E6DB4]" /> 직급 선택 (정직원 필수)
-              </span>
+              <span className="font-bold text-gray-500">직급 선택 (정직원 필수)</span>
               <select
                 value={selectedRank}
                 onChange={(e) => {
@@ -4100,7 +4106,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                     setCustomRankInput("");
                   }
                 }}
-                className="px-3.5 py-2 border border-gray-200 rounded-xl font-bold bg-white text-xs focus:outline-hidden focus:border-[#2E6DB4]"
+                className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 text-sm focus:bg-white focus:outline-hidden focus:border-[#2E6DB4]"
               >
                 {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rk) => (
                   <option key={rk} value={rk}>{rk}</option>
@@ -4364,7 +4370,7 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
           <div>
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
-              초과 근무 대장기록 내역
+              초과 근무 내역
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
@@ -4374,13 +4380,14 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
           >
             <RefreshCw className="w-3 h-3" /> 새로고침
           </button>
-          <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
-            <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
-            <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
-            <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
-            <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
-            <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">수기 입력</button>
-          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 rounded-xl bg-gray-50 p-3 border border-gray-100">
+          <span className="w-full text-xs font-black text-gray-600">초과근무 수기 입력</span>
+          <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
+          <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
+          <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
+          <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
+          <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">등록</button>
         </div>
 
         {loading ? (
