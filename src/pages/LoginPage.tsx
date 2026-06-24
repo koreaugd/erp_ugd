@@ -4,10 +4,15 @@ import { AlertOctagon, Lock, LogIn } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuthContext } from "../contexts/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { getFirebaseLoginBranches, LoginBranch } from "../api/firebaseAuth";
 
 export default function LoginPage() {
   const { user, login, loading, error, failedAttempts } = useAuthContext();
   const [pin, setPin] = useState("");
+  const [branches, setBranches] = useState<LoginBranch[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<LoginBranch | null>(null);
+  const [loadingBranches, setLoadingBranches] = useState(true);
+  const [adminMode, setAdminMode] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -15,11 +20,18 @@ export default function LoginPage() {
     navigate(user.role === "admin" ? "/admin" : "/branch-confirm");
   }, [user, navigate]);
 
+  useEffect(() => {
+    getFirebaseLoginBranches()
+      .then((list) => setBranches(list))
+      .catch(() => setBranches([]))
+      .finally(() => setLoadingBranches(false));
+  }, []);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (loading || !pin) return;
 
-    const success = await login(pin);
+    const success = await login(adminMode ? null : selectedBranch, pin);
     if (success) setPin("");
   };
 
@@ -60,6 +72,24 @@ export default function LoginPage() {
         </AnimatePresence>
 
         <form className="space-y-4" onSubmit={handleSubmit} id="login-form">
+          {!adminMode && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-zinc-600">지점 선택</p>
+              {loadingBranches ? (
+                <div className="flex justify-center py-5"><LoadingSpinner size="sm" /></div>
+              ) : (
+                <select
+                  value={selectedBranch?.branchName || ""}
+                  onChange={(event) => setSelectedBranch(branches.find((branch) => branch.branchName === event.target.value) || null)}
+                  required
+                  className="w-full rounded-xl border border-black bg-white px-4 py-4 text-center text-sm font-bold outline-hidden"
+                >
+                  <option value="">지점을 선택하세요</option>
+                  {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+                </select>
+              )}
+            </div>
+          )}
           <div className="relative">
             <input
               id="pin-input"
@@ -80,11 +110,18 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !pin}
+            disabled={loading || !pin || (!adminMode && !selectedBranch)}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             id="btn-login-submit"
           >
             {loading ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAdminMode((current) => !current); setPin(""); }}
+            className="w-full text-xs font-bold text-zinc-500 underline underline-offset-4"
+          >
+            {adminMode ? "지점 로그인으로 돌아가기" : "관리자 로그인"}
           </button>
         </form>
       </motion.div>
