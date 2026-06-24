@@ -7,12 +7,13 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { getFirebaseLoginBranches, LoginBranch } from "../api/firebaseAuth";
 
 export default function LoginPage() {
-  const { user, login, loading, error, failedAttempts } = useAuthContext();
+  const { user, login, loading, error, failedAttempts, setError } = useAuthContext();
   const [pin, setPin] = useState("");
   const [branches, setBranches] = useState<LoginBranch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<LoginBranch | null>(null);
-  const [loadingBranches, setLoadingBranches] = useState(true);
+  const [loadingBranches, setLoadingBranches] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
+  const [showBranchSelect, setShowBranchSelect] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,15 +22,23 @@ export default function LoginPage() {
   }, [user, navigate]);
 
   useEffect(() => {
+    if (!showBranchSelect || adminMode) return;
+    setLoadingBranches(true);
     getFirebaseLoginBranches()
       .then((list) => setBranches(list))
       .catch(() => setBranches([]))
       .finally(() => setLoadingBranches(false));
-  }, []);
+  }, [showBranchSelect, adminMode]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (loading || !pin) return;
+
+    if (!adminMode && !showBranchSelect) {
+      setError(null);
+      setShowBranchSelect(true);
+      return;
+    }
 
     const success = await login(adminMode ? null : selectedBranch, pin);
     if (success) setPin("");
@@ -72,7 +81,25 @@ export default function LoginPage() {
         </AnimatePresence>
 
         <form className="space-y-4" onSubmit={handleSubmit} id="login-form">
-          {!adminMode && (
+          <div className="relative">
+            <input
+              id="pin-input"
+              name="pin"
+              type="password"
+              inputMode="text"
+              autoComplete="current-password"
+              required
+              value={pin}
+              onChange={handlePinChange}
+              disabled={loading}
+              placeholder="PIN"
+              aria-label="PIN"
+              className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
+            />
+            <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
+          </div>
+
+          {!adminMode && showBranchSelect && (
             <div className="space-y-2">
               <p className="text-xs font-bold text-zinc-600">지점 선택</p>
               {loadingBranches ? (
@@ -90,7 +117,7 @@ export default function LoginPage() {
               )}
             </div>
           )}
-          <div className="relative">
+          <div className="relative hidden">
             <input
               id="pin-input"
               name="pin"
@@ -101,16 +128,17 @@ export default function LoginPage() {
               value={pin}
               onChange={handlePinChange}
               disabled={loading}
+              hidden
               placeholder="PIN 번호"
               aria-label="PIN 번호"
               className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
             />
-            <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
+            <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500 hidden" />
           </div>
 
           <button
             type="submit"
-            disabled={loading || !pin || (!adminMode && !selectedBranch)}
+            disabled={loading || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             id="btn-login-submit"
           >
@@ -118,7 +146,7 @@ export default function LoginPage() {
           </button>
           <button
             type="button"
-            onClick={() => { setAdminMode((current) => !current); setPin(""); }}
+            onClick={() => { setAdminMode((current) => !current); setPin(""); setShowBranchSelect(false); setSelectedBranch(null); setError(null); }}
             className="w-full text-xs font-bold text-zinc-500 underline underline-offset-4"
           >
             {adminMode ? "지점 로그인으로 돌아가기" : "관리자 로그인"}
