@@ -3583,47 +3583,39 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editEntryDate, setEditEntryDate] = useState("");
 
   // 지점 전용 branch_own_rosters 컬렉션을 사용합니다.
-  // 관리자 직원명부(staff_rosters)와 분리되어 있으며,
-  // 관리자가 직원명부에서 추가한 인원(employeeId: emp-XXXXX 형식)은 자동으로 걸러냅니다.
+  // staff_rosters에서 이 지점 소속이 아닌 인원(다른 지점코드 또는 외부 등록 인원)을 자동으로 걸러냅니다.
   useEffect(() => {
     let cancelled = false;
     const syncRoster = async () => {
       try {
-        // 관리자 직원명부에서 직접 등록된 인원 판별 (employeeId가 emp-숫자 형식)
-        const isAdminAdded = (emp: any) => /^emp-\d/.test(String(emp.employeeId || ""));
+        // 지점 소속 직원 판별: employeeId가 UGD-{지점코드}- 형식이거나 설정되지 않은 경우
+        // 지점코드 = 지점명에서 공백/괄호/점 제거 (예: "대물섬 한남점" → "대물섬한남")
+        const branchCode = branchName.replace(/[\s()점]/g, "");
+        const isBranchEmployee = (emp: any) => {
+          const eid = String(emp.employeeId || "");
+          return !eid || eid.startsWith(`UGD-${branchCode}-`);
+        };
 
-        const remoteOwn = await gasClient.getBranchOwnRoster(branchName);
+        // staff_rosters에서 이 지점 소속 직원만 추출
+        const staffRoster = await gasClient.getStaffRoster(branchName);
         if (cancelled) return;
-        if (remoteOwn.length > 0) {
-          const cleaned = remoteOwn.filter((emp: any) => !isAdminAdded(emp));
-          if (cleaned.length < remoteOwn.length) {
-            // 관리자 등록 인원이 섞여 있으면 제거 후 저장
-            await gasClient.saveBranchOwnRoster(branchName, cleaned);
-          }
-          setEmployees(cleaned as Employee[]);
-          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(cleaned));
-          return;
-        }
+        const staffFiltered = staffRoster.filter(isBranchEmployee);
 
-        // branch_own_rosters가 비어 있으면 staff_rosters에서 지점 등록 인원만 이전합니다.
-        const legacyRoster = await gasClient.getStaffRoster(branchName);
+        // branch_own_rosters에서 지점이 직접 추가했으나 staff_rosters에 없는 인원 병합
+        const ownRoster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        const branchOriginal = legacyRoster.filter((emp: any) => !isAdminAdded(emp));
-        if (branchOriginal.length > 0) {
-          setEmployees(branchOriginal as Employee[]);
-          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(branchOriginal));
-          await gasClient.saveBranchOwnRoster(branchName, branchOriginal);
-          return;
-        }
+        const staffIds = new Set(staffFiltered.map((e: any) => e.id));
+        const ownAdditions = ownRoster.filter((e: any) => isBranchEmployee(e) && !staffIds.has(e.id));
 
-        // legacy 데이터도 없으면 localStorage에서 이전합니다.
-        const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
-        const localEmployees = saved ? JSON.parse(saved) : [];
-        if (Array.isArray(localEmployees) && localEmployees.length > 0) {
-          const localOriginal = localEmployees.filter((emp: any) => !isAdminAdded(emp));
-          if (localOriginal.length > 0) {
-            await gasClient.saveBranchOwnRoster(branchName, localOriginal);
-          }
+        const merged = [...staffFiltered, ...ownAdditions];
+        setEmployees(merged as Employee[]);
+        localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(merged));
+
+        // 오염이 있거나 결과가 달라진 경우 branch_own_rosters 정리
+        const needsUpdate = ownRoster.some((e: any) => !isBranchEmployee(e))
+          || ownRoster.length !== merged.length;
+        if (needsUpdate) {
+          await gasClient.saveBranchOwnRoster(branchName, merged);
         }
       } catch (error) {
         console.warn("직원 명단 원격 동기화에 실패했습니다.", error);
