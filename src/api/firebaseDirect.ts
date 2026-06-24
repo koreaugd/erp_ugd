@@ -7,10 +7,91 @@ import {
   doc, 
   setDoc, 
   deleteDoc,
+  getDoc,
   getDocFromServer
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, MasterDaily, ExpenseDetail, StaffRecord } from "./gasClient";
+
+const firebaseRecordId = (branchName: string, settleDate: string) => `${encodeURIComponent(branchName)}--${settleDate}`;
+
+function toMaster(data: any): MasterDaily {
+  return data as MasterDaily;
+}
+
+async function findDailyDocs(branchName?: string) {
+  const snapshot = await getDocs(collection(getDirectDb(), "daily_settles"));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() as any }))
+    .filter((item: any) => !branchName || item.master?.branchName === branchName);
+}
+
+export async function firebaseGetDailyFormBootstrap(branchName: string, settleDate: string) {
+  const items = await findDailyDocs(branchName);
+  const duplicate = items.find((item: any) => item.master?.settleDate === settleDate);
+  const previous = items.filter((item: any) => item.master?.settleDate < settleDate)
+    .sort((a: any, b: any) => b.master.settleDate.localeCompare(a.master.settleDate))[0];
+  let previousCash = "0";
+  try { previousCash = String(JSON.parse(String(previous?.master?.memo || "").split("\n---\nMETADATA:")[1]).cashBalance ?? "0"); } catch {}
+  return { exists: !!duplicate, recordId: duplicate?.recordId || duplicate?.id || null, record: duplicate?.master || null, previousCash };
+}
+
+export async function firebaseSubmitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]) {
+  const recordId = firebaseRecordId(master.branchName, master.settleDate);
+  const existing = await getDoc(doc(getDirectDb(), "daily_settles", recordId));
+  const now = new Date().toISOString();
+  const savedMaster = {
+    ...master,
+    recordId,
+    totalSales: Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0),
+    submittedAt: existing.exists() ? existing.data().master.submittedAt : now,
+    modifiedAt: existing.exists() ? now : "",
+    modifiedBy: existing.exists() ? master.submittedBy || "branch" : ""
+  };
+  await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master: savedMaster, expenses, staff, updatedAt: now });
+  return { recordId };
+}
+
+export async function firebaseGetDailyDetail(recordId: string) {
+  const snapshot = await getDoc(doc(getDirectDb(), "daily_settles", recordId));
+  if (!snapshot.exists()) throw new Error("해당 마감 데이터를 찾을 수 없습니다.");
+  const data: any = snapshot.data();
+  return { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
+}
+
+export async function firebaseGetBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
+  return (await findDailyDocs(branchName)).map((item: any) => item.master as MasterDaily)
+    .filter((master) => !month || master.settleDate.startsWith(month))
+    .sort((a, b) => b.settleDate.localeCompare(a.settleDate));
+}
+
+export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string) {
+  const detail = await firebaseGetDailyDetail(recordId);
+  const master = { ...detail.master, ...masterData, modifiedAt: new Date().toISOString(), modifiedBy: modifiedBy || "관리자" };
+  master.totalSales = Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0);
+  await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master, expenses: expenses ?? detail.expenses, staff: staff ?? detail.staff, updatedAt: new Date().toISOString() });
+  return { success: true };
+}
+
+export async function firebaseGetStaffRoster(branchName: string) {
+  const snapshot = await getDocs(collection(getDirectDb(), "staff_rosters"));
+  const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
+  return entry?.employees || [];
+}
+
+export async function firebaseSaveStaffRoster(branchName: string, employees: any[]) {
+  await setDoc(doc(getDirectDb(), "staff_rosters", encodeURIComponent(branchName)), { branchName, employees, updatedAt: new Date().toISOString() });
+  return { success: true, employees };
+}
+
+export async function firebaseGetSharedData(dataKey: string) {
+  const snapshot = await getDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)));
+  return snapshot.exists() ? snapshot.data().value ?? null : null;
+}
+
+export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
+  await setDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)), { value, updatedAt: new Date().toISOString() });
+  return { success: true };
+}
 
 export enum OperationType {
   CREATE = "create",
