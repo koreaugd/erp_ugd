@@ -2572,7 +2572,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             </div>
           </div>
 
-          {!isEditApproved && (
+          {(
             <div className="flex flex-wrap gap-2 pt-1 font-extrabold text-[11px]">
               <button
                 type="button"
@@ -2584,7 +2584,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               >
                 ✏️ 수정모드로 진행할 것을 승인함
               </button>
-              <button
+              {isEditApproved && <button
                 type="button"
                 onClick={() => {
                   if (!window.confirm("현재 화면의 마감 입력 내용을 비우고 처음부터 다시 작성할까요? 기존 저장 기록은 마감 제출 전까지 유지됩니다.")) return;
@@ -2595,7 +2595,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
               >
                 ↺ 정산 리셋
-              </button>
+              </button>}
               <button
                 type="button"
                 onClick={() => {
