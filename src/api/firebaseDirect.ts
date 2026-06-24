@@ -88,6 +88,17 @@ export async function firebaseGetSharedData(dataKey: string) {
   return snapshot.exists() ? snapshot.data().value ?? null : null;
 }
 
+export async function firebaseGetBranchList() {
+  const snapshot = await getDocs(collection(getDirectDb(), "public_branches"));
+  return snapshot.docs.map((item) => item.data() as any).filter((branch) => branch.isActive !== false);
+}
+
+export async function firebaseGetDailyList(settleDate: string) {
+  const [branches, settlements] = await Promise.all([firebaseGetBranchList(), findDailyDocs()]);
+  const byBranch = new Map(settlements.filter((item: any) => item.master?.settleDate === settleDate).map((item: any) => [item.master.branchName, item.master]));
+  return branches.filter((branch: any) => branch.role === "branch").map((branch: any) => ({ branchName: branch.branchName, brand: branch.brand, role: "branch", submitted: byBranch.has(branch.branchName), record: byBranch.get(branch.branchName) || null }));
+}
+
 export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
   await setDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)), { value, updatedAt: new Date().toISOString() });
   return { success: true };

@@ -265,7 +265,8 @@ export const gasClient = {
    * 특정 일자의 전체 지점 마감 리스트 조회
    */
   async getDailyList(settleDate: string, adminPinHash?: string): Promise<DailyListRow[]> {
-    return await callApi("getDailyList", { settleDate, adminPinHash });
+    const { firebaseGetDailyList } = await import("./firebaseDirect");
+    return await firebaseGetDailyList(settleDate);
   },
 
   /**
@@ -293,7 +294,8 @@ export const gasClient = {
    * 전체 지점 설정 목록 반환
    */
   async getBranchList(): Promise<BranchSetting[]> {
-    return await callCachedReadApi("getBranchList");
+    const { firebaseGetBranchList } = await import("./firebaseDirect");
+    return await firebaseGetBranchList();
   },
 
   /**
