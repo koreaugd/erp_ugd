@@ -37,6 +37,10 @@ service cloud.firestore {
       allow read, write: if signedIn();
     }
 
+    match /branch_own_rosters/{branchId} {
+      allow read, write: if signedIn();
+    }
+
     match /shared_data/{dataKey} {
       allow read, write: if signedIn();
     }
