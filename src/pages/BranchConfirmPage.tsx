@@ -46,6 +46,9 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 interface StaffRow {
   division: "정직원" | "파트타이머";
   name: string;
+  residentNumber?: string;
+  rank?: string;
+  entryDate?: string;
   standardHours: number; // 0, 9, 10, 10.5
   clockIn: string; // e.g. "09:00"
   clockOut: string; // e.g. "18:00"
@@ -1780,6 +1783,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   // Personnel inline form inputs
   const [newStaffInputName, setNewStaffInputName] = useState<string>("");
   const [newStaffInputDivision, setNewStaffInputDivision] = useState<"정직원" | "파트타이머">("정직원");
+  const [newStaffInputResidentNumber, setNewStaffInputResidentNumber] = useState("");
+  const [newStaffInputRank, setNewStaffInputRank] = useState("사원");
+  const [newStaffInputEntryDate, setNewStaffInputEntryDate] = useState("");
 
   // Expenses
   const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>([
@@ -2159,7 +2165,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             const newEmp = {
               id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               name: s.name,
-              division: s.division
+              division: s.division,
+              residentNumber: s.residentNumber || "",
+              contractType: "4대보험" as const,
+              entryDate: s.entryDate || "",
+              ...(s.division === "정직원" ? { rank: s.rank || "사원" } : {})
             };
             updatedRoster.push(newEmp);
             rosterUpdated = true;
@@ -2953,6 +2963,32 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             <option value="정직원">정직원</option>
             <option value="파트타이머">파트타이머</option>
           </select>
+          <input
+            type="text"
+            placeholder="주민등록번호"
+            value={newStaffInputResidentNumber}
+            onChange={(e) => setNewStaffInputResidentNumber(e.target.value)}
+            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono w-36"
+          />
+          {newStaffInputDivision === "정직원" && (
+            <select
+              value={newStaffInputRank}
+              onChange={(e) => setNewStaffInputRank(e.target.value)}
+              className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer"
+            >
+              {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
+                <option key={rank} value={rank}>{rank}</option>
+              ))}
+            </select>
+          )}
+          <input
+            type="date"
+            value={newStaffInputEntryDate}
+            onChange={(e) => setNewStaffInputEntryDate(e.target.value)}
+            onClick={(e) => e.currentTarget.showPicker?.()}
+            aria-label="입사일"
+            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono cursor-pointer"
+          />
           <button
             type="button"
             onClick={() => {
@@ -2968,6 +3004,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               const newRow: StaffRow = {
                 division: newStaffInputDivision,
                 name,
+                residentNumber: newStaffInputResidentNumber.trim(),
+                rank: newStaffInputDivision === "정직원" ? newStaffInputRank : undefined,
+                entryDate: newStaffInputEntryDate,
                 standardHours: newStaffInputDivision === "정직원" ? defaultStandardHours : 0,
                 clockIn: "00:00",
                 clockOut: "00:00",
@@ -2977,6 +3016,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               };
               setStaffRows(prev => [...prev, newRow]);
               setNewStaffInputName("");
+              setNewStaffInputResidentNumber("");
+              setNewStaffInputRank("사원");
+              setNewStaffInputEntryDate("");
               triggerToast(`${name} 님이 추가되었습니다 (마감 제출 시 직원현황 자동 등록)`);
             }}
             className="px-3.5 py-1.5 bg-zinc-800 hover:bg-black text-white font-black rounded-lg cursor-pointer transition-colors"
@@ -3641,6 +3683,12 @@ function RosterTab({ branchName }: { branchName: string }) {
     });
   };
 
+  const updateEmployeeField = (id: string, field: "residentNumber" | "contractType" | "entryDate" | "rank", value: string) => {
+    setEmployees((current) => current.map((employee) => (
+      employee.id === id ? { ...employee, [field]: value } : employee
+    )));
+  };
+
   const handleAddEmployee = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -4110,13 +4158,37 @@ function RosterTab({ branchName }: { branchName: string }) {
                   <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold">
                     <td className="py-3 px-3 text-gray-400 font-mono">#{idx + 1}</td>
                     <td className="py-3 px-3 text-gray-800 font-extrabold text-sm">{emp.name}</td>
-                    <td className="py-3 px-3 font-mono text-gray-600">{emp.residentNumber || "-"}</td>
                     <td className="py-3 px-3">
-                      <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black bg-violet-50 text-violet-700 border border-violet-100">
-                        {emp.contractType || "4대보험"}
-                      </span>
+                      <input
+                        type="text"
+                        value={emp.residentNumber || ""}
+                        onChange={(e) => updateEmployeeField(emp.id, "residentNumber", e.target.value)}
+                        onBlur={() => saveEmployees(employees)}
+                        placeholder="000000-0000000"
+                        className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                      />
                     </td>
-                    <td className="py-3 px-3 font-mono text-gray-600 whitespace-nowrap">{emp.entryDate || "-"}</td>
+                    <td className="py-3 px-3">
+                      <select
+                        value={emp.contractType || "4대보험"}
+                        onChange={(e) => updateEmployeeField(emp.id, "contractType", e.target.value)}
+                        onBlur={() => saveEmployees(employees)}
+                        className="px-2 py-1 border border-violet-100 rounded-md text-[10px] font-black bg-violet-50 text-violet-700 focus:outline-hidden focus:border-violet-400"
+                      >
+                        <option value="4대보험">4대보험</option>
+                        <option value="3.3%">3.3%</option>
+                      </select>
+                    </td>
+                    <td className="py-3 px-3">
+                      <input
+                        type="date"
+                        value={emp.entryDate || ""}
+                        onChange={(e) => updateEmployeeField(emp.id, "entryDate", e.target.value)}
+                        onBlur={() => saveEmployees(employees)}
+                        onClick={(e) => e.currentTarget.showPicker?.()}
+                        className="px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
+                      />
+                    </td>
                     <td className="py-3 px-3">
                       <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black ${
                         emp.division === "정직원" 
@@ -4128,10 +4200,16 @@ function RosterTab({ branchName }: { branchName: string }) {
                     </td>
                     <td className="py-3 px-3 font-bold text-gray-750">
                       {emp.division === "정직원" ? (
-                        <span className="inline-flex items-center gap-1">
-                          <Briefcase className="w-3 h-3 text-[#2E6DB4]/70" />
-                          {emp.rank === "기타" ? emp.customRank || "기타" : emp.rank || "사원"}
-                        </span>
+                        <select
+                          value={emp.rank || "사원"}
+                          onChange={(e) => updateEmployeeField(emp.id, "rank", e.target.value)}
+                          onBlur={() => saveEmployees(employees)}
+                          className="px-2 py-1 border border-gray-200 rounded-md bg-white text-xs font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                        >
+                          {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
+                            <option key={rank} value={rank}>{rank}</option>
+                          ))}
+                        </select>
                       ) : (
                         <span className="text-gray-300 font-normal">-</span>
                       )}
