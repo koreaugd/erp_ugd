@@ -79,6 +79,9 @@ interface Employee {
   division: "정직원" | "파트타이머";
   rank?: string;       // 사원, 대리, 과장, 차장, 실장, 부장, 이사, 대표, 부대표, 기타
   customRank?: string; // 기타 선택 시 직접 입력한 직급
+  residentNumber?: string;
+  contractType?: "4대보험" | "3.3%";
+  entryDate?: string;
 }
 
 export default function BranchConfirmPage() {
@@ -3510,6 +3513,9 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [division, setDivision] = useState<"정직원" | "파트타이머" >("정직원");
   const [selectedRank, setSelectedRank] = useState<string>("사원");
   const [customRankInput, setCustomRankInput] = useState<string>("");
+  const [newResidentNumber, setNewResidentNumber] = useState("");
+  const [newContractType, setNewContractType] = useState<"4대보험" | "3.3%">("4대보험");
+  const [newEntryDate, setNewEntryDate] = useState("");
 
   // Deletion Modal States
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -3530,6 +3536,9 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editDivision, setEditDivision] = useState<"정직원" | "파트타이머">("정직원");
   const [editRank, setEditRank] = useState("사원");
   const [editCustomRank, setEditCustomRank] = useState("");
+  const [editResidentNumber, setEditResidentNumber] = useState("");
+  const [editContractType, setEditContractType] = useState<"4대보험" | "3.3%">("4대보험");
+  const [editEntryDate, setEditEntryDate] = useState("");
 
   // 원격 직원 명단을 우선 사용합니다. 기존 기기에만 있던 명단은
   // 서버에 데이터가 없을 때 한 번 자동 이전합니다.
@@ -3564,6 +3573,9 @@ function RosterTab({ branchName }: { branchName: string }) {
     setEditDivision(emp.division);
     setEditRank(emp.rank || "사원");
     setEditCustomRank(emp.customRank || "");
+    setEditResidentNumber(emp.residentNumber || "");
+    setEditContractType(emp.contractType || "4대보험");
+    setEditEntryDate(emp.entryDate || "");
     setShowEditModal(true);
   };
 
@@ -3580,6 +3592,9 @@ function RosterTab({ branchName }: { branchName: string }) {
           ...emp,
           name: editName.trim(),
           division: editDivision,
+          residentNumber: editResidentNumber.trim(),
+          contractType: editContractType,
+          entryDate: editEntryDate,
           ...(editDivision === "정직원" ? {
             rank: editRank,
             ...(editRank === "기타" ? { customRank: editCustomRank.trim() } : {})
@@ -3640,6 +3655,9 @@ function RosterTab({ branchName }: { branchName: string }) {
       id: `emp-${Date.now()}`,
       name: newName.trim(),
       division,
+      residentNumber: newResidentNumber.trim(),
+      contractType: newContractType,
+      entryDate: newEntryDate,
       ...(division === "정직원" ? {
         rank: selectedRank,
         ...(selectedRank === "기타" ? { customRank: customRankInput.trim() } : {})
@@ -3651,6 +3669,9 @@ function RosterTab({ branchName }: { branchName: string }) {
     setNewName("");
     setSelectedRank("사원");
     setCustomRankInput("");
+    setNewResidentNumber("");
+    setNewContractType("4대보험");
+    setNewEntryDate("");
   };
 
   // Staff category counters
@@ -3737,7 +3758,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                 )}
 
                 <div className="flex flex-col space-y-1">
-                  <span className="font-bold text-gray-400">처리 기준 날짜</span>
+                  <span className="font-bold text-gray-400">{deleteReason === "퇴사" ? "퇴사 날짜" : "지점이동 날짜"}</span>
                   <input
                     type="date"
                     value={effectiveDate}
@@ -3863,6 +3884,40 @@ function RosterTab({ branchName }: { branchName: string }) {
                     )}
                   </div>
                 )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex flex-col space-y-1">
+                    <label className="font-bold text-gray-400">주민등록번호</label>
+                    <input
+                      type="text"
+                      value={editResidentNumber}
+                      onChange={(e) => setEditResidentNumber(e.target.value)}
+                      placeholder="000000-0000000"
+                      className="px-3.5 py-2 border border-gray-200 rounded-xl font-mono text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="font-bold text-gray-400">계약형태</label>
+                    <select
+                      value={editContractType}
+                      onChange={(e) => setEditContractType(e.target.value as "4대보험" | "3.3%")}
+                      className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
+                    >
+                      <option value="4대보험">4대보험</option>
+                      <option value="3.3%">3.3%</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex flex-col space-y-1">
+                  <label className="font-bold text-gray-400">입사일</label>
+                  <input
+                    type="date"
+                    value={editEntryDate}
+                    onChange={(e) => setEditEntryDate(e.target.value)}
+                    onClick={(e) => e.currentTarget.showPicker?.()}
+                    className="px-3.5 py-2 border border-gray-200 rounded-xl font-mono text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full cursor-pointer"
+                  />
+                </div>
               </div>
 
               <div className="flex gap-2 pt-3 border-t border-gray-100 justify-end">
@@ -3971,6 +4026,41 @@ function RosterTab({ branchName }: { branchName: string }) {
             </div>
           )}
 
+          <div className="flex flex-col space-y-1.5">
+            <label className="font-bold text-gray-500">주민등록번호</label>
+            <input
+              type="text"
+              value={newResidentNumber}
+              onChange={(e) => setNewResidentNumber(e.target.value)}
+              placeholder="000000-0000000"
+              className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col space-y-1.5">
+              <label className="font-bold text-gray-500">계약형태</label>
+              <select
+                value={newContractType}
+                onChange={(e) => setNewContractType(e.target.value as "4대보험" | "3.3%")}
+                className="px-3.5 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-sm focus:outline-hidden focus:border-[#2E6DB4]"
+              >
+                <option value="4대보험">4대보험</option>
+                <option value="3.3%">3.3%</option>
+              </select>
+            </div>
+            <div className="flex flex-col space-y-1.5">
+              <label className="font-bold text-gray-500">입사일</label>
+              <input
+                type="date"
+                value={newEntryDate}
+                onChange={(e) => setNewEntryDate(e.target.value)}
+                onClick={(e) => e.currentTarget.showPicker?.()}
+                className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4] cursor-pointer"
+              />
+            </div>
+          </div>
+
           <button
             type="submit"
             className="w-full py-4 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-colors flex items-center justify-center gap-1.5"
@@ -4000,6 +4090,9 @@ function RosterTab({ branchName }: { branchName: string }) {
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
                 <th className="py-2.5 px-3">근무자 번호</th>
                 <th className="py-2.5 px-3">성명 (이름)</th>
+                <th className="py-2.5 px-3">주민등록번호</th>
+                <th className="py-2.5 px-3">계약형태</th>
+                <th className="py-2.5 px-3">입사일</th>
                 <th className="py-2.5 px-3">계약종류 구분</th>
                 <th className="py-2.5 px-3">직급</th>
                 <th className="py-2.5 px-3 text-right">활동</th>
@@ -4008,7 +4101,7 @@ function RosterTab({ branchName }: { branchName: string }) {
             <tbody className="divide-y divide-gray-100 font-medium">
               {sortedEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-gray-400">
+                  <td colSpan={8} className="py-12 text-center text-gray-400">
                     등록된 조원이 아무도 없습니다. 새로운 근무 인원을 명부에 먼저 기입해 보십시오.
                   </td>
                 </tr>
@@ -4017,6 +4110,13 @@ function RosterTab({ branchName }: { branchName: string }) {
                   <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold">
                     <td className="py-3 px-3 text-gray-400 font-mono">#{idx + 1}</td>
                     <td className="py-3 px-3 text-gray-800 font-extrabold text-sm">{emp.name}</td>
+                    <td className="py-3 px-3 font-mono text-gray-600">{emp.residentNumber || "-"}</td>
+                    <td className="py-3 px-3">
+                      <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black bg-violet-50 text-violet-700 border border-violet-100">
+                        {emp.contractType || "4대보험"}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 font-mono text-gray-600 whitespace-nowrap">{emp.entryDate || "-"}</td>
                     <td className="py-3 px-3">
                       <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black ${
                         emp.division === "정직원" 
