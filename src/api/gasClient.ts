@@ -275,9 +275,9 @@ export const gasClient = {
   /**
    * 특정 지점의 모든 마감 기록 조회 (히스토리)
    */
-  async getBranchHistory(branchName: string): Promise<MasterDaily[]> {
+  async getBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
     try {
-      return await callCachedReadApi("getBranchHistory", { branchName });
+      return await callCachedReadApi("getBranchHistory", { branchName, month });
     } catch (err) {
       console.warn("getBranchHistory Action Failed. Returning empty fallback array.", err);
       return [];

@@ -56,7 +56,7 @@ function doPost(e) {
         result = getDailyDetail(requestData.recordId);
         break;
       case "getBranchHistory":
-        result = getBranchHistory(requestData.branchName);
+        result = getBranchHistory(requestData.branchName, requestData.month);
         break;
       case "getAttendanceLog":
         result = getAttendanceLog(requestData.branchName, requestData.logType);
@@ -1064,7 +1064,7 @@ function getDailyDetail(recordId) {
 /**
  * 특정 지점의 모든 마감 기록 조회 (히스토리)
  */
-function getBranchHistory(branchName) {
+function getBranchHistory(branchName, month) {
   const ss = getSpreadsheet();
   const masterSheet = ss.getSheetByName(SHEETS.MASTER);
   const masterValues = masterSheet.getDataRange().getValues();
@@ -1072,11 +1072,12 @@ function getBranchHistory(branchName) {
   
   for (let i = 1; i < masterValues.length; i++) {
     const row = masterValues[i];
-    if (row[1] === branchName) {
+    const settleDate = formatDate(row[2]);
+    if (row[1] === branchName && (!month || settleDate.indexOf(String(month)) === 0)) {
       history.push({
         recordId: row[0],
         branchName: row[1],
-        settleDate: formatDate(row[2]),
+        settleDate: settleDate,
         cashSales: Number(row[3]),
         cardSales: Number(row[4]),
         transferSales: Number(row[5]),
