@@ -1740,9 +1740,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
 
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
-  const [writer, setWriter] = useState<string>(() => {
-    return localStorage.getItem(`erp_writer_${branchName}`) || "";
-  });
+  // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
+  const [writer, setWriter] = useState<string>("");
 
   // Sales
   const [cashSales, setCashSales] = useState<string>("");
@@ -1787,13 +1786,6 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [validationErrors, setValidationErrors] = useState<boolean>(false);
 
-  // Auto-save writer to local storage
-  useEffect(() => {
-    if (writer) {
-      localStorage.setItem(`erp_writer_${branchName}`, writer);
-    }
-  }, [writer, branchName]);
-
   // Toast trigger helper
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -1835,12 +1827,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const checkDuplicateAndLoad = async () => {
       try {
         setChecking(true);
-        const res = await gasClient.checkDuplicate(branchName, settleDate);
+        const [res, history] = await Promise.all([
+          gasClient.checkDuplicate(branchName, settleDate),
+          gasClient.getBranchHistory(branchName)
+        ]);
         
         // Dynamic lookup of the previous day's recorded cash balance
         let prevCashVal = "0";
         try {
-          const history = await gasClient.getBranchHistory(branchName);
           const sorted = [...history].sort((a, b) => b.settleDate.localeCompare(a.settleDate));
           const prevRec = sorted.find(h => h.settleDate < settleDate);
           if (prevRec) {
@@ -5181,6 +5175,33 @@ function MonthlyPartTimeSalarySubTab({
   triggerToast: (msg: string, type?: "success" | "error") => void;
 }) {
   const [salaries, setSalaries] = useState<PartTimeSalaryRow[]>([]);
+  const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
+
+  const exclusionStorageKey = `erp_monthly_part_time_exclusions_${branchName}_${selectedMonth}`;
+  const exclusionDataKey = `part_time_salary_exclusions:${branchName}:${selectedMonth}`;
+
+  useEffect(() => {
+    let active = true;
+    const loadExclusions = async () => {
+      try {
+        const local = localStorage.getItem(exclusionStorageKey);
+        if (local && active) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) setExcludedEmployeeIds(parsed);
+        }
+
+        const remote = await gasClient.getSharedData<string[]>(exclusionDataKey);
+        if (active && Array.isArray(remote)) {
+          setExcludedEmployeeIds(remote);
+          localStorage.setItem(exclusionStorageKey, JSON.stringify(remote));
+        }
+      } catch (error) {
+        console.warn("파트타이머 급여대장 제외 목록을 불러오지 못했습니다.", error);
+      }
+    };
+    loadExclusions();
+    return () => { active = false; };
+  }, [exclusionDataKey, exclusionStorageKey]);
 
   // 1. Fetch current live Roster for PTs and merge with previously saved info + auto computed work logs from history!
   useEffect(() => {
@@ -5249,7 +5270,10 @@ function MonthlyPartTimeSalarySubTab({
     };
 
     // E. Assemble all pieces
-    const assembledRows: PartTimeSalaryRow[] = rosterPartTimers.map((pt) => {
+    const excluded = new Set(excludedEmployeeIds);
+    const assembledRows: PartTimeSalaryRow[] = rosterPartTimers
+      .filter((pt) => !excluded.has(pt.id))
+      .map((pt) => {
       const tel = ptTelemetry[pt.name] || { hours: 0, dates: [] };
       const saved = savedSalaryMap[pt.id] || {};
       const profile = getStoredProfile(pt.id);
@@ -5286,23 +5310,26 @@ function MonthlyPartTimeSalarySubTab({
         payoutBranch: saved.payoutBranch || branchName,
         memo: saved.memo || ""
       };
-    });
+      });
 
     setSalaries(assembledRows);
-  }, [branchName, selectedMonth, history]);
+  }, [branchName, selectedMonth, history, excludedEmployeeIds]);
 
   useEffect(() => {
     const loadSharedSalaries = async () => {
       try {
         const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(`part_time_salaries:${branchName}:${selectedMonth}`);
         // 빈 배열은 아직 저장된 급여대장이 없다는 뜻이므로, 일일마감에서 계산한 행을 유지합니다.
-        if (Array.isArray(remote) && remote.length > 0) setSalaries(remote);
+        if (Array.isArray(remote) && remote.length > 0) {
+          const excluded = new Set(excludedEmployeeIds);
+          setSalaries(remote.filter((salary) => !excluded.has(salary.employeeId)));
+        }
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
       }
     };
     loadSharedSalaries();
-  }, [branchName, selectedMonth]);
+  }, [branchName, selectedMonth, excludedEmployeeIds]);
 
   useEffect(() => {
     const loadSharedProfiles = async () => {
@@ -5371,7 +5398,8 @@ function MonthlyPartTimeSalarySubTab({
 
         setSalaries((current) => {
           const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
-          return allPartTimers.map((employee) => {
+          const excluded = new Set(excludedEmployeeIds);
+          return allPartTimers.filter((employee) => !excluded.has(employee.id)).map((employee) => {
             const existing = byEmployeeId.get(employee.id);
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
             const attendanceDates = work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(",");
@@ -5408,7 +5436,7 @@ function MonthlyPartTimeSalarySubTab({
       }
     };
     mergeRemotePartTimers();
-  }, [branchName, selectedMonth, history]);
+  }, [branchName, selectedMonth, history, excludedEmployeeIds]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     setSalaries(prev =>
@@ -5425,6 +5453,16 @@ function MonthlyPartTimeSalarySubTab({
         return updated;
       })
     );
+  };
+
+  const handleExcludeEmployee = (employee: PartTimeSalaryRow) => {
+    if (!window.confirm(`${employee.name} 님을 이번 달 파트타이머 급여대장에서 제외할까요?\n직원현황과 일일마감 근무기록은 삭제되지 않습니다.`)) return;
+
+    setSalaries((current) => current.filter((salary) => salary.employeeId !== employee.employeeId));
+    setExcludedEmployeeIds((current) => current.includes(employee.employeeId)
+      ? current
+      : [...current, employee.employeeId]);
+    triggerToast(`${employee.name} 님을 이번 달 급여대장에서 제외했습니다. 저장하기를 누르면 모든 기기에 반영됩니다.`);
   };
 
   const handleSave = async () => {
@@ -5456,9 +5494,11 @@ function MonthlyPartTimeSalarySubTab({
 
       // 2. Save current month's specific transactions
       localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(salaries));
+      localStorage.setItem(exclusionStorageKey, JSON.stringify(excludedEmployeeIds));
       await Promise.all([
         gasClient.saveSharedData(`part_time_salaries:${branchName}:${selectedMonth}`, salaries),
-        gasClient.saveSharedData(`part_time_profiles:${branchName}`, profiles)
+        gasClient.saveSharedData(`part_time_profiles:${branchName}`, profiles),
+        gasClient.saveSharedData(exclusionDataKey, excludedEmployeeIds)
       ]);
       triggerToast("파트타이머 급여대장이 직원현황 연동 및 시각화 저장 성공하였습니다!", "success");
     } catch {
@@ -5524,7 +5564,7 @@ function MonthlyPartTimeSalarySubTab({
 
       {/* Ledger Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1200px]">
+        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1280px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
               <th className="py-3 px-3">성명 (사원)</th>
@@ -5540,12 +5580,13 @@ function MonthlyPartTimeSalarySubTab({
               <th className="py-3 px-3 w-28 text-right bg-blue-50/10">실수령액 (송금)</th>
               <th className="py-3 px-3 w-24">실제 송금지점</th>
               <th className="py-3 px-3">기타 비고 내용 (퇴사일 등)</th>
+              <th className="py-3 px-3 w-20 text-center">제외</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
             {salaries.length === 0 ? (
               <tr>
-                <td colSpan={13} className="py-16 text-center text-gray-400 font-bold">
+                <td colSpan={14} className="py-16 text-center text-gray-400 font-bold">
                   등록된 "파트타이머" 지점 직원이 없습니다. 직원현황(Roster) 탭에서 직원을 '파트타이머' 로 먼저 등록해 주세요.
                 </td>
               </tr>
@@ -5657,6 +5698,17 @@ function MonthlyPartTimeSalarySubTab({
                       placeholder="기타 특이 사항 기재"
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-medium placeholder-gray-300"
                     />
+                  </td>
+                  <td className="py-2.5 px-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleExcludeEmployee(sal)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[10px] font-bold text-rose-600 transition-colors hover:bg-rose-100"
+                      title="이번 달 파트타이머 급여대장에서만 제외"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      제외
+                    </button>
                   </td>
                 </tr>
               ))

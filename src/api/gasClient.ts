@@ -128,6 +128,35 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
   }
 }
 
+// 같은 화면에서 동일한 읽기 요청이 반복되는 것을 막습니다. 탭 이동 시에는
+// 이미 받은 데이터를 즉시 보여 주되, 짧은 시간 뒤에는 다시 서버에서 최신값을 받습니다.
+const READ_CACHE_TTL_MS = 15000;
+const readCache = new Map<string, { expiresAt: number; value: unknown }>();
+const pendingReadRequests = new Map<string, Promise<unknown>>();
+
+async function callCachedReadApi<T>(action: string, params: Record<string, any> = {}): Promise<T> {
+  const cacheKey = `${action}:${JSON.stringify(params)}`;
+  const cached = readCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value as T;
+
+  const pending = pendingReadRequests.get(cacheKey);
+  if (pending) return pending as Promise<T>;
+
+  const request = callApi(action, params)
+    .then((value) => {
+      readCache.set(cacheKey, { value, expiresAt: Date.now() + READ_CACHE_TTL_MS });
+      return value;
+    })
+    .finally(() => pendingReadRequests.delete(cacheKey));
+
+  pendingReadRequests.set(cacheKey, request);
+  return request as Promise<T>;
+}
+
+function clearReadCache() {
+  readCache.clear();
+}
+
 // Helper to safely write to direct Firebase in the background (used for Netlify / local offline static modes)
 async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id: string, payload?: any) {
   try {
@@ -185,6 +214,7 @@ export const gasClient = {
     }
     // masterData는 구버전 GAS 호환용 별칭 (신버전은 master 우선, 구버전은 masterData 사용)
     const result = await callApi("submitDaily", { master, masterData: master, expenses: expenses || [], staff: staff || [] });
+    clearReadCache();
     if (result && result.recordId) {
       // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
       await tryDirectBackup("settle", result.recordId, { master, expenses, staff });
@@ -203,6 +233,7 @@ export const gasClient = {
     modifiedBy?: string
   ): Promise<{ success: boolean }> {
     const result = await callApi("updateDaily", { recordId, masterData, expenses, staff, modifiedBy });
+    clearReadCache();
     if (result && result.success !== false) {
       // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화
       try {
@@ -234,7 +265,7 @@ export const gasClient = {
    */
   async getBranchHistory(branchName: string): Promise<MasterDaily[]> {
     try {
-      return await callApi("getBranchHistory", { branchName });
+      return await callCachedReadApi("getBranchHistory", { branchName });
     } catch (err) {
       console.warn("getBranchHistory Action Failed. Returning empty fallback array.", err);
       return [];
@@ -245,7 +276,7 @@ export const gasClient = {
    * 전체 지점 설정 목록 반환
    */
   async getBranchList(): Promise<BranchSetting[]> {
-    return await callApi("getBranchList");
+    return await callCachedReadApi("getBranchList");
   },
 
   /**
@@ -256,19 +287,23 @@ export const gasClient = {
   },
 
   async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
-    return await callApi("getStaffRoster", { branchName });
+    return await callCachedReadApi("getStaffRoster", { branchName });
   },
 
   async saveStaffRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
-    return await callApi("saveStaffRoster", { branchName, employees });
+    const result = await callApi("saveStaffRoster", { branchName, employees });
+    clearReadCache();
+    return result;
   },
 
   async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
-    return await callApi("getSharedData", { dataKey });
+    return await callCachedReadApi<T | null>("getSharedData", { dataKey });
   },
 
   async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
-    return await callApi("saveSharedData", { dataKey, value });
+    const result = await callApi("saveSharedData", { dataKey, value });
+    clearReadCache();
+    return result;
   },
 
   /**
