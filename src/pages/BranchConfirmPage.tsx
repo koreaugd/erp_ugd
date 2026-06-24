@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { formatNumber } from "../utils/formatNumber";
 import { hashPin } from "../utils/hashPin";
+import { changeFirebaseLoginPins, loginWithAdminPin } from "../api/firebaseAuth";
 
 const formatWithCommas = (val: string | number | undefined | null) => {
   if (val === undefined || val === null || val === "") return "";
@@ -351,10 +352,17 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const [newBranchBrand, setNewBranchBrand] = useState("");
   const [newBranchPin, setNewBranchPin] = useState("");
   const [newBranchRole, setNewBranchRole] = useState("branch");
-  const [changingPinBranch, setChangingPinBranch] = useState<string | null>(null);
-  const [changingPinValue, setChangingPinValue] = useState("");
   const [newBranchSubmitting, setNewBranchSubmitting] = useState(false);
   const [deletingBranchName, setDeletingBranchName] = useState<string | null>(null);
+
+  // Firebase 로그인 PIN 변경 상태 (Google Sheet PIN과 별도)
+  const [currentAdminLoginPin, setCurrentAdminLoginPin] = useState("");
+  const [currentBranchLoginPin, setCurrentBranchLoginPin] = useState("");
+  const [newAdminLoginPin, setNewAdminLoginPin] = useState("");
+  const [newBranchLoginPin, setNewBranchLoginPin] = useState("");
+  const [confirmAdminLoginPin, setConfirmAdminLoginPin] = useState("");
+  const [confirmBranchLoginPin, setConfirmBranchLoginPin] = useState("");
+  const [changingFirebaseLoginPins, setChangingFirebaseLoginPins] = useState(false);
 
   // Firebase monitoring / syncing states
   const [firebaseStatus, setFirebaseStatus] = useState<{ connected: boolean; projectId: string; totalSettles: number; totalSettings: number; error?: string } | null>(null);
@@ -451,14 +459,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setIsAdminModalOpen(true);
   };
 
-  const handleVerifyPasscode = (e: React.FormEvent) => {
+  const handleVerifyPasscode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const correctPasscode = (adminSettings.adminSecurityPasscode || "1234").trim();
-    if (passcode.trim() === correctPasscode) {
+    try {
+      // 별도 로컬 비밀번호 대신 실제 Firebase 관리자 PIN으로 재인증합니다.
+      await loginWithAdminPin(passcode);
       setIsPasscodeVerified(true);
       setPasscodeError("");
-    } else {
-      setPasscodeError("비밀번호가 일치하지 않습니다. 다시 시도해 주세요.");
+    } catch {
+      setPasscodeError("관리자 PIN이 일치하지 않습니다. 다시 시도해 주세요.");
     }
   };
 
@@ -486,6 +495,45 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     // Dispatch custom event to trigger update in sibling subtabs
     window.dispatchEvent(new Event("admin_settings_updated"));
     setIsAdminModalOpen(false);
+  };
+
+  const isValidLoginPin = (value: string) => /^\d{4,12}$/.test(value.trim());
+
+  const handleChangeFirebaseLoginPins = async () => {
+    const wantsBranchChange = Boolean(newBranchLoginPin.trim() || confirmBranchLoginPin.trim());
+    const wantsAdminChange = Boolean(newAdminLoginPin.trim() || confirmAdminLoginPin.trim());
+    if (!wantsBranchChange && !wantsAdminChange) {
+      triggerToast("변경할 지점 또는 관리자 PIN을 입력해 주세요.", "error");
+      return;
+    }
+    if (!isValidLoginPin(currentAdminLoginPin)) {
+      triggerToast("현재 관리자 PIN은 숫자 4~12자리여야 합니다.", "error");
+      return;
+    }
+    if (wantsBranchChange && (!isValidLoginPin(currentBranchLoginPin) || !isValidLoginPin(newBranchLoginPin) || newBranchLoginPin !== confirmBranchLoginPin)) {
+      triggerToast("지점 공통 PIN의 현재값·새 값·확인값을 숫자 4~12자리로 정확히 입력해 주세요.", "error");
+      return;
+    }
+    if (wantsAdminChange && (!isValidLoginPin(newAdminLoginPin) || newAdminLoginPin !== confirmAdminLoginPin)) {
+      triggerToast("새 관리자 PIN과 확인값을 숫자 4~12자리로 동일하게 입력해 주세요.", "error");
+      return;
+    }
+    try {
+      setChangingFirebaseLoginPins(true);
+      const result = await changeFirebaseLoginPins({
+        currentAdminPin: currentAdminLoginPin,
+        currentBranchPin: wantsBranchChange ? currentBranchLoginPin : undefined,
+        newBranchPin: wantsBranchChange ? newBranchLoginPin : undefined,
+        newAdminPin: wantsAdminChange ? newAdminLoginPin : undefined
+      });
+      setCurrentAdminLoginPin(""); setCurrentBranchLoginPin(""); setNewAdminLoginPin("");
+      setNewBranchLoginPin(""); setConfirmAdminLoginPin(""); setConfirmBranchLoginPin("");
+      triggerToast(`로그인 PIN 변경 완료: 지점 ${result.changedBranches}개${result.changedAdmin ? ", 관리자 1개" : ""}. 다음 로그인부터 새 PIN을 사용합니다.`);
+    } catch (error: any) {
+      triggerToast(error?.message || "Firebase 로그인 PIN 변경에 실패했습니다. 기존 PIN은 유지됩니다.", "error");
+    } finally {
+      setChangingFirebaseLoginPins(false);
+    }
   };
 
   return (
@@ -783,7 +831,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   </div>
                   <h3 className="text-sm font-black text-gray-800 mb-1">어드민 보안 비밀번호 인증</h3>
                   <p className="text-xs text-gray-400 font-semibold mb-6">
-                    이 설정 영역은 브랜드 관리자 전용입니다. 비밀번호를 입력해주세요. (현재 비밀번호: <span className="font-mono font-bold text-rose-600">{adminSettings.adminSecurityPasscode || "1234"}</span>)
+                    이 설정 영역은 관리자 전용입니다. 관리자 로그인 PIN을 한 번 더 입력해 주세요.
                   </p>
 
                   <div className="w-full max-w-xs space-y-3">
@@ -794,7 +842,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                         setPasscode(e.target.value);
                         setPasscodeError("");
                       }}
-                      placeholder="비밀번호 입력"
+                      placeholder="관리자 PIN 입력"
                       autoFocus
                       className="w-full px-4 py-3 border border-gray-200 focus:border-zinc-900 rounded-xl font-mono font-bold text-center tracking-widest text-lg bg-gray-50 focus:bg-white focus:outline-hidden transition"
                     />
@@ -1085,20 +1133,36 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                     )}
 
                     {adminActiveTab === "security" && (
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1 font-sans">어드민 설정 접속 보안 비밀번호</label>
-                          <input
-                            type="text"
-                            value={formAdminSecurityPasscode}
-                            onChange={(e) => setFormAdminSecurityPasscode(e.target.value)}
-                            placeholder="1234"
-                            className="w-full px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900"
-                          />
-                          <p className="text-[10px] text-gray-450 mt-1.5 leading-normal font-semibold">
-                            * 주의: '어드민 설정' 입장 시에 요구되는 인증 비밀번호입니다. 저장 후 다음 번 입장 때부터 이 변경된 비밀번호를 입력해야 합니다.
+                      <div className="space-y-5">
+                        <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                          <h4 className="text-xs font-black text-blue-950">Firebase 로그인 PIN 관리</h4>
+                          <p className="mt-1 text-[10px] leading-relaxed font-semibold text-blue-800">
+                            이 PIN은 모든 기기의 로그인에 즉시 적용됩니다. 지점 공통 PIN을 변경하면 등록된 모든 지점 계정이 함께 변경됩니다. 현재 로그인된 기기는 계속 사용할 수 있지만, 다음 로그인부터 새 PIN이 필요합니다.
                           </p>
                         </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-gray-700 block mb-1">현재 관리자 PIN <span className="text-rose-500">*</span></label>
+                          <input type="password" inputMode="numeric" value={currentAdminLoginPin} onChange={(e) => setCurrentAdminLoginPin(cleanNumeric(e.target.value))} placeholder="현재 관리자 PIN" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl font-mono text-sm focus:outline-hidden focus:border-zinc-900" />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-2xl border border-gray-150 p-4">
+                          <div className="sm:col-span-2"><h5 className="text-xs font-black text-zinc-800">지점 공통 PIN 변경 <span className="text-[10px] font-semibold text-gray-400">(선택)</span></h5></div>
+                          <input type="password" inputMode="numeric" value={currentBranchLoginPin} onChange={(e) => setCurrentBranchLoginPin(cleanNumeric(e.target.value))} placeholder="현재 지점 공통 PIN" className="px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900" />
+                          <input type="password" inputMode="numeric" value={newBranchLoginPin} onChange={(e) => setNewBranchLoginPin(cleanNumeric(e.target.value))} placeholder="새 지점 공통 PIN" className="px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900" />
+                          <input type="password" inputMode="numeric" value={confirmBranchLoginPin} onChange={(e) => setConfirmBranchLoginPin(cleanNumeric(e.target.value))} placeholder="새 지점 PIN 다시 입력" className="sm:col-start-2 px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900" />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-2xl border border-gray-150 p-4">
+                          <div className="sm:col-span-2"><h5 className="text-xs font-black text-zinc-800">관리자 PIN 변경 <span className="text-[10px] font-semibold text-gray-400">(선택)</span></h5></div>
+                          <input type="password" inputMode="numeric" value={newAdminLoginPin} onChange={(e) => setNewAdminLoginPin(cleanNumeric(e.target.value))} placeholder="새 관리자 PIN" className="px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900" />
+                          <input type="password" inputMode="numeric" value={confirmAdminLoginPin} onChange={(e) => setConfirmAdminLoginPin(cleanNumeric(e.target.value))} placeholder="새 관리자 PIN 다시 입력" className="px-3 py-2 border border-gray-200 rounded-xl font-mono text-xs focus:outline-hidden focus:border-zinc-900" />
+                        </div>
+
+                        <button type="button" disabled={changingFirebaseLoginPins} onClick={handleChangeFirebaseLoginPins} className="w-full py-3 rounded-xl bg-zinc-950 hover:bg-zinc-800 disabled:bg-zinc-400 text-white text-xs font-black transition cursor-pointer flex items-center justify-center gap-2">
+                          {changingFirebaseLoginPins && <RefreshCw className="w-4 h-4 animate-spin" />}
+                          {changingFirebaseLoginPins ? "Firebase 로그인 PIN 변경 중…" : "로그인 PIN 변경 저장"}
+                        </button>
                       </div>
                     )}
 
@@ -1221,7 +1285,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                           ) : (
                             <div className="border border-gray-150 rounded-2xl overflow-hidden divide-y divide-gray-100 bg-white">
                               {adminBranches.map((b: any, index: number) => {
-                                const isChangingPin = changingPinBranch === b.branchName;
                                 const isConfirmingDelete = deletingBranchName === b.branchName;
 
                                 return (
@@ -1250,64 +1313,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
                                     {/* Actions */}
                                     <div className="flex items-center gap-2 self-end sm:self-center">
-                                      {/* Password Change Sub-section */}
-                                      {isChangingPin ? (
-                                        <div className="flex items-center gap-1.5 bg-zinc-100 p-1 rounded-xl border border-zinc-200">
-                                          <input
-                                            type="password"
-                                            placeholder="새 PIN 숫자"
-                                            value={changingPinValue}
-                                            onChange={(e) => setChangingPinValue(e.target.value)}
-                                            className="w-24 px-2 py-1 bg-white border border-gray-200 rounded-md text-xs font-bold font-mono"
-                                          />
-                                          <button
-                                            onClick={async () => {
-                                              const trimVal = changingPinValue.trim();
-                                              if (!trimVal) {
-                                                triggerToast("비밀번호를 입력하세요.", "error");
-                                                return;
-                                              }
-                                              try {
-                                                const phash = await hashPin(trimVal);
-                                                const res = await gasClient.updateBranchPin(b.branchName, phash);
-                                                if (res && res.success !== false) {
-                                                  triggerToast(`${b.branchName} 지점의 비밀번호(PIN)가 성공적으로 갱신되었습니다.`, "success");
-                                                  setChangingPinBranch(null);
-                                                  setChangingPinValue("");
-                                                } else {
-                                                  triggerToast("오류가 생겼습니다.", "error");
-                                                }
-                                              } catch (err: any) {
-                                                triggerToast(err.message, "error");
-                                              }
-                                            }}
-                                            className="p-1 bg-emerald-500 hover:bg-emerald-600 rounded-md text-white cursor-pointer"
-                                            title="승인"
-                                          >
-                                            <Check className="w-3.5 h-3.5" />
-                                          </button>
-                                          <button
-                                            onClick={() => {
-                                              setChangingPinBranch(null);
-                                              setChangingPinValue("");
-                                            }}
-                                            className="p-1 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-600 cursor-pointer"
-                                            title="취소"
-                                          >
-                                            <X className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          onClick={() => {
-                                            setChangingPinBranch(b.branchName);
-                                            setChangingPinValue("");
-                                          }}
-                                          className="text-[10px] font-black text-gray-650 hover:text-gray-950 border border-gray-300 py-1.5 px-2.5 rounded-lg hover:bg-gray-50 bg-white transition cursor-pointer"
-                                        >
-                                          PIN 변경
-                                        </button>
-                                      )}
+                                      <button
+                                        onClick={() => setAdminActiveTab("security")}
+                                        className="text-[10px] font-black text-gray-650 hover:text-gray-950 border border-gray-300 py-1.5 px-2.5 rounded-lg hover:bg-gray-50 bg-white transition cursor-pointer"
+                                      >
+                                        공통 PIN 설정
+                                      </button>
 
                                       {/* Active/Inactive toggle */}
                                       <button
