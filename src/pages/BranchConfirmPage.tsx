@@ -1979,6 +1979,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setCashBalance("");
           setPrevDayCash(prevCashVal);
           setCashDiffReason("");
+          setWriter("");
           setStaffMemo("");
           setReviewMemo("");
           setOtherMemo("");
@@ -2099,7 +2100,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
       return;
     }
-    if (!cashSales || !cardSales || !cashBalance) {
+    if (!cashSales || !cardSales || (!hasExistingRecord && !cashBalance)) {
       setValidationErrors(true);
       triggerToast("일일 매출 필수 요건(현금, 카드 매출액 및 금고 현금 잔액)을 모두 채워주십시오.", "error");
       return;
@@ -2112,7 +2113,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const actualCashInVault = Number(cashBalance) || 0;
     const diff = actualCashInVault - theoreticalBalance;
 
-    if (diff !== 0 && !cashDiffReason.trim()) {
+    if (cashBalance !== "" && diff !== 0 && !cashDiffReason.trim()) {
       setValidationErrors(true);
       triggerToast("이론상 잔액과 금고 실사 현금이 일치하지 않습니다. 불일치 사유를 반드시 작성해 주셔야 제출 가능합니다.", "error");
       return;
