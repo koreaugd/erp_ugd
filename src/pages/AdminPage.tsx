@@ -72,6 +72,8 @@ export default function AdminPage() {
   const [clearingDirectory, setClearingDirectory] = useState(false);
   const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash">("dashboard");
   const employeeIdSequence = useRef(1);
+  // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
+  const employeeDirectoryEnabled = false;
 
   // 본인 권한 검수 및 마크업 라우팅 분기
   useEffect(() => {
@@ -108,6 +110,7 @@ export default function AdminPage() {
   };
 
   const loadEmployeeDirectory = async () => {
+    if (!employeeDirectoryEnabled) return;
     try {
       setDirectoryLoading(true);
       const branches = await gasClient.getBranchList();
@@ -142,8 +145,8 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (adminSection === "employeeDirectory") void loadEmployeeDirectory();
-  }, [adminSection]);
+    if (employeeDirectoryEnabled && adminSection === "employeeDirectory") void loadEmployeeDirectory();
+  }, [adminSection, employeeDirectoryEnabled]);
 
   const cleanBranchOwnRosters = async () => {
     if (!window.confirm("모든 지점의 직원현황에서 관리자 등록 직원을 제거하고 지점 등록 직원만 남깁니다. 계속할까요?")) return;
@@ -519,13 +522,13 @@ export default function AdminPage() {
             <TrendingUp className="w-5 h-5" />
             마감현황
           </button>
-          <button
+          {employeeDirectoryEnabled && <button
             onClick={() => setAdminSection("employeeDirectory")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "employeeDirectory" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
           >
             <Users className="w-5 h-5" />
             직원명부
-          </button>
+          </button>}
           <div className="hidden">
             <TrendingUp className="w-5 h-5" />
             실시간 매출 현황
@@ -794,7 +797,7 @@ export default function AdminPage() {
             </>
           )}
 
-          {adminSection === "employeeDirectory" && (
+          {employeeDirectoryEnabled && adminSection === "employeeDirectory" && (
             <section className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
