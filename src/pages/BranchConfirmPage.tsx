@@ -3601,13 +3601,15 @@ function RosterTab({ branchName }: { branchName: string }) {
         if (cancelled) return;
         const staffFiltered = staffRoster.filter(isBranchEmployee);
 
-        // branch_own_rosters에서 지점이 직접 추가했으나 staff_rosters에 없는 인원 병합
+        // branch_own_rosters를 우선 사용 (사용자 편집 내용 보존)
+        // staff_rosters는 branch_own_rosters에 없는 신규 인원만 추가
         const ownRoster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        const staffIds = new Set(staffFiltered.map((e: any) => e.id));
-        const ownAdditions = ownRoster.filter((e: any) => isBranchEmployee(e) && !staffIds.has(e.id));
+        const ownFiltered = ownRoster.filter(isBranchEmployee);
+        const ownIds = new Set(ownFiltered.map((e: any) => e.id));
+        const staffOnlyNew = staffFiltered.filter((e: any) => !ownIds.has(e.id));
+        const merged = [...ownFiltered, ...staffOnlyNew];
 
-        const merged = [...staffFiltered, ...ownAdditions];
         setEmployees(merged as Employee[]);
         localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(merged));
 
@@ -3699,10 +3701,13 @@ function RosterTab({ branchName }: { branchName: string }) {
     });
   };
 
-  const updateEmployeeField = (id: string, field: "residentNumber" | "contractType" | "entryDate" | "rank", value: string) => {
-    setEmployees((current) => current.map((employee) => (
-      employee.id === id ? { ...employee, [field]: value } : employee
-    )));
+  const updateEmployeeField = (id: string, field: "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
+    setEmployees((current) => current.map((employee) => {
+      if (employee.id !== id) return employee;
+      const updated = { ...employee, [field]: value };
+      if (field === "division" && value === "파트타이머") updated.rank = "사원";
+      return updated;
+    }));
   };
 
   const recordStaffMovement = async (employee: Employee, reason: "퇴사" | "지점이동", date: string, destination?: string) => {
@@ -4225,13 +4230,19 @@ function RosterTab({ branchName }: { branchName: string }) {
                       />
                     </td>
                     <td className="py-3 px-3">
-                      <span className={`inline-flex whitespace-nowrap px-2.5 py-0.5 rounded-lg text-[10px] font-black ${
-                        emp.division === "정직원" 
-                          ? "bg-amber-50 text-amber-700 border border-amber-100" 
-                          : "bg-blue-50 text-[#2E6DB4] border border-blue-100"
-                      }`}>
-                        {emp.division}
-                      </span>
+                      <select
+                        value={emp.division}
+                        onChange={(e) => updateEmployeeField(emp.id, "division", e.target.value)}
+                        onBlur={() => saveEmployees(employees)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
+                          emp.division === "정직원"
+                            ? "bg-amber-50 text-amber-700 border-amber-200 focus:border-amber-400"
+                            : "bg-blue-50 text-[#2E6DB4] border-blue-200 focus:border-blue-400"
+                        }`}
+                      >
+                        <option value="정직원">정직원</option>
+                        <option value="파트타이머">파트타이머</option>
+                      </select>
                     </td>
                     <td className="py-3 px-3 font-bold text-gray-750">
                       {emp.division === "정직원" ? (
