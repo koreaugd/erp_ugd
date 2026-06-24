@@ -1827,30 +1827,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const checkDuplicateAndLoad = async () => {
       try {
         setChecking(true);
-        const [res, history] = await Promise.all([
-          gasClient.checkDuplicate(branchName, settleDate),
-          gasClient.getBranchHistory(branchName)
-        ]);
-        
-        // Dynamic lookup of the previous day's recorded cash balance
-        let prevCashVal = "0";
-        try {
-          const sorted = [...history].sort((a, b) => b.settleDate.localeCompare(a.settleDate));
-          const prevRec = sorted.find(h => h.settleDate < settleDate);
-          if (prevRec) {
-            const parts = (prevRec.memo || "").split("\n---\nMETADATA:");
-            if (parts[1]) {
-              try {
-                const meta = JSON.parse(parts[1].trim());
-                if (meta && meta.cashBalance !== undefined) {
-                  prevCashVal = String(meta.cashBalance);
-                }
-              } catch {}
-            }
-          }
-        } catch (e) {
-          console.error("Error fetching previous day cash:", e);
-        }
+        const res = await gasClient.getDailyFormBootstrap(branchName, settleDate);
+        const prevCashVal = res.previousCash || "0";
 
         if (res.exists && res.recordId) {
           setHasExistingRecord(true);
@@ -4082,57 +4060,9 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const history = await gasClient.getBranchHistory(branchName);
-      
-      const parsedRecords: any[] = [];
-      const staffAggregate: { [name: string]: number } = {};
-
-      history.forEach((m) => {
-        const divider = "\n---\nMETADATA:";
-        const memoRaw = m.memo || "";
-        const parts = memoRaw.split(divider);
-        
-        let metadataParsed: any = null;
-        if (parts[1]) {
-          try {
-            metadataParsed = JSON.parse(parts[1].trim());
-          } catch {}
-        }
-
-        if (metadataParsed && metadataParsed.staffRows) {
-          metadataParsed.staffRows.forEach((s: any) => {
-            const overtimeVal = Number(s.overtime || 0);
-            // 파트타이머는 시급제 실제 근무시간이므로 초과근무 대장에서 제외합니다.
-            if (s.division === "정직원" && overtimeVal !== 0) {
-              parsedRecords.push({
-                settleDate: m.settleDate,
-                staffName: s.name,
-                clockIn: s.clockIn || "00:00",
-                clockOut: s.clockOut || "00:00",
-                workHours: Number(s.workHours || 0),
-                standardHours: Number(s.standardHours || 0),
-                overtime: overtimeVal,
-                overtimeReason: s.overtimeReason || "-",
-                writer: m.submittedBy || "점장"
-              });
-
-              // Cumulative grouping (Both positive and negative counted together, styled elegantly)
-              staffAggregate[s.name] = (staffAggregate[s.name] || 0) + overtimeVal;
-            }
-          });
-        }
-      });
-
-      // Sort logs by Date descending
-      parsedRecords.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
-      setRecords(parsedRecords);
-
-      // Convert grouping to list and sort by aggregate descending
-      const sumList = Object.keys(staffAggregate).map((name) => ({
-        name,
-        totalOvertime: staffAggregate[name]
-      })).sort((a, b) => b.totalOvertime - a.totalOvertime);
-      setSummaryList(sumList);
+      const log = await gasClient.getAttendanceLog(branchName, "overtime");
+      setRecords(log.records || []);
+      setSummaryList(log.summaryList || []);
 
     } catch (e) {
       console.error("Overtime database read error:", e);
@@ -4267,65 +4197,9 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const history = await gasClient.getBranchHistory(branchName);
-      
-      const parsedRecords: any[] = [];
-      const partAggregate: { [name: string]: { totalHours: number; distinctDays: Set<string> } } = {};
-
-      history.forEach((m) => {
-        const divider = "\n---\nMETADATA:";
-        const memoRaw = m.memo || "";
-        const parts = memoRaw.split(divider);
-        
-        let metadataParsed: any = null;
-        if (parts[1]) {
-          try {
-            metadataParsed = JSON.parse(parts[1].trim());
-          } catch {}
-        }
-
-        if (metadataParsed && metadataParsed.staffRows) {
-          metadataParsed.staffRows.forEach((s: any) => {
-            if (s.division === "파트타이머" && Number(s.workHours || 0) > 0) {
-              parsedRecords.push({
-                settleDate: m.settleDate,
-                staffName: s.name,
-                clockIn: s.clockIn || "00:00",
-                clockOut: s.clockOut || "00:00",
-                workHours: Number(s.workHours || 0),
-                writer: m.submittedBy || "매니저"
-              });
-
-              // Cumulative grouping
-              if (!partAggregate[s.name]) {
-                partAggregate[s.name] = { totalHours: 0, distinctDays: new Set<string>() };
-              }
-              partAggregate[s.name].totalHours += Number(s.workHours || 0);
-              partAggregate[s.name].distinctDays.add(m.settleDate);
-            }
-          });
-        }
-      });
-
-      // Sort logs by Date descending
-      parsedRecords.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
-      setRecords(parsedRecords);
-
-      // Convert grouping to list
-      const sumList = Object.keys(partAggregate).map((name) => {
-        const sortedDates = Array.from(partAggregate[name].distinctDays).sort((a, b) => a.localeCompare(b));
-        const daysWithSuffix = sortedDates.map(dStr => {
-          const parts = dStr.split('-');
-          return parts[2] ? `${Number(parts[2])}일` : dStr;
-        });
-        return {
-          name,
-          totalHours: partAggregate[name].totalHours,
-          daysCount: partAggregate[name].distinctDays.size,
-          workedDaysList: daysWithSuffix.join(', ')
-        };
-      }).sort((a, b) => b.totalHours - a.totalHours);
-      setSummaryList(sumList);
+      const log = await gasClient.getAttendanceLog(branchName, "partTime");
+      setRecords(log.records || []);
+      setSummaryList(log.summaryList || []);
 
     } catch (e) {
       console.error("Part timer database read error:", e);
@@ -5507,9 +5381,10 @@ function MonthlyPartTimeSalarySubTab({
   };
 
   // Grand totals
-  const totalHours = salaries.reduce((acc, s) => acc + (Number(s.accumulatedHours) || 0), 0);
-  const totalSalary = salaries.reduce((acc, s) => acc + (Number(s.calculatedSalary) || 0), 0);
-  const totalActual = salaries.reduce((acc, s) => acc + (Number(s.actualPaidAmount) || 0), 0);
+  // 실제 근무시간이 없는 인원은 이번 달 급여대장에 표시하지 않습니다.
+  const visibleSalaries = salaries.filter((salary) => Number(salary.accumulatedHours) > 0);
+  const totalHours = visibleSalaries.reduce((acc, s) => acc + (Number(s.accumulatedHours) || 0), 0);
+  const totalSalary = visibleSalaries.reduce((acc, s) => acc + (Number(s.calculatedSalary) || 0), 0);
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
@@ -5534,14 +5409,14 @@ function MonthlyPartTimeSalarySubTab({
       </div>
 
       {/* Stats cards block */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100 flex justify-between items-center">
           <div>
             <span className="text-[9px] text-zinc-450 font-black">총합 누적근무 (시간)</span>
             <p className="text-lg font-black text-zinc-850 font-mono mt-0.5">{totalHours} hr</p>
           </div>
           <span className="text-xs bg-zinc-200/50 p-2 rounded-xl text-zinc-650 font-bold font-mono">
-            {salaries.length} 명
+            {visibleSalaries.length} 명
           </span>
         </div>
         <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100 flex justify-between items-center">
@@ -5551,20 +5426,11 @@ function MonthlyPartTimeSalarySubTab({
           </div>
           <span className="text-[10px] text-zinc-400 font-bold">100% 자동 산정</span>
         </div>
-        <div className="bg-blue-50/40 p-4 rounded-2xl border border-blue-150 flex justify-between items-center animate-pulse">
-          <div>
-            <span className="text-[9px] text-[#2E6DB4] font-black">실수령송금액 (실제송금 합계)</span>
-            <p className="text-lg font-black text-rose-600 font-mono mt-0.5">{formatNumber(totalActual)} 원</p>
-          </div>
-          <span className="text-[9px] bg-rose-50 border border-rose-100 text-rose-600 font-bold px-1.5 py-0.5 rounded-lg">
-            이체 대상고지
-          </span>
-        </div>
       </div>
 
       {/* Ledger Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1280px]">
+        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1100px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
               <th className="py-3 px-3">성명 (사원)</th>
@@ -5577,21 +5443,19 @@ function MonthlyPartTimeSalarySubTab({
               <th className="py-3 px-3 w-20 text-right">누적시간</th>
               <th className="py-3 px-3 w-28 text-right">기본급여</th>
               <th className="py-3 px-3 w-40">근무일정 (출근일)</th>
-              <th className="py-3 px-3 w-28 text-right bg-blue-50/10">실수령액 (송금)</th>
-              <th className="py-3 px-3 w-24">실제 송금지점</th>
-              <th className="py-3 px-3">기타 비고 내용 (퇴사일 등)</th>
+              <th className="py-3 px-3 w-[360px]">기타 비고 내용 (퇴사일 등)</th>
               <th className="py-3 px-3 w-20 text-center">제외</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
-            {salaries.length === 0 ? (
+            {visibleSalaries.length === 0 ? (
               <tr>
-                <td colSpan={14} className="py-16 text-center text-gray-400 font-bold">
-                  등록된 "파트타이머" 지점 직원이 없습니다. 직원현황(Roster) 탭에서 직원을 '파트타이머' 로 먼저 등록해 주세요.
+                <td colSpan={12} className="py-16 text-center text-gray-400 font-bold">
+                  이번 달 근무시간이 기록된 파트타이머가 없습니다.
                 </td>
               </tr>
             ) : (
-              salaries.map((sal) => (
+              visibleSalaries.map((sal) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
                   <td className="py-3 px-3 font-extrabold text-zinc-900 text-xs">
                     {sal.name}
@@ -5672,31 +5536,13 @@ function MonthlyPartTimeSalarySubTab({
                       title={sal.attendanceDates}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 text-right bg-zinc-50">
-                    <input
-                      type="text"
-                      value={sal.actualPaidAmount}
-                      onChange={(e) => handleUpdate(sal.employeeId, "actualPaidAmount", e.target.value)}
-                      placeholder="(본사 기입)"
-                      className="w-full p-1 bg-white border border-[#2E6DB4] rounded text-xs font-mono font-bold text-right text-[#1A3C6E]"
-                    />
-                  </td>
-                  <td className="py-2.5 px-1.5">
-                    <input
-                      type="text"
-                      value={sal.payoutBranch}
-                      onChange={(e) => handleUpdate(sal.employeeId, "payoutBranch", e.target.value)}
-                      placeholder="송금지점명"
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-bold text-gray-800 text-center"
-                    />
-                  </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className="py-2.5 px-1.5 min-w-[360px]">
                     <input
                       type="text"
                       value={sal.memo}
                       onChange={(e) => handleUpdate(sal.employeeId, "memo", e.target.value)}
                       placeholder="기타 특이 사항 기재"
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-medium placeholder-gray-300"
+                      className="w-full p-2 bg-white border border-gray-200 rounded text-xs font-medium placeholder-gray-300"
                     />
                   </td>
                   <td className="py-2.5 px-2 text-center">

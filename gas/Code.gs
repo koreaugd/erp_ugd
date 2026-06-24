@@ -25,7 +25,12 @@ function doPost(e) {
       initSheets();
       PROPERTIES.setProperty("SHEETS_INITIALIZED", "true");
     }
-    ensureSheetsSchema();
+    // 헤더/보조 시트 확인은 매 요청마다 수행할 필요가 없습니다.
+    // 최초 한 번만 보정해 일반 조회와 탭 전환의 시트 호출 수를 줄입니다.
+    if (!PROPERTIES.getProperty("SHEETS_SCHEMA_READY")) {
+      ensureSheetsSchema();
+      PROPERTIES.setProperty("SHEETS_SCHEMA_READY", "true");
+    }
 
     let result;
     switch (action) {
@@ -34,6 +39,9 @@ function doPost(e) {
         break;
       case "checkDuplicate":
         result = checkDuplicate(requestData.branchName, requestData.settleDate);
+        break;
+      case "getDailyFormBootstrap":
+        result = getDailyFormBootstrap(requestData.branchName, requestData.settleDate);
         break;
       case "submitDaily":
         result = submitDaily(requestData.master || requestData.masterData, requestData.expenses || [], requestData.staff || []);
@@ -49,6 +57,9 @@ function doPost(e) {
         break;
       case "getBranchHistory":
         result = getBranchHistory(requestData.branchName);
+        break;
+      case "getAttendanceLog":
+        result = getAttendanceLog(requestData.branchName, requestData.logType);
         break;
       case "getBranchList":
         result = getBranchList();
@@ -604,6 +615,136 @@ function checkDuplicate(branchName, settleDate) {
     }
   }
   return { exists: false, record: null };
+}
+
+/**
+ * 일일마감 작성 화면용 최소 데이터 조회.
+ * 전체 이력을 브라우저로 전송하지 않고, 당일 중복 여부와 전일 금고현금만 한 번에 반환한다.
+ */
+function getDailyFormBootstrap(branchName, settleDate) {
+  const sheet = getSpreadsheet().getSheetByName(SHEETS.MASTER);
+  const data = sheet.getDataRange().getValues();
+  let duplicate = null;
+  let previousRow = null;
+  let previousDate = "";
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (row[1] !== branchName) continue;
+    const rowDate = formatDate(row[2]);
+
+    if (rowDate === settleDate) {
+      duplicate = {
+        recordId: row[0],
+        branchName: row[1],
+        settleDate: rowDate,
+        cashSales: Number(row[3]),
+        cardSales: Number(row[4]),
+        transferSales: Number(row[5]),
+        deliverySales: Number(row[6]),
+        totalSales: Number(row[7]),
+        memo: row[8],
+        submittedAt: row[9]
+      };
+    }
+
+    if (rowDate < settleDate && rowDate > previousDate) {
+      previousDate = rowDate;
+      previousRow = row;
+    }
+  }
+
+  let previousCash = "0";
+  if (previousRow) {
+    const metadata = String(previousRow[8] || "").split("\n---\nMETADATA:")[1];
+    if (metadata) {
+      try {
+        const parsed = JSON.parse(metadata.trim());
+        if (parsed.cashBalance !== undefined) previousCash = String(parsed.cashBalance);
+      } catch (e) {}
+    }
+  }
+
+  return {
+    exists: !!duplicate,
+    recordId: duplicate ? duplicate.recordId : null,
+    record: duplicate,
+    previousCash: previousCash
+  };
+}
+
+/**
+ * 일지 화면에 필요한 근태 데이터만 반환한다. 대용량 마감 메모 전체를 전송하지 않아
+ * 지점별 기록량 차이로 인한 탭 전환 지연을 줄인다.
+ */
+function getAttendanceLog(branchName, logType) {
+  const masterValues = getSpreadsheet().getSheetByName(SHEETS.MASTER).getDataRange().getValues();
+  const records = [];
+  const aggregate = {};
+  const isPartTime = logType === "partTime";
+
+  for (let i = 1; i < masterValues.length; i++) {
+    const row = masterValues[i];
+    if (row[1] !== branchName) continue;
+
+    const metadata = String(row[8] || "").split("\n---\nMETADATA:")[1];
+    if (!metadata) continue;
+
+    try {
+      const staffRows = JSON.parse(metadata.trim()).staffRows || [];
+      staffRows.forEach(function(staff) {
+        const workHours = Number(staff.workHours || 0);
+        const isTarget = isPartTime
+          ? staff.division === "파트타이머" && workHours > 0
+          : staff.division === "정직원" && Number(staff.overtime || 0) !== 0;
+        if (!isTarget) return;
+
+        const settleDate = formatDate(row[2]);
+        const item = {
+          settleDate: settleDate,
+          staffName: staff.name,
+          clockIn: staff.clockIn || "00:00",
+          clockOut: staff.clockOut || "00:00",
+          workHours: workHours,
+          writer: row[10] || "점장"
+        };
+
+        if (isPartTime) {
+          records.push(item);
+          if (!aggregate[staff.name]) aggregate[staff.name] = { totalHours: 0, dates: {} };
+          aggregate[staff.name].totalHours += workHours;
+          aggregate[staff.name].dates[settleDate] = true;
+        } else {
+          const overtime = Number(staff.overtime || 0);
+          item.standardHours = Number(staff.standardHours || 0);
+          item.overtime = overtime;
+          item.overtimeReason = staff.overtimeReason || "-";
+          records.push(item);
+          aggregate[staff.name] = (aggregate[staff.name] || 0) + overtime;
+        }
+      });
+    } catch (e) {}
+  }
+
+  records.sort(function(a, b) { return b.settleDate.localeCompare(a.settleDate); });
+  let summaryList;
+  if (isPartTime) {
+    summaryList = Object.keys(aggregate).map(function(name) {
+      const dates = Object.keys(aggregate[name].dates).sort();
+      return {
+        name: name,
+        totalHours: aggregate[name].totalHours,
+        daysCount: dates.length,
+        workedDaysList: dates.map(function(date) { return Number(date.split("-")[2]) + "일"; }).join(", ")
+      };
+    }).sort(function(a, b) { return b.totalHours - a.totalHours; });
+  } else {
+    summaryList = Object.keys(aggregate).map(function(name) {
+      return { name: name, totalOvertime: aggregate[name] };
+    }).sort(function(a, b) { return b.totalOvertime - a.totalOvertime; });
+  }
+
+  return { records: records, summaryList: summaryList };
 }
 
 /**

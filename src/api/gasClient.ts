@@ -128,6 +128,13 @@ async function callApi(action: string, params: Record<string, any> = {}): Promis
   }
 }
 
+export interface DailyFormBootstrap {
+  exists: boolean;
+  recordId: string | null;
+  record: MasterDaily | null;
+  previousCash: string;
+}
+
 // 같은 화면에서 동일한 읽기 요청이 반복되는 것을 막습니다. 탭 이동 시에는
 // 이미 받은 데이터를 즉시 보여 주되, 짧은 시간 뒤에는 다시 서버에서 최신값을 받습니다.
 const READ_CACHE_TTL_MS = 15000;
@@ -205,6 +212,10 @@ export const gasClient = {
     return await callApi("checkDuplicate", { branchName, settleDate });
   },
 
+  async getDailyFormBootstrap(branchName: string, settleDate: string): Promise<DailyFormBootstrap> {
+    return await callApi("getDailyFormBootstrap", { branchName, settleDate });
+  },
+
   /**
    * 마감 정산 데이터 신규 저장
    */
@@ -217,7 +228,8 @@ export const gasClient = {
     clearReadCache();
     if (result && result.recordId) {
       // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
-      await tryDirectBackup("settle", result.recordId, { master, expenses, staff });
+      // 보조 백업은 저장 완료 화면을 늦추지 않도록 뒤에서 실행합니다.
+      void tryDirectBackup("settle", result.recordId, { master, expenses, staff });
     }
     return result;
   },
@@ -284,6 +296,10 @@ export const gasClient = {
    */
   async getBranchListAll(): Promise<AdminBranchSetting[]> {
     return await callApi("getBranchListAll");
+  },
+
+  async getAttendanceLog(branchName: string, logType: "overtime" | "partTime"): Promise<{ records: any[]; summaryList: any[] }> {
+    return await callCachedReadApi("getAttendanceLog", { branchName, logType });
   },
 
   async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
