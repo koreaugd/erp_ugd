@@ -2151,6 +2151,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
+    const missingOvertimeReason = staffRows.filter((staff) => staff.overtime !== 0 && !staff.overtimeReason.trim());
+    if (missingOvertimeReason.length > 0) {
+      setValidationErrors(true);
+      triggerToast(`${missingOvertimeReason.map((staff) => staff.name).join(", ")} 님의 초과근무 또는 조기퇴근 사유를 입력해 주세요.`, "error");
+      return;
+    }
+
     const longShift = staffRows.filter((staff) => staff.workHours > 13);
     if (longShift.length > 0 && !window.confirm(`${longShift.map((staff) => `${staff.name} ${staff.workHours}시간`).join(", ")} 근무가 13시간을 초과합니다. 출퇴근 시간 입력이 맞습니까?`)) return;
 
@@ -3208,7 +3215,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           placeholder={hasOvertimeDelta ? "상세 사유 필수 입력" : "사유 불필요"}
                           className={`w-full px-2 py-1.5 border rounded-lg text-xs transition-all ${
                             hasOvertimeDelta
-                              ? "bg-white border-amber-300 focus:border-amber-500"
+                              ? validationErrors && !s.overtimeReason.trim() ? "bg-rose-50 border-rose-500 ring-1 ring-rose-300 focus:border-rose-500" : "bg-white border-amber-300 focus:border-amber-500"
                               : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
                           }`}
                         />
