@@ -69,6 +69,7 @@ export default function AdminPage() {
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
   const [cleaningRosters, setCleaningRosters] = useState(false);
+  const [clearingDirectory, setClearingDirectory] = useState(false);
   const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash">("dashboard");
   const employeeIdSequence = useRef(1);
 
@@ -174,6 +175,24 @@ export default function AdminPage() {
       triggerToast("직원현황 정리에 실패했습니다.", "error");
     } finally {
       setCleaningRosters(false);
+    }
+  };
+
+  const clearEmployeeDirectory = async () => {
+    if (!window.confirm("전 지점 직원명부의 모든 직원 데이터를 삭제합니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+    try {
+      setClearingDirectory(true);
+      const branches = await gasClient.getBranchList();
+      for (const branch of branches) {
+        await gasClient.saveStaffRoster(branch.branchName, []);
+      }
+      setDirectoryEmployees([]);
+      triggerToast(`전 지점 직원명부 초기화 완료`, "success");
+    } catch (error) {
+      console.error("직원명부 초기화 실패:", error);
+      triggerToast("직원명부 초기화에 실패했습니다.", "error");
+    } finally {
+      setClearingDirectory(false);
     }
   };
 
@@ -784,7 +803,8 @@ export default function AdminPage() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => void loadEmployeeDirectory()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
-                  <button onClick={() => void cleanBranchOwnRosters()} disabled={cleaningRosters} className="px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold disabled:opacity-50">{cleaningRosters ? "정리 중…" : "직원현황 정리"}</button>
+                  <button onClick={() => void cleanBranchOwnRosters()} disabled={cleaningRosters} className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold disabled:opacity-50">{cleaningRosters ? "정리 중…" : "직원현황 정리"}</button>
+                  <button onClick={() => void clearEmployeeDirectory()} disabled={clearingDirectory} className="px-4 py-2 bg-red-700 text-white rounded-xl text-xs font-bold disabled:opacity-50">{clearingDirectory ? "삭제 중…" : "명부 전체 삭제"}</button>
                 </div>
               </div>
               <div className="flex gap-2 border-b border-gray-200">
