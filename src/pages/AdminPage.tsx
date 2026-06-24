@@ -60,6 +60,10 @@ export default function AdminPage() {
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
   const [movementHistory, setMovementHistory] = useState<Array<any>>([]);
+  const [directoryBranches, setDirectoryBranches] = useState<Array<any>>([]);
+  const [showEmployeeRegistration, setShowEmployeeRegistration] = useState(false);
+  const [registrationRows, setRegistrationRows] = useState<Array<any>>([{ branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }]);
+  const [uploadingPayroll, setUploadingPayroll] = useState(false);
 
   // 본인 권한 검수 및 마크업 라우팅 분기
   useEffect(() => {
@@ -99,13 +103,21 @@ export default function AdminPage() {
     try {
       setDirectoryLoading(true);
       const branches = await gasClient.getBranchList();
+      setDirectoryBranches(branches);
       const results = await Promise.all(branches.map(async (branch) => {
         const [employees, movements] = await Promise.all([
           gasClient.getStaffRoster(branch.branchName),
           gasClient.getSharedData<any[]>(`staff_movements:${branch.branchName}`).catch(() => null)
         ]);
+        const normalizedEmployees = employees.map((employee) => employee.employeeId ? employee : {
+          ...employee,
+          employeeId: `UGD-${normalizeText(branch.branchName).toUpperCase()}-${employee.id}`
+        });
+        if (normalizedEmployees.some((employee, index) => employee !== employees[index])) {
+          await gasClient.saveStaffRoster(branch.branchName, normalizedEmployees);
+        }
         return {
-          employees: employees.filter((employee) => employee.division === "정직원").map((employee) => ({ ...employee, branchName: branch.branchName, brand: branch.brand })),
+          employees: normalizedEmployees.filter((employee) => employee.division === "정직원").map((employee) => ({ ...employee, branchName: branch.branchName, brand: branch.brand })),
           movements: Array.isArray(movements) ? movements : []
         };
       }));
@@ -122,6 +134,92 @@ export default function AdminPage() {
   useEffect(() => {
     if (adminSection === "employeeDirectory") void loadEmployeeDirectory();
   }, [adminSection]);
+
+  const makeEmployeeId = () => `UGD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const toMoney = (value: unknown) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || 0;
+  const normalizeText = (value: unknown) => String(value ?? "").replace(/[\s()점]/g, "").toLowerCase();
+  const formatTenure = (entryDate?: string) => {
+    if (!entryDate) return "-";
+    const start = new Date(entryDate);
+    if (Number.isNaN(start.getTime())) return "-";
+    const now = new Date();
+    let months = (now.getFullYear() - start.getFullYear()) * 12 + now.getMonth() - start.getMonth();
+    if (now.getDate() < start.getDate()) months--;
+    if (months < 0) return "-";
+    return `${Math.floor(months / 12)}년 ${months % 12}개월`;
+  };
+
+  const saveRegistrationRows = async () => {
+    const grouped = new Map<string, any[]>();
+    registrationRows.filter((row) => row.branchName && row.name.trim()).forEach((row) => {
+      const list = grouped.get(row.branchName) || [];
+      list.push(row);
+      grouped.set(row.branchName, list);
+    });
+    if (grouped.size === 0) return triggerToast("지점과 직원명을 입력해 주세요.", "error");
+    await Promise.all(Array.from(grouped.entries()).map(async ([branchName, rows]) => {
+      const current = await gasClient.getStaffRoster(branchName);
+      const next = [...current, ...rows.map((row) => ({
+        id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        employeeId: makeEmployeeId(), name: row.name.trim(), division: "정직원", rank: row.rank || "사원",
+        birthDate: row.birthDate, entryDate: row.entryDate, salary: toMoney(row.salary), contractType: "4대보험" as const
+      }))];
+      await gasClient.saveStaffRoster(branchName, next);
+    }));
+    setRegistrationRows([{ branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }]);
+    setShowEmployeeRegistration(false);
+    await loadEmployeeDirectory();
+    triggerToast("직원명부를 등록했습니다.");
+  };
+
+  const handlePayrollUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []) as File[];
+    if (!files.length) return;
+    try {
+      setUploadingPayroll(true);
+      const branches = directoryBranches.length ? directoryBranches : await gasClient.getBranchList();
+      const updates = new Map<string, any[]>();
+      for (const file of files) {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+        for (const sheetName of workbook.SheetNames) {
+          const rows = XLSX.utils.sheet_to_json<any[]>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false });
+          const headerIndex = rows.findIndex((row) => row.some((cell) => String(cell).trim() === "성명"));
+          if (headerIndex < 0) continue;
+          const headers = rows[headerIndex].map((cell) => String(cell).trim());
+          const col = (name: string) => headers.indexOf(name);
+          const nameCol = col("성명"), salaryCol = col("이달급여"), residentCol = col("주민등록번호"), rankCol = col("직급"), entryCol = col("입사일"), contractCol = col("근로계약"), branchCol = col("실제 송금지점");
+          for (const row of rows.slice(headerIndex + 1)) {
+            const name = String(row[nameCol] || "").trim();
+            if (!name || name === "합계") continue;
+            const rawBranch = String(row[branchCol] || sheetName).trim();
+            const branch = branches.find((item) => { const a = normalizeText(item.branchName); const b = normalizeText(rawBranch); const c = normalizeText(sheetName); return a === b || a === c || a.includes(b) || b.includes(a) || a.includes(c) || c.includes(a); });
+            if (!branch) continue;
+            const list = updates.get(branch.branchName) || [];
+            list.push({ name, residentNumber: String(row[residentCol] || "").trim(), rank: String(row[rankCol] || "사원").trim(), entryDate: String(row[entryCol] || "").trim(), contractType: String(row[contractCol] || "4대보험").trim(), salary: toMoney(row[salaryCol]) });
+            updates.set(branch.branchName, list);
+          }
+        }
+      }
+      await Promise.all(Array.from(updates.entries()).map(async ([branchName, rows]) => {
+        const current = await gasClient.getStaffRoster(branchName);
+        const next = [...current];
+        rows.forEach((row) => {
+          const index = next.findIndex((employee: any) => (row.residentNumber && employee.residentNumber === row.residentNumber) || employee.name === row.name);
+          const patch = { ...row, division: "정직원", contractType: row.contractType.includes("3.3%") ? "3.3%" as const : "4대보험" as const, employeeId: index >= 0 ? next[index].employeeId || makeEmployeeId() : makeEmployeeId() };
+          if (index >= 0) next[index] = { ...next[index], ...patch }; else next.push({ id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...patch });
+        });
+        await gasClient.saveStaffRoster(branchName, next);
+      }));
+      await loadEmployeeDirectory();
+      triggerToast("인건비 파일의 급여 정보를 반영했습니다.");
+    } catch (error) {
+      console.error("Payroll upload failed:", error);
+      triggerToast("인건비 파일을 처리하지 못했습니다.", "error");
+    } finally {
+      setUploadingPayroll(false);
+      event.target.value = "";
+    }
+  };
 
   // 고유 브랜드 리스트 추출
   const brandList = useMemo(() => {
@@ -606,8 +704,18 @@ export default function AdminPage() {
                 <button onClick={() => setDirectoryTab("roster")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "roster" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>직원명부</button>
                 <button onClick={() => setDirectoryTab("movements")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "movements" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변동내역</button>
               </div>
+              {directoryTab === "roster" && !directoryLoading && (
+                <>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button onClick={() => setShowEmployeeRegistration((open) => !open)} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-bold">직원 직접 등록</button>
+                    <label className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer">{uploadingPayroll ? "인건비 반영 중…" : "인건비내역 업로드"}<input type="file" accept=".xlsx,.xls" multiple className="hidden" disabled={uploadingPayroll} onChange={handlePayrollUpload} /></label>
+                  </div>
+                  {showEmployeeRegistration && <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-xs"><thead><tr className="text-gray-500"><th className="text-left pb-2">지점</th><th className="text-left pb-2">이름</th><th className="text-left pb-2">생년월일</th><th className="text-left pb-2">직급</th><th className="text-left pb-2">입사일</th><th className="text-left pb-2">급여</th></tr></thead><tbody>{registrationRows.map((row, index) => <tr key={index}><td className="pr-2 pb-2"><select value={row.branchName} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, branchName: e.target.value } : item))} className="w-full p-2 rounded border"><option value="">지점 선택</option>{directoryBranches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input value={row.name} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input type="date" value={row.birthDate} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, birthDate: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input value={row.rank} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, rank: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input type="date" value={row.entryDate} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, entryDate: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pb-2"><input type="number" value={row.salary} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, salary: e.target.value } : item))} className="w-full p-2 rounded border" /></td></tr>)}</tbody></table></div><div className="flex gap-2"><button onClick={() => setRegistrationRows((rows) => [...rows, { branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }])} className="px-3 py-2 bg-white border rounded-lg text-xs font-bold">입력칸 추가</button><button onClick={() => void saveRegistrationRows()} className="px-3 py-2 bg-[#2E6DB4] text-white rounded-lg text-xs font-bold">등록 저장</button></div></div>}
+                  <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-3 text-left">직원ID</th><th className="px-4 py-3 text-left">지점</th><th className="px-4 py-3 text-left">이름</th><th className="px-4 py-3 text-left">생년월일</th><th className="px-4 py-3 text-left">직급</th><th className="px-4 py-3 text-left">입사일</th><th className="px-4 py-3 text-right">급여</th><th className="px-4 py-3 text-left">재직년수</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-4 py-3 font-mono text-xs">{employee.employeeId || employee.id}</td><td className="px-4 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-4 py-3 font-bold">{employee.name}</td><td className="px-4 py-3 font-mono">{employee.birthDate || "-"}</td><td className="px-4 py-3">{employee.rank || "사원"}</td><td className="px-4 py-3 font-mono">{employee.entryDate || "-"}</td><td className="px-4 py-3 text-right font-mono">{employee.salary ? formatNumber(employee.salary) : "-"}</td><td className="px-4 py-3">{formatTenure(employee.entryDate)}</td></tr>) : <tr><td colSpan={8} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
+                </>
+              )}
               {directoryLoading ? <div className="py-20 text-center"><LoadingSpinner size="md" /></div> : directoryTab === "roster" ? (
-                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                <div className="hidden">
                   <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">지점</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">직급</th><th className="px-5 py-3 text-left">주민등록번호</th><th className="px-5 py-3 text-left">입사일</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-5 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-5 py-3 font-bold">{employee.name}</td><td className="px-5 py-3">{employee.rank || "사원"}</td><td className="px-5 py-3 font-mono">{employee.residentNumber || "-"}</td><td className="px-5 py-3 font-mono">{employee.entryDate || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
                 </div>
               ) : (

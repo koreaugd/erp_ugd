@@ -48,6 +48,9 @@ export interface RosterEmployee {
   residentNumber?: string;
   contractType?: "4대보험" | "3.3%";
   entryDate?: string;
+  employeeId?: string;
+  birthDate?: string;
+  salary?: number;
 }
 
 export interface DailySettleDetail {
