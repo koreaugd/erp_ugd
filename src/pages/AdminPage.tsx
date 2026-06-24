@@ -68,6 +68,7 @@ export default function AdminPage() {
   const [salaryUnlocked, setSalaryUnlocked] = useState(false);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
+  const [cleaningRosters, setCleaningRosters] = useState(false);
   const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash">("dashboard");
   const employeeIdSequence = useRef(1);
 
@@ -142,6 +143,39 @@ export default function AdminPage() {
   useEffect(() => {
     if (adminSection === "employeeDirectory") void loadEmployeeDirectory();
   }, [adminSection]);
+
+  const cleanBranchOwnRosters = async () => {
+    if (!window.confirm("모든 지점의 직원현황에서 관리자 등록 직원을 제거하고 지점 등록 직원만 남깁니다. 계속할까요?")) return;
+    try {
+      setCleaningRosters(true);
+      const branches = await gasClient.getBranchList();
+      for (const branch of branches) {
+        const employees = await gasClient.getStaffRoster(branch.branchName);
+        const branchCode = String(branch.branchName).replace(/[\s()점]/g, "");
+        const isAdminEmployee = (emp: any): boolean => {
+          const id = String(emp.id || "");
+          const eid = String(emp.employeeId || "");
+          if (/^emp-\d{10,}-[a-z0-9]{3,}$/i.test(id)) return true;
+          if (/^emp-\d{1,6}$/.test(eid)) return true;
+          return false;
+        };
+        const isBranchEmployee = (emp: any): boolean => {
+          const eid = String(emp.employeeId || "").toLowerCase();
+          if (!eid) return true;
+          if (eid.startsWith(`ugd-${branchCode.toLowerCase()}-`)) return true;
+          return false;
+        };
+        const branchOnly = employees.filter((emp: any) => !isAdminEmployee(emp) && isBranchEmployee(emp));
+        await gasClient.saveBranchOwnRoster(branch.branchName, branchOnly);
+      }
+      triggerToast(`${branches.length}개 지점 직원현황 정리 완료`, "success");
+    } catch (error) {
+      console.error("직원현황 정리 실패:", error);
+      triggerToast("직원현황 정리에 실패했습니다.", "error");
+    } finally {
+      setCleaningRosters(false);
+    }
+  };
 
   const makeEmployeeId = () => `emp-${String(employeeIdSequence.current++).padStart(5, "0")}`;
   const toMoney = (value: unknown) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || 0;
@@ -748,7 +782,10 @@ export default function AdminPage() {
                   <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 지점 직원명부</h2>
                   <p className="text-xs text-gray-400 mt-1">정직원 명부와 퇴사·지점이동 이력을 확인합니다.</p>
                 </div>
-                <button onClick={() => void loadEmployeeDirectory()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
+                <div className="flex gap-2">
+                  <button onClick={() => void loadEmployeeDirectory()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
+                  <button onClick={() => void cleanBranchOwnRosters()} disabled={cleaningRosters} className="px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold disabled:opacity-50">{cleaningRosters ? "정리 중…" : "직원현황 정리"}</button>
+                </div>
               </div>
               <div className="flex gap-2 border-b border-gray-200">
                 <button onClick={() => setDirectoryTab("roster")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "roster" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>직원명부</button>
