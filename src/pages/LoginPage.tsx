@@ -18,7 +18,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!user) return;
-    navigate(user.role === "admin" ? "/admin" : "/branch-confirm");
+    navigate("/branch-confirm");
   }, [user, navigate]);
 
   useEffect(() => {

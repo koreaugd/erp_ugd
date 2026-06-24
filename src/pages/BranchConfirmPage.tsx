@@ -99,10 +99,6 @@ export default function BranchConfirmPage() {
       navigate("/");
       return;
     }
-    if (user.role === "admin") {
-      navigate("/admin");
-      return;
-    }
   }, [user, navigate]);
 
   // ----------------------------------------------------
@@ -249,7 +245,7 @@ export default function BranchConfirmPage() {
 
   // Loaded if selectedBranch is present
   return (
-    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} />
+    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={user.role === "admin"} />
   );
 }
 
@@ -262,9 +258,10 @@ interface WorkspaceProps {
   selectBranch: (branch: any) => void;
   activeTab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
   setActiveTab: (tab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
+  isAdmin: boolean;
 }
 
-function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab }: WorkspaceProps) {
+function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin }: WorkspaceProps) {
   const activeBranchName = branch?.branchName || "";
   const activeBranchBrand = branch?.brand || "";
 
