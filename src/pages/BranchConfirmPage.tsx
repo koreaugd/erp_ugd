@@ -262,6 +262,7 @@ interface WorkspaceProps {
 }
 
 function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin }: WorkspaceProps) {
+  const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
   const activeBranchBrand = branch?.brand || "";
 
@@ -633,15 +634,19 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           {/* 어드민 설정 버튼 */}
           <button
             onClick={handleOpenAdmin}
-            className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
+            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
           >
             <Settings className="w-3.5 h-3.5" />
             어드민 설정
           </button>
 
+          <button onClick={() => navigate("/admin")} className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}>
+            <Settings className="w-3.5 h-3.5" /> 관리자페이지
+          </button>
+
           <button
             onClick={() => selectBranch(null)}
-            className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
+            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
           >
             <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
             지점 변경하기
@@ -2273,6 +2278,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   };
 
   const handleCreateNewSettle = () => {
+    setHasExistingRecord(false);
+    setExistingRecordId(null);
+    setIsEditApproved(true);
+    setWriter("");
+    setTimeErrors({});
     setSubmittedResult(null);
     setCashSales("");
     setCardSales("");
@@ -2578,6 +2588,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 type="button"
                 onClick={() => {
                   if (!window.confirm("현재 화면의 마감 입력 내용을 비우고 처음부터 다시 작성할까요? 기존 저장 기록은 마감 제출 전까지 유지됩니다.")) return;
+                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setWriter("");
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("정산 입력을 초기화했습니다. 새 내용으로 마감 제출해 주세요.", "success");
                 }}
