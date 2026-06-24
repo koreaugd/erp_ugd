@@ -274,12 +274,13 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [mainCategory, setMainCategory] = useState<"daily" | "monthly">("daily");
+  const [mainCategory, setMainCategory] = useState<"daily" | "monthly" | "annualLeave">("daily");
   const [monthlyTab, setMonthlyTab] = useState<"purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const mainTabs = [
     { id: "daily", label: "일일마감정산", icon: Calendar },
-    { id: "monthly", label: "월말마감정산", icon: Coins }
+    { id: "monthly", label: "월말마감정산", icon: Coins },
+    { id: "annualLeave", label: "연차관리", icon: Calendar }
   ];
 
   // 1. Admin Settings State and Sync listening
@@ -601,6 +602,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   setMainCategory(mt.id as any);
                   if (mt.id === "daily") {
                     setActiveTab("settle");
+                  } else if (mt.id === "annualLeave") {
+                    setActiveTab("annualLeave");
                   }
                 }}
                 className={`flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer whitespace-nowrap w-full text-left justify-center md:justify-start ${
@@ -622,14 +625,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           })}
         </nav>
 
-        <div className="px-3 md:px-4 pb-3">
-          <button
-            onClick={() => { setMainCategory("daily"); setActiveTab("annualLeave"); }}
-            className={`w-full flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer ${activeTab === "annualLeave" ? "bg-white/15 text-white" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
-          >
-            <Calendar className="w-4 h-4" /> 연차관리
-          </button>
-        </div>
 
         {/* Change Branch / Signout Section Bottom */}
         <div className={`p-4 border-t hidden md:block space-y-2 transition-colors duration-300`}
@@ -803,6 +798,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               activeSubTab={monthlyTab}
             />
           )}
+
+          {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
         </main>
       </div>
 
@@ -3085,7 +3082,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             const std = div === "파트타이머" ? 0 : defaultStandardHours;
                             executeStaffCalculation(idx, { division: div, standardHours: std });
                           }}
-                          className="px-2 py-1.5 border border-gray-200 rounded-lg bg-white font-bold text-[11px]"
+                          className={`px-2 py-1.5 rounded-lg font-bold text-[11px] border ${s.division === "정직원" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}
                         >
                           <option value="정직원">정직원</option>
                           <option value="파트타이머">파트타이머</option>
@@ -3142,7 +3139,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
                       {/* Work Hours calculated */}
                       <td className="py-3.5 px-2 font-mono font-bold text-gray-600">
-                        <span className="py-1 px-2.5 bg-gray-100 rounded-md">
+                        <span className={`py-1 px-2.5 rounded-md ${s.workHours > 0 ? "bg-sky-100 text-sky-700" : "bg-gray-100 text-gray-600"}`}>
                           {s.workHours} h
                         </span>
                       </td>
