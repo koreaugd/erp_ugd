@@ -4531,7 +4531,8 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
                       "지출내용 (세부)": exp.detail || "",
                       "비고": "확인완료",
                       "작성자": m.submittedBy || m.submitted_by || (m as any).writer || "미상",
-                      "입력 시각": m.submittedAt ? new Date(m.submittedAt).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }) : "-"
+                      "입력 시각": m.submittedAt ? new Date(m.submittedAt).toISOString() : "",
+                      "_마감원본": m.settleDate
                     });
                   }
                 });
@@ -4571,7 +4572,9 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
             "금고 실사 현금 (원)": vaultVal,
             "차액 (불일치)": difference,
             "대조 불일치 사유 소명": metaParsed.cashDiffReason || "",
-            "점검 작성자": m.submittedBy || m.submitted_by || (m as any).writer || "매니저"
+            "점검 작성자": m.submittedBy || m.submitted_by || (m as any).writer || "매니저",
+            "_입력원본": m.submittedAt || "",
+            "_마감원본": m.settleDate
           });
         }
       });
@@ -4597,7 +4600,9 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
                       "항목 (분류)": exp.classification || "미분류",
                       "지출내용 (세부)": exp.detail || "",
                       "비고": "확인증빙필",
-                      "작성자": m.submittedBy || m.submitted_by || (m as any).writer || "매니저"
+                      "작성자": m.submittedBy || m.submitted_by || (m as any).writer || "매니저",
+                      "_입력원본": m.submittedAt || "",
+                      "_마감원본": m.settleDate
                     });
                   }
                 });
@@ -4608,33 +4613,103 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
       });
       cardList.sort((a,b) => a["마감 일자"].localeCompare(b["마감 일자"]));
 
-      // Construct Workbook
-      const psWS = XLSX.utils.json_to_sheet(psData);
-      const ptWS = XLSX.utils.json_to_sheet(ptData);
-      const cashWS = XLSX.utils.json_to_sheet(cashList);
-      const mgmtWS = XLSX.utils.json_to_sheet(cashMgmt);
-      const cardWS = XLSX.utils.json_to_sheet(cardList);
-
-      const includePS = adminSettings.excelIncludeSheets?.purchaseSales !== false;
-      const includePT = adminSettings.excelIncludeSheets?.partTimeSalary !== false;
-      const includeCashExp = adminSettings.excelIncludeSheets?.cashExpenses !== false;
-      const includeCashMgmt = adminSettings.excelIncludeSheets?.cashManagement !== false;
-      const includeCardExp = adminSettings.excelIncludeSheets?.cardExpenses !== false;
-
-      if (includePS) XLSX.utils.book_append_sheet(wb, psWS, "매입매출 대장");
-      if (includePT) XLSX.utils.book_append_sheet(wb, ptWS, "파트타이머 급여대장");
-      if (includeCashExp) XLSX.utils.book_append_sheet(wb, cashWS, "현금지출 일람");
-      if (includeCashMgmt) XLSX.utils.book_append_sheet(wb, mgmtWS, "현금관리 집계");
-      if (includeCardExp) XLSX.utils.book_append_sheet(wb, cardWS, "카드지출 일람");
-
       const [year, month] = selectedMonth.split("-");
-      const yy = year.slice(2);
-      const yymm = `${yy}${month}`;
-      const mVal = `${parseInt(month, 10)}월`;
+      const monthNumber = Number(month);
+      const formatDate = (value: string) => {
+        const match = String(value || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+        return match ? `${match[1]}. ${Number(match[2])}. ${Number(match[3])}` : "";
+      };
+      const formatCardDate = (value: string) => {
+        const match = String(value || "").match(/\d{4}-(\d{2})-(\d{2})/);
+        return match ? `${Number(match[1])} . ${Number(match[2])}` : "";
+      };
+      const formatInputDate = (value: string, fallback: string) => {
+        const parsed = value ? new Date(value) : null;
+        return parsed && !Number.isNaN(parsed.getTime())
+          ? `${parsed.getFullYear()}. ${parsed.getMonth() + 1}. ${parsed.getDate()}`
+          : formatDate(fallback);
+      };
 
-      const fileName = adminSettings.excelFilenamePattern === "original"
-        ? `${branchName}_월말마감결산_${selectedMonth}.xlsx`
-        : `${yymm}_${branchName}_월말마감_${mVal}.xlsx`;
+      const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        border: { top: { style: "thin", color: { rgb: "B7C9D6" } }, bottom: { style: "thin", color: { rgb: "B7C9D6" } }, left: { style: "thin", color: { rgb: "B7C9D6" } }, right: { style: "thin", color: { rgb: "B7C9D6" } } }
+      };
+      const titleStyle = { font: { bold: true, sz: 14, color: { rgb: "17365D" } }, alignment: { vertical: "center" } };
+      const bodyBorder = { top: { style: "thin", color: { rgb: "D9E2F3" } }, bottom: { style: "thin", color: { rgb: "D9E2F3" } }, left: { style: "thin", color: { rgb: "D9E2F3" } }, right: { style: "thin", color: { rgb: "D9E2F3" } } };
+
+      const makeSheet = (headers: string[], rows: any[][], widths: number[], includeTitle: boolean, numericColumns: number[] = [], textColumns: number[] = []) => {
+        const source = includeTitle
+          ? [[branchName, "", "", monthNumber, "월"], headers, ...rows]
+          : [headers, ...rows];
+        const sheet = XLSX.utils.aoa_to_sheet(source);
+        const headerRow = includeTitle ? 1 : 0;
+        sheet["!cols"] = widths.map((wch) => ({ wch }));
+        sheet["!rows"] = source.map((_, index) => ({ hpt: includeTitle && index === 0 ? 24 : index === headerRow ? 20 : 17 }));
+        for (let col = 0; col < headers.length; col++) {
+          const cell = sheet[XLSX.utils.encode_cell({ r: headerRow, c: col })];
+          if (cell) cell.s = headerStyle;
+        }
+        if (includeTitle) {
+          [0, 3, 4].forEach((col) => {
+            const cell = sheet[XLSX.utils.encode_cell({ r: 0, c: col })];
+            if (cell) cell.s = titleStyle;
+          });
+        }
+        for (let row = headerRow + 1; row < source.length; row++) {
+          for (let col = 0; col < headers.length; col++) {
+            const address = XLSX.utils.encode_cell({ r: row, c: col });
+            const cell = sheet[address];
+            if (!cell) continue;
+            cell.s = { border: bodyBorder, alignment: { vertical: "center", wrapText: col === headers.length - 1 } };
+            if (numericColumns.includes(col)) cell.z = "#,##0";
+            if (textColumns.includes(col)) cell.z = "@";
+          }
+        }
+        sheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: Math.max(headerRow, source.length - 1), c: headers.length - 1 } }) };
+        return sheet;
+      };
+
+      // 기준 파일의 시트명, 제목행, 헤더 순서와 열 폭을 그대로 사용합니다.
+      const purchaseHeaders = ["매출항목", "업체명", "이체 필요금액", "은행", "계좌번호", "기타내용", "이달사용금액", "오류"];
+      const purchaseRows = psData.map((row) => [row["분류항목"], row["송금/사용 대상업체명"], row["이체필요 금액 (원)"], row["은행"], row["계좌번호"], row["거래 비고 고지"], row["실제 이달사용액 (원)"], ""]);
+      const psWS = makeSheet(purchaseHeaders, purchaseRows, [17.17, 14, 12.17, 13.33, 40.83, 60.17, 14.83, 10.33], true, [2, 6], [4]);
+
+      const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
+      const partTimeRows = ptData.map((row) => [row["성명 (사원)"], row["주민등록번호"], row["입사일자"], row["근로계약"], row["은행"], row["입금 계좌번호"], row["시급 (원)"], row["누적시간"], row["기본급여"], row["근무일정 (출근일)"], row["실수령액 (송금)"], row["실제 송금지점"], row["기타 비고 내용 (퇴사일 등)"]]);
+      const ptWS = makeSheet(partTimeHeaders, partTimeRows, [11.57, 15.86, 10.21, 8.21, 5.14, 19.64, 10.71, 8.64, 9.29, 24.14, 10.21, 10.21, 41.43], true, [6, 7, 8, 10], [1, 5]);
+
+      const expenseHeaders = ["마감일자", "결제수단", "금액", "사용처(거래처)", "항목", "지출내용(세부)", "비고", "작성자", "입력시각", "마감키"];
+      const cashRows = cashList.map((row) => {
+        const date = String(row["_마감원본"] || row["마감 일자"] || "");
+        const writer = String(row["작성자"] || "");
+        return [formatDate(date), "현금", row["지출 금액"], row["거래처 (사용처)"], row["분류 항목"], row["지출내용 (세부)"], row["비고"] === "확인완료" ? "" : row["비고"], writer, formatInputDate(row["입력 시각"], date), `${date}|${writer}`];
+      });
+      const cashWS = makeSheet(expenseHeaders, cashRows, [11.3, 6.8, 16.4, 11.3, 24.8, 11.9, 6.8, 10.2, 11, 28.8], false, [2]);
+
+      const cashManagementHeaders = ["마감일자", "전일현금", "현금매출", "현금지출", "현금잔액", "실사현금", "차이", "계좌이체", "거래처", "항목", "품목명", "비고", "작성자", "입력시각", "마감키"];
+      const mgmtRows = cashMgmt.map((row) => {
+        const date = String(row["_마감원본"] || row["마감 일자"] || "");
+        const writer = String(row["점검 작성자"] || "");
+        return [formatDate(date), row["전일 금고현금"], row["금일 현금매출"], row["현금지출 합계"], row["이론상 잔액 (원)"], row["금고 실사 현금 (원)"], row["차액 (불일치)"], 0, "", "", "", row["대조 불일치 사유 소명"], writer, formatInputDate(row["_입력원본"], date), `${date}|${writer}`];
+      });
+      const mgmtWS = makeSheet(cashManagementHeaders, mgmtRows, [10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 23.23, 10.08, 10.08, 10.08], false, [1, 2, 3, 4, 5, 6, 7]);
+
+      const cardRows = cardList.map((row) => {
+        const date = String(row["_마감원본"] || row["마감 일자"] || "");
+        const writer = String(row["작성자"] || "");
+        return [formatCardDate(date), "카드", row["지출 금액"], row["사용처 (가맹점)"], row["항목 (분류)"], row["지출내용 (세부)"], row["비고"] === "확인증빙필" ? "" : row["비고"], writer, formatInputDate(row["_입력원본"], date), `${date}|${writer}`];
+      });
+      const cardWS = makeSheet(expenseHeaders, cardRows, [11.3, 6.8, 16.4, 18.8, 24.8, 13.3, 6.8, 6.8, 9.9, 23.5], false, [2]);
+
+      XLSX.utils.book_append_sheet(wb, psWS, "매입매출");
+      XLSX.utils.book_append_sheet(wb, ptWS, "파트타이머급여");
+      XLSX.utils.book_append_sheet(wb, cashWS, "현금지출");
+      XLSX.utils.book_append_sheet(wb, mgmtWS, "현금관리");
+      XLSX.utils.book_append_sheet(wb, cardWS, "카드지출");
+
+      const fileName = `월말정산_${branchName}${monthNumber}월.xlsx`;
 
       XLSX.writeFile(wb, fileName);
       triggerToast("엑셀 파일 다운로드 성공!", "success");
