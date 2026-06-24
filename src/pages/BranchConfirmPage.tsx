@@ -3735,7 +3735,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const partTimeCount = employees.filter((e) => e.division === "파트타이머").length;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="roster-tab-view">
+    <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-6" id="roster-tab-view">
       {/* Deletion Modal */}
       <AnimatePresence>
         {showDeleteModal && employeeToDelete && (
@@ -4119,7 +4119,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       </div>
 
       {/* Roster Right list */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
+      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4 min-w-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-3">
           <div>
             <h3 className="text-sm font-black text-gray-800">지점 등록 근무 인원</h3>
@@ -4133,17 +4133,17 @@ function RosterTab({ branchName }: { branchName: string }) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full min-w-[1180px] text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                <th className="py-2.5 px-3">근무자 번호</th>
-                <th className="py-2.5 px-3">성명 (이름)</th>
-                <th className="py-2.5 px-3">주민등록번호</th>
-                <th className="py-2.5 px-3">계약형태</th>
-                <th className="py-2.5 px-3">입사일</th>
-                <th className="py-2.5 px-3">계약종류 구분</th>
-                <th className="py-2.5 px-3">직급</th>
-                <th className="py-2.5 px-3 text-right">활동</th>
+                <th className="py-2.5 px-3 w-16 whitespace-nowrap">근무자 번호</th>
+                <th className="py-2.5 px-3 w-24 whitespace-nowrap">성명 (이름)</th>
+                <th className="py-2.5 px-3 w-40 whitespace-nowrap">주민등록번호</th>
+                <th className="py-2.5 px-3 w-28 whitespace-nowrap">계약형태</th>
+                <th className="py-2.5 px-3 w-40 whitespace-nowrap">입사일</th>
+                <th className="py-2.5 px-3 w-24 whitespace-nowrap">계약종류 구분</th>
+                <th className="py-2.5 px-3 w-24 whitespace-nowrap">직급</th>
+                <th className="py-2.5 px-3 w-20 text-right whitespace-nowrap">활동</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-medium">
@@ -4156,8 +4156,8 @@ function RosterTab({ branchName }: { branchName: string }) {
               ) : (
                 sortedEmployees.map((emp, idx) => (
                   <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold">
-                    <td className="py-3 px-3 text-gray-400 font-mono">#{idx + 1}</td>
-                    <td className="py-3 px-3 text-gray-800 font-extrabold text-sm">{emp.name}</td>
+                    <td className="py-3 px-3 text-gray-400 font-mono whitespace-nowrap">#{idx + 1}</td>
+                    <td className="py-3 px-3 text-gray-800 font-extrabold text-sm whitespace-nowrap">{emp.name}</td>
                     <td className="py-3 px-3">
                       <input
                         type="text"
@@ -4190,7 +4190,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                       />
                     </td>
                     <td className="py-3 px-3">
-                      <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black ${
+                      <span className={`inline-flex whitespace-nowrap px-2.5 py-0.5 rounded-lg text-[10px] font-black ${
                         emp.division === "정직원" 
                           ? "bg-amber-50 text-amber-700 border border-amber-100" 
                           : "bg-blue-50 text-[#2E6DB4] border border-blue-100"
