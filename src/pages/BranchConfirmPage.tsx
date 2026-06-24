@@ -2036,6 +2036,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     return h + (m === 30 ? 0.5 : 0);
   };
 
+  const normalizeTimeInput = (index: number, field: "clockIn" | "clockOut", value: string) => {
+    const match = value.trim().match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
+    if (!match) { triggerToast("시간은 24시간제로 09:00 또는 1530 형식으로 입력해 주세요.", "error"); return; }
+    const hour = (match[1] || match[3]).padStart(2, "0");
+    executeStaffCalculation(index, { [field]: `${hour}:${match[2] || match[4]}` });
+  };
+
   // Interactive Staff updates with calculation triggers
   const executeStaffCalculation = (index: number, updatedFields: Partial<StaffRow>) => {
     setStaffRows((prev) => {
@@ -2133,6 +2140,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       triggerToast("지점 정보를 불러올 수 없습니다. 로그아웃 후 다시 로그인해 주세요.", "error");
       return;
     }
+
+    const longShift = staffRows.filter((staff) => staff.workHours > 13);
+    if (longShift.length > 0 && !window.confirm(`${longShift.map((staff) => `${staff.name} ${staff.workHours}시간`).join(", ")} 근무가 13시간을 초과합니다. 출퇴근 시간 입력이 맞습니까?`)) return;
 
     setSubmitting(true);
     setValidationErrors(false);
@@ -3113,28 +3123,26 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
                       {/* Clock In */}
                       <td className="py-3.5 px-2">
-                        <select
+                        <input
+                          type="text"
                           value={s.clockIn}
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
-                          className="px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
-                        >
-                          {TIME_OPTIONS.map((time) => (
-                            <option key={time} value={time}>{time}</option>
-                          ))}
-                        </select>
+                          onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
+                          placeholder="24시간"
+                          className="w-16 px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
+                        />
                       </td>
 
                       {/* Clock Out */}
                       <td className="py-3.5 px-2">
-                        <select
+                        <input
+                          type="text"
                           value={s.clockOut}
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
-                          className="px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
-                        >
-                          {TIME_OPTIONS.map((time) => (
-                            <option key={time} value={time}>{time}</option>
-                          ))}
-                        </select>
+                          onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
+                          placeholder="24시간"
+                          className="w-16 px-1.5 py-1.5 border border-gray-200 rounded-lg font-mono bg-white text-[11px]"
+                        />
                       </td>
 
                       {/* Work Hours calculated */}
