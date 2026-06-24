@@ -3689,6 +3689,20 @@ function RosterTab({ branchName }: { branchName: string }) {
     )));
   };
 
+  const recordStaffMovement = async (employee: Employee, reason: "퇴사" | "지점이동", date: string, destination?: string) => {
+    const key = `staff_movements:${branchName}`;
+    const previous = (await gasClient.getSharedData<any[]>(key)) || [];
+    await gasClient.saveSharedData(key, [{
+      id: `movement-${Date.now()}`,
+      type: reason,
+      employeeName: employee.name,
+      fromBranch: branchName,
+      toBranch: reason === "지점이동" ? destination || "-" : "-",
+      effectiveDate: date,
+      createdAt: new Date().toISOString()
+    }, ...previous]);
+  };
+
   const handleAddEmployee = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -3831,9 +3845,14 @@ function RosterTab({ branchName }: { branchName: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const updated = employees.filter((emp) => emp.id !== employeeToDelete.id);
                     saveEmployees(updated);
+                    try {
+                      await recordStaffMovement(employeeToDelete, deleteReason, effectiveDate, targetBranch);
+                    } catch (error) {
+                      console.error("Staff movement history save failed:", error);
+                    }
                     
                     const detailMsg = deleteReason === "지점이동"
                       ? `[${employeeToDelete.name}] 님이 ${effectiveDate} 일자로 [${targetBranch}] (으)로 지점이동 삭제 완료되었습니다.`

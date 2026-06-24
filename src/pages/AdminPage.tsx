@@ -13,7 +13,7 @@ import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
-  X, Plus, Edit3, Save, LogOut, ShieldAlert
+  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -55,6 +55,11 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
+  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory">("dashboard");
+  const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
+  const [movementHistory, setMovementHistory] = useState<Array<any>>([]);
 
   // 본인 권한 검수 및 마크업 라우팅 분기
   useEffect(() => {
@@ -89,6 +94,34 @@ export default function AdminPage() {
   const triggerToast = (message: string, type: ToastType = "success") => {
     setToast({ message, type });
   };
+
+  const loadEmployeeDirectory = async () => {
+    try {
+      setDirectoryLoading(true);
+      const branches = await gasClient.getBranchList();
+      const results = await Promise.all(branches.map(async (branch) => {
+        const [employees, movements] = await Promise.all([
+          gasClient.getStaffRoster(branch.branchName),
+          gasClient.getSharedData<any[]>(`staff_movements:${branch.branchName}`).catch(() => null)
+        ]);
+        return {
+          employees: employees.filter((employee) => employee.division === "정직원").map((employee) => ({ ...employee, branchName: branch.branchName, brand: branch.brand })),
+          movements: Array.isArray(movements) ? movements : []
+        };
+      }));
+      setDirectoryEmployees(results.flatMap((result) => result.employees));
+      setMovementHistory(results.flatMap((result) => result.movements).sort((a, b) => String(b.effectiveDate || b.createdAt || "").localeCompare(String(a.effectiveDate || a.createdAt || ""))));
+    } catch (error) {
+      console.error("Employee directory load failed:", error);
+      triggerToast("직원명부를 불러오지 못했습니다.", "error");
+    } finally {
+      setDirectoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (adminSection === "employeeDirectory") void loadEmployeeDirectory();
+  }, [adminSection]);
 
   // 고유 브랜드 리스트 추출
   const brandList = useMemo(() => {
@@ -289,7 +322,21 @@ export default function AdminPage() {
         </div>
 
         <nav className="grow space-y-2">
-          <div className="flex items-center gap-3 px-4 py-3 bg-[#2E6DB4] rounded-xl text-white font-bold text-sm">
+          <button
+            onClick={() => setAdminSection("dashboard")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "dashboard" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <TrendingUp className="w-5 h-5" />
+            마감현황
+          </button>
+          <button
+            onClick={() => setAdminSection("employeeDirectory")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "employeeDirectory" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <Users className="w-5 h-5" />
+            직원명부
+          </button>
+          <div className="hidden">
             <TrendingUp className="w-5 h-5" />
             실시간 매출 현황
           </div>
@@ -329,6 +376,8 @@ export default function AdminPage() {
         </header>
 
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
+          {adminSection === "dashboard" && (
+            <>
           
           {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -541,6 +590,31 @@ export default function AdminPage() {
               </table>
             </div>
           </div>
+            </>
+          )}
+
+          {adminSection === "employeeDirectory" && (
+            <section className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 지점 직원명부</h2>
+                  <p className="text-xs text-gray-400 mt-1">정직원 명부와 퇴사·지점이동 이력을 확인합니다.</p>
+                </div>
+                <button onClick={() => void loadEmployeeDirectory()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
+              </div>
+              <div className="flex gap-2 border-b border-gray-200">
+                <button onClick={() => setDirectoryTab("roster")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "roster" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>직원명부</button>
+                <button onClick={() => setDirectoryTab("movements")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "movements" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변동내역</button>
+              </div>
+              {directoryLoading ? <div className="py-20 text-center"><LoadingSpinner size="md" /></div> : directoryTab === "roster" ? (
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                  <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">지점</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">직급</th><th className="px-5 py-3 text-left">주민등록번호</th><th className="px-5 py-3 text-left">입사일</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-5 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-5 py-3 font-bold">{employee.name}</td><td className="px-5 py-3">{employee.rank || "사원"}</td><td className="px-5 py-3 font-mono">{employee.residentNumber || "-"}</td><td className="px-5 py-3 font-mono">{employee.entryDate || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">처리일</th><th className="px-5 py-3 text-left">구분</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">기존 지점</th><th className="px-5 py-3 text-left">이동 지점</th></tr></thead><tbody className="divide-y divide-gray-100">{movementHistory.length ? movementHistory.map((item, index) => <tr key={item.id || index}><td className="px-5 py-3 font-mono">{item.effectiveDate || "-"}</td><td className="px-5 py-3 font-bold">{item.type || "-"}</td><td className="px-5 py-3 font-bold">{item.employeeName || "-"}</td><td className="px-5 py-3">{item.fromBranch || "-"}</td><td className="px-5 py-3">{item.toBranch || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 퇴사 또는 지점이동 내역이 없습니다.</td></tr>}</tbody></table></div></div>
+              )}
+            </section>
+          )}
         </main>
       </div>
 
