@@ -4620,7 +4620,7 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [branchName]);
+  }, [branchName, selectedMonth]);
 
   const handleDownloadExcel = useCallback(() => {
     try {
