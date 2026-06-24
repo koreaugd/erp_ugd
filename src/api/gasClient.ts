@@ -209,11 +209,13 @@ export const gasClient = {
     if (!branchName) {
       return { exists: false, record: null };
     }
-    return await callApi("checkDuplicate", { branchName, settleDate });
+    const { firebaseGetDailyFormBootstrap } = await import("./firebaseDirect");
+    return await firebaseGetDailyFormBootstrap(branchName, settleDate);
   },
 
   async getDailyFormBootstrap(branchName: string, settleDate: string): Promise<DailyFormBootstrap> {
-    return await callApi("getDailyFormBootstrap", { branchName, settleDate });
+    const { firebaseGetDailyFormBootstrap } = await import("./firebaseDirect");
+    return await firebaseGetDailyFormBootstrap(branchName, settleDate);
   },
 
   /**
@@ -224,12 +226,12 @@ export const gasClient = {
       throw new Error("지점 정보가 없습니다. 로그아웃 후 다시 로그인하고 지점을 선택해 주세요.");
     }
     // masterData는 구버전 GAS 호환용 별칭 (신버전은 master 우선, 구버전은 masterData 사용)
-    const result = await callApi("submitDaily", { master, masterData: master, expenses: expenses || [], staff: staff || [] });
+    const { firebaseSubmitDaily } = await import("./firebaseDirect");
+    const result = await firebaseSubmitDaily(master, expenses || [], staff || []);
     clearReadCache();
     if (result && result.recordId) {
       // Netlify 환경인 경우, 마감 정산 보존을 Firestore 클라우드 수집본에 직접 저장
       // 보조 백업은 저장 완료 화면을 늦추지 않도록 뒤에서 실행합니다.
-      void tryDirectBackup("settle", result.recordId, { master, expenses, staff });
     }
     return result;
   },
@@ -244,7 +246,8 @@ export const gasClient = {
     staff?: StaffRecord[],
     modifiedBy?: string
   ): Promise<{ success: boolean }> {
-    const result = await callApi("updateDaily", { recordId, masterData, expenses, staff, modifiedBy });
+    const { firebaseUpdateDaily } = await import("./firebaseDirect");
+    const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy);
     clearReadCache();
     if (result && result.success !== false) {
       // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화
@@ -269,7 +272,8 @@ export const gasClient = {
    * 특정 레코드 상세 조회 (마스터 + 지출 + 인원)
    */
   async getDailyDetail(recordId: string): Promise<DailySettleDetail> {
-    return await callApi("getDailyDetail", { recordId });
+    const { firebaseGetDailyDetail } = await import("./firebaseDirect");
+    return await firebaseGetDailyDetail(recordId);
   },
 
   /**
@@ -277,7 +281,8 @@ export const gasClient = {
    */
   async getBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
     try {
-      return await callCachedReadApi("getBranchHistory", { branchName, month });
+      const { firebaseGetBranchHistory } = await import("./firebaseDirect");
+      return await firebaseGetBranchHistory(branchName, month);
     } catch (err) {
       console.warn("getBranchHistory Action Failed. Returning empty fallback array.", err);
       return [];
@@ -299,25 +304,46 @@ export const gasClient = {
   },
 
   async getAttendanceLog(branchName: string, logType: "overtime" | "partTime"): Promise<{ records: any[]; summaryList: any[] }> {
-    return await callCachedReadApi("getAttendanceLog", { branchName, logType });
+    const { firebaseGetBranchHistory, firebaseGetDailyDetail } = await import("./firebaseDirect");
+    const history = await firebaseGetBranchHistory(branchName);
+    const records: any[] = [];
+    const summary = new Map<string, { hours: number; overtime: number; dates: Set<string> }>();
+    for (const item of history) {
+      const detail = await firebaseGetDailyDetail(item.recordId!);
+      for (const staff of detail.staff as any[]) {
+        const isPartTime = staff.division === "파트타이머" && Number(staff.workHours || 0) > 0;
+        const isOvertime = staff.division === "정직원" && Number(staff.overtime || 0) !== 0;
+        if ((logType === "partTime" && !isPartTime) || (logType === "overtime" && !isOvertime)) continue;
+        records.push({ settleDate: item.settleDate, staffName: staff.staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", writer: item.submittedBy || "점장" });
+        const aggregate = summary.get(staff.staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
+        aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staff.staffName, aggregate);
+      }
+    }
+    records.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
+    const summaryList = Array.from(summary.entries()).map(([name, value]) => logType === "partTime" ? ({ name, totalHours: value.hours, daysCount: value.dates.size, workedDaysList: Array.from(value.dates).sort().map((date) => `${Number(date.split("-")[2])}일`).join(", ") }) : ({ name, totalOvertime: value.overtime }));
+    return { records, summaryList };
   },
 
   async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
-    return await callCachedReadApi("getStaffRoster", { branchName });
+    const { firebaseGetStaffRoster } = await import("./firebaseDirect");
+    return await firebaseGetStaffRoster(branchName);
   },
 
   async saveStaffRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
-    const result = await callApi("saveStaffRoster", { branchName, employees });
+    const { firebaseSaveStaffRoster } = await import("./firebaseDirect");
+    const result = await firebaseSaveStaffRoster(branchName, employees);
     clearReadCache();
     return result;
   },
 
   async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
-    return await callCachedReadApi<T | null>("getSharedData", { dataKey });
+    const { firebaseGetSharedData } = await import("./firebaseDirect");
+    return await firebaseGetSharedData(dataKey);
   },
 
   async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
-    const result = await callApi("saveSharedData", { dataKey, value });
+    const { firebaseSaveSharedData } = await import("./firebaseDirect");
+    const result = await firebaseSaveSharedData(dataKey, value);
     clearReadCache();
     return result;
   },
