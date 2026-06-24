@@ -3582,25 +3582,48 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editContractType, setEditContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [editEntryDate, setEditEntryDate] = useState("");
 
-  // 원격 직원 명단을 우선 사용합니다. 기존 기기에만 있던 명단은
-  // 지점 전용 branch_own_rosters 컬렉션을 우선 사용합니다.
-  // 관리자 직원명부(staff_rosters)와 분리되어 관리자 수정사항이 지점 화면에 영향을 주지 않습니다.
+  // 지점 전용 branch_own_rosters 컬렉션을 사용합니다.
+  // 관리자 직원명부(staff_rosters)와 분리되어 있으며,
+  // 관리자가 직원명부에서 추가한 인원(employeeId: emp-XXXXX 형식)은 자동으로 걸러냅니다.
   useEffect(() => {
     let cancelled = false;
     const syncRoster = async () => {
       try {
-        const remoteEmployees = await gasClient.getBranchOwnRoster(branchName);
+        // 관리자 직원명부에서 직접 등록된 인원 판별 (employeeId가 emp-숫자 형식)
+        const isAdminAdded = (emp: any) => /^emp-\d/.test(String(emp.employeeId || ""));
+
+        const remoteOwn = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        if (remoteEmployees.length > 0) {
-          setEmployees(remoteEmployees as Employee[]);
-          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(remoteEmployees));
+        if (remoteOwn.length > 0) {
+          const cleaned = remoteOwn.filter((emp: any) => !isAdminAdded(emp));
+          if (cleaned.length < remoteOwn.length) {
+            // 관리자 등록 인원이 섞여 있으면 제거 후 저장
+            await gasClient.saveBranchOwnRoster(branchName, cleaned);
+          }
+          setEmployees(cleaned as Employee[]);
+          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(cleaned));
           return;
         }
 
+        // branch_own_rosters가 비어 있으면 staff_rosters에서 지점 등록 인원만 이전합니다.
+        const legacyRoster = await gasClient.getStaffRoster(branchName);
+        if (cancelled) return;
+        const branchOriginal = legacyRoster.filter((emp: any) => !isAdminAdded(emp));
+        if (branchOriginal.length > 0) {
+          setEmployees(branchOriginal as Employee[]);
+          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(branchOriginal));
+          await gasClient.saveBranchOwnRoster(branchName, branchOriginal);
+          return;
+        }
+
+        // legacy 데이터도 없으면 localStorage에서 이전합니다.
         const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
         const localEmployees = saved ? JSON.parse(saved) : [];
         if (Array.isArray(localEmployees) && localEmployees.length > 0) {
-          await gasClient.saveBranchOwnRoster(branchName, localEmployees);
+          const localOriginal = localEmployees.filter((emp: any) => !isAdminAdded(emp));
+          if (localOriginal.length > 0) {
+            await gasClient.saveBranchOwnRoster(branchName, localOriginal);
+          }
         }
       } catch (error) {
         console.warn("직원 명단 원격 동기화에 실패했습니다.", error);
