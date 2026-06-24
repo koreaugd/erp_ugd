@@ -138,6 +138,12 @@ export default function AdminPage() {
   const makeEmployeeId = () => `UGD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   const toMoney = (value: unknown) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || 0;
   const normalizeText = (value: unknown) => String(value ?? "").replace(/[\s()점]/g, "").toLowerCase();
+  const birthDateFromResident = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    if (digits.length < 7) return "";
+    const century = ["1", "2", "5", "6"].includes(digits[6]) ? "19" : "20";
+    return `${century}${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4, 6)}`;
+  };
   const formatTenure = (entryDate?: string) => {
     if (!entryDate) return "-";
     const start = new Date(entryDate);
@@ -195,7 +201,8 @@ export default function AdminPage() {
             const branch = branches.find((item) => { const a = normalizeText(item.branchName); const b = normalizeText(rawBranch); const c = normalizeText(sheetName); return a === b || a === c || a.includes(b) || b.includes(a) || a.includes(c) || c.includes(a); });
             if (!branch) continue;
             const list = updates.get(branch.branchName) || [];
-            list.push({ name, residentNumber: String(row[residentCol] || "").trim(), rank: String(row[rankCol] || "사원").trim(), entryDate: String(row[entryCol] || "").trim(), contractType: String(row[contractCol] || "4대보험").trim(), salary: toMoney(row[salaryCol]) });
+            const residentNumber = String(row[residentCol] || "").trim();
+            list.push({ name, residentNumber, birthDate: birthDateFromResident(residentNumber), rank: String(row[rankCol] || "사원").trim(), entryDate: String(row[entryCol] || "").trim(), contractType: String(row[contractCol] || "4대보험").trim(), salary: toMoney(row[salaryCol]) });
             updates.set(branch.branchName, list);
           }
         }
