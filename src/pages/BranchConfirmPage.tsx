@@ -1869,7 +1869,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setDeliverySales(String(detail.master.deliverySales || "0"));
           // 새 마감에서는 작성자를 비워 두되, 기존 마감을 수정할 때는
           // 당시 작성자를 반드시 되살립니다.
-          setWriter(detail.master.submittedBy || "");
+          // 과거 마감에는 작성자가 숫자로 저장된 경우가 있습니다.
+          // 입력값과 제출 검증에서 trim()을 안전하게 사용할 수 있도록 항상 문자열로 정규화합니다.
+          setWriter(String(detail.master.submittedBy ?? ""));
 
           // Metadata extraction from memo
           const divider = "\n---\nMETADATA:";
@@ -2094,8 +2096,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   // Submit flow
   const handleSettleSubmit = async () => {
     if (submitting) return;
+    const writerName = String(writer ?? "").trim();
 
-    if (!writer.trim() && !hasExistingRecord) {
+    if (!writerName && !hasExistingRecord) {
       setValidationErrors(true);
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
       return;
@@ -2219,13 +2222,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         transferSales: Number(transferSales) || 0,
         deliverySales: Number(deliverySales) || 0,
         memo: combinedMemo,
-        submittedBy: writer.trim()
+        submittedBy: writerName
       };
 
       let response;
       if (hasExistingRecord && existingRecordId) {
         // Edit mode (GAS Spreadsheet updates row & logs modification)
-        response = await gasClient.updateDaily(existingRecordId, masterPayload, formattedExpenses, formattedStaff, writer.trim());
+        response = await gasClient.updateDaily(existingRecordId, masterPayload, formattedExpenses, formattedStaff, writerName);
         triggerToast("해당 날짜의 마감 정산 정보가 업데이트에 성공했습니다!");
       } else {
         // Save mode
@@ -2235,7 +2238,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
       setSubmittedResult({
         date: settleDate,
-        writer: writer.trim(),
+        writer: writerName,
         total: totalSales,
         recordId: existingRecordId || (response as any)?.recordId || `uid-${Date.now()}`
       });
