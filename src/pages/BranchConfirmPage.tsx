@@ -140,6 +140,24 @@ interface OrderItem {
   orderDate: string;
 }
 
+interface InventoryProduct {
+  id: string;
+  classification: string;
+  importer: string;
+  itemName: string;
+  salePrice: string;
+  costPrice: string;
+}
+
+interface InventoryMovement {
+  id: string;
+  productId: string;
+  movementDate: string;
+  inbound: string;
+  sold: string;
+  memo: string;
+}
+
 interface Employee {
   id: string;
   name: string;
@@ -856,8 +874,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 id={`tab-view-${activeTab}`}
               >
                 {activeTab === "settle" && <DailySettleTab branchName={activeBranchName} />}
-                {activeTab === "orders" && <OrderManagementTab branchName={activeBranchName} />}
-                {activeTab === "liquorInventory" && <LiquorInventoryTab branchName={activeBranchName} />}
+                {activeTab === "orders" && <OrderManagementTabV2 branchName={activeBranchName} />}
+                {activeTab === "liquorInventory" && <LiquorInventoryTabV2 branchName={activeBranchName} />}
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
                 {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
@@ -3885,6 +3903,390 @@ function LiquorInventoryTab({ branchName }: { branchName: string }) {
   const saveRows = (next: any[]) => { setRows(next); localStorage.setItem(storageKey, JSON.stringify(next)); };
   const addRow = (event: React.FormEvent) => { event.preventDefault(); if (!itemName.trim()) return; saveRows([{ id: "liq-" + Date.now(), itemName: itemName.trim(), stockQty: stockQty.trim(), memo: memo.trim(), checkedAt: new Date().toISOString().slice(0, 10) }, ...rows]); setItemName(""); setStockQty(""); setMemo(""); };
   return <div className="space-y-5" id="liquor-inventory-tab"><section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm"><h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고</h3><form onSubmit={addRow} className="grid grid-cols-1 md:grid-cols-[1fr_140px_1fr_auto] gap-3 mt-4 items-end"><input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="주류명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="재고수량" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" /><button className="px-5 py-2.5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">등록</button></form></section><section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">확인일</th><th className="p-3">주류명</th><th className="p-3">재고수량</th><th className="p-3">비고</th></tr></thead><tbody className="divide-y divide-gray-100">{rows.length === 0 ? <tr><td colSpan={4} className="p-10 text-center text-gray-400 font-bold">등록된 주류 재고가 없습니다.</td></tr> : rows.map((row) => <tr key={row.id}><td className="p-3 font-mono text-xs text-gray-500">{row.checkedAt}</td><td className="p-3 font-black">{row.itemName}</td><td className="p-3">{row.stockQty || "-"}</td><td className="p-3 text-gray-600">{row.memo || "-"}</td></tr>)}</tbody></table></section></div>;
+}
+
+const ORDER_CATEGORIES: OrderCategory[] = ["식자재", "주류", "식음료외 기타"];
+const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
+  식자재: ["비알(식자재)", "쿠팡(식자재)", "네이버(식자재)"],
+  주류: [],
+  "식음료외 기타": []
+};
+
+const monthDays = (monthValue: string) => {
+  const [year, month] = monthValue.split("-").map(Number);
+  const count = new Date(year, month, 0).getDate();
+  return Array.from({ length: count }, (_, index) => String(index + 1).padStart(2, "0"));
+};
+
+function OrderManagementTabV2({ branchName }: { branchName: string }) {
+  const storageKey = "erp_orders_" + branchName;
+  const vendorKey = "erp_order_vendors_" + branchName;
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [vendorsByCategory, setVendorsByCategory] = useState<Record<OrderCategory, string[]>>(ORDER_DEFAULT_VENDORS);
+  const [vendorCategory, setVendorCategory] = useState<OrderCategory>("식자재");
+  const [vendorText, setVendorText] = useState("");
+  const [category, setCategory] = useState<OrderCategory>("식자재");
+  const [vendorName, setVendorName] = useState(ORDER_DEFAULT_VENDORS.식자재[0]);
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [reportCategory, setReportCategory] = useState<OrderCategory | "전체">("식자재");
+  const [reportVendor, setReportVendor] = useState("전체");
+
+  useEffect(() => {
+    try {
+      const savedOrders = localStorage.getItem(storageKey);
+      const savedVendors = localStorage.getItem(vendorKey);
+      if (savedOrders) setOrders(JSON.parse(savedOrders));
+      if (savedVendors) {
+        const parsed = JSON.parse(savedVendors);
+        if (Array.isArray(parsed)) {
+          setVendorsByCategory({ ...ORDER_DEFAULT_VENDORS, 식자재: Array.from(new Set([...ORDER_DEFAULT_VENDORS.식자재, ...parsed])) });
+        } else if (parsed && typeof parsed === "object") {
+          setVendorsByCategory({
+            식자재: Array.from(new Set([...ORDER_DEFAULT_VENDORS.식자재, ...(parsed.식자재 || [])])),
+            주류: Array.from(new Set([...(parsed.주류 || [])])),
+            "식음료외 기타": Array.from(new Set([...(parsed["식음료외 기타"] || [])]))
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load order data", err);
+    }
+  }, [storageKey, vendorKey]);
+
+  const currentVendors = vendorsByCategory[category] || [];
+  const reportVendors = useMemo(() => {
+    const categories = reportCategory === "전체" ? ORDER_CATEGORIES : [reportCategory];
+    const names = categories.flatMap((item) => vendorsByCategory[item] || []);
+    return Array.from(new Set(names));
+  }, [reportCategory, vendorsByCategory]);
+
+  useEffect(() => {
+    const list = vendorsByCategory[category] || [];
+    setVendorName((prev) => list.includes(prev) ? prev : (list[0] || ""));
+  }, [category, vendorsByCategory]);
+
+  useEffect(() => {
+    if (reportVendor !== "전체" && !reportVendors.includes(reportVendor)) setReportVendor("전체");
+  }, [reportVendor, reportVendors]);
+
+  const saveVendors = (next: Record<OrderCategory, string[]>) => {
+    setVendorsByCategory(next);
+    localStorage.setItem(vendorKey, JSON.stringify(next));
+  };
+
+  const saveOrders = (next: OrderItem[]) => {
+    setOrders(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+  };
+
+  const addVendors = () => {
+    const names = vendorText.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+    if (names.length === 0) return;
+    const next = {
+      ...vendorsByCategory,
+      [vendorCategory]: Array.from(new Set([...(vendorsByCategory[vendorCategory] || []), ...names]))
+    };
+    saveVendors(next);
+    setVendorText("");
+    if (category === vendorCategory && !vendorName) setVendorName(names[0]);
+  };
+
+  const handlePlaceOrder = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!category || !vendorName.trim() || !amount.trim()) return;
+    const newOrder: OrderItem = {
+      id: "ord-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+      category,
+      vendorName: vendorName.trim(),
+      amount: cleanNumeric(amount),
+      memo: memo.trim(),
+      orderDate
+    };
+    saveOrders([newOrder, ...orders]);
+    setAmount("");
+    setMemo("");
+  };
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const sameMonth = String(order.orderDate || "").startsWith(reportMonth);
+      const sameCategory = reportCategory === "전체" || order.category === reportCategory;
+      const sameVendor = reportVendor === "전체" || order.vendorName === reportVendor;
+      return sameMonth && sameCategory && sameVendor;
+    });
+  }, [orders, reportCategory, reportMonth, reportVendor]);
+
+  const matrixVendors = reportVendor === "전체" ? reportVendors : [reportVendor];
+  const totals = matrixVendors.map((vendor) => filteredOrders.filter((order) => order.vendorName === vendor).reduce((sum, order) => sum + Number(order.amount || 0), 0));
+  const monthTotal = totals.reduce((sum, item) => sum + item, 0);
+
+  return (
+    <div className="space-y-5" id="orders-tab-view">
+      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-[#2E6DB4]" /> 거래처 추가</h3>
+          <p className="text-xs text-gray-400 mt-1">대분류를 고른 뒤 업체명을 줄바꿈 또는 쉼표로 여러 개 추가할 수 있습니다.</p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_auto] gap-3 items-end">
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>대분류</span>
+            <select value={vendorCategory} onChange={(e) => setVendorCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800">
+              {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>거래처명</span>
+            <textarea value={vendorText} onChange={(e) => setVendorText(e.target.value)} rows={2} placeholder="예: 대정, 크리스탈, 카나와인" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none" />
+          </label>
+          <button type="button" onClick={addVendors} className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 업체 추가</button>
+        </div>
+      </section>
+
+      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><FileText className="w-5 h-5 text-[#2E6DB4]" /> 발주 등록</h3>
+          <p className="text-xs text-gray-400 mt-1">날짜, 대분류, 거래처, 금액, 기타내용을 입력하면 아래 리포트에 날짜별로 반영됩니다.</p>
+        </div>
+        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 xl:grid-cols-[160px_160px_220px_160px_1fr_auto] gap-3 items-end">
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>발주일</span><input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl font-mono font-bold" /></label>
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>대분류</span><select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800">{ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>거래처</span><select value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-800">{currentVendors.length === 0 ? <option value="">거래처를 먼저 추가하세요</option> : currentVendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}</select></label>
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>금액</span><input value={formatWithCommas(amount)} onChange={(e) => setAmount(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="0" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-right font-mono font-black" /></label>
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>기타내용</span><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="품목, 요청사항, 비고" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl" /></label>
+          <button type="submit" className="h-[42px] px-5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 등록</button>
+        </form>
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-100 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3>
+              <p className="text-xs text-gray-400 mt-1">대분류와 거래처를 선택하면 해당 월의 날짜별 입력 금액을 표로 확인할 수 있습니다.</p>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-[#2E6DB4]/10 text-[#1A3C6E] text-xs font-black">월 합계 {formatNumber(monthTotal)}원</div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+            <select value={reportCategory} onChange={(e) => setReportCategory(e.target.value as OrderCategory | "전체")} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+              <option value="전체">전체 대분류</option>
+              {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select value={reportVendor} onChange={(e) => setReportVendor(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+              <option value="전체">전체 거래처</option>
+              {reportVendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-xs">
+            <thead className="bg-gray-50 text-gray-600 font-black border-b">
+              <tr>
+                <th className="sticky left-0 z-10 bg-gray-50 p-3 w-20 border-r">일</th>
+                {matrixVendors.map((vendor) => <th key={vendor} className="p-3 min-w-[140px] text-right border-r">{vendor}</th>)}
+                <th className="p-3 min-w-[130px] text-right bg-slate-100">일 합계</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {monthDays(reportMonth).map((day) => {
+                const dateKey = reportMonth + "-" + day;
+                const rowValues = matrixVendors.map((vendor) => filteredOrders.filter((order) => order.orderDate === dateKey && order.vendorName === vendor).reduce((sum, order) => sum + Number(order.amount || 0), 0));
+                const rowTotal = rowValues.reduce((sum, item) => sum + item, 0);
+                return (
+                  <tr key={dateKey} className="hover:bg-slate-50/70">
+                    <td className="sticky left-0 bg-white p-3 text-center font-mono font-black text-gray-600 border-r">{Number(day)}</td>
+                    {rowValues.map((value, index) => <td key={matrixVendors[index]} className="p-3 text-right font-mono border-r">{value ? formatNumber(value) : ""}</td>)}
+                    <td className="p-3 text-right font-mono font-black bg-slate-50">{rowTotal ? formatNumber(rowTotal) : ""}</td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-gray-100 font-black">
+                <td className="sticky left-0 bg-gray-100 p-3 text-center border-r">합계</td>
+                {totals.map((value, index) => <td key={matrixVendors[index]} className="p-3 text-right font-mono border-r">{value ? formatNumber(value) : ""}</td>)}
+                <td className="p-3 text-right font-mono text-[#2E6DB4]">{formatNumber(monthTotal)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
+  const productKey = "erp_liquor_products_" + branchName;
+  const movementKey = "erp_liquor_movements_" + branchName;
+  const [products, setProducts] = useState<InventoryProduct[]>([]);
+  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [classification, setClassification] = useState("샴페인");
+  const [importer, setImporter] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [salePrice, setSalePrice] = useState("");
+  const [costPrice, setCostPrice] = useState("");
+  const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [inbound, setInbound] = useState("");
+  const [sold, setSold] = useState("");
+  const [memo, setMemo] = useState("");
+
+  useEffect(() => {
+    try {
+      const savedProducts = localStorage.getItem(productKey);
+      const savedMovements = localStorage.getItem(movementKey);
+      if (savedProducts) setProducts(JSON.parse(savedProducts));
+      if (savedMovements) setMovements(JSON.parse(savedMovements));
+    } catch (err) {
+      console.error("Failed to load liquor inventory", err);
+    }
+  }, [productKey, movementKey]);
+
+  useEffect(() => {
+    if (!selectedProductId && products[0]) setSelectedProductId(products[0].id);
+  }, [products, selectedProductId]);
+
+  const saveProducts = (next: InventoryProduct[]) => {
+    setProducts(next);
+    localStorage.setItem(productKey, JSON.stringify(next));
+  };
+
+  const saveMovements = (next: InventoryMovement[]) => {
+    setMovements(next);
+    localStorage.setItem(movementKey, JSON.stringify(next));
+  };
+
+  const addProduct = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!itemName.trim()) return;
+    const nextProduct = {
+      id: "liq-product-" + Date.now(),
+      classification: classification.trim() || "기타",
+      importer: importer.trim(),
+      itemName: itemName.trim(),
+      salePrice: cleanNumeric(salePrice),
+      costPrice: cleanNumeric(costPrice)
+    };
+    saveProducts([...products, nextProduct]);
+    setSelectedProductId(nextProduct.id);
+    setItemName("");
+    setImporter("");
+    setSalePrice("");
+    setCostPrice("");
+  };
+
+  const addMovement = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProductId) return;
+    const nextMovement = {
+      id: "liq-move-" + Date.now(),
+      productId: selectedProductId,
+      movementDate,
+      inbound: cleanNumeric(inbound),
+      sold: cleanNumeric(sold),
+      memo: memo.trim()
+    };
+    saveMovements([nextMovement, ...movements]);
+    setInbound("");
+    setSold("");
+    setMemo("");
+  };
+
+  const stockOf = (productId: string, untilDate?: string) => {
+    return movements
+      .filter((movement) => movement.productId === productId && (!untilDate || movement.movementDate <= untilDate))
+      .reduce((sum, movement) => sum + Number(movement.inbound || 0) - Number(movement.sold || 0), 0);
+  };
+
+  const visibleDates: string[] = Array.from(new Set<string>(movements.map((movement) => movement.movementDate))).sort().slice(-10);
+
+  return (
+    <div className="space-y-5" id="liquor-inventory-tab">
+      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고 관리표</h3>
+          <p className="text-xs text-gray-400 mt-1">상품 기본정보를 등록하고 날짜별 입고, 판매, 재고 흐름을 관리합니다.</p>
+        </div>
+        <form onSubmit={addProduct} className="grid grid-cols-1 xl:grid-cols-[140px_160px_1fr_150px_150px_auto] gap-3 items-end">
+          <input value={classification} onChange={(e) => setClassification(e.target.value)} placeholder="분류" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+          <input value={importer} onChange={(e) => setImporter(e.target.value)} placeholder="수입사" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+          <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="상품명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+          <input value={formatWithCommas(salePrice)} onChange={(e) => setSalePrice(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="판매가" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono text-right font-black" />
+          <input value={formatWithCommas(costPrice)} onChange={(e) => setCostPrice(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="원가" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono text-right font-black" />
+          <button className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
+        </form>
+        <form onSubmit={addMovement} className="grid grid-cols-1 xl:grid-cols-[160px_1fr_140px_140px_1fr_auto] gap-3 items-end pt-3 border-t border-gray-100">
+          <input type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
+          <select value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+            {products.length === 0 ? <option value="">상품을 먼저 추가하세요</option> : products.map((product) => <option key={product.id} value={product.id}>{product.itemName}</option>)}
+          </select>
+          <input value={inbound} onChange={(e) => setInbound(e.target.value.replace(/[^0-9-]/g, ""))} inputMode="numeric" placeholder="입고" className="px-3 py-2.5 border border-blue-100 bg-blue-50/60 rounded-xl text-sm font-mono text-right font-black" />
+          <input value={sold} onChange={(e) => setSold(e.target.value.replace(/[^0-9-]/g, ""))} inputMode="numeric" placeholder="판매" className="px-3 py-2.5 border border-rose-100 bg-rose-50/60 rounded-xl text-sm font-mono text-right font-black" />
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" />
+          <button className="h-[42px] px-5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">기록</button>
+        </form>
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1180px] text-xs">
+            <thead className="bg-[#202A5A] text-white font-black">
+              <tr>
+                <th rowSpan={2} className="p-3 text-left">분류</th>
+                <th rowSpan={2} className="p-3 text-left">수입사</th>
+                <th rowSpan={2} className="p-3 text-left min-w-[180px]">상품명</th>
+                <th rowSpan={2} className="p-3 text-right">판매가</th>
+                <th rowSpan={2} className="p-3 text-right">원가</th>
+                <th rowSpan={2} className="p-3 text-right">마진율</th>
+                <th rowSpan={2} className="p-3 text-center bg-slate-700">현재 재고</th>
+                {visibleDates.map((date) => <th key={date} colSpan={3} className="p-2 text-center border-l border-white/20">{date.slice(5)}</th>)}
+              </tr>
+              <tr>
+                {visibleDates.map((date) => (
+                  <React.Fragment key={date}>
+                    <th className="p-2 bg-blue-100 text-blue-900">입고</th>
+                    <th className="p-2 bg-rose-100 text-rose-900">판매</th>
+                    <th className="p-2 bg-green-100 text-green-900">재고</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {products.length === 0 ? (
+                <tr><td colSpan={7 + visibleDates.length * 3} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
+              ) : products.map((product) => {
+                const margin = Number(product.salePrice || 0) ? Math.round((1 - Number(product.costPrice || 0) / Number(product.salePrice || 1)) * 1000) / 10 : 0;
+                return (
+                  <tr key={product.id} className="hover:bg-slate-50/70">
+                    <td className="p-3 font-bold">{product.classification}</td>
+                    <td className="p-3">{product.importer || "-"}</td>
+                    <td className="p-3 font-black text-gray-900">{product.itemName}</td>
+                    <td className="p-3 text-right font-mono text-blue-700">{formatNumber(Number(product.salePrice || 0))}</td>
+                    <td className="p-3 text-right font-mono text-emerald-700">{formatNumber(Number(product.costPrice || 0))}</td>
+                    <td className="p-3 text-right font-mono text-purple-700">{margin ? margin + "%" : "-"}</td>
+                    <td className="p-3 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
+                    {visibleDates.map((date) => {
+                      const dayRows = movements.filter((movement) => movement.productId === product.id && movement.movementDate === date);
+                      const inSum = dayRows.reduce((sum, movement) => sum + Number(movement.inbound || 0), 0);
+                      const soldSum = dayRows.reduce((sum, movement) => sum + Number(movement.sold || 0), 0);
+                      return (
+                        <React.Fragment key={date}>
+                          <td className="p-3 text-center font-mono bg-blue-50">{inSum || ""}</td>
+                          <td className="p-3 text-center font-mono bg-rose-50">{soldSum || ""}</td>
+                          <td className="p-3 text-center font-mono bg-green-50 font-black">{stockOf(product.id, date)}</td>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 // ----------------------------------------------------
