@@ -274,6 +274,11 @@ export const gasClient = {
     return result;
   },
 
+  async getEditLogs(): Promise<any[]> {
+    const { firebaseGetEditLogs } = await import("./firebaseDirect");
+    return await firebaseGetEditLogs();
+  },
+
   /**
    * 특정 일자의 전체 지점 마감 리스트 조회
    */
@@ -389,6 +394,16 @@ export const gasClient = {
     const result = await firebaseSaveSharedData(dataKey, value);
     clearReadCache();
     return result;
+  },
+
+  async getAllManualOvertimes(): Promise<any[]> {
+    const { firebaseGetAllManualOvertimes } = await import("./firebaseDirect");
+    return await firebaseGetAllManualOvertimes();
+  },
+
+  async getAllLaborContracts(): Promise<any[]> {
+    const { firebaseGetAllLaborContracts } = await import("./firebaseDirect");
+    return await firebaseGetAllLaborContracts();
   },
 
   /**

@@ -61,6 +61,47 @@
         }
       },
       "required": ["recordId"]
+    },
+    "EditLog": {
+      "title": "EditLog",
+      "description": "지점 마감 정산 정보 수정 이력 로그",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "로그 고유 ID"
+        },
+        "recordId": {
+          "type": "string",
+          "description": "수정 대상 마감 레코드 ID"
+        },
+        "branchName": {
+          "type": "string",
+          "description": "수정 대상 지점명"
+        },
+        "settleDate": {
+          "type": "string",
+          "description": "수정 대상 마감 일자"
+        },
+        "modifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "수정 일시"
+        },
+        "modifiedBy": {
+          "type": "string",
+          "description": "수정 작업자 정보"
+        },
+        "before": {
+          "type": "object",
+          "description": "수정 전 정산 상태"
+        },
+        "after": {
+          "type": "object",
+          "description": "수정 후 정산 상태"
+        }
+      },
+      "required": ["id", "recordId", "branchName", "settleDate", "modifiedAt", "modifiedBy", "before", "after"]
     }
   },
   "firestore": {
@@ -71,6 +112,10 @@
     "daily_settles": {
       "schema": "DailySettle",
       "description": "일일 마감 정산 원장 보존 대장 저장소"
+    },
+    "edit_logs": {
+      "schema": "EditLog",
+      "description": "지점 마감 정산 정보 수정 이력 저장소"
     }
   }
 }

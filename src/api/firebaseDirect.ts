@@ -1,11 +1,11 @@
 // src/api/firebaseDirect.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  doc, 
-  setDoc, 
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  doc,
+  setDoc,
   deleteDoc,
   getDoc,
   getDocFromServer
@@ -83,11 +83,60 @@ export async function firebaseGetBranchHistory(branchName: string, month?: strin
     .sort((a, b) => b.settleDate.localeCompare(a.settleDate));
 }
 
+export async function firebaseGetEditLogs() {
+  const snapshot = await getDocs(collection(getDirectDb(), "edit_logs"));
+  return snapshot.docs.map((item) => item.data() as any)
+    .sort((a: any, b: any) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
 export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string) {
   const detail = await firebaseGetDailyDetail(recordId);
-  const master = { ...detail.master, ...masterData, modifiedAt: new Date().toISOString(), modifiedBy: modifiedBy || "관리자" };
+  const now = new Date().toISOString();
+
+  const beforeState = {
+    cashSales: Number(detail.master?.cashSales || 0),
+    cardSales: Number(detail.master?.cardSales || 0),
+    transferSales: Number(detail.master?.transferSales || 0),
+    deliverySales: Number(detail.master?.deliverySales || 0),
+    memo: detail.master?.memo || "",
+    expenses: detail.expenses || [],
+    staff: detail.staff || []
+  };
+
+  const master = { ...detail.master, ...masterData, modifiedAt: now, modifiedBy: modifiedBy || "관리자" };
   master.totalSales = Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0);
-  await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master, expenses: expenses ?? detail.expenses, staff: staff ?? detail.staff, updatedAt: new Date().toISOString() });
+
+  const afterExpenses = expenses ?? detail.expenses;
+  const afterStaff = staff ?? detail.staff;
+
+  const afterState = {
+    cashSales: Number(master.cashSales || 0),
+    cardSales: Number(master.cardSales || 0),
+    transferSales: Number(master.transferSales || 0),
+    deliverySales: Number(master.deliverySales || 0),
+    memo: master.memo || "",
+    expenses: afterExpenses,
+    staff: afterStaff
+  };
+
+  await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master, expenses: afterExpenses, staff: afterStaff, updatedAt: now });
+
+  try {
+    const logId = `${recordId}-${Date.now()}`;
+    await setDoc(doc(getDirectDb(), "edit_logs", logId), {
+      id: logId,
+      recordId,
+      branchName: master.branchName,
+      settleDate: master.settleDate,
+      modifiedAt: now,
+      modifiedBy: modifiedBy || "관리자",
+      before: beforeState,
+      after: afterState
+    });
+  } catch (err) {
+    console.warn("Failed to write edit log to Firebase:", err);
+  }
+
   return { success: true };
 }
 
@@ -140,6 +189,48 @@ export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
   return { success: true };
 }
 
+export async function firebaseGetAllManualOvertimes() {
+  const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
+  const allOvertimes: any[] = [];
+  snapshot.forEach((doc) => {
+    const key = decodeURIComponent(doc.id);
+    if (key.startsWith("manual_overtime:")) {
+      const branchName = key.replace("manual_overtime:", "");
+      const list = doc.data().value || [];
+      if (Array.isArray(list)) {
+        list.forEach((item: any) => {
+          allOvertimes.push({
+            ...item,
+            branchName,
+          });
+        });
+      }
+    }
+  });
+  return allOvertimes;
+}
+
+export async function firebaseGetAllLaborContracts() {
+  const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
+  const allContracts: any[] = [];
+  snapshot.forEach((doc) => {
+    const key = decodeURIComponent(doc.id);
+    if (key.startsWith("labor_contracts:")) {
+      const branchName = key.replace("labor_contracts:", "");
+      const list = doc.data().value || [];
+      if (Array.isArray(list)) {
+        list.forEach((item: any) => {
+          allContracts.push({
+            ...item,
+            branchName,
+          });
+        });
+      }
+    }
+  });
+  return allContracts;
+}
+
 export enum OperationType {
   CREATE = "create",
   UPDATE = "update",
@@ -189,7 +280,7 @@ export function getDirectDb() {
   if (!isFirebaseConfigValid()) {
     throw new Error("firebase-applet-config.json 구성 파일이 누락되었거나 불완전합니다.");
   }
-  
+
   if (!dbInstance) {
     if (getApps().length === 0) {
       appInstance = initializeApp(firebaseConfig);
@@ -198,7 +289,7 @@ export function getDirectDb() {
     }
     // 프레임워크 스키마 내 firestoreDatabaseId를 정규 인수로 지정하여 초기화
     dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
-    
+
     // 부팅 시점에 1회 커넥션을 시범적으로 점검 (Skill 요구사항 충족)
     testConnection(dbInstance);
   }
@@ -233,7 +324,7 @@ export async function getDirectFirebaseStatus() {
     const db = getDirectDb();
     const settleSnap = await getDocs(collection(db, "daily_settles"));
     const settingSnap = await getDocs(collection(db, "settings"));
-    
+
     return {
       success: true,
       connected: true,
@@ -356,7 +447,7 @@ export async function backupSettleDirect(recordId: string, payload: { master: an
 export async function syncDirectToFirebase() {
   try {
     const db = getDirectDb();
-    
+
     // 1. 전체 설정 동기화
     const branches = await gasClient.getBranchListAll();
     const existingSettingsSnap = await getDocs(collection(db, "settings"));
@@ -386,10 +477,10 @@ export async function syncDirectToFirebase() {
       const history = await gasClient.getBranchHistory(b.branchName);
       for (const item of history) {
         if (!item.recordId) continue;
-        
+
         // 지출 및 근무 인적 세부 정보 획득
         const detail = await gasClient.getDailyDetail(item.recordId);
-        
+
         const masterObj = {
           record_id: item.recordId,
           branch_name: item.branchName,
@@ -405,14 +496,14 @@ export async function syncDirectToFirebase() {
           modified_at: item.modifiedAt || "",
           modified_by: item.modifiedBy || ""
         };
-        
+
         const expensesArr = (detail.expenses || []).map((e: any) => ({
           record_id: item.recordId,
           expense_type: e.expenseType,
           item_name: e.itemName,
           amount: Number(e.amount)
         }));
-        
+
         const staffArr = (detail.staff || []).map((s: any) => ({
           record_id: item.recordId,
           staff_name: s.staffName,
@@ -426,7 +517,7 @@ export async function syncDirectToFirebase() {
           staff: staffArr,
           _updatedAt: new Date().toISOString()
         };
-        
+
         await setDoc(doc(db, "daily_settles", item.recordId), backupObj);
         settlesCount++;
       }
