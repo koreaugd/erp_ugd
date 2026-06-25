@@ -47,6 +47,13 @@ const maskResidentNumber = (value?: string) => {
   return `${digits.slice(0, 6)}-${"*".repeat(Math.min(7, digits.length - 6))}`;
 };
 
+const toPhoneTail8 = (value: string) => String(value || "").replace(/\D/g, "").slice(0, 8);
+const formatMobilePhone = (tail8: string) => {
+  const digits = toPhoneTail8(tail8);
+  if (digits.length !== 8) return digits ? `010-${digits}` : "";
+  return `010-${digits.slice(0, 4)}-${digits.slice(4)}`;
+};
+
 const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
 
 const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string }>) => {
@@ -123,6 +130,7 @@ interface StaffRow {
   residentNumber?: string;
   rank?: string;
   entryDate?: string;
+  phone?: string;
   addReason?: StaffAddReason;
   fromBranch?: string;
   transferDate?: string;
@@ -181,6 +189,7 @@ interface Employee {
   residentNumber?: string;
   contractType?: "4대보험" | "3.3%";
   entryDate?: string;
+  phone?: string;
   addReason?: StaffAddReason;
   fromBranch?: string;
   transferDate?: string;
@@ -2108,10 +2117,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [newStaffInputResidentNumber, setNewStaffInputResidentNumber] = useState("");
   const [newStaffInputRank, setNewStaffInputRank] = useState("");
   const [newStaffInputEntryDate, setNewStaffInputEntryDate] = useState("");
+  const [newStaffInputPhoneDigits, setNewStaffInputPhoneDigits] = useState("");
   const [newStaffInputAddReason, setNewStaffInputAddReason] = useState<StaffAddReason>("신규입사");
   const [newStaffInputFromBranch, setNewStaffInputFromBranch] = useState("");
   const [newStaffInputTransferDate, setNewStaffInputTransferDate] = useState("");
   const [newStaffInputAddReasonMemo, setNewStaffInputAddReasonMemo] = useState("");
+  const [transferBranchList, setTransferBranchList] = useState<any[]>([]);
+  const [loadingTransferBranches, setLoadingTransferBranches] = useState(false);
 
   // Expenses
   const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>([
@@ -2145,6 +2157,43 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setTimeout(() => setToast(null), 3000);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadTransferBranches = async () => {
+      try {
+        setLoadingTransferBranches(true);
+        let list = await gasClient.getBranchList();
+        if (!Array.isArray(list) || list.length === 0) {
+          const cached = sessionStorage.getItem("erp_branch_list_cache");
+          const parsed = cached ? JSON.parse(cached) : null;
+          list = Array.isArray(parsed) ? parsed : parsed?.branches || [];
+        }
+        if (cancelled) return;
+        const filtered = list.filter((b: any) => b.role === "branch" && b.branchName !== branchName);
+        setTransferBranchList(filtered);
+        setNewStaffInputFromBranch((current) => current || filtered[0]?.branchName || "");
+      } catch (error) {
+        console.warn("이동 전 지점 목록 로드 실패:", error);
+        if (!cancelled) {
+          try {
+            const cached = sessionStorage.getItem("erp_branch_list_cache");
+            const parsed = cached ? JSON.parse(cached) : null;
+            const cachedBranches = (Array.isArray(parsed) ? parsed : parsed?.branches || [])
+              .filter((b: any) => b.role === "branch" && b.branchName !== branchName);
+            setTransferBranchList(cachedBranches);
+            setNewStaffInputFromBranch((current) => current || cachedBranches[0]?.branchName || "");
+          } catch {
+            setTransferBranchList([]);
+          }
+        }
+      } finally {
+        if (!cancelled) setLoadingTransferBranches(false);
+      }
+    };
+    loadTransferBranches();
+    return () => { cancelled = true; };
+  }, [branchName]);
+
   // Google Sheets/GAS가 시트 잠금 또는 콜드 스타트로 지연될 수 있습니다.
   // 제출은 계속 한 번만 유지하고, 30초 뒤에는 오류가 아닌 진행 상태를 안내합니다.
   useEffect(() => {
@@ -2166,6 +2215,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       residentNumber: emp.residentNumber || "",
       rank: emp.rank || "",
       entryDate: emp.entryDate || "",
+      phone: emp.phone || "",
       addReason: emp.addReason,
       fromBranch: emp.fromBranch || "",
       transferDate: emp.transferDate || "",
@@ -2302,6 +2352,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                  residentNumber: emp.residentNumber || "",
                  rank: emp.rank || "",
                  entryDate: emp.entryDate || "",
+                 phone: emp.phone || "",
                  addReason: emp.addReason,
                  fromBranch: emp.fromBranch || "",
                  transferDate: emp.transferDate || "",
@@ -2567,6 +2618,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               residentNumber: formatResidentNumber(s.residentNumber || ""),
               contractType: s.division === "정직원" ? "4대보험" as const : "3.3%" as const,
               entryDate: s.entryDate || "",
+              phone: s.phone || "",
               addReason: s.addReason,
               fromBranch: s.fromBranch || "",
               transferDate: s.transferDate || "",
@@ -3524,7 +3576,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         {/* Inline Employee Field Addition Block */}
         <div className="flex flex-wrap items-center gap-2.5 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
-          <span className="font-extrabold text-zinc-800">🆕 신규 근무자 추가:</span>
+          <span className="font-extrabold text-zinc-800">추가</span>
           <input
             type="text"
             placeholder="근무자 이름 입력"
@@ -3581,15 +3633,32 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               />
             </label>
           )}
-          {newStaffInputAddReason === "지점이동" && (
-            <>
+          {newStaffInputAddReason === "신규입사" && (
+            <label className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden text-xs">
+              <span className="px-2 py-1.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
               <input
                 type="text"
-                placeholder="이동 전 지점"
+                inputMode="numeric"
+                placeholder="12345678"
+                value={newStaffInputPhoneDigits}
+                onChange={(e) => setNewStaffInputPhoneDigits(toPhoneTail8(e.target.value))}
+                className="w-24 px-2 py-1.5 bg-white focus:outline-hidden font-mono font-bold"
+                aria-label="핸드폰번호 뒤 8자리"
+              />
+            </label>
+          )}
+          {newStaffInputAddReason === "지점이동" && (
+            <>
+              <select
                 value={newStaffInputFromBranch}
                 onChange={(e) => setNewStaffInputFromBranch(e.target.value)}
-                className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden w-28"
-              />
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32"
+              >
+                <option value="">{loadingTransferBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
+                {transferBranchList.map((branch: any) => (
+                  <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>
+                ))}
+              </select>
               <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
                 <span>이동일</span>
                 <input
@@ -3633,6 +3702,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 triggerToast("신규입사일을 선택해 주세요.", "error");
                 return;
               }
+              if (newStaffInputAddReason === "신규입사" && toPhoneTail8(newStaffInputPhoneDigits).length !== 8) {
+                triggerToast("핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.", "error");
+                return;
+              }
               if (newStaffInputAddReason === "지점이동" && (!newStaffInputFromBranch.trim() || !newStaffInputTransferDate)) {
                 triggerToast("이동 전 지점과 이동일을 입력해 주세요.", "error");
                 return;
@@ -3652,6 +3725,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 residentNumber: formattedResident,
                 rank: newStaffInputDivision === "정직원" ? newStaffInputRank : undefined,
                 entryDate: newStaffInputAddReason === "지점이동" ? newStaffInputTransferDate : newStaffInputEntryDate,
+                phone: newStaffInputAddReason === "신규입사" ? formatMobilePhone(newStaffInputPhoneDigits) : "",
                 addReason: newStaffInputAddReason,
                 fromBranch: newStaffInputAddReason === "지점이동" ? newStaffInputFromBranch.trim() : "",
                 transferDate: newStaffInputAddReason === "지점이동" ? newStaffInputTransferDate : "",
@@ -3669,6 +3743,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               setNewStaffInputResidentNumber("");
               setNewStaffInputRank("");
               setNewStaffInputEntryDate("");
+              setNewStaffInputPhoneDigits("");
               setNewStaffInputAddReason("신규입사");
               setNewStaffInputFromBranch("");
               setNewStaffInputTransferDate("");
@@ -3700,7 +3775,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               {staffRows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-10 text-center text-gray-400">
-                    등록된 지점 직원이 없습니다. 신규 근무자 추가 입력을 통해 인원을 생성해주세요.
+                    등록된 지점 직원이 없습니다. 추가 입력을 통해 인원을 생성해주세요.
                   </td>
                 </tr>
               ) : (
@@ -4508,6 +4583,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [newResidentNumber, setNewResidentNumber] = useState("");
   const [newContractType, setNewContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [newEntryDate, setNewEntryDate] = useState("");
+  const [newPhoneDigits, setNewPhoneDigits] = useState("");
   const [newAddReason, setNewAddReason] = useState<StaffAddReason>("신규입사");
   const [newFromBranch, setNewFromBranch] = useState("");
   const [newTransferDate, setNewTransferDate] = useState("");
@@ -4701,6 +4777,10 @@ function RosterTab({ branchName }: { branchName: string }) {
       alert("신규입사일을 선택해 주세요.");
       return;
     }
+    if (newAddReason === "신규입사" && toPhoneTail8(newPhoneDigits).length !== 8) {
+      alert("핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.");
+      return;
+    }
     if (newAddReason === "지점이동" && (!newFromBranch.trim() || !newTransferDate)) {
       alert("이동 전 지점과 이동일을 입력해 주세요.");
       return;
@@ -4722,6 +4802,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       residentNumber: formattedResident,
       contractType: newContractType,
       entryDate: newAddReason === "지점이동" ? newTransferDate : newEntryDate,
+      phone: newAddReason === "신규입사" ? formatMobilePhone(newPhoneDigits) : "",
       addReason: newAddReason,
       fromBranch: newAddReason === "지점이동" ? newFromBranch.trim() : "",
       transferDate: newAddReason === "지점이동" ? newTransferDate : "",
@@ -4741,6 +4822,7 @@ function RosterTab({ branchName }: { branchName: string }) {
     setNewResidentNumber("");
     setNewContractType("4대보험");
     setNewEntryDate("");
+    setNewPhoneDigits("");
     setNewAddReason("신규입사");
     setNewFromBranch("");
     setNewTransferDate("");
@@ -5030,8 +5112,8 @@ function RosterTab({ branchName }: { branchName: string }) {
           신규 등록
         </h3>
 
-        <form onSubmit={handleAddEmployee} className="flex flex-wrap items-end gap-3 text-xs">
-          <div className="flex w-44 flex-col space-y-1.5">
+        <form onSubmit={handleAddEmployee} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 text-xs items-end">
+          <div className="flex flex-col space-y-1.5">
             <span className="font-bold text-gray-500">성명 (이름)</span>
             <input
               type="text"
@@ -5119,7 +5201,7 @@ function RosterTab({ branchName }: { branchName: string }) {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 sm:col-span-2 lg:col-span-4 xl:col-span-6">
             <div className="flex flex-col space-y-1.5">
               <label className="font-bold text-gray-500">계약형태</label>
               <select
@@ -5156,6 +5238,24 @@ function RosterTab({ branchName }: { branchName: string }) {
                 className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4] cursor-pointer"
               />
             </div>
+            )}
+
+            {newAddReason === "신규입사" && (
+              <div className="flex flex-col space-y-1.5">
+                <label className="font-bold text-gray-500">핸드폰번호</label>
+                <div className="flex items-center border border-gray-200 rounded-xl bg-gray-50/50 overflow-hidden focus-within:bg-white focus-within:border-[#2E6DB4]">
+                  <span className="px-3.5 py-2.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={newPhoneDigits}
+                    onChange={(e) => setNewPhoneDigits(toPhoneTail8(e.target.value))}
+                    placeholder="12345678"
+                    className="w-full min-w-0 px-3 py-2.5 bg-transparent font-mono text-sm font-bold focus:outline-hidden"
+                    aria-label="핸드폰번호 뒤 8자리"
+                  />
+                </div>
+              </div>
             )}
 
             {newAddReason === "지점이동" && (
@@ -5203,12 +5303,14 @@ function RosterTab({ branchName }: { branchName: string }) {
             )}
           </div>
 
-          <button
-            type="submit"
-            className="w-full py-4 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-colors flex items-center justify-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" /> 근무자 최종 등록
-          </button>
+          <div className="sm:col-span-2 lg:col-span-4 xl:col-span-6 flex justify-end pt-1">
+            <button
+              type="submit"
+              className="w-full sm:w-56 h-11 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> 근무자 최종 등록
+            </button>
+          </div>
         </form>
       </div>
 
