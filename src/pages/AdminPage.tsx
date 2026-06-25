@@ -100,8 +100,26 @@ export default function AdminPage() {
     if (!user) return;
     try {
       setLoading(true);
-      const list = await gasClient.getDailyList(selectedDate, user.pinHash);
-      setDailyList(list);
+      const [list, branches] = await Promise.all([
+        gasClient.getDailyList(selectedDate, user.pinHash),
+        gasClient.getBranchList().catch(() => [])
+      ]);
+      const byBranch = new Map<string, DailyListRow>();
+      list.forEach((item) => byBranch.set(item.branchName, item));
+      branches
+        .filter((branch: any) => branch?.role === "branch" && branch.branchName)
+        .forEach((branch: any) => {
+          if (!byBranch.has(branch.branchName)) {
+            byBranch.set(branch.branchName, {
+              branchName: branch.branchName,
+              brand: branch.brand || branch.branchName,
+              role: "branch",
+              submitted: false,
+              record: null
+            });
+          }
+        });
+      setDailyList(Array.from(byBranch.values()));
     } catch (e: any) {
       console.error(e);
       triggerToast(e.message || "정산 리스트를 불러오지 못했습니다.", "error");
