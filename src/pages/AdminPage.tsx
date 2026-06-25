@@ -13,7 +13,7 @@ import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
-  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList
+  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { loginWithAdminPin } from "../api/firebaseAuth";
@@ -30,8 +30,17 @@ export default function AdminPage() {
     return `${year}-${month}-${day}`;
   };
 
+  const getYesterdayDateString = () => {
+    const local = new Date();
+    local.setDate(local.getDate() - 1);
+    const year = local.getFullYear();
+    const month = String(local.getMonth() + 1).padStart(2, "0");
+    const day = String(local.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   // 1. 관리자 필터 관련 상태
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());
+  const [selectedDate, setSelectedDate] = useState<string>(getYesterdayDateString());
   const [selectedBrand, setSelectedBrand] = useState<string>("전체");
   
   // 2. 데이터 수집 상태
@@ -56,7 +65,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory" | "annualLeave">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -530,6 +539,20 @@ export default function AdminPage() {
             연차관리
           </button>
           <button
+            onClick={() => setAdminSection("modificationLogs")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "modificationLogs" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <ShieldAlert className="w-5 h-5" />
+            변경이력 & 수기대장
+          </button>
+          <button
+            onClick={() => setAdminSection("laborContracts")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "laborContracts" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <Briefcase className="w-5 h-5" />
+            근로계약서 발송 현황
+          </button>
+          <button
             onClick={() => navigate("/branch-confirm")}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors text-white/80 hover:bg-white/10 hover:text-white"
           >
@@ -591,99 +614,149 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
                 <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button></div>
                 {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div></div>}
-                <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="border-b text-left text-gray-500"><tr><th className="py-3">마감일</th><th>지점</th><th>마감자</th><th>이상 항목</th><th>내용</th></tr></thead><tbody className="divide-y">{anomalyLoading ? <tr><td colSpan={5} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr> : anomalyRecords.filter((item) => closingView === "dashboard" || closingView === "cash" ? Boolean(item.cashDifference) : Boolean(item.overtime)).map((item, index, list) => <tr key={`${item.branchName}-${item.date}-${index}`} className={index === 0 || item.date === list[0]?.date ? "bg-sky-50" : ""}><td className="py-3 font-mono">{item.date}</td><td className="font-bold">{item.branchName}</td><td>{item.writer || "-"}</td><td className="font-bold text-rose-600">{closingView === "cash" ? "현금 차이" : closingView === "overtime" ? "초과근무" : item.issues.join(", ")}{(index === 0 || item.date === list[0]?.date) && <span className="ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">NEW</span>}</td><td>{closingView === "cash" ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}` : item.overtime || "-"}</td></tr>)}</tbody></table></div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="border-b text-left text-gray-500">
+                      <tr>
+                        <th className="py-3">마감일</th>
+                        <th>지점</th>
+                        <th>마감자</th>
+                        <th>이상 항목</th>
+                        <th>내용</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {anomalyLoading ? (
+                        <tr>
+                          <td colSpan={5} className="py-10 text-center">
+                            <LoadingSpinner size="sm" />
+                          </td>
+                        </tr>
+                      ) : (
+                        anomalyRecords
+                          .filter((item) =>
+                            closingView === "dashboard" || closingView === "cash"
+                              ? Boolean(item.cashDifference)
+                              : Boolean(item.overtime)
+                          )
+                          .map((item, index, list) => (
+                            <tr
+                              key={`${item.branchName}-${item.date}-${index}`}
+                              className={index === 0 || item.date === list[0]?.date ? "bg-sky-50" : ""}
+                            >
+                              <td className="py-3 font-mono">{item.date}</td>
+                              <td className="font-bold">{item.branchName}</td>
+                              <td>{item.writer || "-"}</td>
+                              <td className="font-bold text-rose-600">
+                                {closingView === "cash"
+                                  ? "현금 차이"
+                                  : closingView === "overtime"
+                                  ? "초과근무"
+                                  : item.issues.join(", ")}
+                                {(index === 0 || item.date === list[0]?.date) && (
+                                  <span className="ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
+                                    NEW
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {closingView === "cash"
+                                  ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
+                                  : item.overtime || "-"}
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </section>
-              <section className="hidden">
-                <div className="flex items-center justify-between"><div><h2 className="text-xl font-black text-[#2C3E50]">마감 이상치 누적 모니터링</h2><p className="text-xs text-gray-400 mt-1">현금 차이와 초과근무가 발생한 일일마감 기록을 누적 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-500 font-bold">현금 차이 발생</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference !== 0).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무 발생</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black text-slate-700">{anomalyRecords.length}건</p></div></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="text-left text-gray-500 border-b"><tr><th className="py-3">마감일</th><th>지점</th><th>이상 항목</th><th className="text-right">현금 차이</th><th>초과근무</th><th>차이 사유</th></tr></thead><tbody className="divide-y">{anomalyLoading ? <tr><td colSpan={6} className="py-8 text-center"><LoadingSpinner size="sm" /></td></tr> : anomalyRecords.slice(0, 100).map((item, index) => <tr key={`${item.branchName}-${item.date}-${index}`}><td className="py-3 font-mono">{item.date}</td><td className="font-bold">{item.branchName}</td><td><span className="text-rose-600 font-bold">{item.issues.join(", ")}</span></td><td className="text-right font-mono">{item.cashDifference ? formatNumber(item.cashDifference) : "-"}</td><td>{item.overtime || "-"}</td><td className="text-gray-500">{item.reason || "-"}</td></tr>)}</tbody></table></div>
-              </section>
-          
-          {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">지점 정산 실시간 모니터링</h2>
-              <p className="text-xs text-gray-400 mt-0.5 font-medium">14개 외식 사업장의 매출 보고서 자동 합산 내역입니다.</p>
-            </div>
 
-            {/* 필터 세트 */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 border border-gray-200 bg-white py-2 px-3 rounded-xl shadow-xs">
-                <Calendar className="w-4 h-4 text-[#2E6DB4]" />
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="font-mono text-xs font-extrabold text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-32"
-                  id="admin-date-picker"
-                />
-              </div>
+              {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전일 정산 현황</h2>
+                  <p className="text-xs text-gray-400 mt-0.5 font-medium">14개 외식 사업장의 전일 기준 매출 보고서 자동 합산 내역입니다.</p>
+                </div>
 
-              {/* 엑셀 파일 다운로드 링크 */}
-              <button
-                onClick={handleDownloadExcel}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer select-none"
-                id="btn-excel-download"
-              >
-                <Download className="w-4 h-4" /> 엑셀 다운로드 (XLSX)
-              </button>
-            </div>
-          </div>
+                {/* 필터 세트 */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 border border-gray-200 bg-white py-2 px-3 rounded-xl shadow-xs">
+                    <Calendar className="w-4 h-4 text-[#2E6DB4]" />
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="font-mono text-xs font-extrabold text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-32"
+                      id="admin-date-picker"
+                    />
+                  </div>
 
-          {/* ----------------------------------------------------
-              [상단 요약 카드 3개]
-             ---------------------------------------------------- */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5" id="stats-cards">
-            {/* 1. 제출 상태 지표 */}
-            <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-gray-400 block">오늘 제출 지점</span>
-                <span className="text-2xl font-mono font-black text-[#2C3E50]" id="stat-submitted-count">
-                  {stats.submitted} <span className="text-xs font-bold text-gray-300 font-sans">/ {stats.total} 지점</span>
-                </span>
-                <div className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> 완료율 {stats.total > 0 ? Math.round((stats.submitted / stats.total) * 100) : 0}%
+                  {/* 엑셀 파일 다운로드 링크 */}
+                  <button
+                    onClick={handleDownloadExcel}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer select-none"
+                    id="btn-excel-download"
+                  >
+                    <Download className="w-4 h-4" /> 엑셀 다운로드 (XLSX)
+                  </button>
                 </div>
               </div>
-              <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-            </div>
 
-            {/* 2. 미제출 지점 */}
-            <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-gray-400 block">오늘 미제출 지점</span>
-                <span className="text-2xl font-mono font-black text-[#2C3E50]" id="stat-pending-count">
-                  {stats.pending} <span className="text-xs font-bold text-gray-300 font-sans">지점</span>
-                </span>
-                {stats.pending > 0 ? (
-                  <div className="text-[11px] font-semibold text-[#F39C12] flex items-center gap-1 animate-pulse">
-                    <AlertTriangle className="w-3.5 h-3.5" /> 대기 등록 수집 중
+              {/* ----------------------------------------------------
+                  [상단 요약 카드 3개]
+                 ---------------------------------------------------- */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5" id="stats-cards">
+                {/* 1. 제출 상태 지표 */}
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-gray-400 block">어제 제출 지점</span>
+                    <span className="text-2xl font-mono font-black text-[#2C3E50]" id="stat-submitted-count">
+                      {stats.submitted} <span className="text-xs font-bold text-gray-300 font-sans">/ {stats.total} 지점</span>
+                    </span>
+                    <div className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> 완료율 {stats.total > 0 ? Math.round((stats.submitted / stats.total) * 100) : 0}%
+                    </div>
                   </div>
-                ) : (
-                  <div className="text-[11px] font-semibold text-emerald-600">만점 매장 완료</div>
-                )}
-              </div>
-              <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-            </div>
+                  <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                </div>
 
-            {/* 3. 금일 총 매출 합계 */}
-            <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-gray-400 block">금일 총 수집 매출액</span>
-                <span className="text-2xl font-mono font-black text-[#2E6DB4]" id="stat-total-revenue">
-                  {formatNumber(stats.revenue)} <span className="text-xs font-sans font-bold text-gray-400">원</span>
-                </span>
-                <div className="text-[11px] font-semibold text-gray-400">실시간 순수 매출 자동 산정</div>
+                {/* 2. 미제출 지점 */}
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-gray-400 block">어제 미제출 지점</span>
+                    <span className="text-2xl font-mono font-black text-[#2C3E50]" id="stat-pending-count">
+                      {stats.pending} <span className="text-xs font-bold text-gray-300 font-sans">지점</span>
+                    </span>
+                    {stats.pending > 0 ? (
+                      <div className="text-[11px] font-semibold text-[#F39C12] flex items-center gap-1 animate-pulse">
+                        <AlertTriangle className="w-3.5 h-3.5" /> 대기 등록 수집 중
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-semibold text-emerald-600">만점 매장 완료</div>
+                    )}
+                  </div>
+                  <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                </div>
+
+                {/* 3. 금일 총 매출 합계 */}
+                <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-gray-400 block">어제 총 수집 매출액</span>
+                    <span className="text-2xl font-mono font-black text-[#2E6DB4]" id="stat-total-revenue">
+                      {formatNumber(stats.revenue)} <span className="text-xs font-sans font-bold text-gray-400">원</span>
+                    </span>
+                    <div className="text-[11px] font-semibold text-gray-400">어제 기준 순수 매출 자동 산정</div>
+                  </div>
+                  <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                </div>
               </div>
-              <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl">
-                <TrendingUp className="w-6 h-6" />
-              </div>
-            </div>
-          </div>
 
           {/* ----------------------------------------------------
               [필터 바]
@@ -814,6 +887,10 @@ export default function AdminPage() {
           )}
 
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
+
+          {adminSection === "modificationLogs" && <AdminModificationLogsSection />}
+
+          {adminSection === "laborContracts" && <AdminLaborContractsSection />}
 
           {employeeDirectoryEnabled && adminSection === "employeeDirectory" && (
             <section className="space-y-6">
@@ -1520,5 +1597,529 @@ function AdminAnnualLeaveSection() {
         </div>
       </div>
     </section>
+  );
+}
+
+function AdminModificationLogsSection() {
+  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">("logs");
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchBranch, setSearchBranch] = useState("");
+  const [searchDate, setSearchDate] = useState("");
+
+  const loadLogs = async () => {
+    try {
+      setLoading(true);
+      const data = await gasClient.getEditLogs();
+      setLogs(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const matchBranch = !searchBranch || log.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
+      const matchDate = !searchDate || log.settleDate?.includes(searchDate);
+      return matchBranch && matchDate;
+    });
+  }, [logs, searchBranch, searchDate]);
+
+  const formatShortDate = (isoString: string) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return isoString;
+    return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const getChangesSummary = (log: any) => {
+    const changes: string[] = [];
+    const before = log.before || {};
+    const after = log.after || {};
+
+    if (before.cashSales !== after.cashSales) {
+      changes.push(`현금매출: ${formatNumber(before.cashSales)}원 ➔ ${formatNumber(after.cashSales)}원`);
+    }
+    if (before.cardSales !== after.cardSales) {
+      changes.push(`카드매출: ${formatNumber(before.cardSales)}원 ➔ ${formatNumber(after.cardSales)}원`);
+    }
+    if (before.transferSales !== after.transferSales) {
+      changes.push(`계좌매출: ${formatNumber(before.transferSales)}원 ➔ ${formatNumber(after.transferSales)}원`);
+    }
+    if (before.deliverySales !== after.deliverySales) {
+      changes.push(`배달매출: ${formatNumber(before.deliverySales)}원 ➔ ${formatNumber(after.deliverySales)}원`);
+    }
+    if (before.memo !== after.memo) {
+      changes.push(`마감 메모 변경됨`);
+    }
+
+    const beforeExpLength = before.expenses?.length || 0;
+    const afterExpLength = after.expenses?.length || 0;
+    if (beforeExpLength !== afterExpLength) {
+      changes.push(`지출 항목 수: ${beforeExpLength}개 ➔ ${afterExpLength}개`);
+    } else if (before.expenses && after.expenses) {
+      let diff = false;
+      for (let i = 0; i < beforeExpLength; i++) {
+        if (before.expenses[i]?.amount !== after.expenses[i]?.amount || before.expenses[i]?.itemName !== after.expenses[i]?.itemName) {
+          diff = true;
+          break;
+        }
+      }
+      if (diff) changes.push(`지출 세부 내역 수정됨`);
+    }
+
+    const beforeStaffLength = before.staff?.length || 0;
+    const afterStaffLength = after.staff?.length || 0;
+    if (beforeStaffLength !== afterStaffLength) {
+      changes.push(`근무 직원 수: ${beforeStaffLength}명 ➔ ${afterStaffLength}명`);
+    } else if (before.staff && after.staff) {
+      let diff = false;
+      for (let i = 0; i < beforeStaffLength; i++) {
+        if (before.staff[i]?.workHours !== after.staff[i]?.workHours) {
+          diff = true;
+          break;
+        }
+      }
+      if (diff) changes.push(`근무 시간/직원 내역 수정됨`);
+    }
+
+    if (changes.length === 0) {
+      return <span className="text-gray-400">변경 사항 없음 (또는 기타 설정 변경)</span>;
+    }
+
+    return (
+      <ul className="space-y-1 text-xs font-bold text-gray-700">
+        {changes.map((ch, idx) => (
+          <li key={idx} className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2E6DB4]" />
+            <span>{ch}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="modification-logs-section">
+      <div className="flex gap-2 border-b border-gray-200">
+        <button
+          onClick={() => setSubTab("logs")}
+          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+        >
+          정산 변경이력 로그
+        </button>
+        <button
+          onClick={() => setSubTab("manualOvertimes")}
+          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "manualOvertimes" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+        >
+          지점 수기 초과근무 대장
+        </button>
+      </div>
+
+      {subTab === "logs" ? (
+        <>
+          <div className="bg-white p-6 rounded-2xl border shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-amber-500" /> 지점 마감 수정이력 모니터링
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  각 지점에서 마감 제출 후 수정한 세부 정보 및 변경 내역을 실시간으로 추적합니다.
+                </p>
+              </div>
+              <button
+                onClick={loadLogs}
+                className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              >
+                새로고침
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+              <div>
+                <label className="text-[10px] font-black text-gray-500 uppercase">지점명 검색</label>
+                <input
+                  type="text"
+                  value={searchBranch}
+                  onChange={(e) => setSearchBranch(e.target.value)}
+                  placeholder="예: 강남점"
+                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-gray-500 uppercase">마감 대상 날짜 검색</label>
+                <input
+                  type="text"
+                  value={searchDate}
+                  onChange={(e) => setSearchDate(e.target.value)}
+                  placeholder="예: 2026-06"
+                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                    <th className="p-4 w-44">수정 일시</th>
+                    <th className="py-4 px-3 w-28">지점명</th>
+                    <th className="py-4 px-3 w-32">마감 대상일</th>
+                    <th className="py-4 px-3 w-28">작업자</th>
+                    <th className="py-4 px-3">수정 전 ➔ 수정 후 세부 내역</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="p-12 text-center text-gray-400 font-semibold">
+                        <LoadingSpinner size="sm" />
+                      </td>
+                    </tr>
+                  ) : filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-12 text-center text-gray-400 font-bold">
+                        기록된 마감 수정 이력이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredLogs.map((log) => (
+                      <tr key={log.id} className="border-b hover:bg-slate-50/50 transition-colors">
+                        <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
+                          {formatShortDate(log.modifiedAt)}
+                        </td>
+                        <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
+                          {log.branchName}
+                        </td>
+                        <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
+                          {log.settleDate}
+                        </td>
+                        <td className="py-4 px-3 whitespace-nowrap">
+                          <span className="inline-block px-2.5 py-1 bg-zinc-100 text-zinc-800 rounded-full text-xs font-extrabold">
+                            {log.modifiedBy || "지점담당"}
+                          </span>
+                        </td>
+                        <td className="py-4 px-3">
+                          {getChangesSummary(log)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        <AdminManualOvertimesSection />
+      )}
+    </div>
+  );
+}
+
+function AdminManualOvertimesSection() {
+  const [records, setRecords] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchBranch, setSearchBranch] = useState("");
+  const [searchName, setSearchName] = useState("");
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const data = await gasClient.getAllManualOvertimes();
+      setRecords(data || []);
+    } catch (err) {
+      console.error("Failed to load manual overtimes:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const filteredRecords = useMemo(() => {
+    return records.filter((r) => {
+      const matchBranch = !searchBranch || r.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
+      const matchName = !searchName || r.staffName?.toLowerCase().includes(searchName.toLowerCase());
+      return matchBranch && matchName;
+    }).sort((a, b) => {
+      const dateA = a.createdAt || a.settleDate || "";
+      const dateB = b.createdAt || b.settleDate || "";
+      return dateB.localeCompare(dateA);
+    });
+  }, [records, searchBranch, searchName]);
+
+  const formatShortDate = (isoStr?: string) => {
+    if (!isoStr) return "-";
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return isoStr;
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const date = String(d.getDate()).padStart(2, "0");
+      const hour = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      return `${year}-${month}-${date} ${hour}:${min}`;
+    } catch {
+      return isoStr;
+    }
+  };
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="manual-overtimes-section">
+      <div className="bg-white p-6 rounded-2xl border shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+              <Clock className="w-5 h-5 text-[#2E6DB4]" /> 지점 수기 초과근무 대장
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">
+              각 지점에서 수기로 직접 등록한 초과근무 대장 내역을 종합 모니터링합니다.
+            </p>
+          </div>
+          <button
+            onClick={() => void loadData()}
+            className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+          >
+            새로고침
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">지점명 검색</label>
+            <input
+              type="text"
+              value={searchBranch}
+              onChange={(e) => setSearchBranch(e.target.value)}
+              placeholder="예: 강남점"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">직원명 검색</label>
+            <input
+              type="text"
+              value={searchName}
+              onChange={(e) => setSearchName(e.target.value)}
+              placeholder="예: 홍길동"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                <th className="p-4 w-44">등록 일시</th>
+                <th className="py-4 px-3 w-32">지점명</th>
+                <th className="py-4 px-3 w-32">마감 대상일</th>
+                <th className="py-4 px-3 w-32">직원명</th>
+                <th className="py-4 px-3 w-28 text-center">초과시간</th>
+                <th className="py-4 px-3">수기 입력 사유</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="p-12 text-center text-gray-400 font-semibold">
+                    <LoadingSpinner size="sm" />
+                  </td>
+                </tr>
+              ) : filteredRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-12 text-center text-gray-400 font-bold">
+                    수기로 등록된 초과근무 내역이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                filteredRecords.map((r, idx) => (
+                  <tr key={r.id || idx} className="border-b hover:bg-slate-50/50 transition-colors">
+                    <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
+                      {formatShortDate(r.createdAt)}
+                    </td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
+                      {r.branchName}
+                    </td>
+                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
+                      {r.settleDate}
+                    </td>
+                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">
+                      {r.staffName}
+                    </td>
+                    <td className="py-4 px-3 text-center whitespace-nowrap">
+                      <span className="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-black">
+                        {r.overtime}h
+                      </span>
+                    </td>
+                    <td className="py-4 px-3 text-gray-700 font-medium max-w-sm truncate">
+                      {r.reason || "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminLaborContractsSection() {
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchBranch, setSearchBranch] = useState("");
+  const [searchName, setSearchName] = useState("");
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const data = await gasClient.getAllLaborContracts();
+      setContracts(data || []);
+    } catch (err) {
+      console.error("Failed to load labor contracts:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const filteredContracts = useMemo(() => {
+    return contracts.filter((c) => {
+      const matchBranch = !searchBranch || c.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
+      const matchName = !searchName || c.name?.toLowerCase().includes(searchName.toLowerCase());
+      return matchBranch && matchName;
+    }).sort((a, b) => {
+      const dateA = a.createdAt || "";
+      const dateB = b.createdAt || "";
+      return dateB.localeCompare(dateA);
+    });
+  }, [contracts, searchBranch, searchName]);
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
+      <div className="bg-white p-6 rounded-2xl border shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+              <Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 전 지점 근로계약서 발송 대기 현황
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">
+              각 지점에서 등록한 전자계약서 발송 대상 인원의 인적사항 및 발송 진행 현황을 종합 모니터링합니다.
+            </p>
+          </div>
+          <button
+            onClick={() => void loadData()}
+            className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+          >
+            새로고침
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">지점명 검색</label>
+            <input
+              type="text"
+              value={searchBranch}
+              onChange={(e) => setSearchBranch(e.target.value)}
+              placeholder="예: 강남점"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">직원명 검색</label>
+            <input
+              type="text"
+              value={searchName}
+              onChange={(e) => setSearchName(e.target.value)}
+              placeholder="예: 홍길동"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                <th className="p-4 w-44">등록일자</th>
+                <th className="py-4 px-3 w-32">지점명</th>
+                <th className="py-4 px-3 w-32">이름</th>
+                <th className="py-4 px-3 w-44">연락처</th>
+                <th className="py-4 px-3 w-44">급여</th>
+                <th className="py-4 px-3 text-center w-36">진행 상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="p-12 text-center text-gray-400 font-semibold">
+                    <LoadingSpinner size="sm" />
+                  </td>
+                </tr>
+              ) : filteredContracts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-12 text-center text-gray-400 font-bold">
+                    근로계약서 발송 필요 등록 내역이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                filteredContracts.map((c, idx) => (
+                  <tr key={c.id || idx} className="border-b hover:bg-slate-50/50 transition-colors">
+                    <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">
+                      {c.createdAt ? c.createdAt.slice(0, 10) : "-"}
+                    </td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
+                      {c.branchName}
+                    </td>
+                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">
+                      {c.name}
+                    </td>
+                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
+                      {c.phone}
+                    </td>
+                    <td className="py-4 px-3 font-black text-zinc-700 whitespace-nowrap">
+                      {Number(c.salary || 0).toLocaleString("ko-KR")}원
+                    </td>
+                    <td className="py-4 px-3 text-center whitespace-nowrap">
+                      <span className={`inline-block px-3 py-1 text-xs font-black rounded-full border ${
+                        c.status === "서명 완료"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : c.status === "발송 완료"
+                          ? "bg-blue-50 text-blue-700 border-blue-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}>
+                        {c.status || "발송 대기"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

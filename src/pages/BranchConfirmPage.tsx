@@ -4,9 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
 import * as XLSX from "xlsx";
-import { 
+import {
   Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
-  CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText, 
+  CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
   ShoppingCart, Landmark, Info, CheckCircle2, AlertTriangle, ShieldAlert, Lock,
   Users, ClipboardList, Coins, Briefcase, Pencil, Check, TrendingUp, Settings, X,
   Cloud, Database, UploadCloud, AlertCircle
@@ -337,14 +337,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave">("dashboard");
+  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract">("dashboard");
   const [monthlyTab, setMonthlyTab] = useState<"purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const mainTabs = [
     { id: "dashboard", label: "대시보드", icon: ClipboardList },
     { id: "daily", label: "일일마감정산", icon: Calendar },
     { id: "monthly", label: "월말마감정산", icon: Coins },
-    { id: "annualLeave", label: "연차관리", icon: Calendar }
+    { id: "annualLeave", label: "연차관리", icon: Calendar },
+    { id: "laborContract", label: "근로계약서", icon: Briefcase }
   ];
 
   // 1. Admin Settings State and Sync listening
@@ -610,14 +611,14 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
       {/* Sidebar Layout */}
-      <aside 
+      <aside
         className={`w-full md:w-64 shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40 text-zinc-150 border-zinc-850`}
         style={{
           backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily
         }}
       >
         {/* Brand/Branch Info Top */}
-        <div 
+        <div
           className={`p-5 border-b flex md:flex-col items-center md:items-start justify-between md:justify-start gap-4 transition-colors duration-300`}
           style={{
             backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily,
@@ -639,7 +640,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeBranchBrand}
               </span>
               <h1 className="text-base font-black tracking-tight text-white flex items-center gap-1.5 mt-0.5">
-                {activeBranchName} 
+                {activeBranchName}
                 <span className={`text-[9px] font-black font-mono tracking-tight transition-colors ${
                   mainCategory === "monthly" ? "text-indigo-400" : "text-[#2E6DB4]"
                 }`}>
@@ -873,6 +874,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           )}
 
           {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
+
+          {mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} />}
         </main>
       </div>
 
@@ -1528,7 +1531,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                 </div>
                                 <div>
                                   <h4 className="text-xs font-black text-gray-900 flex items-center gap-1.5">
-                                    연동 상태: 
+                                    연동 상태:
                                     {firebaseStatus.connected ? (
                                       <span className="text-emerald-600 font-extrabold flex items-center gap-1">
                                         ● 정상 가동 중
@@ -1540,7 +1543,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                     )}
                                   </h4>
                                   <p className="text-[10px] text-gray-400 font-semibold mt-1">
-                                    {firebaseStatus.connected 
+                                    {firebaseStatus.connected
                                       ? `Firestore 백업 엔진 활성화: ${firebaseStatus.projectId}`
                                       : "로컬 JSON 파일 대체 상태이며 실시간 백업이 대기 중입니다."}
                                   </p>
@@ -1635,7 +1638,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                     disabled={firebaseSyncing || !firebaseStatus?.connected}
                                     className={`w-full mt-4 py-2 border rounded-lg font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer select-none ${
                                       firebaseSyncing || !firebaseStatus?.connected
-                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed" 
+                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed"
                                         : "bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200 hover:border-blue-300 shadow-xs"
                                     }`}
                                   >
@@ -1690,7 +1693,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                     disabled={firebaseRestoring || !firebaseStatus?.connected}
                                     className={`w-full mt-4 py-2 border rounded-lg font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer select-none ${
                                       firebaseRestoring || !firebaseStatus?.connected
-                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed" 
+                                        ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed"
                                         : "bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200 hover:border-rose-300 shadow-xs"
                                     }`}
                                   >
@@ -2024,11 +2027,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   };
 
   // State
-  const isExtraHoursBranch = 
-    branchName.includes("연하동") || 
-    branchName === "대학로고래" || 
-    branchName === "카츠스위스" || 
-    branchName === "오키스테이크하우스" || 
+  const isExtraHoursBranch =
+    branchName.includes("연하동") ||
+    branchName === "대학로고래" ||
+    branchName === "카츠스위스" ||
+    branchName === "오키스테이크하우스" ||
     branchName === "대골뼈국";
 
   const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
@@ -2036,6 +2039,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
   // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
   const [writer, setWriter] = useState<string>("");
+
+  // Completed Dates & Mini Calendar States
+  const [completedDates, setCompletedDates] = useState<string[]>([]);
+  const [showStatusCalendar, setShowStatusCalendar] = useState<boolean>(false);
+  const [calYear, setCalYear] = useState<number>(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState<number>(new Date().getMonth());
 
   // Sales
   const [cashSales, setCashSales] = useState<string>("");
@@ -2077,7 +2086,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [existingRecordId, setExistingRecordId] = useState<string | null>(null);
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
   const [timeErrors, setTimeErrors] = useState<Record<string, string>>({});
-  
+
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submissionDelayNotice, setSubmissionDelayNotice] = useState<boolean>(false);
   const [submittedResult, setSubmittedResult] = useState<any | null>(null);
@@ -2118,6 +2127,33 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setStaffRows(mappedRows);
   }, [getRoster, defaultStandardHours]);
 
+  // Refresh completed dates from branch history
+  const refreshCompletedDates = useCallback(async () => {
+    try {
+      const history = await gasClient.getBranchHistory(branchName);
+      const dates = history.map(item => item.settleDate);
+      setCompletedDates(dates);
+    } catch (err) {
+      console.error("Failed to load completed dates", err);
+    }
+  }, [branchName]);
+
+  // Load completed dates on mount & branchName change
+  useEffect(() => {
+    refreshCompletedDates();
+  }, [branchName, refreshCompletedDates]);
+
+  // Sync calendar view to selected date changes
+  useEffect(() => {
+    if (settleDate) {
+      const parts = settleDate.split("-");
+      if (parts.length === 3) {
+        setCalYear(Number(parts[0]));
+        setCalMonth(Number(parts[1]) - 1);
+      }
+    }
+  }, [settleDate]);
+
   // ----------------------------------------------------
   // Dynamic Load & Duplicate check on Date Change
   // ----------------------------------------------------
@@ -2134,7 +2170,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setIsEditApproved(false); // Reset to false and require approval warning
           // Load details
           const detail = await gasClient.getDailyDetail(res.recordId);
-          
+
           setCashSales(String(detail.master.cashSales || "0"));
           setCardSales(String(detail.master.cardSales || "0"));
           setTransferSales(String(detail.master.transferSales || "0"));
@@ -2277,7 +2313,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         setChecking(false);
       }
     };
-    
+
     checkDuplicateAndLoad();
   }, [settleDate, branchName, getRoster, initRosterInForm]);
 
@@ -2538,6 +2574,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         total: totalSales,
         recordId: existingRecordId || (response as any)?.recordId || `uid-${Date.now()}`
       });
+
+      // Refresh completed dates list
+      void refreshCompletedDates();
     } catch (e: any) {
       console.error("Submission failed", e);
       triggerToast(e.message || "원격 데이터베이스 연동 네트워크 에러가 발생했습니다.", "error");
@@ -2569,6 +2608,148 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     initRosterInForm();
   };
 
+  const getDaysInMonth = (year: number, month: number) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (year: number, month: number) => {
+    return new Date(year, month, 1).getDay(); // 0 = Sunday, ..., 6 = Saturday
+  };
+
+  const renderMiniCalendar = () => {
+    const daysInMonth = getDaysInMonth(calYear, calMonth);
+    const firstDay = getFirstDayOfMonth(calYear, calMonth);
+
+    // Create days array
+    const days: Array<{ day: number; dateStr: string; isCurrentMonth: boolean } | null> = [];
+
+    // Empty slots for previous month padding
+    for (let i = 0; i < firstDay; i++) {
+      days.push(null);
+    }
+
+    // Days of current month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const mStr = String(calMonth + 1).padStart(2, "0");
+      const dStr = String(day).padStart(2, "0");
+      const dateStr = `${calYear}-${mStr}-${dStr}`;
+      days.push({ day, dateStr, isCurrentMonth: true });
+    }
+
+    const prevMonth = () => {
+      if (calMonth === 0) {
+        setCalYear(prev => prev - 1);
+        setCalMonth(11);
+      } else {
+        setCalMonth(prev => prev - 1);
+      }
+    };
+
+    const nextMonth = () => {
+      if (calMonth === 11) {
+        setCalYear(prev => prev + 1);
+        setCalMonth(0);
+      } else {
+        setCalMonth(prev => prev + 1);
+      }
+    };
+
+    const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+
+    return (
+      <div className="absolute top-full left-0 z-50 mt-1.5 p-4 bg-white border border-zinc-200 rounded-2xl shadow-xl w-full max-w-sm" id="mini-status-calendar">
+        <div className="flex justify-between items-center mb-3">
+          <button
+            type="button"
+            onClick={prevMonth}
+            className="p-1 hover:bg-zinc-100 rounded-lg text-zinc-600 transition-colors focus:outline-none cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs font-black text-zinc-800">
+            {calYear}년 {calMonth + 1}월 마감 현황
+          </span>
+          <button
+            type="button"
+            onClick={nextMonth}
+            className="p-1 hover:bg-zinc-100 rounded-lg text-zinc-600 transition-colors focus:outline-none cursor-pointer"
+          >
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Weekday names */}
+        <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+          {weekdays.map((w, idx) => (
+            <span
+              key={w}
+              className={`text-[10px] font-extrabold ${
+                idx === 0 ? "text-rose-500" : idx === 6 ? "text-[#2E6DB4]" : "text-zinc-400"
+              }`}
+            >
+              {w}
+            </span>
+          ))}
+        </div>
+
+        {/* Days grid */}
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((item, idx) => {
+            if (!item) {
+              return <div key={`empty-${idx}`} className="aspect-square" />;
+            }
+
+            const isSelected = item.dateStr === settleDate;
+            const isCompleted = completedDates.includes(item.dateStr);
+
+            return (
+              <button
+                key={item.dateStr}
+                type="button"
+                onClick={() => {
+                  setSettleDate(item.dateStr);
+                  setShowStatusCalendar(false);
+                }}
+                className={`relative aspect-square rounded-xl text-xs font-bold flex flex-col items-center justify-center transition-all focus:outline-none cursor-pointer ${
+                  isSelected
+                    ? "bg-[#2E6DB4] text-white shadow-sm font-black scale-105 z-10"
+                    : isCompleted
+                    ? "bg-emerald-50 text-emerald-800 hover:bg-emerald-100/70 border border-emerald-100"
+                    : "bg-white text-zinc-700 hover:bg-zinc-100 border border-zinc-100"
+                }`}
+              >
+                <span>{item.day}</span>
+                {isCompleted && (
+                  <span
+                    className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ring-2 ${
+                      isSelected ? "bg-white ring-[#2E6DB4]" : "bg-emerald-500 ring-emerald-50"
+                    }`}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2.5 flex items-center justify-end gap-3 text-[10px] text-zinc-500 font-bold px-1">
+          <div className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-md bg-white border border-zinc-150" />
+            <span>미마감</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-md bg-emerald-50 border border-emerald-100 relative flex items-center justify-center">
+              <span className="w-1 h-1 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-emerald-700">마감 완료</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-md bg-[#2E6DB4]" />
+            <span className="text-[#2E6DB4]">선택됨</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (checking) {
     return (
       <div className="bg-white rounded-3xl p-12 text-center border border-gray-100 shadow-sm flex flex-col items-center justify-center space-y-4 min-h-[400px]">
@@ -2583,24 +2764,24 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const getKakaoReportText = () => {
       const koreanDate = getKoreanDateWithDay(submittedResult.date);
       const writerName = submittedResult.writer;
-      
+
       const cardExpensesSum = cardExpenses.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
       const cashExpensesSum = cashExpenses.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
 
-      const cardText = cardExpensesSum > 0 
+      const cardText = cardExpensesSum > 0
         ? `${formatNumber(cardExpensesSum)}(${cardExpenses.filter(e => e.amount).map(e => {
             const detailStr = e.detail ? ` ${e.detail}` : "";
             return `${e.classification}/${e.usage}${detailStr}`;
           }).join(', ')})`
         : "";
-        
-      const cashText = cashExpensesSum > 0 
+
+      const cashText = cashExpensesSum > 0
         ? `${formatNumber(cashExpensesSum)}(${cashExpenses.filter(e => e.amount).map(e => {
             const detailStr = e.detail ? ` ${e.detail}` : "";
             return `${e.classification}/${e.usage}${detailStr}`;
           }).join(', ')})`
         : "";
-        
+
       const workersText = staffRows.map(s => s.name).join(", ");
 
       const prevDayCashNum = Number(prevDayCash) || 0;
@@ -2609,7 +2790,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       const theoreticalBalance = prevDayCashNum + cashSalesNum - cashExpensesSum;
       const actualCashInVault = Number(cashBalance) || 0;
       const diff = actualCashInVault - theoreticalBalance;
-      
+
       return `[${koreanDate} - 작성자:${writerName}]
 
 1. 현금 마감
@@ -2621,14 +2802,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 - 금고실사현금: ${formatNumber(actualCashInVault)}원
 - 차이: ${diff > 0 ? "+" : ""}${formatNumber(diff)}원${diff !== 0 ? ` (사유: ${cashDiffReason.trim()})` : ""}
 
-2. 지출 
+2. 지출
 - 카드지출 : ${cardText || "없음"}
 - 현금지출 : ${cashText || "없음"}
 
 3. 근무자
 - ${workersText}
-- 홀: 
-- 주방: 
+- 홀:
+- 주방:
 
 4. 특이사항
 - 직원 특이사항: ${staffMemo.trim() || "없음"}
@@ -2759,8 +2940,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       {toast && (
         <div className="fixed bottom-6 right-6 z-50">
           <div className={`px-5 py-3.5 rounded-2xl border text-xs font-bold shadow-xl flex items-center gap-2.5 ${
-            toast.type === "success" 
-              ? "bg-emerald-50 border-emerald-100 text-emerald-800" 
+            toast.type === "success"
+              ? "bg-emerald-50 border-emerald-100 text-emerald-800"
               : "bg-rose-50 border-rose-100 text-rose-800"
           }`}>
             {toast.type === "success" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-rose-500" />}
@@ -2772,19 +2953,32 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       {/* Date & Writer Row */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6" id="settle-header-controls">
         <div className="grid grid-cols-2 gap-4 grow">
-          <div className="flex flex-col space-y-1.5">
-            <label className="text-xs font-extrabold text-[#1C3C6E] flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-[#2E6DB4]" /> 마감 대상 날짜
-            </label>
-            <input
-              type="date"
-              value={settleDate}
-              onChange={(e) => setSettleDate(e.target.value)}
-              onClick={(e) => e.currentTarget.showPicker?.()}
-              onFocus={(e) => e.currentTarget.showPicker?.()}
-              className="px-4 py-2.5 border border-gray-200 rounded-xl font-mono text-sm text-gray-700 bg-gray-50/50 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all cursor-pointer"
-              id="settle-date-picker"
-            />
+          <div className="flex flex-col space-y-1.5 relative">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-[#1C3C6E] flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-[#2E6DB4]" /> 마감 대상 날짜
+              </label>
+            </div>
+            <div className="relative">
+              {/* Hidden native input for compatibility */}
+              <input
+                type="date"
+                value={settleDate}
+                onChange={(e) => setSettleDate(e.target.value)}
+                onFocus={() => setShowStatusCalendar(true)}
+                className="absolute inset-0 opacity-0 pointer-events-none w-0 h-0"
+                id="settle-date-picker"
+              />
+              <button
+                type="button"
+                onClick={() => setShowStatusCalendar(prev => !prev)}
+                className="px-4 py-2.5 border border-gray-200 rounded-xl font-mono text-sm text-gray-700 bg-gray-50/50 hover:bg-zinc-100/50 hover:border-gray-300 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all cursor-pointer w-full text-left flex justify-between items-center"
+              >
+                <span>{settleDate || "날짜를 선택해 주세요"}</span>
+                <Calendar className="w-4 h-4 text-gray-400" />
+              </button>
+              {showStatusCalendar && renderMiniCalendar()}
+            </div>
           </div>
 
           <div className="flex flex-col space-y-1.5">
@@ -2822,8 +3016,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       {/* Prominent Red warning for duplicate records */}
       {hasExistingRecord && (
         <div className={`p-5 rounded-2xl border ${
-          isEditApproved 
-            ? "bg-rose-50 border-rose-200 text-rose-900 shadow-xs" 
+          isEditApproved
+            ? "bg-rose-50 border-rose-200 text-rose-900 shadow-xs"
             : "bg-red-600 border-red-700 text-white shadow-md"
         } transition-all space-y-4`} id="existing-record-warning-box">
           <div className="flex items-start gap-3">
@@ -2833,7 +3027,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 🚨 이미 마감 기록이 완료된 정산일입니다 ({settleDate})
               </h4>
               <p className="text-[11px] opacity-90 leading-relaxed font-bold">
-                {isEditApproved 
+                {isEditApproved
                   ? "지점 마감 기록 수정 모드 진입이 최종 승인되었습니다. 아래 양식에서 값을 수정한 다음 [마감 제출]을 클릭하시면 이중 등록 없이 기존 내용이 완전히 교체 수정됩니다."
                   : "선택하신 날짜에 이미 다른 마감 결재가 완료되었습니다. 본 마감 정산 내역을 정말로 수정하여 덮어쓰시겠습니까? 수정을 원치 않으시면 날짜를 다시 지정해 주십시오."
                 }
@@ -2876,11 +3070,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 type="button"
                 onClick={() => {
                   triggerToast("마감 정산 날짜를 달력에서 다시 선택해 주십시오.", "error");
-                  const picker = document.getElementById("settle-date-picker");
-                  if (picker) {
-                    picker.focus();
-                    (picker as any).showPicker?.();
-                  }
+                  setShowStatusCalendar(true);
                 }}
                 className="px-3.5 py-2 bg-red-800 hover:bg-red-900 text-white border border-red-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1"
               >
@@ -2907,11 +3097,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           <button
             type="button"
             onClick={() => {
-              const picker = document.getElementById("settle-date-picker");
-              if (picker) {
-                picker.focus();
-                (picker as any).showPicker?.();
-              }
+              setShowStatusCalendar(true);
             }}
             className="px-3.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 text-gray-600 text-xs font-extrabold rounded-lg shadow-2xs transition-colors cursor-pointer"
           >
@@ -3144,7 +3330,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           <Coins className="w-4 h-4 text-[#2E6DB4]" />
           현금마감 정산 (시재 일치 점검)
         </h3>
-        
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-zinc-50/50 p-5 rounded-2xl border border-gray-150">
           {/* 전일현금 */}
           <div className="flex flex-col space-y-1.5 bg-white p-3 rounded-xl border border-gray-100">
@@ -3391,7 +3577,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                     <tr key={idx} className="hover:bg-gray-50/50">
                       {/* Name */}
                       <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
-                      
+
                       {/* Division Dropdown */}
                       <td className="py-3.5 px-2 relative">
                         <select
@@ -3524,7 +3710,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           <FileText className="w-4 h-4 text-[#2E6DB4]" />
           특이사항 기록 (본부 보고 및 카톡보고 자동 연동)
         </label>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-gray-600 block">
@@ -3833,10 +4019,10 @@ function OrderManagementTab({ branchName }: { branchName: string }) {
                         value={ord.status}
                         onChange={(e) => handleUpdateStatus(ord.id, e.target.value as any)}
                         className={`text-[10px] font-black px-1.5 py-1 rounded-lg border focus:outline-hidden ${
-                          ord.status === "신청완료" 
-                            ? "bg-amber-50 text-amber-700 border-amber-200" 
-                            : ord.status === "배송중" 
-                            ? "bg-[#D6E4F0]/50 text-[#2E6DB4] border-blue-200" 
+                          ord.status === "신청완료"
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : ord.status === "배송중"
+                            ? "bg-[#D6E4F0]/50 text-[#2E6DB4] border-blue-200"
                             : "bg-emerald-50 text-emerald-700 border-emerald-200"
                         }`}
                       >
@@ -3873,7 +4059,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
       if (saved) return JSON.parse(saved);
     } catch {}
-    
+
     // Default fallback roster
     const defaults: Employee[] = [
       { id: "e1", name: "김철수", division: "정직원" },
@@ -4219,11 +4405,11 @@ function RosterTab({ branchName }: { branchName: string }) {
                     } catch (error) {
                       console.error("Staff movement history save failed:", error);
                     }
-                    
+
                     const detailMsg = deleteReason === "지점이동"
                       ? `[${employeeToDelete.name}] 님이 ${effectiveDate} 일자로 [${targetBranch}] (으)로 지점이동 삭제 완료되었습니다.`
                       : `[${employeeToDelete.name}] 님이 ${effectiveDate} 일자로 퇴사 처리 삭제 완료되었습니다.`;
-                    
+
                     alert(detailMsg);
 
                     setShowDeleteModal(false);
@@ -4680,6 +4866,262 @@ function AnnualLeaveTab({ branchName }: { branchName: string }) {
   return <div className="space-y-5"><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800">연차관리</h3><p className="text-xs text-gray-400 mt-1">시작일과 종료일을 선택하면 사용 일수가 자동 계산됩니다.</p><div className="flex flex-wrap gap-2 mt-4"><select value={employeeId} onChange={e=>setEmployeeId(e.target.value)} className="border rounded px-3 py-2 text-sm"><option value="">직원 선택</option>{employees.filter(e=>e.division === "정직원").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select><label className="text-xs">시작일<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="block border rounded px-2 py-1"/></label><label className="text-xs">종료일<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="block border rounded px-2 py-1"/></label><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="사용 사유" className="border rounded px-3"/><button onClick={()=>void save()} className="bg-[#2E6DB4] text-white rounded px-4 text-sm font-bold">연차 사용 등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">직원</th><th>입사일</th><th>부여</th><th>사용</th><th>잔여</th><th>사용 날짜 기록</th></tr></thead><tbody>{employees.filter(e=>e.division === "정직원").map(e=>{const logs=entries.filter(x=>x.employeeId===e.id);const used=logs.reduce((s,x)=>s+Number(x.days||0),0);return <tr key={e.id} className="border-t"><td className="p-3 font-bold">{e.name}</td><td>{e.entryDate||"-"}</td><td>15일</td><td>{used}일</td><td className="font-bold text-[#2E6DB4]">{15-used}일</td><td className="text-xs text-gray-500">{logs.map(x=>`${x.startDate || x.date}${x.endDate && x.endDate !== (x.startDate || x.date) ? ` ~ ${x.endDate}` : ""}`).join(", ") || "-"}</td></tr>})}</tbody></table></div></div>;
 }
 
+function LaborContractTab({ branchName }: { branchName: string }) {
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState("");
+  const [phoneDigits, setPhoneDigits] = useState("");
+  const [salary, setSalary] = useState("");
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const data = await gasClient.getSharedData<any[]>(`labor_contracts:${branchName}`);
+      setContracts(data || []);
+    } catch (err) {
+      console.error("Failed to load labor contracts:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [branchName]);
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/[^0-9]/g, "");
+    setPhoneDigits(raw.slice(0, 8));
+  };
+
+  const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSalary(e.target.value);
+  };
+
+  // Robust salary input parser
+  const parseSalaryInput = (rawVal: string): number => {
+    if (!rawVal) return 0;
+    let val = rawVal.trim();
+
+    // Check for "만" or "만원"
+    if (val.includes("만")) {
+      const parts = val.split("만");
+      const numericPart = parts[0].replace(/[^0-9.]/g, "");
+      const num = parseFloat(numericPart) || 0;
+      return Math.round(num * 10000);
+    }
+
+    // Remove commas, "원", and spaces
+    val = val.replace(/[,원\s]/g, "");
+
+    // Check for dot-separated values (e.g. 2.500.000)
+    if (val.includes(".")) {
+      const parts = val.split(".");
+      if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3)) {
+        val = val.replace(/\./g, "");
+      }
+    }
+
+    let parsed = parseFloat(val) || 0;
+
+    // If the resulting number is small, assume unit is "만원" or "천원"
+    if (parsed > 0 && parsed < 1000) {
+      // e.g. 250 -> 2,500,000
+      parsed = parsed * 10000;
+    } else if (parsed >= 1000 && parsed < 10000) {
+      // e.g. 2500 -> 2,500,000
+      parsed = parsed * 1000;
+    }
+
+    return Math.round(parsed);
+  };
+
+  const isInvalidPhone = phoneDigits.length > 0 && phoneDigits.length !== 8;
+
+  const saveContract = async () => {
+    if (!name.trim()) {
+      alert("이름을 기입해주세요.");
+      return;
+    }
+    if (phoneDigits.length !== 8) {
+      alert("연락처는 010을 제외한 숫자 8자리를 정확히 입력해주세요.");
+      return;
+    }
+    if (!salary.trim()) {
+      alert("급여를 기입해주세요.");
+      return;
+    }
+
+    const numericSalary = parseSalaryInput(salary);
+    if (!numericSalary || numericSalary <= 0) {
+      alert("급여를 올바르게 입력해주세요.");
+      return;
+    }
+
+    const newRecord = {
+      id: `contract-${Date.now()}`,
+      name: name.trim(),
+      phone: `010-${phoneDigits.slice(0, 4)}-${phoneDigits.slice(4)}`,
+      salary: numericSalary,
+      status: "발송 대기",
+      createdAt: new Date().toISOString()
+    };
+
+    const next = [newRecord, ...contracts];
+    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
+    setContracts(next);
+    setName("");
+    setPhoneDigits("");
+    setSalary("");
+  };
+
+  const deleteContract = async (id: string) => {
+    if (!window.confirm("해당 인적사항을 삭제하시겠습니까?")) return;
+    const next = contracts.filter((c) => c.id !== id);
+    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
+    setContracts(next);
+  };
+
+  const updateStatus = async (id: string, newStatus: string) => {
+    const next = contracts.map((c) => c.id === id ? { ...c, status: newStatus } : c);
+    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
+    setContracts(next);
+  };
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="labor-contract-tab">
+      <div className="bg-white p-6 rounded-2xl border shadow-sm">
+        <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+          <Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 전자서명 근로계약서 발송 인적사항 등록
+        </h3>
+        <p className="text-xs text-gray-400 mt-1">
+          근로계약서 발송이 필요한 대상 인원의 인적사항을 기재하고 발송 상태를 관리합니다.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5 items-end">
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">이름</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="예: 홍길동"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+          </div>
+
+          <div className="relative">
+            <label className="text-[10px] font-black text-gray-500 uppercase">연락처 (010 제외 8자리)</label>
+            <div className="mt-1 flex items-center border border-gray-200 rounded-xl bg-gray-50 overflow-hidden focus-within:bg-white focus-within:border-[#2E6DB4] transition-all">
+              <span className="bg-gray-100 px-3 py-2 text-sm font-extrabold text-gray-400 border-r border-gray-200">010</span>
+              <input
+                type="text"
+                value={phoneDigits}
+                onChange={handlePhoneChange}
+                placeholder="12345678"
+                className="w-full px-3 py-2 text-sm font-bold bg-transparent outline-none border-0"
+              />
+            </div>
+            {isInvalidPhone && (
+              <div className="absolute z-10 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-black p-2 rounded-xl shadow-md mt-1 animate-bounce">
+                연락처는 반드시 숫자 8자리여야 합니다!
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[10px] font-black text-gray-500 uppercase">급여 (원)</label>
+            <input
+              type="text"
+              value={salary}
+              onChange={handleSalaryChange}
+              placeholder="예: 250 또는 250만, 2,500,000"
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
+            />
+            {salary.trim() && (
+              <div className="mt-1.5 text-[10px] font-black text-[#2E6DB4] bg-blue-50/50 p-1.5 rounded-lg border border-blue-100 flex items-center gap-1">
+                <span>📢 인식된 급여:</span>
+                <span className="underline font-mono text-xs">{Number(parseSalaryInput(salary)).toLocaleString("ko-KR")}원</span>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => void saveContract()}
+            className="w-full bg-[#2E6DB4] hover:bg-[#20528B] text-white py-2 px-4 rounded-xl text-xs font-black h-10 transition-colors"
+          >
+            인적사항 등록
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                <th className="p-4 w-44">등록일</th>
+                <th className="py-4 px-3 w-32">이름</th>
+                <th className="py-4 px-3 w-44">연락처</th>
+                <th className="py-4 px-3 w-36 text-center">진행 상태</th>
+                <th className="py-4 px-3 text-center w-28">액션</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="p-12 text-center text-gray-400 font-semibold">
+                    <LoadingSpinner size="sm" />
+                  </td>
+                </tr>
+              ) : contracts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-12 text-center text-gray-400 font-bold">
+                    근로계약서 발송 대기 인원이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                contracts.map((c) => (
+                  <tr key={c.id} className="border-b hover:bg-slate-50/50 transition-colors">
+                    <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">
+                      {c.createdAt ? c.createdAt.slice(0, 10) : "-"}
+                    </td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
+                      {c.name}
+                    </td>
+                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
+                      {c.phone}
+                    </td>
+                    <td className="py-4 px-3 text-center whitespace-nowrap">
+                      <span className={`inline-block px-3 py-1 text-xs font-black rounded-full border ${
+                        c.status === "서명 완료"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : c.status === "발송 완료"
+                          ? "bg-blue-50 text-blue-700 border-blue-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      }`}>
+                        {c.status || "발송 대기"}
+                      </span>
+                    </td>
+                    <td className="py-4 px-3 text-center">
+                      <button
+                        onClick={() => void deleteContract(c.id)}
+                        className="text-rose-600 hover:text-rose-800 p-1 font-bold text-xs"
+                      >
+                        삭제
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ----------------------------------------------------
 // TAB 4: Overtime Log Tab (초과근무일지)
 // ----------------------------------------------------
@@ -4717,8 +5159,23 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   }, [loadData]);
 
   const saveManualOvertime = async () => {
+    if (!manualName.trim() || !manualHours.trim() || !manualReason.trim()) {
+      alert("직원명, 시간, 수기 입력 사유를 모두 채워주세요.");
+      return;
+    }
+    if (!/^\d+(\.\d+)?$/.test(manualHours)) {
+      alert("시간은 숫자 형식으로만 입력해 주세요. (예: 2시간 30분 ➔ 2.5)");
+      return;
+    }
     const hours = Number(manualHours);
-    if (!manualName.trim() || !hours || !manualReason.trim()) return;
+    if (hours <= 0) {
+      alert("초과 근무 시간은 0보다 커야 합니다.");
+      return;
+    }
+    if (hours >= 5) {
+      const ok = window.confirm(`초과 근무 시간이 5시간 이상(${hours}시간)으로 기재되었습니다. 오타(예: 25 등)가 아닌 것이 확실한가요?\n정말 등록하시겠습니까?`);
+      if (!ok) return;
+    }
     const key = `manual_overtime:${branchName}`;
     const previous = (await gasClient.getSharedData<any[]>(key)) || [];
     await gasClient.saveSharedData(key, [{ id: `manual-${Date.now()}`, staffName: manualName.trim(), settleDate: manualDate, overtime: hours, reason: manualReason.trim(), createdAt: new Date().toISOString() }, ...previous]);
@@ -4827,7 +5284,19 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
           <span className="w-full text-xs font-black text-gray-600">초과근무 수기 입력</span>
           <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
           <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
-          <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
+          <div className="relative">
+            <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
+            {manualHours.length > 0 && !/^\d+(\.\d+)?$/.test(manualHours) && (
+              <div className="absolute z-10 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-black p-2 rounded-xl shadow-md -bottom-12 left-0 whitespace-nowrap animate-bounce">
+                숫자만 기입해 주세요! (예: 2시간 30분 ➔ 2.5)
+              </div>
+            )}
+            {manualHours.length > 0 && /^\d+(\.\d+)?$/.test(manualHours) && Number(manualHours) >= 5 && (
+              <div className="absolute z-10 bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-black p-2 rounded-xl shadow-md -bottom-12 left-0 whitespace-nowrap animate-bounce">
+                ⚠️ 5시간 이상 입력됨. 오타(예: 25)가 아닌가요?
+              </div>
+            )}
+          </div>
           <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
           <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">등록</button>
         </div>
@@ -4915,10 +5384,10 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
               <div key={idx} className="py-3 flex items-center justify-between">
                 <span className="text-gray-700 font-extrabold">{item.name}</span>
                 <span className={`text-[11px] font-mono p-1 px-2.5 rounded-xl ${
-                  item.totalOvertime < 0 
-                    ? "bg-amber-55 bg-amber-50 text-amber-700 font-extrabold" 
-                    : item.totalOvertime === 0 
-                    ? "bg-gray-105 bg-gray-100 text-gray-500" 
+                  item.totalOvertime < 0
+                    ? "bg-amber-55 bg-amber-50 text-amber-700 font-extrabold"
+                    : item.totalOvertime === 0
+                    ? "bg-gray-105 bg-gray-100 text-gray-500"
                     : "bg-emerald-50 text-emerald-800 font-extrabold"
                 }`}>
                   {`전월누적 ${item.previous || 0}h · 이번달 ${item.current || 0}h · 총 ${item.totalOvertime}h`}
@@ -4941,12 +5410,129 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   const [summaryList, setSummaryList] = useState<any[]>([]);
   const [editPartTime, setEditPartTime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
+  // States for manual part-timer entry
+  const [manualName, setManualName] = useState("");
+  const [manualHours, setManualHours] = useState("9");
+  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [manualReason, setManualReason] = useState("");
+  const [manualClockIn, setManualClockIn] = useState("09:00");
+  const [manualClockOut, setManualClockOut] = useState("18:00");
+  const [manualClockInError, setManualClockInError] = useState("");
+  const [manualClockOutError, setManualClockOutError] = useState("");
+
+  const recalculateHours = (clockIn: string, clockOut: string) => {
+    const trimmedIn = clockIn.trim();
+    const trimmedOut = clockOut.trim();
+
+    if (!trimmedIn || !trimmedOut) {
+      setManualHours("");
+      return;
+    }
+
+    const matchIn = trimmedIn.match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
+    const matchOut = trimmedOut.match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
+
+    const errIn = trimmedIn && !matchIn ? "24시간제 예: 09:00 또는 1530" : "";
+    const errOut = trimmedOut && !matchOut ? "24시간제 예: 09:00 또는 1530" : "";
+
+    setManualClockInError(errIn);
+    setManualClockOutError(errOut);
+
+    if (matchIn && matchOut) {
+      const hIn = (matchIn[1] || matchIn[3]).padStart(2, "0");
+      const mIn = matchIn[2] || matchIn[4];
+      const hOut = (matchOut[1] || matchOut[3]).padStart(2, "0");
+      const mOut = matchOut[2] || matchOut[4];
+
+      const inDecimal = Number(hIn) + Number(mIn) / 60;
+      const outDecimal = Number(hOut) + Number(mOut) / 60;
+
+      let calculated = outDecimal - inDecimal;
+      if (calculated < 0) {
+        calculated += 24; // Overnight shift support
+      }
+      setManualHours(String(parseFloat(calculated.toFixed(1))));
+    } else {
+      setManualHours("");
+    }
+  };
+
+  const handleClockInChange = (val: string) => {
+    setManualClockIn(val);
+    recalculateHours(val, manualClockOut);
+  };
+
+  const handleClockOutChange = (val: string) => {
+    setManualClockOut(val);
+    recalculateHours(manualClockIn, val);
+  };
+
+  const handleClockBlur = (field: "in" | "out") => {
+    const val = field === "in" ? manualClockIn : manualClockOut;
+    const match = val.trim().match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
+    if (match) {
+      const h = (match[1] || match[3]).padStart(2, "0");
+      const m = match[2] || match[4];
+      const formatted = `${h}:${m}`;
+      if (field === "in") {
+        setManualClockIn(formatted);
+        recalculateHours(formatted, manualClockOut);
+      } else {
+        setManualClockOut(formatted);
+        recalculateHours(manualClockIn, formatted);
+      }
+    }
+  };
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const log = await gasClient.getAttendanceLog(branchName, "partTime");
-      setRecords(log.records || []);
-      setSummaryList(log.summaryList || []);
+      const [log, manual] = await Promise.all([
+        gasClient.getAttendanceLog(branchName, "partTime"),
+        gasClient.getSharedData<any[]>(`manual_parttime:${branchName}`)
+      ]);
+
+      const manualRows = (manual || []).map((item) => ({
+        ...item,
+        writer: item.writer || "수기",
+        manual: true
+      }));
+
+      const all = [...(log.records || []), ...manualRows].sort((a, b) => String(b.settleDate).localeCompare(String(a.settleDate)));
+      setRecords(all);
+
+      // Re-calculate the part-time summary aggregate including manual records
+      const totals = new Map<string, { daysCount: number; workedDates: string[]; totalHours: number }>();
+      all.forEach((item) => {
+        const name = item.staffName;
+        if (!name) return;
+        const current = totals.get(name) || { daysCount: 0, workedDates: [], totalHours: 0 };
+        current.daysCount += 1;
+
+        // formats date to MM.DD
+        let formattedDate = String(item.settleDate);
+        if (formattedDate.includes("-")) {
+          const parts = formattedDate.split("-");
+          formattedDate = parts.length >= 3 ? `${parts[1]}.${parts[2]}` : formattedDate;
+        } else if (formattedDate.includes(".")) {
+          const parts = formattedDate.split(".");
+          formattedDate = parts.length >= 2 ? `${parts[parts.length - 2]}.${parts[parts.length - 1]}` : formattedDate;
+        }
+
+        if (!current.workedDates.includes(formattedDate)) {
+          current.workedDates.push(formattedDate);
+        }
+        current.totalHours += Number(item.workHours) || 0;
+        totals.set(name, current);
+      });
+
+      const calcSummary = Array.from(totals, ([name, val]) => ({
+        name,
+        daysCount: val.daysCount,
+        workedDaysList: val.workedDates.slice(0, 5).join(", ") + (val.workedDates.length > 5 ? "..." : ""),
+        totalHours: Number(val.totalHours.toFixed(1))
+      }));
+      setSummaryList(calcSummary);
 
     } catch (e) {
       console.error("Part timer database read error:", e);
@@ -4959,7 +5545,60 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
     loadData();
   }, [loadData]);
 
+  const saveManualPartTime = async () => {
+    if (manualClockInError || manualClockOutError) {
+      alert("출퇴근 시간 형식을 올바르게 입력해주세요 (예: 09:00).");
+      return;
+    }
+    if (!manualName.trim() || !manualHours.trim() || !manualReason.trim()) {
+      alert("직원명, 출퇴근 시간, 수기 입력 사유를 모두 채워주세요.");
+      return;
+    }
+    if (!/^\d+(\.\d+)?$/.test(manualHours)) {
+      alert("근무시간은 숫자 형식으로만 입력해 주세요. (예: 8시간 ➔ 8)");
+      return;
+    }
+    const hours = Number(manualHours);
+    if (hours <= 0) {
+      alert("근무 시간은 0보다 커야 합니다.");
+      return;
+    }
+
+    if (hours >= 15) {
+      const ok = window.confirm(`근무 시간이 15시간 이상(${hours}시간)으로 기재되었습니다. 오타(예: 1.5를 15로 잘못 적음)가 아닌 것이 확실한가요?\n정말 등록하시겠습니까?`);
+      if (!ok) return;
+    }
+
+    const key = `manual_parttime:${branchName}`;
+    const previous = (await gasClient.getSharedData<any[]>(key)) || [];
+    const newRecord = {
+      id: `manual-pt-${Date.now()}`,
+      staffName: manualName.trim(),
+      settleDate: manualDate,
+      clockIn: manualClockIn.trim() || "수기",
+      clockOut: manualClockOut.trim() || "수기",
+      workHours: hours,
+      reason: manualReason.trim(),
+      writer: `수기 (${manualReason.trim()})`,
+      createdAt: new Date().toISOString()
+    };
+
+    await gasClient.saveSharedData(key, [newRecord, ...previous]);
+    setManualName("");
+    setManualHours("9");
+    setManualClockIn("09:00");
+    setManualClockOut("18:00");
+    setManualClockInError("");
+    setManualClockOutError("");
+    setManualReason("");
+    await loadData();
+  };
+
   const handleEditPartTimeRow = (row: any) => {
+    if (row.manual) {
+      alert("수기로 작성된 파트타이머 근무 기록은 삭제 후 재등록해 주시기 바랍니다.");
+      return;
+    }
     if (!row.recordId) return;
     setEditPartTime({ row, fields: { clockIn: String(row.clockIn || ""), clockOut: String(row.clockOut || ""), workHours: toNumberPromptValue(row.workHours) } });
   };
@@ -4989,14 +5628,23 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   };
 
   const handleDeletePartTimeRow = async (row: any) => {
-    if (!row.recordId || !window.confirm(`${row.staffName}님의 ${row.settleDate} 파트타이머 근무기록을 삭제할까요?`)) return;
-    await updateDailyMetadata(row.recordId, (metadata, detail) => {
-      const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
-      const nextRows = staffRows.filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
-      const nextStaff = (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
-      return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-    });
-    await loadData();
+    if (row.manual) {
+      if (!window.confirm(`${row.staffName}님의 ${row.settleDate} 수기 파트타이머 근무기록을 삭제할까요?`)) return;
+      const key = `manual_parttime:${branchName}`;
+      const previous = (await gasClient.getSharedData<any[]>(key)) || [];
+      const next = previous.filter((item) => item.id !== row.id);
+      await gasClient.saveSharedData(key, next);
+      await loadData();
+    } else {
+      if (!row.recordId || !window.confirm(`${row.staffName}님의 ${row.settleDate} 파트타이머 근무기록을 삭제할까요?`)) return;
+      await updateDailyMetadata(row.recordId, (metadata, detail) => {
+        const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+        const nextRows = staffRows.filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
+        const nextStaff = (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
+        return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+      });
+      await loadData();
+    }
   };
 
   return (
@@ -5030,6 +5678,65 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
           >
             <RefreshCw className="w-3 h-3" /> 새로고침
           </button>
+        </div>
+
+        {/* Manual Part-Timer Registration Form */}
+        <div className="flex flex-wrap gap-2.5 rounded-xl bg-gray-50 p-3 border border-gray-100 items-center">
+          <span className="w-full text-xs font-black text-gray-600">파트타이머 근무 수기 입력</span>
+          <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4]" />
+          <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4]" />
+
+          <div className="relative">
+            <input
+              value={manualClockIn}
+              onChange={(e) => handleClockInChange(e.target.value)}
+              onBlur={() => handleClockBlur("in")}
+              placeholder="출근 (09:00)"
+              className={`w-20 px-2 py-1 border rounded text-xs bg-white font-mono focus:outline-none ${
+                manualClockInError ? "border-rose-500 ring-1 ring-rose-300" : "focus:border-[#2E6DB4]"
+              }`}
+            />
+            {manualClockInError && (
+              <div className="absolute z-10 left-0 -top-8 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow animate-fade-in">
+                {manualClockInError}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <input
+              value={manualClockOut}
+              onChange={(e) => handleClockOutChange(e.target.value)}
+              onBlur={() => handleClockBlur("out")}
+              placeholder="퇴근 (18:00)"
+              className={`w-20 px-2 py-1 border rounded text-xs bg-white font-mono focus:outline-none ${
+                manualClockOutError ? "border-rose-500 ring-1 ring-rose-300" : "focus:border-[#2E6DB4]"
+              }`}
+            />
+            {manualClockOutError && (
+              <div className="absolute z-10 left-0 -top-8 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow animate-fade-in">
+                {manualClockOutError}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <input
+              value={manualHours}
+              readOnly
+              placeholder="근무시간"
+              className="w-20 px-2 py-1 border rounded text-xs bg-gray-100 text-center font-black text-blue-700 cursor-not-allowed select-none"
+              title="출퇴근 시간에 의해 자동 계산됩니다"
+            />
+            {manualHours.length > 0 && /^\d+(\.\d+)?$/.test(manualHours) && Number(manualHours) >= 15 && (
+              <div className="absolute z-10 bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-black p-2 rounded-xl shadow-md -bottom-12 left-0 whitespace-nowrap animate-bounce">
+                ⚠️ 15시간 이상 입력됨. 오타가 아닌가요?
+              </div>
+            )}
+          </div>
+
+          <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4]" />
+          <button onClick={() => void saveManualPartTime()} className="px-3 py-1 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded text-xs font-bold transition-colors">등록</button>
         </div>
 
         {loading ? (
@@ -5520,8 +6227,8 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-fade-in">
           <div className={`px-5 py-3.5 rounded-2xl border text-xs font-bold shadow-xl flex items-center gap-2.5 ${
-            toast.type === "success" 
-              ? "bg-emerald-50 border-emerald-100 text-emerald-800" 
+            toast.type === "success"
+              ? "bg-emerald-50 border-emerald-100 text-emerald-800"
               : "bg-rose-50 border-rose-100 text-rose-800"
           }`}>
             {toast.type === "success" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-rose-500" />}
@@ -5612,13 +6319,13 @@ interface PurchaseSalesRow {
   memo: string;
 }
 
-function MonthlyPurchaseSalesSubTab({ 
-  branchName, 
+function MonthlyPurchaseSalesSubTab({
+  branchName,
   selectedMonth,
-  triggerToast 
-}: { 
-  branchName: string; 
-  selectedMonth: string; 
+  triggerToast
+}: {
+  branchName: string;
+  selectedMonth: string;
   triggerToast: (msg: string, type?: "success" | "error") => void;
 }) {
   const [rows, setRows] = useState<PurchaseSalesRow[]>([]);
@@ -5694,7 +6401,13 @@ function MonthlyPurchaseSalesSubTab({
         if (field === "transferAmount" && !updated.isPrepaid) {
           updated.monthlyUsageAmount = val;
         }
-        if (field === "isPrepaid" && val === true && !updated.prepaidChargeAmount) updated.prepaidChargeAmount = updated.transferAmount || "";
+        if (field === "isPrepaid" && val === true && !updated.prepaidChargeAmount) {
+          updated.prepaidChargeAmount = updated.transferAmount || "";
+        }
+        if (field === "isPrepaid" && val === false) {
+          updated.prepaidChargeAmount = "";
+          updated.monthlyUsageAmount = updated.transferAmount || "";
+        }
         return updated;
       })
     );
@@ -5793,8 +6506,8 @@ function MonthlyPurchaseSalesSubTab({
               <th className="py-3 px-3">분류항목</th>
               <th className="py-3 px-3">송금/사용 대상업체명</th>
               <th className="py-3 px-3 w-32">선입금 충전방식?</th>
-              <th className="py-3 px-3 w-36">이체필요 금액 (원)</th>
               <th className="py-3 px-3 w-32">충전금액 (원)</th>
+              <th className="py-3 px-3 w-36">이체필요 금액 (원)</th>
               <th className="py-3 px-3 w-32">실제 이달사용액 (원)</th>
               <th className="py-3 px-3 w-28">은행</th>
               <th className="py-3 px-3">계좌번호</th>
@@ -5846,6 +6559,18 @@ function MonthlyPurchaseSalesSubTab({
                   <td className="py-2 px-2.5">
                     <input
                       type="number"
+                      value={row.prepaidChargeAmount || ""}
+                      disabled={!row.isPrepaid}
+                      onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
+                      placeholder={row.isPrepaid ? "충전 금액" : "-"}
+                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
+                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-blue-700" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                      }`}
+                    />
+                  </td>
+                  <td className="py-2 px-2.5">
+                    <input
+                      type="number"
                       value={row.transferAmount}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
                       placeholder="송금 필요 금액"
@@ -5855,21 +6580,13 @@ function MonthlyPurchaseSalesSubTab({
                   <td className="py-2 px-2.5">
                     <input
                       type="number"
-                      value={row.prepaidChargeAmount || ""}
-                      onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
-                      placeholder={row.isPrepaid ? "충전 금액" : "-"}
-                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-blue-700" : "bg-zinc-100 text-gray-400 border-gray-200"
-                      }`}
-                    />
-                  </td>
-                  <td className="py-2 px-2.5">
-                    <input
-                      type="number"
                       value={row.monthlyUsageAmount}
+                      disabled={!row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder="발주액 합계"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right text-gray-800 focus:outline-none focus:border-[#2E6DB4]"
+                      placeholder={row.isPrepaid ? "발주액 합계" : "-"}
+                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
+                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-gray-800" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                      }`}
                     />
                   </td>
                   <td className="py-2 px-2.5">
@@ -5937,14 +6654,14 @@ interface PartTimeSalaryRow {
   memo: string;
 }
 
-function MonthlyPartTimeSalarySubTab({ 
-  branchName, 
-  selectedMonth, 
+function MonthlyPartTimeSalarySubTab({
+  branchName,
+  selectedMonth,
   history,
   triggerToast
-}: { 
-  branchName: string; 
-  selectedMonth: string; 
+}: {
+  branchName: string;
+  selectedMonth: string;
   history: any[];
   triggerToast: (msg: string, type?: "success" | "error") => void;
 }) {
@@ -6007,7 +6724,7 @@ function MonthlyPartTimeSalarySubTab({
                     ptTelemetry[s.name] = { hours: 0, dates: [] };
                   }
                   ptTelemetry[s.name].hours += Number(s.workHours || 0);
-                  
+
                   // Keep only date day integer like "28" or "28"
                   const dateParts = m.settleDate.split("-");
                   const daySuffix = dateParts[2] ? `${Number(dateParts[2])}` : m.settleDate;
@@ -6055,10 +6772,10 @@ function MonthlyPartTimeSalarySubTab({
       // Default values
       const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
       // Cumulative hours synced dynamically unless edited
-      const accumulatedHours = saved.accumulatedHours !== undefined 
-        ? saved.accumulatedHours 
+      const accumulatedHours = saved.accumulatedHours !== undefined
+        ? saved.accumulatedHours
         : String(tel.hours);
-      
+
       const calcSalary = String(Number(hourlyRate) * Number(accumulatedHours));
       // Forced empty string per "본사에서 입력해야 하는 칸이라 일단 공란으로 해두고"
       const calcActualPaid = saved.actualPaidAmount || "";
@@ -6451,15 +7168,15 @@ function MonthlyPartTimeSalarySubTab({
 // ----------------------------------------------------------------------------
 // 2-3. SUB TAB: 현금지출 일람
 // ----------------------------------------------------------------------------
-function MonthlyCashExpensesSubTab({ 
-  branchName, 
-  selectedMonth, 
+function MonthlyCashExpensesSubTab({
+  branchName,
+  selectedMonth,
   history,
   isAdmin = false,
   refreshHistory
-}: { 
-  branchName: string; 
-  selectedMonth: string; 
+}: {
+  branchName: string;
+  selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
@@ -6469,7 +7186,7 @@ function MonthlyCashExpensesSubTab({
 
   useEffect(() => {
     const cashList: any[] = [];
-    
+
     history.forEach((m) => {
       if (m.settleDate && m.settleDate.startsWith(selectedMonth)) {
         const parts = (m.memo || "").split("\n---\nMETADATA:");
@@ -6634,15 +7351,15 @@ function MonthlyCashExpensesSubTab({
 // ----------------------------------------------------------------------------
 // 2-4. SUB TAB: 현금관리 집계 (금고 실사 대조)
 // ----------------------------------------------------------------------------
-function MonthlyCashManagementSubTab({ 
-  branchName, 
-  selectedMonth, 
+function MonthlyCashManagementSubTab({
+  branchName,
+  selectedMonth,
   history,
   isAdmin = false,
   refreshHistory
-}: { 
-  branchName: string; 
-  selectedMonth: string; 
+}: {
+  branchName: string;
+  selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
@@ -6652,11 +7369,11 @@ function MonthlyCashManagementSubTab({
 
   useEffect(() => {
     const cashMgmt: any[] = [];
-    
+
     history.forEach((m) => {
       if (m.settleDate && m.settleDate.startsWith(selectedMonth)) {
         const parts = (m.memo || "").split("\n---\nMETADATA:");
-        
+
         let metaParsed: any = {};
         if (parts[1]) {
           try {
@@ -6666,11 +7383,11 @@ function MonthlyCashManagementSubTab({
 
         const prevVal = Number(metaParsed.prevDayCash) || 0;
         const salesVal = Number(m.cashSales) || 0;
-        
+
         const expensesVal = metaParsed.cashExpenses
           ? metaParsed.cashExpenses.reduce((sum: number, x: any) => sum + (Number(x.amount) || 0), 0)
           : 0;
-        
+
         const theoryVal = prevVal + salesVal - expensesVal;
         const vaultVal = Number(metaParsed.cashBalance) || 0;
         const difference = vaultVal - theoryVal;
@@ -6825,15 +7542,15 @@ function MonthlyCashManagementSubTab({
 // ----------------------------------------------------------------------------
 // 2-5. SUB TAB: 카드지출 일람
 // ----------------------------------------------------------------------------
-function MonthlyCardExpensesSubTab({ 
-  branchName, 
-  selectedMonth, 
+function MonthlyCardExpensesSubTab({
+  branchName,
+  selectedMonth,
   history,
   isAdmin = false,
   refreshHistory
-}: { 
-  branchName: string; 
-  selectedMonth: string; 
+}: {
+  branchName: string;
+  selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
@@ -6843,7 +7560,7 @@ function MonthlyCardExpensesSubTab({
 
   useEffect(() => {
     const cardList: any[] = [];
-    
+
     history.forEach((m) => {
       if (m.settleDate && m.settleDate.startsWith(selectedMonth)) {
         const parts = (m.memo || "").split("\n---\nMETADATA:");
