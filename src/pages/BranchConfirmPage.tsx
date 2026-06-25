@@ -222,10 +222,8 @@ export default function BranchConfirmPage() {
           const cached = sessionStorage.getItem(BRANCH_LIST_CACHE_KEY);
           if (cached) {
             const parsed = JSON.parse(cached);
-            if (parsed.length > 0) {
-              setBranches(parsed);
-              return;
-            }
+            const cachedBranches = Array.isArray(parsed) ? parsed : parsed?.branches;
+            if (Array.isArray(cachedBranches) && cachedBranches.length > 0) setBranches(cachedBranches);
           }
           setLoadingBranches(true);
           let filtered: any[] = [];
@@ -238,7 +236,7 @@ export default function BranchConfirmPage() {
           if (filtered.length === 0) {
             filtered = LOCAL_BRANCH_FALLBACK;
           }
-          sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify(filtered));
+          sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify({ branches: filtered, savedAt: Date.now() }));
           setBranches(filtered);
         } catch (e) {
           console.error("지점 목록 로드 실패:", e);
@@ -2682,7 +2680,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
 
     return (
-      <div className="absolute top-full left-0 z-50 mt-1.5 p-4 bg-white border border-zinc-200 rounded-2xl shadow-xl w-full max-w-sm" id="mini-status-calendar">
+      <div className="absolute top-full left-0 z-50 mt-1.5 p-4 bg-white border border-zinc-200 rounded-2xl shadow-xl w-[320px] max-w-[calc(100vw-2rem)]" id="mini-status-calendar">
         <div className="flex justify-between items-center mb-3">
           <button
             type="button"
