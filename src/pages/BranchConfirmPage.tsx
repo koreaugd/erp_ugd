@@ -40,6 +40,13 @@ const formatResidentNumber = (value: string) => {
   return `${digits.slice(0, 6)}-${digits.slice(6)}`;
 };
 
+const maskResidentNumber = (value?: string) => {
+  const formatted = formatResidentNumber(value || "");
+  const digits = formatted.replace(/\D/g, "");
+  if (digits.length <= 6) return formatted || "-";
+  return `${digits.slice(0, 6)}-${"*".repeat(Math.min(7, digits.length - 6))}`;
+};
+
 const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
 
 const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string }>) => {
@@ -4578,6 +4585,10 @@ function RosterTab({ branchName }: { branchName: string }) {
     if (!newName.trim()) return;
 
     const formattedResident = formatResidentNumber(newResidentNumber);
+    if (formattedResident.replace(/\D/g, "").length !== 13) {
+      alert("주민등록번호 13자리를 모두 입력해 주세요.");
+      return;
+    }
     const matchedDup = getSameNameWarning(newName, formattedResident, employees);
     if (matchedDup) {
       alert(matchedDup);
@@ -5072,7 +5083,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                           placeholder=""
                           className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
                         />
-                      ) : <span className="font-mono text-xs text-gray-600">{emp.residentNumber || "-"}</span>}
+                      ) : <span className="font-mono text-xs text-gray-600">{maskResidentNumber(emp.residentNumber)}</span>}
                     </td>
                     <td className="py-3 px-3">
                       {isEditing ? (
@@ -5613,7 +5624,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       const calcSummary = Array.from(totals, ([name, val]) => ({
         name,
         daysCount: val.daysCount,
-        workedDaysList: val.workedDates.slice(0, 5).join(", ") + (val.workedDates.length > 5 ? "..." : ""),
+        workedDaysList: val.workedDates.slice(0, 5).map((date: string) => String(date).split(/[.-]/).pop()?.padStart(2, "0") || String(date)).join(", ") + (val.workedDates.length > 5 ? "..." : ""),
         totalHours: Number(val.totalHours.toFixed(1))
       }));
       setSummaryList(calcSummary);
