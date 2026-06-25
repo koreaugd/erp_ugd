@@ -1325,7 +1325,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                 try {
                                   setNewBranchSubmitting(true);
                                   const phash = await hashPin(trimPin);
-                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole);
+                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole, trimPin);
                                   if (res && res.success !== false) {
                                     triggerToast("신규 점포가 데이터베이스에 원활히 등록되었습니다!", "success");
                                     setNewBranchName("");
@@ -7717,4 +7717,3 @@ function MonthlyCardExpensesSubTab({
     </div>
   );
 }
-

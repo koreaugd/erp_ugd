@@ -344,6 +344,57 @@ export async function getDirectFirebaseStatus() {
   }
 }
 
+async function findPublicBranchDocId(branchName: string) {
+  const db = getDirectDb();
+  const snapshot = await getDocs(collection(db, "public_branches"));
+  const existing = snapshot.docs.find((item) => String((item.data() as any).branchName || "").trim() === branchName.trim());
+  if (existing) return existing.id;
+
+  const numericIds = snapshot.docs
+    .map((item) => Number((item.data() as any).branchId || item.id))
+    .filter((value) => Number.isFinite(value));
+  const nextId = numericIds.length > 0 ? Math.max(...numericIds) + 1 : snapshot.size + 1;
+  return String(nextId).padStart(2, "0");
+}
+
+async function ensureBranchAuthUser(loginEmail: string, rawPin?: string) {
+  if (!rawPin?.trim()) return;
+  const password = `ugd-${rawPin.trim()}`;
+  if (password.length < 6) return;
+
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: loginEmail, password, returnSecureToken: false })
+  });
+  if (response.ok) return;
+
+  const body = await response.json().catch(() => ({}));
+  const message = String(body?.error?.message || "");
+  if (message.includes("EMAIL_EXISTS")) return;
+  throw new Error(message || `Failed to create Firebase Auth user: ${loginEmail}`);
+}
+
+async function upsertPublicBranchDirect(branchName: string, data: any) {
+  const role = data?.role || "branch";
+  if (role !== "branch") return;
+
+  const db = getDirectDb();
+  const branchId = await findPublicBranchDocId(branchName);
+  const loginEmail = `branch-${branchId}@ugd-erp.example`;
+  await ensureBranchAuthUser(loginEmail, data?.rawPin);
+
+  await setDoc(doc(db, "public_branches", branchId), {
+    branchId,
+    branchName: branchName.trim(),
+    brand: data?.brand || branchName.trim(),
+    role: "branch",
+    loginEmail,
+    isActive: data?.isActive !== false && data?.is_active !== false,
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
+}
+
 /**
  * Netlify 등 정적 호스팅 환경용: 실시간 지점 정보 개별 다이렉트 백업
  */
@@ -361,6 +412,7 @@ export async function backupSettingDirect(branchName: string, data: any) {
       _updatedAt: new Date().toISOString()
     };
     await setDoc(docRef, payload);
+    await upsertPublicBranchDirect(branchName, data);
     console.log(`[Firebase Direct] setting backed up: ${branchName}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `settings/${branchName}`);
@@ -376,6 +428,8 @@ export async function deleteSettingDirect(branchName: string) {
     const db = getDirectDb();
     const docRef = doc(db, "settings", branchName.trim());
     await deleteDoc(docRef);
+    const publicBranchId = await findPublicBranchDocId(branchName);
+    await deleteDoc(doc(db, "public_branches", publicBranchId));
     console.log(`[Firebase Direct] setting deleted: ${branchName}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `settings/${branchName}`);
