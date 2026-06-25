@@ -267,6 +267,13 @@ export const gasClient = {
     return result;
   },
 
+  async deleteDaily(recordId: string): Promise<{ success: boolean }> {
+    const { firebaseDeleteDaily } = await import("./firebaseDirect");
+    const result = await firebaseDeleteDaily(recordId);
+    clearReadCache();
+    return result;
+  },
+
   /**
    * 특정 일자의 전체 지점 마감 리스트 조회
    */

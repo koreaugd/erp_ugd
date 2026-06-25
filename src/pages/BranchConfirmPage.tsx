@@ -34,6 +34,31 @@ const toDateInputValue = (value: string) => {
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 };
 
+const formatResidentNumber = (value: string) => {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
+  if (digits.length <= 6) return digits;
+  return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+};
+
+const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
+
+const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string }>) => {
+  const cleanName = name.trim();
+  if (!cleanName) return "";
+  const incomingBirth = residentBirthKey(residentNumber);
+  const sameName = employees.filter((employee) => employee.name?.trim() === cleanName);
+  if (sameName.length === 0) return "";
+  const hasMissingResident = sameName.some((employee) => !residentBirthKey(employee.residentNumber));
+  if (hasMissingResident || !incomingBirth) {
+    return `${cleanName} 이름의 직원이 이미 있고 주민등록번호 앞 6자리 확인이 필요합니다. 동명이인 또는 동일인 여부를 직원현황에서 먼저 확인해주세요.`;
+  }
+  const hasDifferentBirth = sameName.some((employee) => residentBirthKey(employee.residentNumber) !== incomingBirth);
+  if (hasDifferentBirth) {
+    return `${cleanName} 이름의 동명이인이 있습니다. 주민등록번호 앞 6자리로 구분해서 확인해주세요.`;
+  }
+  return `${cleanName} 이름과 주민등록번호 앞 6자리가 같은 직원이 이미 등록되어 있습니다.`;
+};
+
 const splitDailyMemoMetadata = (memo?: string | null) => {
   const raw = String(memo || "");
   const parts = raw.split("\n---\nMETADATA:");
@@ -144,7 +169,7 @@ export default function BranchConfirmPage() {
   // ----------------------------------------------------
   // Tabs State
   // ----------------------------------------------------
-  const [activeTab, setActiveTab] = useState<"settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("settle");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("dashboard");
 
   // ----------------------------------------------------
   // Branch Selector State
@@ -215,7 +240,7 @@ export default function BranchConfirmPage() {
       return;
     }
     selectBranch(branch);
-    setActiveTab("settle");
+    setActiveTab("dashboard");
   };
 
   if (!user) return null;
@@ -296,8 +321,8 @@ interface WorkspaceProps {
   branch: { branchName: string; brand: string; role: string };
   logout: () => void;
   selectBranch: (branch: any) => void;
-  activeTab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
-  setActiveTab: (tab: "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
+  activeTab: "dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
+  setActiveTab: (tab: "dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
   isAdmin: boolean;
 }
 
@@ -312,10 +337,11 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [mainCategory, setMainCategory] = useState<"daily" | "monthly" | "annualLeave">("daily");
+  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave">("dashboard");
   const [monthlyTab, setMonthlyTab] = useState<"purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const mainTabs = [
+    { id: "dashboard", label: "대시보드", icon: ClipboardList },
     { id: "daily", label: "일일마감정산", icon: Calendar },
     { id: "monthly", label: "월말마감정산", icon: Coins },
     { id: "annualLeave", label: "연차관리", icon: Calendar }
@@ -638,7 +664,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 key={mt.id}
                 onClick={() => {
                   setMainCategory(mt.id as any);
-                  if (mt.id === "daily") {
+                  if (mt.id === "dashboard") {
+                    setActiveTab("dashboard");
+                  } else if (mt.id === "daily") {
                     setActiveTab("settle");
                   } else if (mt.id === "annualLeave") {
                     setActiveTab("annualLeave");
@@ -813,6 +841,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
         {/* Content Panel Frame */}
         <main className="grow p-4 sm:p-6 pb-20 max-w-7xl w-full mx-auto">
+          {mainCategory === "dashboard" && <BranchDashboardTab branchName={activeBranchName} />}
+
           {mainCategory === "daily" && (
             <AnimatePresence mode="wait">
               <motion.div
@@ -1744,6 +1774,126 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   );
 }
 
+function BranchDashboardTab({ branchName }: { branchName: string }) {
+  const [loading, setLoading] = useState(true);
+  const [notices, setNotices] = useState<any[]>([]);
+  const [issues, setIssues] = useState<Array<{ type: string; message: string; level: "warn" | "danger" | "info" }>>([]);
+
+  const getTodayDateStr = () => {
+    const local = new Date();
+    return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+  };
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [savedNotices, roster, today] = await Promise.all([
+        gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
+        gasClient.getBranchOwnRoster(branchName).catch(() => []),
+        gasClient.getDailyFormBootstrap(branchName, getTodayDateStr()).catch(() => null)
+      ]);
+      setNotices(Array.isArray(savedNotices) ? savedNotices : []);
+
+      const nextIssues: Array<{ type: string; message: string; level: "warn" | "danger" | "info" }> = [];
+      if (!today?.exists) {
+        nextIssues.push({ type: "일일마감", message: "오늘 일일마감정산이 아직 제출되지 않았습니다.", level: "info" });
+      }
+
+      (roster || []).forEach((employee: any) => {
+        const missing: string[] = [];
+        if (!residentBirthKey(employee.residentNumber)) missing.push("주민등록번호");
+        if (!employee.entryDate) missing.push("입사일");
+        if (employee.division === "정직원" && !employee.rank) missing.push("직급");
+        if (missing.length > 0) {
+          nextIssues.push({ type: "직원현황", message: `${employee.name}님: ${missing.join(", ")} 입력이 필요합니다.`, level: "warn" });
+        }
+      });
+
+      const byName = new Map<string, any[]>();
+      (roster || []).forEach((employee: any) => {
+        const name = String(employee.name || "").trim();
+        if (!name) return;
+        byName.set(name, [...(byName.get(name) || []), employee]);
+      });
+      byName.forEach((group, name) => {
+        if (group.length < 2) return;
+        const birthKeys = group.map((employee) => residentBirthKey(employee.residentNumber));
+        const hasMissing = birthKeys.some((key) => !key);
+        const distinct = new Set(birthKeys.filter(Boolean));
+        nextIssues.push({
+          type: "동명이인 확인",
+          message: hasMissing
+            ? `${name} 이름의 직원이 여러 명이고 주민등록번호가 비어있는 인원이 있습니다. 같은 사람인지 확인해주세요.`
+            : `${name} 이름의 직원이 여러 명입니다. 주민등록번호 앞 6자리로 동명이인 여부를 확인해주세요. (${Array.from(distinct).join(", ")})`,
+          level: "danger"
+        });
+      });
+
+      setIssues(nextIssues);
+    } finally {
+      setLoading(false);
+    }
+  }, [branchName]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-black text-gray-900">{branchName} 대시보드</h2>
+            <p className="text-xs text-gray-400 mt-1">공지사항과 지점에서 아직 확인해야 할 미결사항을 모아 보여줍니다.</p>
+          </div>
+          <button onClick={() => void load()} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">새로고침</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="lg:col-span-2 bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-black text-gray-800 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500" /> 미결 확인사항</h3>
+            <span className="text-xs font-black text-gray-400">{issues.length}건</span>
+          </div>
+          {loading ? (
+            <div className="py-16 flex justify-center"><LoadingSpinner size="md" /></div>
+          ) : issues.length === 0 ? (
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-5 text-sm font-bold text-emerald-800">현재 확인 필요한 미결사항이 없습니다.</div>
+          ) : (
+            <div className="space-y-2">
+              {issues.map((issue, index) => (
+                <div key={index} className={`rounded-2xl border p-4 text-sm ${issue.level === "danger" ? "bg-rose-50 border-rose-100 text-rose-800" : issue.level === "warn" ? "bg-amber-50 border-amber-100 text-amber-800" : "bg-sky-50 border-sky-100 text-sky-800"}`}>
+                  <p className="text-[11px] font-black opacity-70">{issue.type}</p>
+                  <p className="font-bold mt-1">{issue.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4">
+          <h3 className="text-sm font-black text-gray-800 flex items-center gap-2"><Info className="w-4 h-4 text-[#2E6DB4]" /> 관리자 공지사항</h3>
+          {notices.length === 0 ? (
+            <p className="text-xs text-gray-400 py-8 text-center">등록된 공지사항이 없습니다.</p>
+          ) : (
+            <div className="space-y-3">
+              {notices.slice(0, 5).map((notice, index) => (
+                <div key={notice.id || index} className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                  <p className="text-sm font-black text-gray-800">{notice.title || "공지사항"}</p>
+                  <p className="text-xs text-gray-500 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
+                  <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 // ----------------------------------------------------
 // TAB 1: Daily Settle Tab (일일마감정산)
 // ----------------------------------------------------
@@ -2245,7 +2395,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               name: s.name,
               division: s.division,
-              residentNumber: s.residentNumber || "",
+              residentNumber: formatResidentNumber(s.residentNumber || ""),
               contractType: "4대보험" as const,
               entryDate: s.entryDate || "",
               ...(s.division === "정직원" ? { rank: s.rank || "사원" } : {})
@@ -2634,11 +2784,18 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               </button>
               {isEditApproved && <button
                 type="button"
-                onClick={() => {
-                  if (!window.confirm("현재 화면의 마감 입력 내용을 비우고 처음부터 다시 작성할까요? 기존 저장 기록은 마감 제출 전까지 유지됩니다.")) return;
+                onClick={async () => {
+                  if (!existingRecordId) return;
+                  if (!window.confirm(`${settleDate} 마감정산 내역을 완전히 초기화할까요?\n확인을 누르면 저장된 마감기록이 삭제되어 다시 들어와도 처음 입력 상태로 표시됩니다.`)) return;
+                  try {
+                    await gasClient.deleteDaily(existingRecordId);
+                  } catch (error: any) {
+                    triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
+                    return;
+                  }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setWriter("");
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); initRosterInForm(); setIsEditApproved(true);
-                  triggerToast("정산 입력을 초기화했습니다. 새 내용으로 마감 제출해 주세요.", "success");
+                  triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
               >
@@ -3063,7 +3220,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             type="text"
             placeholder="주민등록번호"
             value={newStaffInputResidentNumber}
-            onChange={(e) => setNewStaffInputResidentNumber(e.target.value)}
+            onChange={(e) => setNewStaffInputResidentNumber(formatResidentNumber(e.target.value))}
             className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono w-36"
           />
           {newStaffInputDivision === "정직원" && (
@@ -3100,10 +3257,16 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 triggerToast("이미 정산 표에 등록된 이름입니다.", "error");
                 return;
               }
+              const formattedResident = formatResidentNumber(newStaffInputResidentNumber);
+              const warning = getSameNameWarning(name, formattedResident, getRoster());
+              if (warning) {
+                alert(warning);
+                return;
+              }
               const newRow: StaffRow = {
                 division: newStaffInputDivision,
                 name,
-                residentNumber: newStaffInputResidentNumber.trim(),
+                residentNumber: formattedResident,
                 rank: newStaffInputDivision === "정직원" ? newStaffInputRank : undefined,
                 entryDate: newStaffInputEntryDate,
                 standardHours: newStaffInputDivision === "정직원" ? defaultStandardHours : 0,
@@ -3203,7 +3366,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           value={s.clockIn}
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
-                          placeholder="24시간"
+                          placeholder="00:00"
                           className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockIn`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockIn`]}</span>}
@@ -3216,7 +3379,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           value={s.clockOut}
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
-                          placeholder="24시간"
+                          placeholder="00:00"
                           className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockOut`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockOut`]}</span>}
@@ -3732,7 +3895,7 @@ function RosterTab({ branchName }: { branchName: string }) {
     setEditDivision(emp.division);
     setEditRank(emp.rank || "사원");
     setEditCustomRank(emp.customRank || "");
-    setEditResidentNumber(emp.residentNumber || "");
+    setEditResidentNumber(formatResidentNumber(emp.residentNumber || ""));
     setEditContractType(emp.contractType || "4대보험");
     setEditEntryDate(emp.entryDate || "");
     setShowEditModal(true);
@@ -3751,7 +3914,7 @@ function RosterTab({ branchName }: { branchName: string }) {
           ...emp,
           name: editName.trim(),
           division: editDivision,
-          residentNumber: editResidentNumber.trim(),
+          residentNumber: formatResidentNumber(editResidentNumber),
           contractType: editContractType,
           entryDate: editEntryDate,
           ...(editDivision === "정직원" ? {
@@ -3793,9 +3956,10 @@ function RosterTab({ branchName }: { branchName: string }) {
   }, [branchName]);
 
   const saveEmployees = (updated: Employee[]) => {
-    setEmployees(updated);
-    localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(updated));
-    gasClient.saveBranchOwnRoster(branchName, updated).catch((error) => {
+    const normalized = updated.map((employee) => ({ ...employee, residentNumber: formatResidentNumber(employee.residentNumber || "") }));
+    setEmployees(normalized);
+    localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(normalized));
+    gasClient.saveBranchOwnRoster(branchName, normalized).catch((error) => {
       console.error("직원 명단 저장에 실패했습니다.", error);
     });
   };
@@ -3803,7 +3967,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const updateEmployeeField = (id: string, field: "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
     setEmployees((current) => current.map((employee) => {
       if (employee.id !== id) return employee;
-      const updated = { ...employee, [field]: value };
+      const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
       if (field === "division" && value === "파트타이머") updated.rank = "사원";
       return updated;
     }));
@@ -3827,9 +3991,10 @@ function RosterTab({ branchName }: { branchName: string }) {
     e.preventDefault();
     if (!newName.trim()) return;
 
-    const matchedDup = employees.find((emp) => emp.name.trim() === newName.trim());
+    const formattedResident = formatResidentNumber(newResidentNumber);
+    const matchedDup = getSameNameWarning(newName, formattedResident, employees);
     if (matchedDup) {
-      alert("이미 동일한 이름의 근무 조원이 명부에 개설 중입니다.");
+      alert(matchedDup);
       return;
     }
 
@@ -3837,7 +4002,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       id: `emp-${Date.now()}`,
       name: newName.trim(),
       division,
-      residentNumber: newResidentNumber.trim(),
+      residentNumber: formattedResident,
       contractType: newContractType,
       entryDate: newEntryDate,
       ...(division === "정직원" ? {
@@ -4078,7 +4243,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                     <input
                       type="text"
                       value={editResidentNumber}
-                      onChange={(e) => setEditResidentNumber(e.target.value)}
+                      onChange={(e) => setEditResidentNumber(formatResidentNumber(e.target.value))}
                       placeholder="000000-0000000"
                       className="px-3.5 py-2 border border-gray-200 rounded-xl font-mono text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
                     />
@@ -4216,7 +4381,7 @@ function RosterTab({ branchName }: { branchName: string }) {
             <input
               type="text"
               value={newResidentNumber}
-              onChange={(e) => setNewResidentNumber(e.target.value)}
+              onChange={(e) => setNewResidentNumber(formatResidentNumber(e.target.value))}
               placeholder=""
               className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
             />

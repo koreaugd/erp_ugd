@@ -91,6 +91,11 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
   return { success: true };
 }
 
+export async function firebaseDeleteDaily(recordId: string) {
+  await deleteDoc(doc(getDirectDb(), "daily_settles", recordId));
+  return { success: true };
+}
+
 export async function firebaseGetStaffRoster(branchName: string) {
   const snapshot = await getDocs(collection(getDirectDb(), "staff_rosters"));
   const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);

@@ -578,6 +578,8 @@ export default function AdminPage() {
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
           {adminSection === "dashboard" && (
             <>
+              <AdminNoticeManager />
+
               <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
                 <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button></div>
@@ -1120,6 +1122,70 @@ export default function AdminPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function AdminNoticeManager() {
+  const [notices, setNotices] = useState<any[]>([]);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const saved = await gasClient.getSharedData<any[]>("admin_notices").catch(() => []);
+    setNotices(Array.isArray(saved) ? saved : []);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const saveNotice = async () => {
+    if (!title.trim() && !body.trim()) return;
+    try {
+      setSaving(true);
+      const next = [{ id: `notice-${Date.now()}`, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
+      await gasClient.saveSharedData("admin_notices", next);
+      setNotices(next);
+      setTitle("");
+      setBody("");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteNotice = async (id: string) => {
+    if (!window.confirm("공지사항을 삭제할까요?")) return;
+    const next = notices.filter((notice) => notice.id !== id);
+    await gasClient.saveSharedData("admin_notices", next);
+    setNotices(next);
+  };
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+      <div>
+        <h2 className="text-lg font-black text-[#2C3E50]">지점 공지사항</h2>
+        <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-2">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+        <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+        <button onClick={() => void saveNotice()} disabled={saving} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
+      </div>
+      {notices.length > 0 && (
+        <div className="space-y-2">
+          {notices.slice(0, 3).map((notice) => (
+            <div key={notice.id} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <div>
+                <p className="text-sm font-black text-gray-800">{notice.title}</p>
+                <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
+              </div>
+              <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
