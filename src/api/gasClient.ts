@@ -338,7 +338,7 @@ export const gasClient = {
         const isOvertime = staff.division === "정직원" && Number(staff.overtime || 0) !== 0;
         if ((logType === "partTime" && !isPartTime) || (logType === "overtime" && !isOvertime)) continue;
         const staffName = staff.staffName || staff.name;
-        records.push({ settleDate: item.settleDate, staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", writer: item.submittedBy || "점장" });
+        records.push({ recordId: item.recordId, settleDate: item.settleDate, staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", writer: item.submittedBy || "점장" });
         const aggregate = summary.get(staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
         aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staffName, aggregate);
       }

@@ -1,5 +1,5 @@
 // src/pages/AdminPage.tsx
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailyListRow, DailySettleDetail, ExpenseDetail, StaffRecord } from "../api/gasClient";
@@ -56,7 +56,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory" | "annualLeave">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -522,6 +522,13 @@ export default function AdminPage() {
             <TrendingUp className="w-5 h-5" />
             마감현황
           </button>
+          <button
+            onClick={() => setAdminSection("annualLeave")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "annualLeave" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <Calendar className="w-5 h-5" />
+            연차관리
+          </button>
           {employeeDirectoryEnabled && <button
             onClick={() => setAdminSection("employeeDirectory")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "employeeDirectory" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
@@ -796,6 +803,8 @@ export default function AdminPage() {
           </div>
             </>
           )}
+
+          {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
 
           {employeeDirectoryEnabled && adminSection === "employeeDirectory" && (
             <section className="space-y-6">
@@ -1111,5 +1120,187 @@ export default function AdminPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function AdminAnnualLeaveSection() {
+  const [loading, setLoading] = useState(false);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [entriesByBranch, setEntriesByBranch] = useState<Record<string, any[]>>({});
+  const [grantsByBranch, setGrantsByBranch] = useState<Record<string, Record<string, number>>>({});
+  const [selectedBranch, setSelectedBranch] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+
+  const formatShortDate = (value: string) => {
+    if (!value) return "-";
+    const normalized = String(value).replace(/\./g, "-");
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return value;
+    return `${String(date.getFullYear()).slice(2)}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+  };
+
+  const calcDays = (from: string, to: string) => {
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+    return Number.isFinite(days) ? days : 0;
+  };
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const branchList = await gasClient.getBranchList();
+      setBranches(branchList || []);
+      const packed = await Promise.all((branchList || []).map(async (branch: any) => {
+        const branchName = branch.branchName;
+        const [roster, entries, grants] = await Promise.all([
+          gasClient.getBranchOwnRoster(branchName).catch(() => []),
+          gasClient.getSharedData<any[]>(`annual_leave:${branchName}`).catch(() => []),
+          gasClient.getSharedData<Record<string, number>>(`annual_leave_grants:${branchName}`).catch(() => ({}))
+        ]);
+        return {
+          branchName,
+          brand: branch.brand,
+          employees: (roster || []).filter((employee: any) => employee.division === "정직원").map((employee: any) => ({ ...employee, branchName, brand: branch.brand })),
+          entries: Array.isArray(entries) ? entries : [],
+          grants: grants || {}
+        };
+      }));
+      setEmployees(packed.flatMap((item) => item.employees));
+      setEntriesByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.entries])));
+      setGrantsByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.grants])));
+      if (!selectedBranch && packed[0]) setSelectedBranch(packed[0].branchName);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBranch]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const availableEmployees = employees.filter((employee) => !selectedBranch || employee.branchName === selectedBranch);
+
+  const saveGrant = async (branchName: string, employeeId: string, value: string) => {
+    const nextValue = Math.max(0, Number(value) || 0);
+    const branchGrants = { ...(grantsByBranch[branchName] || {}), [employeeId]: nextValue };
+    const next = { ...grantsByBranch, [branchName]: branchGrants };
+    setGrantsByBranch(next);
+    await gasClient.saveSharedData(`annual_leave_grants:${branchName}`, branchGrants);
+  };
+
+  const saveLeaveUse = async () => {
+    const employee = employees.find((item) => item.id === selectedEmployeeId && item.branchName === selectedBranch);
+    const days = calcDays(startDate, endDate);
+    if (!employee || days < 1 || !reason.trim()) {
+      alert("직원, 기간, 사용 사유를 모두 확인해주세요.");
+      return;
+    }
+    const key = `annual_leave:${selectedBranch}`;
+    const previous = entriesByBranch[selectedBranch] || [];
+    const nextEntry = {
+      id: `admin-leave-${Date.now()}`,
+      employeeId: employee.id,
+      staffName: employee.name,
+      branchName: selectedBranch,
+      startDate,
+      endDate,
+      date: startDate,
+      days,
+      reason: reason.trim(),
+      createdAt: new Date().toISOString(),
+      createdBy: "관리자"
+    };
+    const nextEntries = [nextEntry, ...previous];
+    await gasClient.saveSharedData(key, nextEntries);
+    setEntriesByBranch((prev) => ({ ...prev, [selectedBranch]: nextEntries }));
+    setReason("");
+  };
+
+  const rows = employees.map((employee) => {
+    const branchEntries = entriesByBranch[employee.branchName] || [];
+    const logs = branchEntries.filter((entry) => entry.employeeId === employee.id);
+    const used = logs.reduce((sum, entry) => sum + Number(entry.days || 0), 0);
+    const grant = Number(grantsByBranch[employee.branchName]?.[employee.id] ?? 15);
+    return { employee, logs, used, grant, remain: grant - used };
+  });
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 직원 연차 통합 관리</h2>
+          <p className="text-xs text-gray-400 mt-1">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다.</p>
+        </div>
+        <button onClick={() => void load()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <h3 className="font-black text-gray-800">연차 사용 등록</h3>
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+          <select value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setSelectedEmployeeId(""); }} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+            <option value="">지점 선택</option>
+            {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+          </select>
+          <select value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+            <option value="">직원 선택</option>
+            {availableEmployees.map((employee) => <option key={`${employee.branchName}-${employee.id}`} value={employee.id}>{employee.name}</option>)}
+          </select>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="사용 사유" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+          <button onClick={() => void saveLeaveUse()} className="bg-emerald-600 text-white rounded-xl text-sm font-black">등록</button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-slate-50 text-left text-xs text-gray-500">
+              <tr>
+                <th className="px-4 py-3">지점</th>
+                <th className="px-4 py-3">직원</th>
+                <th className="px-4 py-3">입사일</th>
+                <th className="px-4 py-3 text-center">부여일수</th>
+                <th className="px-4 py-3 text-center">사용일수</th>
+                <th className="px-4 py-3 text-center">잔여일수</th>
+                <th className="px-4 py-3">사용기록</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={7} className="py-16 text-center"><LoadingSpinner size="sm" /></td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={7} className="py-16 text-center text-gray-400 font-bold">표시할 정직원 데이터가 없습니다.</td></tr>
+              ) : rows.map(({ employee, logs, used, grant, remain }) => (
+                <tr key={`${employee.branchName}-${employee.id}`} className="hover:bg-slate-50/60">
+                  <td className="px-4 py-3 font-bold text-gray-500">{employee.branchName}</td>
+                  <td className="px-4 py-3 font-black text-gray-800">{employee.name}</td>
+                  <td className="px-4 py-3 font-mono text-gray-500">{formatShortDate(employee.entryDate)}</td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="number"
+                      value={grant}
+                      onChange={(e) => setGrantsByBranch((prev) => ({ ...prev, [employee.branchName]: { ...(prev[employee.branchName] || {}), [employee.id]: Number(e.target.value) || 0 } }))}
+                      onBlur={(e) => void saveGrant(employee.branchName, employee.id, e.target.value)}
+                      className="w-20 text-center border border-gray-200 rounded-lg px-2 py-1 font-bold"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-center font-black text-rose-600">{used}</td>
+                  <td className={`px-4 py-3 text-center font-black ${remain < 0 ? "text-rose-700" : "text-[#2E6DB4]"}`}>{remain}</td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {logs.length === 0 ? "-" : logs.map((entry) => `${entry.startDate || entry.date}${entry.endDate && entry.endDate !== (entry.startDate || entry.date) ? `~${entry.endDate}` : ""} (${entry.days}일, ${entry.reason || "-"})`).join(", ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   );
 }
