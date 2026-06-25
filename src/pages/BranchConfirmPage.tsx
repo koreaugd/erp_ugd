@@ -124,6 +124,36 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 
 type StaffAddReason = "신규입사" | "지점이동" | "기타";
 
+interface StaffAddDraft {
+  id: string;
+  name: string;
+  division: "정직원" | "파트타이머";
+  residentNumber: string;
+  rank: string;
+  contractType: "4대보험" | "3.3%";
+  entryDate: string;
+  phoneDigits: string;
+  addReason: StaffAddReason;
+  fromBranch: string;
+  transferDate: string;
+  addReasonMemo: string;
+}
+
+const createStaffAddDraft = (): StaffAddDraft => ({
+  id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  name: "",
+  division: "정직원",
+  residentNumber: "",
+  rank: "",
+  contractType: "4대보험",
+  entryDate: "",
+  phoneDigits: "",
+  addReason: "신규입사",
+  fromBranch: "",
+  transferDate: "",
+  addReasonMemo: ""
+});
+
 interface StaffRow {
   division: "정직원" | "파트타이머";
   name: string;
@@ -2122,6 +2152,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [newStaffInputFromBranch, setNewStaffInputFromBranch] = useState("");
   const [newStaffInputTransferDate, setNewStaffInputTransferDate] = useState("");
   const [newStaffInputAddReasonMemo, setNewStaffInputAddReasonMemo] = useState("");
+  const [staffAddDrafts, setStaffAddDrafts] = useState<StaffAddDraft[]>(() => [createStaffAddDraft()]);
   const [transferBranchList, setTransferBranchList] = useState<any[]>([]);
   const [loadingTransferBranches, setLoadingTransferBranches] = useState(false);
 
@@ -2230,6 +2261,90 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     }));
     setStaffRows(mappedRows);
   }, [getRoster, defaultStandardHours]);
+
+  const updateStaffAddDraft = (id: string, patch: Partial<StaffAddDraft>) => {
+    setStaffAddDrafts((current) => current.map((draft) => {
+      if (draft.id !== id) return draft;
+      const next = { ...draft, ...patch };
+      if (patch.division === "정직원") next.contractType = "4대보험";
+      if (patch.division === "파트타이머") {
+        next.contractType = "3.3%";
+        next.rank = "";
+      }
+      return next;
+    }));
+  };
+
+  const registerStaffAddDrafts = () => {
+    const filledDrafts = staffAddDrafts.filter((draft) => draft.name.trim());
+    if (filledDrafts.length === 0) {
+      triggerToast("추가할 근무자 이름을 입력해주세요.", "error");
+      return;
+    }
+
+    const existingNames = new Set(staffRows.map((staff) => staff.name));
+    const nextRows: StaffRow[] = [];
+
+    for (const draft of filledDrafts) {
+      const name = draft.name.trim();
+      if (existingNames.has(name) || nextRows.some((row) => row.name === name)) {
+        triggerToast(`${name} 님은 이미 정산 표에 등록된 이름입니다.`, "error");
+        return;
+      }
+
+      const formattedResident = formatResidentNumber(draft.residentNumber);
+      if (formattedResident.replace(/\D/g, "").length !== 13) {
+        triggerToast(`${name} 님의 주민등록번호 13자리를 모두 입력해 주세요.`, "error");
+        return;
+      }
+      if (draft.addReason === "신규입사" && !draft.entryDate) {
+        triggerToast(`${name} 님의 신규입사일을 선택해 주세요.`, "error");
+        return;
+      }
+      if (draft.addReason === "신규입사" && toPhoneTail8(draft.phoneDigits).length !== 8) {
+        triggerToast(`${name} 님의 핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.`, "error");
+        return;
+      }
+      if (draft.addReason === "지점이동" && (!draft.fromBranch.trim() || !draft.transferDate)) {
+        triggerToast(`${name} 님의 이동 전 지점과 이동일을 입력해 주세요.`, "error");
+        return;
+      }
+      if (draft.addReason === "기타" && !draft.addReasonMemo.trim()) {
+        triggerToast(`${name} 님의 기타 추가 사유를 입력해 주세요.`, "error");
+        return;
+      }
+
+      const warning = getSameNameWarning(name, formattedResident, getRoster());
+      if (warning) {
+        alert(warning);
+        return;
+      }
+
+      nextRows.push({
+        division: draft.division,
+        name,
+        residentNumber: formattedResident,
+        rank: draft.division === "정직원" ? draft.rank : undefined,
+        entryDate: draft.addReason === "지점이동" ? draft.transferDate : draft.entryDate,
+        phone: draft.addReason === "신규입사" ? formatMobilePhone(draft.phoneDigits) : "",
+        addReason: draft.addReason,
+        fromBranch: draft.addReason === "지점이동" ? draft.fromBranch.trim() : "",
+        transferDate: draft.addReason === "지점이동" ? draft.transferDate : "",
+        hireDate: draft.addReason === "신규입사" ? draft.entryDate : "",
+        addReasonMemo: draft.addReason === "기타" ? draft.addReasonMemo.trim() : "",
+        standardHours: draft.division === "정직원" ? defaultStandardHours : 0,
+        clockIn: "",
+        clockOut: "",
+        workHours: 0,
+        overtime: 0,
+        overtimeReason: ""
+      });
+    }
+
+    setStaffRows((prev) => [...prev, ...nextRows]);
+    setStaffAddDrafts([createStaffAddDraft()]);
+    triggerToast(`${nextRows.length}명 추가되었습니다 (마감 제출 시 직원현황 자동 등록)`);
+  };
 
   // Refresh completed dates from branch history
   const refreshCompletedDates = useCallback(async () => {
@@ -3575,185 +3690,63 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         </div>
 
         {/* Inline Employee Field Addition Block */}
-        <div className="flex flex-wrap items-center gap-2.5 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
-          <span className="font-extrabold text-zinc-800">추가</span>
-          <input
-            type="text"
-            placeholder="근무자 이름 입력"
-            value={newStaffInputName}
-            onChange={(e) => setNewStaffInputName(e.target.value)}
-            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-bold max-w-[155px]"
-          />
-          <select
-            value={newStaffInputDivision}
-            onChange={(e) => setNewStaffInputDivision(e.target.value as "정직원" | "파트타이머")}
-            className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer"
-          >
-            <option value="정직원">정직원</option>
-            <option value="파트타이머">파트타이머</option>
-          </select>
-          <input
-            type="text"
-            placeholder="주민등록번호"
-            value={newStaffInputResidentNumber}
-            onChange={(e) => setNewStaffInputResidentNumber(formatResidentNumber(e.target.value))}
-            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono w-36"
-          />
-          {newStaffInputDivision === "정직원" && (
-            <select
-              value={newStaffInputRank}
-              onChange={(e) => setNewStaffInputRank(e.target.value)}
-              className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer"
-            >
-              <option value="">직급 선택</option>
-              {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
-                <option key={rank} value={rank}>{rank}</option>
-              ))}
-            </select>
-          )}
-          <select
-            value={newStaffInputAddReason}
-            onChange={(e) => setNewStaffInputAddReason(e.target.value as StaffAddReason)}
-            className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer"
-          >
-            <option value="신규입사">신규입사</option>
-            <option value="지점이동">지점이동</option>
-            <option value="기타">기타</option>
-          </select>
-          {newStaffInputAddReason === "신규입사" && (
-            <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
-              <span>신규입사일</span>
-              <input
-                type="date"
-                value={newStaffInputEntryDate}
-                onChange={(e) => setNewStaffInputEntryDate(e.target.value)}
-                onClick={(e) => e.currentTarget.showPicker?.()}
-                aria-label="신규입사일"
-                className="min-w-0 bg-transparent focus:outline-hidden font-mono cursor-pointer"
-              />
-            </label>
-          )}
-          {newStaffInputAddReason === "신규입사" && (
-            <label className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden text-xs">
-              <span className="px-2 py-1.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="12345678"
-                value={newStaffInputPhoneDigits}
-                onChange={(e) => setNewStaffInputPhoneDigits(toPhoneTail8(e.target.value))}
-                className="w-24 px-2 py-1.5 bg-white focus:outline-hidden font-mono font-bold"
-                aria-label="핸드폰번호 뒤 8자리"
-              />
-            </label>
-          )}
-          {newStaffInputAddReason === "지점이동" && (
-            <>
-              <select
-                value={newStaffInputFromBranch}
-                onChange={(e) => setNewStaffInputFromBranch(e.target.value)}
-                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32"
-              >
-                <option value="">{loadingTransferBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
-                {transferBranchList.map((branch: any) => (
-                  <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>
-                ))}
+        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
+          {staffAddDrafts.map((draft, draftIndex) => (
+            <div key={draft.id} className="flex flex-wrap items-center gap-2">
+              <span className="font-extrabold text-zinc-800 w-8">추가</span>
+              <input type="text" placeholder="이름" value={draft.name} onChange={(e) => updateStaffAddDraft(draft.id, { name: e.target.value })} className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-bold" />
+              <select value={draft.division} onChange={(e) => updateStaffAddDraft(draft.id, { division: e.target.value as "정직원" | "파트타이머" })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+                <option value="정직원">정직원</option>
+                <option value="파트타이머">파트타이머</option>
               </select>
-              <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
-                <span>이동일</span>
-                <input
-                  type="date"
-                  value={newStaffInputTransferDate}
-                  onChange={(e) => setNewStaffInputTransferDate(e.target.value)}
-                  onClick={(e) => e.currentTarget.showPicker?.()}
-                  aria-label="이동일"
-                  className="min-w-0 bg-transparent focus:outline-hidden font-mono cursor-pointer"
-                />
-              </label>
-            </>
-          )}
-          {newStaffInputAddReason === "기타" && (
-            <input
-              type="text"
-              placeholder="추가 사유"
-              value={newStaffInputAddReasonMemo}
-              onChange={(e) => setNewStaffInputAddReasonMemo(e.target.value)}
-              className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden w-40"
-            />
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              const name = newStaffInputName.trim();
-              if (!name) {
-                triggerToast("근무자 성명을 입력해주세요.", "error");
-                return;
-              }
-              if (staffRows.some(s => s.name === name)) {
-                triggerToast("이미 정산 표에 등록된 이름입니다.", "error");
-                return;
-              }
-              const formattedResident = formatResidentNumber(newStaffInputResidentNumber);
-              if (formattedResident.replace(/\D/g, "").length !== 13) {
-                triggerToast("주민등록번호 13자리를 모두 입력해 주세요.", "error");
-                return;
-              }
-              if (newStaffInputAddReason === "신규입사" && !newStaffInputEntryDate) {
-                triggerToast("신규입사일을 선택해 주세요.", "error");
-                return;
-              }
-              if (newStaffInputAddReason === "신규입사" && toPhoneTail8(newStaffInputPhoneDigits).length !== 8) {
-                triggerToast("핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.", "error");
-                return;
-              }
-              if (newStaffInputAddReason === "지점이동" && (!newStaffInputFromBranch.trim() || !newStaffInputTransferDate)) {
-                triggerToast("이동 전 지점과 이동일을 입력해 주세요.", "error");
-                return;
-              }
-              if (newStaffInputAddReason === "기타" && !newStaffInputAddReasonMemo.trim()) {
-                triggerToast("기타 추가 사유를 입력해 주세요.", "error");
-                return;
-              }
-              const warning = getSameNameWarning(name, formattedResident, getRoster());
-              if (warning) {
-                alert(warning);
-                return;
-              }
-              const newRow: StaffRow = {
-                division: newStaffInputDivision,
-                name,
-                residentNumber: formattedResident,
-                rank: newStaffInputDivision === "정직원" ? newStaffInputRank : undefined,
-                entryDate: newStaffInputAddReason === "지점이동" ? newStaffInputTransferDate : newStaffInputEntryDate,
-                phone: newStaffInputAddReason === "신규입사" ? formatMobilePhone(newStaffInputPhoneDigits) : "",
-                addReason: newStaffInputAddReason,
-                fromBranch: newStaffInputAddReason === "지점이동" ? newStaffInputFromBranch.trim() : "",
-                transferDate: newStaffInputAddReason === "지점이동" ? newStaffInputTransferDate : "",
-                hireDate: newStaffInputAddReason === "신규입사" ? newStaffInputEntryDate : "",
-                addReasonMemo: newStaffInputAddReason === "기타" ? newStaffInputAddReasonMemo.trim() : "",
-                standardHours: newStaffInputDivision === "정직원" ? defaultStandardHours : 0,
-                clockIn: "",
-                clockOut: "",
-                workHours: 0,
-                overtime: 0,
-                overtimeReason: ""
-              };
-              setStaffRows(prev => [...prev, newRow]);
-              setNewStaffInputName("");
-              setNewStaffInputResidentNumber("");
-              setNewStaffInputRank("");
-              setNewStaffInputEntryDate("");
-              setNewStaffInputPhoneDigits("");
-              setNewStaffInputAddReason("신규입사");
-              setNewStaffInputFromBranch("");
-              setNewStaffInputTransferDate("");
-              setNewStaffInputAddReasonMemo("");
-              triggerToast(`${name} 님이 추가되었습니다 (마감 제출 시 직원현황 자동 등록)`);
-            }}
-            className="px-3.5 py-1.5 bg-zinc-800 hover:bg-black text-white font-black rounded-lg cursor-pointer transition-colors"
-          >
-            추가하기
-          </button>
+              <input type="text" placeholder="주민등록번호" value={draft.residentNumber} onChange={(e) => updateStaffAddDraft(draft.id, { residentNumber: formatResidentNumber(e.target.value) })} className="w-36 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono" />
+              {draft.division === "정직원" && (
+                <select value={draft.rank} onChange={(e) => updateStaffAddDraft(draft.id, { rank: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+                  <option value="">직급 선택</option>
+                  {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => <option key={rank} value={rank}>{rank}</option>)}
+                </select>
+              )}
+              <select value={draft.addReason} onChange={(e) => updateStaffAddDraft(draft.id, { addReason: e.target.value as StaffAddReason })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+                <option value="신규입사">신규입사</option>
+                <option value="지점이동">지점이동</option>
+                <option value="기타">기타</option>
+              </select>
+              {draft.addReason === "신규입사" && (
+                <>
+                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
+                    <span>입사일</span>
+                    <input type="date" value={draft.entryDate} onChange={(e) => updateStaffAddDraft(draft.id, { entryDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="신규입사일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
+                  </label>
+                  <label className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden text-xs">
+                    <span className="px-2 py-1.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
+                    <input type="text" inputMode="numeric" placeholder="12345678" value={draft.phoneDigits} onChange={(e) => updateStaffAddDraft(draft.id, { phoneDigits: toPhoneTail8(e.target.value) })} className="w-24 px-2 py-1.5 bg-white focus:outline-hidden font-mono font-bold" aria-label="핸드폰번호 뒤 8자리" />
+                  </label>
+                </>
+              )}
+              {draft.addReason === "지점이동" && (
+                <>
+                  <select value={draft.fromBranch} onChange={(e) => updateStaffAddDraft(draft.id, { fromBranch: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32">
+                    <option value="">{loadingTransferBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
+                    {transferBranchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+                  </select>
+                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
+                    <span>이동일</span>
+                    <input type="date" value={draft.transferDate} onChange={(e) => updateStaffAddDraft(draft.id, { transferDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="이동일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
+                  </label>
+                </>
+              )}
+              {draft.addReason === "기타" && <input type="text" placeholder="추가 사유" value={draft.addReasonMemo} onChange={(e) => updateStaffAddDraft(draft.id, { addReasonMemo: e.target.value })} className="w-40 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden" />}
+              {staffAddDrafts.length > 1 && (
+                <button type="button" onClick={() => setStaffAddDrafts((current) => current.filter((item) => item.id !== draft.id))} className="px-2 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-rose-600 font-black">삭제</button>
+              )}
+              {draftIndex === staffAddDrafts.length - 1 && (
+                <button type="button" onClick={() => setStaffAddDrafts((current) => [...current, createStaffAddDraft()])} className="px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 text-zinc-700 font-black hover:bg-gray-100">행 추가</button>
+              )}
+            </div>
+          ))}
+          <div className="flex justify-end">
+            <button type="button" onClick={registerStaffAddDrafts} className="px-4 py-1.5 bg-zinc-800 hover:bg-black text-white font-black rounded-lg cursor-pointer transition-colors">입력한 행 등록</button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -4588,6 +4581,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [newFromBranch, setNewFromBranch] = useState("");
   const [newTransferDate, setNewTransferDate] = useState("");
   const [newAddReasonMemo, setNewAddReasonMemo] = useState("");
+  const [rosterAddDrafts, setRosterAddDrafts] = useState<StaffAddDraft[]>(() => [createStaffAddDraft()]);
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
   // Deletion Modal States
@@ -4827,6 +4821,77 @@ function RosterTab({ branchName }: { branchName: string }) {
     setNewFromBranch("");
     setNewTransferDate("");
     setNewAddReasonMemo("");
+  };
+
+  const updateRosterAddDraft = (id: string, patch: Partial<StaffAddDraft>) => {
+    setRosterAddDrafts((current) => current.map((draft) => {
+      if (draft.id !== id) return draft;
+      const next = { ...draft, ...patch };
+      if (patch.division === "정직원") next.contractType = "4대보험";
+      if (patch.division === "파트타이머") {
+        next.contractType = "3.3%";
+        next.rank = "";
+      }
+      return next;
+    }));
+  };
+
+  const registerRosterAddDrafts = () => {
+    const filledDrafts = rosterAddDrafts.filter((draft) => draft.name.trim());
+    if (filledDrafts.length === 0) {
+      alert("추가할 근무자 이름을 입력해주세요.");
+      return;
+    }
+
+    const nextEmployees: Employee[] = [];
+    for (const draft of filledDrafts) {
+      const name = draft.name.trim();
+      const formattedResident = formatResidentNumber(draft.residentNumber);
+      if (formattedResident.replace(/\D/g, "").length !== 13) {
+        alert(`${name} 님의 주민등록번호 13자리를 모두 입력해 주세요.`);
+        return;
+      }
+      if (draft.addReason === "신규입사" && !draft.entryDate) {
+        alert(`${name} 님의 신규입사일을 선택해 주세요.`);
+        return;
+      }
+      if (draft.addReason === "신규입사" && toPhoneTail8(draft.phoneDigits).length !== 8) {
+        alert(`${name} 님의 핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.`);
+        return;
+      }
+      if (draft.addReason === "지점이동" && (!draft.fromBranch.trim() || !draft.transferDate)) {
+        alert(`${name} 님의 이동 전 지점과 이동일을 입력해 주세요.`);
+        return;
+      }
+      if (draft.addReason === "기타" && !draft.addReasonMemo.trim()) {
+        alert(`${name} 님의 기타 추가 사유를 입력해 주세요.`);
+        return;
+      }
+      const matchedDup = getSameNameWarning(name, formattedResident, [...employees, ...nextEmployees]);
+      if (matchedDup) {
+        alert(matchedDup);
+        return;
+      }
+
+      nextEmployees.push({
+        id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        division: draft.division,
+        residentNumber: formattedResident,
+        contractType: draft.contractType,
+        entryDate: draft.addReason === "지점이동" ? draft.transferDate : draft.entryDate,
+        phone: draft.addReason === "신규입사" ? formatMobilePhone(draft.phoneDigits) : "",
+        addReason: draft.addReason,
+        fromBranch: draft.addReason === "지점이동" ? draft.fromBranch.trim() : "",
+        transferDate: draft.addReason === "지점이동" ? draft.transferDate : "",
+        hireDate: draft.addReason === "신규입사" ? draft.entryDate : "",
+        addReasonMemo: draft.addReason === "기타" ? draft.addReasonMemo.trim() : "",
+        ...(draft.division === "정직원" ? { rank: draft.rank } : {})
+      });
+    }
+
+    saveEmployees([...employees, ...nextEmployees]);
+    setRosterAddDrafts([createStaffAddDraft()]);
   };
 
   // Staff category counters
@@ -5112,206 +5177,64 @@ function RosterTab({ branchName }: { branchName: string }) {
           신규 등록
         </h3>
 
-        <form onSubmit={handleAddEmployee} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 text-xs items-end">
-          <div className="flex flex-col space-y-1.5">
-            <span className="font-bold text-gray-500">성명 (이름)</span>
-            <input
-              type="text"
-              required
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="직원 성명 기입"
-              className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-            />
-          </div>
-
-          <div className="flex flex-col space-y-1.5">
-            <span className="font-bold text-gray-500">고용/계약 상태 구분</span>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: "정직원", val: "정직원" },
-                { label: "파트타이머", val: "파트타이머" }
-              ].map((btn) => {
-                const checked = division === btn.val;
-                return (
-                  <button
-                    key={btn.val}
-                    type="button"
-                    onClick={() => {
-                      const nextDivision = btn.val as "정직원" | "파트타이머";
-                      setDivision(nextDivision);
-                      setNewContractType(nextDivision === "정직원" ? "4대보험" : "3.3%");
-                    }}
-                    className={`py-3 rounded-xl border font-extrabold text-xs transition-all cursor-pointer ${
-                      checked
-                        ? "bg-[#2E6DB4] border-[#2E6DB4] text-white shadow-xs"
-                        : "bg-white border-gray-200 text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    {btn.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {division === "정직원" && (
-            <div className="flex flex-col space-y-1.5 animate-in fade-in duration-200">
-              <span className="font-bold text-gray-500">직급 선택</span>
-              <select
-                value={selectedRank}
-                onChange={(e) => {
-                  setSelectedRank(e.target.value);
-                  if (e.target.value !== "기타") {
-                    setCustomRankInput("");
-                  }
-                }}
-                className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 text-sm focus:bg-white focus:outline-hidden focus:border-[#2E6DB4]"
-              >
-                <option value="">직급 선택</option>
-                {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rk) => (
-                  <option key={rk} value={rk}>{rk}</option>
-                ))}
+        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
+          {rosterAddDrafts.map((draft, draftIndex) => (
+            <div key={draft.id} className="flex flex-wrap items-center gap-2">
+              <span className="font-extrabold text-zinc-800 w-8">추가</span>
+              <input type="text" placeholder="이름" value={draft.name} onChange={(e) => updateRosterAddDraft(draft.id, { name: e.target.value })} className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-bold" />
+              <select value={draft.division} onChange={(e) => updateRosterAddDraft(draft.id, { division: e.target.value as "정직원" | "파트타이머" })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+                <option value="정직원">정직원</option>
+                <option value="파트타이머">파트타이머</option>
               </select>
-
-              {selectedRank === "기타" && (
-                <div className="flex flex-col space-y-1 pt-1.5">
-                  <span className="text-[10px] text-gray-400 font-bold">기타 직급 입력</span>
-                  <input
-                    type="text"
-                    required
-                    value={customRankInput}
-                    onChange={(e) => setCustomRankInput(e.target.value)}
-                    placeholder="예: 지점장, 실장 등"
-                    className="px-3 py-1.5 border border-gray-200 rounded-lg font-bold text-xs bg-white focus:outline-hidden focus:border-[#2E6DB4]"
-                  />
-                </div>
+              <input type="text" placeholder="주민등록번호" value={draft.residentNumber} onChange={(e) => updateRosterAddDraft(draft.id, { residentNumber: formatResidentNumber(e.target.value) })} className="w-36 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono" />
+              {draft.division === "정직원" && (
+                <select value={draft.rank} onChange={(e) => updateRosterAddDraft(draft.id, { rank: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+                  <option value="">직급 선택</option>
+                  {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rank) => <option key={rank} value={rank}>{rank}</option>)}
+                </select>
               )}
-            </div>
-          )}
-
-          <div className="flex flex-col space-y-1.5">
-            <label className="font-bold text-gray-500">주민등록번호</label>
-            <input
-              type="text"
-              value={newResidentNumber}
-              onChange={(e) => setNewResidentNumber(formatResidentNumber(e.target.value))}
-              placeholder=""
-              className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3 sm:col-span-2 lg:col-span-4 xl:col-span-6">
-            <div className="flex flex-col space-y-1.5">
-              <label className="font-bold text-gray-500">계약형태</label>
-              <select
-                value={newContractType}
-                onChange={(e) => setNewContractType(e.target.value as "4대보험" | "3.3%")}
-                className="px-3.5 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-              >
+              <select value={draft.contractType} onChange={(e) => updateRosterAddDraft(draft.id, { contractType: e.target.value as "4대보험" | "3.3%" })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
                 <option value="4대보험">4대보험</option>
                 <option value="3.3%">3.3%</option>
               </select>
-            </div>
-
-            <div className="flex flex-col space-y-1.5">
-              <label className="font-bold text-gray-500">추가 사유</label>
-              <select
-                value={newAddReason}
-                onChange={(e) => setNewAddReason(e.target.value as StaffAddReason)}
-                className="px-3.5 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-              >
+              <select value={draft.addReason} onChange={(e) => updateRosterAddDraft(draft.id, { addReason: e.target.value as StaffAddReason })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
                 <option value="신규입사">신규입사</option>
                 <option value="지점이동">지점이동</option>
                 <option value="기타">기타</option>
               </select>
+              {draft.addReason === "신규입사" && (
+                <>
+                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
+                    <span>입사일</span>
+                    <input type="date" value={draft.entryDate} onChange={(e) => updateRosterAddDraft(draft.id, { entryDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="신규입사일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
+                  </label>
+                  <label className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden text-xs">
+                    <span className="px-2 py-1.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
+                    <input type="text" inputMode="numeric" placeholder="12345678" value={draft.phoneDigits} onChange={(e) => updateRosterAddDraft(draft.id, { phoneDigits: toPhoneTail8(e.target.value) })} className="w-24 px-2 py-1.5 bg-white focus:outline-hidden font-mono font-bold" aria-label="핸드폰번호 뒤 8자리" />
+                  </label>
+                </>
+              )}
+              {draft.addReason === "지점이동" && (
+                <>
+                  <select value={draft.fromBranch} onChange={(e) => updateRosterAddDraft(draft.id, { fromBranch: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32">
+                    <option value="">{loadingBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
+                    {branchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+                  </select>
+                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
+                    <span>이동일</span>
+                    <input type="date" value={draft.transferDate} onChange={(e) => updateRosterAddDraft(draft.id, { transferDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="이동일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
+                  </label>
+                </>
+              )}
+              {draft.addReason === "기타" && <input type="text" placeholder="추가 사유" value={draft.addReasonMemo} onChange={(e) => updateRosterAddDraft(draft.id, { addReasonMemo: e.target.value })} className="w-40 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden" />}
+              {rosterAddDrafts.length > 1 && <button type="button" onClick={() => setRosterAddDrafts((current) => current.filter((item) => item.id !== draft.id))} className="px-2 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-rose-600 font-black">삭제</button>}
+              {draftIndex === rosterAddDrafts.length - 1 && <button type="button" onClick={() => setRosterAddDrafts((current) => [...current, createStaffAddDraft()])} className="px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 text-zinc-700 font-black hover:bg-gray-100">행 추가</button>}
             </div>
-
-            {newAddReason === "신규입사" && (
-            <div className="flex flex-col space-y-1.5">
-              <label className="font-bold text-gray-500">신규입사일</label>
-              <input
-                type="date"
-                value={newEntryDate}
-                onChange={(e) => setNewEntryDate(e.target.value)}
-                onClick={(e) => e.currentTarget.showPicker?.()}
-                className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4] cursor-pointer"
-              />
-            </div>
-            )}
-
-            {newAddReason === "신규입사" && (
-              <div className="flex flex-col space-y-1.5">
-                <label className="font-bold text-gray-500">핸드폰번호</label>
-                <div className="flex items-center border border-gray-200 rounded-xl bg-gray-50/50 overflow-hidden focus-within:bg-white focus-within:border-[#2E6DB4]">
-                  <span className="px-3.5 py-2.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={newPhoneDigits}
-                    onChange={(e) => setNewPhoneDigits(toPhoneTail8(e.target.value))}
-                    placeholder="12345678"
-                    className="w-full min-w-0 px-3 py-2.5 bg-transparent font-mono text-sm font-bold focus:outline-hidden"
-                    aria-label="핸드폰번호 뒤 8자리"
-                  />
-                </div>
-              </div>
-            )}
-
-            {newAddReason === "지점이동" && (
-              <>
-                <div className="flex flex-col space-y-1.5">
-                  <label className="font-bold text-gray-500">이동 전 지점</label>
-                  <input
-                    type="text"
-                    list="branch-transfer-source-list"
-                    value={newFromBranch}
-                    onChange={(e) => setNewFromBranch(e.target.value)}
-                    placeholder={loadingBranches ? "지점 불러오는 중" : "이전 지점명"}
-                    className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-                  />
-                  <datalist id="branch-transfer-source-list">
-                    {branchList.map((branch: any) => (
-                      <option key={branch.branchName} value={branch.branchName} />
-                    ))}
-                  </datalist>
-                </div>
-                <div className="flex flex-col space-y-1.5">
-                  <label className="font-bold text-gray-500">이동일</label>
-                  <input
-                    type="date"
-                    value={newTransferDate}
-                    onChange={(e) => setNewTransferDate(e.target.value)}
-                    onClick={(e) => e.currentTarget.showPicker?.()}
-                    className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-mono bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4] cursor-pointer"
-                  />
-                </div>
-              </>
-            )}
-
-            {newAddReason === "기타" && (
-              <div className="flex flex-col space-y-1.5 sm:col-span-2">
-                <label className="font-bold text-gray-500">기타 내용</label>
-                <input
-                  type="text"
-                  value={newAddReasonMemo}
-                  onChange={(e) => setNewAddReasonMemo(e.target.value)}
-                  placeholder="추가 사유를 입력"
-                  className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 focus:bg-white text-sm focus:outline-hidden focus:border-[#2E6DB4]"
-                />
-              </div>
-            )}
+          ))}
+          <div className="flex justify-end">
+            <button type="button" onClick={registerRosterAddDrafts} className="px-4 py-1.5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black rounded-lg cursor-pointer transition-colors">입력한 행 등록</button>
           </div>
-
-          <div className="sm:col-span-2 lg:col-span-4 xl:col-span-6 flex justify-end pt-1">
-            <button
-              type="submit"
-              className="w-full sm:w-56 h-11 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-colors flex items-center justify-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" /> 근무자 최종 등록
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
 
       {/* Roster Right list */}
