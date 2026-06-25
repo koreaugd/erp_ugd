@@ -1218,6 +1218,7 @@ function AdminAnnualLeaveSection() {
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
   const [editLeave, setEditLeave] = useState<{ branchName: string; entry: any; fields: { startDate: string; endDate: string; days: string; reason: string } } | null>(null);
+  const [partialDeleteLeave, setPartialDeleteLeave] = useState<{ branchName: string; entry: any; startDate: string; endDate: string } | null>(null);
 
   const formatShortDate = (value: string) => {
     if (!value) return "-";
@@ -1247,6 +1248,14 @@ function AdminAnnualLeaveSection() {
     const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
     return Number.isFinite(days) ? days : 0;
   };
+
+  const addDays = (value: string, amount: number) => {
+    const date = new Date(`${value}T00:00:00`);
+    date.setDate(date.getDate() + amount);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+
+  const toTime = (value: string) => new Date(`${value}T00:00:00`).getTime();
 
   const load = useCallback(async () => {
     try {
@@ -1344,6 +1353,35 @@ function AdminAnnualLeaveSection() {
     setEntriesByBranch((prev) => ({ ...prev, [branchName]: nextEntries }));
   };
 
+  const deleteLeavePartialRange = async () => {
+    if (!partialDeleteLeave) return;
+    const { branchName, entry, startDate: deleteStart, endDate: deleteEnd } = partialDeleteLeave;
+    const entryStart = entry.startDate || entry.date;
+    const entryEnd = entry.endDate || entryStart;
+    if (toTime(deleteStart) > toTime(deleteEnd) || toTime(deleteStart) > toTime(entryEnd) || toTime(deleteEnd) < toTime(entryStart)) {
+      alert("삭제할 기간이 기존 연차 사용기간과 겹치지 않습니다.");
+      return;
+    }
+    const key = `annual_leave:${branchName}`;
+    const previous = entriesByBranch[branchName] || [];
+    const nextEntries = previous.flatMap((item) => {
+      if (item.id !== entry.id) return [item];
+      const pieces: any[] = [];
+      if (toTime(deleteStart) > toTime(entryStart)) {
+        const leftEnd = addDays(deleteStart, -1);
+        pieces.push({ ...item, id: `${item.id}-left-${Date.now()}`, startDate: entryStart, endDate: leftEnd, date: entryStart, days: calcDays(entryStart, leftEnd) });
+      }
+      if (toTime(deleteEnd) < toTime(entryEnd)) {
+        const rightStart = addDays(deleteEnd, 1);
+        pieces.push({ ...item, id: `${item.id}-right-${Date.now()}`, startDate: rightStart, endDate: entryEnd, date: rightStart, days: calcDays(rightStart, entryEnd) });
+      }
+      return pieces;
+    });
+    await gasClient.saveSharedData(key, nextEntries);
+    setEntriesByBranch((prev) => ({ ...prev, [branchName]: nextEntries }));
+    setPartialDeleteLeave(null);
+  };
+
   const rows = employees.map((employee) => {
     const branchEntries = entriesByBranch[employee.branchName] || [];
     const logs = branchEntries.filter((entry) => entry.employeeId === employee.id);
@@ -1370,6 +1408,28 @@ function AdminAnnualLeaveSection() {
             <div className="px-5 py-4 bg-gray-50 flex justify-end gap-2">
               <button onClick={() => setEditLeave(null)} className="px-4 py-2 rounded-xl bg-white border text-xs font-bold">취소</button>
               <button onClick={() => void saveEditedLeave()} className="px-5 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {partialDeleteLeave && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-sm font-black text-gray-900">연차 기간 일부 삭제</h3>
+              <button onClick={() => setPartialDeleteLeave(null)} className="text-gray-400">×</button>
+            </div>
+            <div className="p-5 space-y-3 text-sm">
+              <p className="rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">
+                기존 기록: {partialDeleteLeave.entry.startDate || partialDeleteLeave.entry.date}~{partialDeleteLeave.entry.endDate || partialDeleteLeave.entry.startDate || partialDeleteLeave.entry.date}
+              </p>
+              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 시작일</span><input type="date" value={partialDeleteLeave.startDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, startDate: e.target.value } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 종료일</span><input type="date" value={partialDeleteLeave.endDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, endDate: e.target.value } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <p className="text-xs text-gray-400">예: 1~10일 기록에서 1~3일만 삭제하면 4~10일 기록만 남습니다.</p>
+            </div>
+            <div className="px-5 py-4 bg-gray-50 flex justify-end gap-2">
+              <button onClick={() => setPartialDeleteLeave(null)} className="px-4 py-2 rounded-xl bg-white border text-xs font-bold">취소</button>
+              <button onClick={() => void deleteLeavePartialRange()} className="px-5 py-2 rounded-xl bg-rose-600 text-white text-xs font-black">선택 기간 삭제</button>
             </div>
           </div>
         </div>
@@ -1445,6 +1505,7 @@ function AdminAnnualLeaveSection() {
                             <span>{entry.startDate || entry.date}{entry.endDate && entry.endDate !== (entry.startDate || entry.date) ? `~${entry.endDate}` : ""} ({entry.days}일, {entry.reason || "-"})</span>
                             <span className="flex gap-1">
                               <button onClick={() => setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } })} className="text-[10px] font-black text-[#2E6DB4]">수정</button>
+                              <button onClick={() => setPartialDeleteLeave({ branchName: employee.branchName, entry, startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "" })} className="text-[10px] font-black text-amber-600">일부삭제</button>
                               <button onClick={() => void deleteLeaveEntry(employee.branchName, entry.id)} className="text-[10px] font-black text-rose-600">삭제</button>
                             </span>
                           </div>
