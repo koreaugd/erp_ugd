@@ -1,5 +1,6 @@
 // src/api/firebaseDirect.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
 import {
   getFirestore,
   collection,
@@ -380,6 +381,11 @@ async function upsertPublicBranchDirect(branchName: string, data: any) {
   if (role !== "branch") return;
 
   const db = getDirectDb();
+  const currentUser = getAuth(appInstance || getApp()).currentUser;
+  if (currentUser?.email !== "admin@ugd-erp.example") {
+    throw new Error("Firebase 관리자 인증이 준비되지 않아 로그인 지점 목록을 갱신하지 못했습니다. 관리자 PIN 인증 후 다시 시도해 주세요.");
+  }
+
   const branchId = await findPublicBranchDocId(branchName);
   const loginEmail = `branch-${branchId}@ugd-erp.example`;
   await ensureBranchAuthUser(loginEmail, data?.rawPin);
