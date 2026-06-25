@@ -129,16 +129,15 @@ interface ExpenseRow {
   amount: string;
 }
 
+type OrderCategory = "???" | "??" | "???? ??";
+
 interface OrderItem {
   id: string;
-  category: "식자재" | "소모품" | "기타";
-  itemName: string;
-  quantity: string;
-  supplier: "쿠팡" | "네이버" | "인근매장" | "그외기타";
-  price: string;
+  category: OrderCategory;
+  vendorName: string;
+  amount: string;
+  memo: string;
   orderDate: string;
-  status: "신청완료" | "배송중" | "검수완료";
-  notes: string;
 }
 
 interface Employee {
@@ -169,7 +168,7 @@ export default function BranchConfirmPage() {
   // ----------------------------------------------------
   // Tabs State
   // ----------------------------------------------------
-  const [activeTab, setActiveTab] = useState<"dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("dashboard");
 
   // ----------------------------------------------------
   // Branch Selector State
@@ -321,8 +320,8 @@ interface WorkspaceProps {
   branch: { branchName: string; brand: string; role: string };
   logout: () => void;
   selectBranch: (branch: any) => void;
-  activeTab: "dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
-  setActiveTab: (tab: "dashboard" | "settle" | "orders" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
+  activeTab: "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
+  setActiveTab: (tab: "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
   isAdmin: boolean;
 }
 
@@ -765,7 +764,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               <div className="flex space-x-6 overflow-x-auto no-scrollbar scroll-smooth">
                 {[
                   { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
-                  { id: "orders", label: "발주관리", icon: ShoppingCart },
+                  { id: "orders", label: "????", icon: ShoppingCart },
+                  { id: "liquorInventory", label: "?? ??", icon: Database },
                   { id: "roster", label: "직원현황", icon: User },
                   { id: "overtimeLog", label: "초과근무일지", icon: Clock },
                   { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
@@ -857,6 +857,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               >
                 {activeTab === "settle" && <DailySettleTab branchName={activeBranchName} />}
                 {activeTab === "orders" && <OrderManagementTab branchName={activeBranchName} />}
+                {activeTab === "liquorInventory" && <LiquorInventoryTab branchName={activeBranchName} />}
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
                 {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
@@ -3790,262 +3791,210 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 // TAB 2: Order Management (발주관리)
 // ----------------------------------------------------
 function OrderManagementTab({ branchName }: { branchName: string }) {
-  const [orders, setOrders] = useState<OrderItem[]>(() => {
+  const storageKey = `erp_orders_${branchName}`;
+  const vendorKey = `erp_order_vendors_${branchName}`;
+  const defaultVendors = ["??(???)", "??(???)", "???(???)"];
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [category, setCategory] = useState<OrderCategory>("???");
+  const [vendorName, setVendorName] = useState(defaultVendors[0]);
+  const [customVendor, setCustomVendor] = useState("");
+  const [vendors, setVendors] = useState<string[]>(defaultVendors);
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem(`erp_orders_${branchName}`);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+      const savedOrders = localStorage.getItem(storageKey);
+      const savedVendors = localStorage.getItem(vendorKey);
+      if (savedOrders) setOrders(JSON.parse(savedOrders));
+      if (savedVendors) {
+        const parsed = JSON.parse(savedVendors);
+        if (Array.isArray(parsed)) setVendors(Array.from(new Set([...defaultVendors, ...parsed])));
+      }
+    } catch (err) {
+      console.error("Failed to load order data", err);
     }
-  });
+  }, [storageKey, vendorKey]);
 
-  // New Order State
-  const [category, setCategory] = useState<"식자재" | "소모품" | "기타">("식자재");
-  const [itemName, setItemName] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [supplier, setSupplier] = useState<"쿠팡" | "네이버" | "인근매장" | "그외기타">("쿠팡");
-  const [price, setPrice] = useState("");
-  const [notes, setNotes] = useState("");
-
-  const [filterStatus, setFilterStatus] = useState<string>("ALL");
-
-  const saveOrders = (updated: OrderItem[]) => {
-    setOrders(updated);
-    localStorage.setItem(`erp_orders_${branchName}`, JSON.stringify(updated));
+  const saveOrders = (next: OrderItem[]) => {
+    setOrders(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
   };
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!itemName.trim() || !quantity.trim()) return;
+  const addVendor = () => {
+    const nextVendor = customVendor.trim();
+    if (!nextVendor) return;
+    const next = Array.from(new Set([...vendors, nextVendor]));
+    setVendors(next);
+    setVendorName(nextVendor);
+    setCustomVendor("");
+    localStorage.setItem(vendorKey, JSON.stringify(next.filter((item) => !defaultVendors.includes(item))));
+  };
 
+  const handlePlaceOrder = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!vendorName.trim() || !amount.trim()) return;
     const newOrder: OrderItem = {
       id: `ord-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       category,
-      itemName: itemName.trim(),
-      quantity: quantity.trim(),
-      supplier,
-      price: price.trim(),
-      orderDate: new Date().toISOString().split("T")[0],
-      status: "신청완료",
-      notes: notes.trim()
+      vendorName: vendorName.trim(),
+      amount: cleanNumeric(amount),
+      memo: memo.trim(),
+      orderDate: new Date().toISOString().slice(0, 10)
     };
-
-    const next = [newOrder, ...orders];
-    saveOrders(next);
-
-    // Reset Inputs
-    setItemName("");
-    setQuantity("");
-    setPrice("");
-    setNotes("");
+    saveOrders([newOrder, ...orders]);
+    setAmount("");
+    setMemo("");
   };
 
-  const handleUpdateStatus = (id: string, nextStatus: "신청완료" | "배송중" | "검수완료") => {
-    const updated = orders.map((o) => (o.id === id ? { ...o, status: nextStatus } : o));
-    saveOrders(updated);
-  };
-
-  const handleDeleteOrder = (id: string) => {
-    if (confirm("정말로 이 발주 내역을 삭제하시겠습니까? (로컬 이관)")) {
-      const next = orders.filter((o) => o.id !== id);
-      saveOrders(next);
-    }
-  };
-
-  const filteredOrders = useMemo(() => {
-    if (filterStatus === "ALL") return orders;
-    return orders.filter((o) => o.status === filterStatus);
-  }, [orders, filterStatus]);
+  const totals = useMemo(() => {
+    return orders.reduce<Record<OrderCategory, number>>((acc, item) => {
+      acc[item.category] += Number(item.amount || 0);
+      return acc;
+    }, { "???": 0, "??": 0, "???? ??": 0 });
+  }, [orders]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="orders-tab-view">
-      {/* Placement Left Form */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-fit space-y-4">
-        <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
-          <ShoppingCart className="w-4 h-4 text-[#2E6DB4]" />
-          신규 품목 발주 신청
-        </h3>
-
-        <form onSubmit={handlePlaceOrder} className="space-y-3 text-xs">
-          <div className="flex flex-col space-y-1">
-            <span className="font-bold text-gray-500">대분류</span>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as any)}
-              className="px-3 py-2 border border-gray-200 rounded-xl font-semibold bg-gray-50/50"
-            >
-              <option value="식자재">식자재류 (고기, 채소, 드레싱)</option>
-              <option value="소모품">소모품 등 기타 (냅킨, 물티슈, 세제)</option>
-              <option value="기타">기타 부식비 및 주류 음료</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col space-y-1">
-            <span className="font-bold text-gray-500">품목명 (자세히)</span>
-            <input
-              type="text"
-              required
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-              placeholder="예: 양파 20kg 2망 / 테라 병맥주 3짝"
-              className="px-3 py-2 border border-gray-200 rounded-xl"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex flex-col space-y-1">
-              <span className="font-bold text-gray-500">수량 (단위 표기 가능)</span>
-              <input
-                type="text"
-                required
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="예: 2망 / 5box"
-                className="px-3 py-2 border border-gray-200 rounded-xl"
-              />
-            </div>
-            <div className="flex flex-col space-y-1">
-              <span className="font-bold text-gray-500">소요 예상액 (원)</span>
-              <input
-                type="text"
-                value={formatWithCommas(price)}
-                onChange={(e) => setPrice(cleanNumeric(e.target.value))}
-                placeholder="예: 45,000"
-                className="px-3 py-2 border border-gray-200 rounded-xl text-right font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col space-y-1">
-            <span className="font-bold text-gray-500">거래 공급처 (지불처)</span>
-            <select
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value as any)}
-              className="px-3 py-2 border border-gray-200 rounded-xl bg-white"
-            >
-              {["쿠팡", "네이버", "인근매장", "그외기타"].map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col space-y-1">
-            <span className="font-bold text-gray-500">발주 특이 요청 메모</span>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="납기일 요청 등 필요 사항 기입"
-              className="px-3 py-2 border border-gray-200 rounded-xl"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="w-full py-3.5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-extrabold text-xs rounded-xl cursor-pointer shadow-sm transition-colors pt-4 mt-3 flex items-center justify-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" /> 발주 요청 등록하기
-          </button>
-        </form>
-      </div>
-
-      {/* Roster Right list */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-3">
+    <div className="space-y-5" id="orders-tab-view">
+      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-black text-gray-800">지점 발주 내역 리포트</h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">요청 상황 및 배송, 검수 상황을 실시간 제어하세요.</p>
-          </div>
-
-          {/* Status filter tabs */}
-          <div className="flex bg-gray-100 p-1 rounded-xl text-[10px] font-bold">
-            {["ALL", "신청완료", "배송중", "검수완료"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilterStatus(tab)}
-                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                  filterStatus === tab ? "bg-white text-[#2E6DB4] shadow-xs" : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                {tab === "ALL" ? "전체" : tab}
-              </button>
-            ))}
+            <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-[#2E6DB4]" /> ????</h3>
+            <p className="text-xs text-gray-400 mt-1">???, ???, ??, ????? ??? ?? ??? ?????.</p>
           </div>
         </div>
 
+        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-[160px_220px_180px_1fr_auto] gap-3 items-end">
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>???</span>
+            <select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800">
+              <option value="???">???</option>
+              <option value="??">??</option>
+              <option value="???? ??">???? ??</option>
+            </select>
+          </label>
+
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>???</span>
+            <select value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-800">
+              {vendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>??</span>
+            <input value={formatWithCommas(amount)} onChange={(e) => setAmount(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="0" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-right font-mono font-black" />
+          </label>
+
+          <label className="space-y-1 text-xs font-bold text-gray-500">
+            <span>????</span>
+            <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="??, ????, ??" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl" />
+          </label>
+
+          <button type="submit" className="h-[42px] px-5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5">
+            <Plus className="w-4 h-4" /> ??
+          </button>
+        </form>
+
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center rounded-xl bg-slate-50 p-3 border border-slate-100">
+          <span className="text-xs font-black text-slate-600">??? ??</span>
+          <input value={customVendor} onChange={(e) => setCustomVendor(e.target.value)} placeholder="?? ?? ???" className="grow px-3 py-2 border border-slate-200 rounded-lg text-xs font-bold bg-white" />
+          <button type="button" onClick={addVendor} className="px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-black">?? ??</button>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-gray-900">???? ???</h3>
+            <p className="text-xs text-gray-400 mt-1">?? ????? ?????.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px] font-black">
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">??? {formatNumber(totals["???"])}?</span>
+            <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700">?? {formatNumber(totals["??"])}?</span>
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">?? {formatNumber(totals["???? ??"])}?</span>
+          </div>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                <th className="py-2.5 px-2">일자</th>
-                <th className="py-2.5 px-2">분류</th>
-                <th className="py-2.5 px-2">품목명</th>
-                <th className="py-2.5 px-2">수량</th>
-                <th className="py-2.5 px-2">공급처</th>
-                <th className="py-2.5 px-2">추정가</th>
-                <th className="py-2.5 px-2">상태 제어</th>
-                <th className="py-2.5 px-2">활동</th>
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b">
+              <tr>
+                <th className="p-3 w-32">??</th>
+                <th className="p-3 w-36">???</th>
+                <th className="p-3 w-48">???</th>
+                <th className="p-3 w-36 text-right">??</th>
+                <th className="p-3">????</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 font-medium">
-              {filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-gray-400">
-                    발주 내역 리스트가 깔끔하게 비어 있습니다.
-                  </td>
+            <tbody className="divide-y divide-gray-100">
+              {orders.length === 0 ? (
+                <tr><td colSpan={5} className="p-10 text-center text-gray-400 font-bold">??? ????? ????.</td></tr>
+              ) : orders.map((order) => (
+                <tr key={order.id} className="hover:bg-slate-50/60">
+                  <td className="p-3 font-mono text-xs text-gray-500">{order.orderDate}</td>
+                  <td className="p-3"><span className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700 text-xs font-black">{order.category}</span></td>
+                  <td className="p-3 font-extrabold text-gray-800">{order.vendorName}</td>
+                  <td className="p-3 text-right font-mono font-black text-[#2E6DB4]">{formatNumber(Number(order.amount || 0))}?</td>
+                  <td className="p-3 text-gray-600">{order.memo || "-"}</td>
                 </tr>
-              ) : (
-                filteredOrders.map((ord) => (
-                  <tr key={ord.id} className="hover:bg-gray-50/50">
-                    <td className="py-3 px-2 font-mono text-[11px] text-gray-400">{ord.orderDate}</td>
-                    <td className="py-3 px-2">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
-                        ord.category === "식자재" ? "bg-amber-55 bg-amber-50 text-amber-700" : "bg-teal-50 text-teal-700"
-                      }`}>
-                        {ord.category}
-                      </span>
-                    </td>
-                    <td className="py-3 px-2 font-bold text-gray-800 leading-normal">
-                      <div>{ord.itemName}</div>
-                      {ord.notes && <p className="text-[10px] text-gray-400 font-normal mt-0.5">{ord.notes}</p>}
-                    </td>
-                    <td className="py-3 px-2 font-semibold text-gray-600">{ord.quantity}</td>
-                    <td className="py-3 px-2 text-gray-500 font-bold">{ord.supplier}</td>
-                    <td className="py-3 px-2 font-mono font-bold text-gray-600">
-                      {ord.price ? `${formatNumber(Number(ord.price))} 원` : "-"}
-                    </td>
-                    <td className="py-3 px-2">
-                      <select
-                        value={ord.status}
-                        onChange={(e) => handleUpdateStatus(ord.id, e.target.value as any)}
-                        className={`text-[10px] font-black px-1.5 py-1 rounded-lg border focus:outline-hidden ${
-                          ord.status === "신청완료"
-                            ? "bg-amber-50 text-amber-700 border-amber-200"
-                            : ord.status === "배송중"
-                            ? "bg-[#D6E4F0]/50 text-[#2E6DB4] border-blue-200"
-                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        }`}
-                      >
-                        <option value="신청완료">신청완료</option>
-                        <option value="배송중">배송중</option>
-                        <option value="검수완료">검수완료</option>
-                      </select>
-                    </td>
-                    <td className="py-3 px-2">
-                      <button
-                        onClick={() => handleDeleteOrder(ord.id)}
-                        className="text-gray-400 hover:text-rose-600 p-1 rounded-md transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
+    </div>
+  );
+}
+
+function LiquorInventoryTab({ branchName }: { branchName: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [itemName, setItemName] = useState("");
+  const [stockQty, setStockQty] = useState("");
+  const [memo, setMemo] = useState("");
+  const storageKey = `erp_liquor_inventory_${branchName}`;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) setRows(JSON.parse(saved));
+    } catch (err) {
+      console.error("Failed to load liquor inventory", err);
+    }
+  }, [storageKey]);
+
+  const saveRows = (next: any[]) => {
+    setRows(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+  };
+
+  const addRow = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!itemName.trim()) return;
+    saveRows([{ id: `liq-${Date.now()}`, itemName: itemName.trim(), stockQty: stockQty.trim(), memo: memo.trim(), checkedAt: new Date().toISOString().slice(0, 10) }, ...rows]);
+    setItemName("");
+    setStockQty("");
+    setMemo("");
+  };
+
+  return (
+    <div className="space-y-5" id="liquor-inventory-tab">
+      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+        <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> ?? ??</h3>
+        <form onSubmit={addRow} className="grid grid-cols-1 md:grid-cols-[1fr_140px_1fr_auto] gap-3 mt-4 items-end">
+          <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="???" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+          <input value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="????" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="??" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" />
+          <button className="px-5 py-2.5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">??</button>
+        </form>
+      </section>
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">???</th><th className="p-3">???</th><th className="p-3">????</th><th className="p-3">??</th></tr></thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.length === 0 ? <tr><td colSpan={4} className="p-10 text-center text-gray-400 font-bold">??? ?? ??? ????.</td></tr> : rows.map((row) => <tr key={row.id}><td className="p-3 font-mono text-xs text-gray-500">{row.checkedAt}</td><td className="p-3 font-black">{row.itemName}</td><td className="p-3">{row.stockQty || "-"}</td><td className="p-3 text-gray-600">{row.memo || "-"}</td></tr>)}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
@@ -4872,12 +4821,16 @@ function LaborContractTab({ branchName }: { branchName: string }) {
   const [name, setName] = useState("");
   const [phoneDigits, setPhoneDigits] = useState("");
   const [salary, setSalary] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhoneDigits, setEditPhoneDigits] = useState("");
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await gasClient.getSharedData<any[]>(`labor_contracts:${branchName}`);
-      setContracts(data || []);
+      const data = await gasClient.getSharedData<any[]>(`labor_contracts_${branchName}`);
+      const legacy = data || await gasClient.getSharedData<any[]>(`labor_contracts:${branchName}`);
+      setContracts(legacy || []);
     } catch (err) {
       console.error("Failed to load labor contracts:", err);
     } finally {
@@ -4885,235 +4838,95 @@ function LaborContractTab({ branchName }: { branchName: string }) {
     }
   };
 
-  useEffect(() => {
-    void loadData();
-  }, [branchName]);
+  useEffect(() => { void loadData(); }, [branchName]);
 
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/[^0-9]/g, "");
-    setPhoneDigits(raw.slice(0, 8));
-  };
-
-  const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSalary(e.target.value);
-  };
-
-  // Robust salary input parser
+  const formatPhone = (digits: string) => `010-${digits.slice(0, 4)}-${digits.slice(4)}`;
   const parseSalaryInput = (rawVal: string): number => {
-    if (!rawVal) return 0;
-    let val = rawVal.trim();
-
-    // Check for "만" or "만원"
-    if (val.includes("만")) {
-      const parts = val.split("만");
-      const numericPart = parts[0].replace(/[^0-9.]/g, "");
-      const num = parseFloat(numericPart) || 0;
-      return Math.round(num * 10000);
-    }
-
-    // Remove commas, "원", and spaces
-    val = val.replace(/[,원\s]/g, "");
-
-    // Check for dot-separated values (e.g. 2.500.000)
-    if (val.includes(".")) {
-      const parts = val.split(".");
-      if (parts.length > 2 || (parts.length === 2 && parts[1].length === 3)) {
-        val = val.replace(/\./g, "");
-      }
-    }
-
-    let parsed = parseFloat(val) || 0;
-
-    // If the resulting number is small, assume unit is "만원" or "천원"
-    if (parsed > 0 && parsed < 1000) {
-      // e.g. 250 -> 2,500,000
-      parsed = parsed * 10000;
-    } else if (parsed >= 1000 && parsed < 10000) {
-      // e.g. 2500 -> 2,500,000
-      parsed = parsed * 1000;
-    }
-
+    const raw = rawVal.trim();
+    if (!raw) return 0;
+    if (raw.includes("?")) return Math.round((parseFloat(raw.replace(/[^0-9.]/g, "")) || 0) * 10000);
+    const numeric = raw.replace(/[,?\s]/g, "");
+    let parsed = parseFloat(numeric) || 0;
+    if (parsed > 0 && parsed < 1000) parsed *= 10000;
+    else if (parsed >= 1000 && parsed < 10000) parsed *= 1000;
     return Math.round(parsed);
   };
 
-  const isInvalidPhone = phoneDigits.length > 0 && phoneDigits.length !== 8;
+  const saveContracts = async (next: any[]) => {
+    await gasClient.saveSharedData(`labor_contracts_${branchName}`, next);
+    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
+    setContracts(next);
+  };
 
   const saveContract = async () => {
-    if (!name.trim()) {
-      alert("이름을 기입해주세요.");
+    const digits = phoneDigits.replace(/[^0-9]/g, "").slice(0, 8);
+    if (!name.trim() || digits.length !== 8 || !salary.trim()) {
+      alert("??, ??? 8??, ??? ?? ??? ???.");
       return;
     }
-    if (phoneDigits.length !== 8) {
-      alert("연락처는 010을 제외한 숫자 8자리를 정확히 입력해주세요.");
-      return;
-    }
-    if (!salary.trim()) {
-      alert("급여를 기입해주세요.");
-      return;
-    }
-
     const numericSalary = parseSalaryInput(salary);
-    if (!numericSalary || numericSalary <= 0) {
-      alert("급여를 올바르게 입력해주세요.");
+    if (!numericSalary) {
+      alert("??? ???? ??? ???.");
       return;
     }
-
-    const newRecord = {
-      id: `contract-${Date.now()}`,
-      name: name.trim(),
-      phone: `010-${phoneDigits.slice(0, 4)}-${phoneDigits.slice(4)}`,
-      salary: numericSalary,
-      status: "발송 대기",
-      createdAt: new Date().toISOString()
-    };
-
-    const next = [newRecord, ...contracts];
-    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
-    setContracts(next);
-    setName("");
-    setPhoneDigits("");
-    setSalary("");
+    const next = [{ id: `contract-${Date.now()}`, name: name.trim(), phone: formatPhone(digits), salary: numericSalary, status: "?? ??", createdAt: new Date().toISOString() }, ...contracts];
+    await saveContracts(next);
+    setName(""); setPhoneDigits(""); setSalary("");
   };
 
-  const deleteContract = async (id: string) => {
-    if (!window.confirm("해당 인적사항을 삭제하시겠습니까?")) return;
-    const next = contracts.filter((c) => c.id !== id);
-    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
-    setContracts(next);
+  const startEdit = (contract: any) => {
+    setEditingId(contract.id);
+    setEditName(contract.name || "");
+    setEditPhoneDigits(String(contract.phone || "").replace(/^010-?/, "").replace(/[^0-9]/g, "").slice(0, 8));
   };
 
-  const updateStatus = async (id: string, newStatus: string) => {
-    const next = contracts.map((c) => c.id === id ? { ...c, status: newStatus } : c);
-    await gasClient.saveSharedData(`labor_contracts:${branchName}`, next);
-    setContracts(next);
+  const saveEdit = async (id: string) => {
+    const digits = editPhoneDigits.replace(/[^0-9]/g, "").slice(0, 8);
+    if (!editName.trim() || digits.length !== 8) {
+      alert("??? ??? 8??? ??? ???.");
+      return;
+    }
+    const next = contracts.map((item) => item.id === id ? { ...item, name: editName.trim(), phone: formatPhone(digits), editRequestedAt: new Date().toISOString() } : item);
+    await saveContracts(next);
+    setEditingId(null);
+  };
+
+  const requestDelete = async (id: string) => {
+    if (!window.confirm("????? ????? ?????? ??? ?? ???? ???? ? ?? ??? ???.")) return;
+    const next = contracts.map((item) => item.id === id ? { ...item, deleteRequested: true, deleteRequestedAt: new Date().toISOString() } : item);
+    await saveContracts(next);
   };
 
   return (
     <div className="space-y-5 animate-fade-in" id="labor-contract-tab">
       <div className="bg-white p-6 rounded-2xl border shadow-sm">
-        <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
-          <Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 전자서명 근로계약서 발송 인적사항 등록
-        </h3>
-        <p className="text-xs text-gray-400 mt-1">
-          근로계약서 발송이 필요한 대상 인원의 인적사항을 기재하고 발송 상태를 관리합니다.
-        </p>
-
+        <h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> ????? ?? ???? ??</h3>
+        <p className="text-xs text-gray-400 mt-1">??? ??? ???? ?? ?? ???? ? ?? ??? ???.</p>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5 items-end">
-          <div>
-            <label className="text-[10px] font-black text-gray-500 uppercase">이름</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="예: 홍길동"
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-            />
-          </div>
-
-          <div className="relative">
-            <label className="text-[10px] font-black text-gray-500 uppercase">연락처 (010 제외 8자리)</label>
-            <div className="mt-1 flex items-center border border-gray-200 rounded-xl bg-gray-50 overflow-hidden focus-within:bg-white focus-within:border-[#2E6DB4] transition-all">
-              <span className="bg-gray-100 px-3 py-2 text-sm font-extrabold text-gray-400 border-r border-gray-200">010</span>
-              <input
-                type="text"
-                value={phoneDigits}
-                onChange={handlePhoneChange}
-                placeholder="12345678"
-                className="w-full px-3 py-2 text-sm font-bold bg-transparent outline-none border-0"
-              />
-            </div>
-            {isInvalidPhone && (
-              <div className="absolute z-10 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-black p-2 rounded-xl shadow-md mt-1 animate-bounce">
-                연락처는 반드시 숫자 8자리여야 합니다!
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="text-[10px] font-black text-gray-500 uppercase">급여 (원)</label>
-            <input
-              type="text"
-              value={salary}
-              onChange={handleSalaryChange}
-              placeholder="예: 250 또는 250만, 2,500,000"
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-            />
-            {salary.trim() && (
-              <div className="mt-1.5 text-[10px] font-black text-[#2E6DB4] bg-blue-50/50 p-1.5 rounded-lg border border-blue-100 flex items-center gap-1">
-                <span>📢 인식된 급여:</span>
-                <span className="underline font-mono text-xs">{Number(parseSalaryInput(salary)).toLocaleString("ko-KR")}원</span>
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={() => void saveContract()}
-            className="w-full bg-[#2E6DB4] hover:bg-[#20528B] text-white py-2 px-4 rounded-xl text-xs font-black h-10 transition-colors"
-          >
-            인적사항 등록
-          </button>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="??" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
+          <div className="flex items-center border border-gray-200 rounded-xl bg-gray-50 overflow-hidden"><span className="bg-gray-100 px-3 py-2 text-sm font-extrabold text-gray-400 border-r">010</span><input value={phoneDigits} onChange={(e) => setPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} placeholder="12345678" className="w-full px-3 py-2 text-sm font-bold bg-transparent outline-none" /></div>
+          <input value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="?? ?: 250?" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
+          <button onClick={() => void saveContract()} className="bg-[#2E6DB4] hover:bg-[#20528B] text-white py-2 px-4 rounded-xl text-xs font-black h-10">??</button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
-                <th className="p-4 w-44">등록일</th>
-                <th className="py-4 px-3 w-32">이름</th>
-                <th className="py-4 px-3 w-44">연락처</th>
-                <th className="py-4 px-3 w-36 text-center">진행 상태</th>
-                <th className="py-4 px-3 text-center w-28">액션</th>
-              </tr>
-            </thead>
+            <thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4 w-36">???</th><th className="py-4 px-3 w-40">??</th><th className="py-4 px-3 w-44">???</th><th className="py-4 px-3">??</th><th className="py-4 px-3 text-center w-44">??</th></tr></thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="p-12 text-center text-gray-400 font-semibold">
-                    <LoadingSpinner size="sm" />
+              {loading ? <tr><td colSpan={5} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : contracts.length === 0 ? <tr><td colSpan={5} className="p-12 text-center text-gray-400 font-bold">??? ????? ????.</td></tr> : contracts.map((c) => (
+                <tr key={c.id} className="border-b hover:bg-slate-50/50">
+                  <td className="p-4 font-mono text-xs text-gray-500">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td>
+                  <td className="py-4 px-3 font-black text-gray-800">{editingId === c.id ? <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full border rounded-lg px-2 py-1" /> : c.name}</td>
+                  <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black">{editingId === c.id ? <div className="flex items-center"><span className="text-gray-400 mr-1">010</span><input value={editPhoneDigits} onChange={(e) => setEditPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} className="w-28 border rounded-lg px-2 py-1" /></div> : c.phone}</td>
+                  <td className="py-4 px-3 text-xs text-gray-500">{c.deleteRequested ? <span className="font-black text-rose-600">?????</span> : "?? ??? ???? ? ?? ??"}</td>
+                  <td className="py-4 px-3 text-center space-x-2">
+                    {editingId === c.id ? <button onClick={() => void saveEdit(c.id)} className="px-3 py-1.5 bg-[#2E6DB4] text-white rounded-lg text-xs font-black">??</button> : <button onClick={() => startEdit(c)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-black">??</button>}
+                    <button onClick={() => void requestDelete(c.id)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">????</button>
                   </td>
                 </tr>
-              ) : contracts.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-12 text-center text-gray-400 font-bold">
-                    근로계약서 발송 대기 인원이 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                contracts.map((c) => (
-                  <tr key={c.id} className="border-b hover:bg-slate-50/50 transition-colors">
-                    <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">
-                      {c.createdAt ? c.createdAt.slice(0, 10) : "-"}
-                    </td>
-                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
-                      {c.name}
-                    </td>
-                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
-                      {c.phone}
-                    </td>
-                    <td className="py-4 px-3 text-center whitespace-nowrap">
-                      <span className={`inline-block px-3 py-1 text-xs font-black rounded-full border ${
-                        c.status === "서명 완료"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : c.status === "발송 완료"
-                          ? "bg-blue-50 text-blue-700 border-blue-200"
-                          : "bg-amber-50 text-amber-700 border-amber-200"
-                      }`}>
-                        {c.status || "발송 대기"}
-                      </span>
-                    </td>
-                    <td className="py-4 px-3 text-center">
-                      <button
-                        onClick={() => void deleteContract(c.id)}
-                        className="text-rose-600 hover:text-rose-800 p-1 font-bold text-xs"
-                      >
-                        삭제
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
