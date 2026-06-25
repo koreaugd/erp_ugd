@@ -793,7 +793,13 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   return (
                     <button
                       key={t.id}
-                      onClick={() => setActiveTab(t.id as any)}
+                      onClick={() => {
+                        if (activeTab === "liquorInventory" && t.id !== "liquorInventory" && (window as any).__ugdLiquorInventoryDirty) {
+                          if (!window.confirm("저장하지 않은 주류 재고 입력값이 있습니다. 저장하지 않고 이동할까요?")) return;
+                          (window as any).__ugdLiquorInventoryDirty = false;
+                        }
+                        setActiveTab(t.id as any);
+                      }}
                       className={`flex items-center gap-1.5 py-4 px-1 border-b-2 font-black text-xs sm:text-sm transition-all relative cursor-pointer whitespace-nowrap ${
                         active
                           ? "border-[#2E6DB4] text-[#2E6DB4]"
@@ -3911,6 +3917,8 @@ const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
   주류: [],
   "식음료외 기타": []
 };
+const LIQUOR_CATEGORIES = ["샴페인", "화이트", "레드", "소주", "맥주", "대표님술", "기타"];
+const VENDOR_HINT = "줄바꿈 또는 쉼표로 여러 개를 한꺼번에 추가할 수 있습니다.";
 
 const monthDays = (monthValue: string) => {
   const [year, month] = monthValue.split("-").map(Number);
@@ -4028,7 +4036,6 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
       <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
         <div>
           <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-[#2E6DB4]" /> 거래처 추가</h3>
-          <p className="text-xs text-gray-400 mt-1">대분류를 고른 뒤 업체명을 줄바꿈 또는 쉼표로 여러 개 추가할 수 있습니다.</p>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_auto] gap-3 items-end">
           <label className="space-y-1 text-xs font-bold text-gray-500">
@@ -4037,9 +4044,10 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
               {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
-          <label className="space-y-1 text-xs font-bold text-gray-500">
+          <label className="space-y-1 text-xs font-bold text-gray-500 relative group">
             <span>거래처명</span>
-            <textarea value={vendorText} onChange={(e) => setVendorText(e.target.value)} rows={2} placeholder="예: 대정, 크리스탈, 카나와인" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none" />
+            <input value={vendorText} onChange={(e) => setVendorText(e.target.value)} title={VENDOR_HINT} placeholder="예: 대정, 크리스탈, 카나와인" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+            <span className="pointer-events-none absolute left-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
           </label>
           <button type="button" onClick={addVendors} className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 업체 추가</button>
         </div>
@@ -4122,15 +4130,9 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [classification, setClassification] = useState("샴페인");
-  const [importer, setImporter] = useState("");
   const [itemName, setItemName] = useState("");
-  const [salePrice, setSalePrice] = useState("");
-  const [costPrice, setCostPrice] = useState("");
-  const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [selectedProductId, setSelectedProductId] = useState("");
-  const [inbound, setInbound] = useState("");
-  const [sold, setSold] = useState("");
-  const [memo, setMemo] = useState("");
+  const [draftDate, setDraftDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [draftCells, setDraftCells] = useState<Record<string, { inbound: string; sold: string }>>({});
 
   useEffect(() => {
     try {
@@ -4144,8 +4146,24 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   }, [productKey, movementKey]);
 
   useEffect(() => {
-    if (!selectedProductId && products[0]) setSelectedProductId(products[0].id);
-  }, [products, selectedProductId]);
+    const isDirty = (Object.values(draftCells) as Array<{ inbound: string; sold: string }>).some((cell) => cell.inbound || cell.sold);
+    (window as any).__ugdLiquorInventoryDirty = isDirty;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [draftCells]);
+
+  useEffect(() => {
+    return () => {
+      (window as any).__ugdLiquorInventoryDirty = false;
+    };
+  }, []);
 
   const saveProducts = (next: InventoryProduct[]) => {
     setProducts(next);
@@ -4159,38 +4177,49 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 
   const addProduct = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!itemName.trim()) return;
-    const nextProduct = {
-      id: "liq-product-" + Date.now(),
-      classification: classification.trim() || "기타",
-      importer: importer.trim(),
-      itemName: itemName.trim(),
-      salePrice: cleanNumeric(salePrice),
-      costPrice: cleanNumeric(costPrice)
-    };
-    saveProducts([...products, nextProduct]);
-    setSelectedProductId(nextProduct.id);
+    const names = itemName.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+    if (names.length === 0) return;
+    const nextProducts = names.map((name, index) => ({
+      id: "liq-product-" + Date.now() + "-" + index,
+      classification,
+      importer: "",
+      itemName: name,
+      salePrice: "",
+      costPrice: ""
+    }));
+    saveProducts([...products, ...nextProducts]);
     setItemName("");
-    setImporter("");
-    setSalePrice("");
-    setCostPrice("");
   };
 
-  const addMovement = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selectedProductId) return;
-    const nextMovement = {
-      id: "liq-move-" + Date.now(),
-      productId: selectedProductId,
-      movementDate,
-      inbound: cleanNumeric(inbound),
-      sold: cleanNumeric(sold),
-      memo: memo.trim()
-    };
-    saveMovements([nextMovement, ...movements]);
-    setInbound("");
-    setSold("");
-    setMemo("");
+  const updateDraft = (productId: string, date: string, field: "inbound" | "sold", value: string) => {
+    const key = productId + "|" + date;
+    setDraftCells((prev) => ({
+      ...prev,
+      [key]: {
+        inbound: prev[key]?.inbound || "",
+        sold: prev[key]?.sold || "",
+        [field]: value.replace(/[^0-9-]/g, "")
+      }
+    }));
+  };
+
+  const saveDrafts = () => {
+    const entries = (Object.entries(draftCells) as Array<[string, { inbound: string; sold: string }]>).filter(([, cell]) => cell.inbound || cell.sold);
+    if (entries.length === 0) return;
+    const nextMovements = entries.map(([key, cell], index) => {
+      const [productId, movementDate] = key.split("|");
+      return {
+        id: "liq-move-" + Date.now() + "-" + index,
+        productId,
+        movementDate,
+        inbound: cleanNumeric(cell.inbound),
+        sold: cleanNumeric(cell.sold),
+        memo: ""
+      };
+    });
+    saveMovements([...nextMovements, ...movements]);
+    setDraftCells({});
+    (window as any).__ugdLiquorInventoryDirty = false;
   };
 
   const stockOf = (productId: string, untilDate?: string) => {
@@ -4199,7 +4228,13 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       .reduce((sum, movement) => sum + Number(movement.inbound || 0) - Number(movement.sold || 0), 0);
   };
 
-  const visibleDates: string[] = Array.from(new Set<string>(movements.map((movement) => movement.movementDate))).sort().slice(-10);
+  const savedAmount = (productId: string, date: string, field: "inbound" | "sold") => {
+    return movements
+      .filter((movement) => movement.productId === productId && movement.movementDate === date)
+      .reduce((sum, movement) => sum + Number(movement[field] || 0), 0);
+  };
+
+  const visibleDates: string[] = Array.from(new Set<string>([...movements.map((movement) => movement.movementDate), draftDate])).sort().slice(-10);
 
   return (
     <div className="space-y-5" id="liquor-inventory-tab">
@@ -4208,37 +4243,32 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
           <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고 관리표</h3>
           <p className="text-xs text-gray-400 mt-1">상품 기본정보를 등록하고 날짜별 입고, 판매, 재고 흐름을 관리합니다.</p>
         </div>
-        <form onSubmit={addProduct} className="grid grid-cols-1 xl:grid-cols-[140px_160px_1fr_150px_150px_auto] gap-3 items-end">
-          <input value={classification} onChange={(e) => setClassification(e.target.value)} placeholder="분류" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
-          <input value={importer} onChange={(e) => setImporter(e.target.value)} placeholder="수입사" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
-          <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="상품명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
-          <input value={formatWithCommas(salePrice)} onChange={(e) => setSalePrice(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="판매가" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono text-right font-black" />
-          <input value={formatWithCommas(costPrice)} onChange={(e) => setCostPrice(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="원가" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono text-right font-black" />
-          <button className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
-        </form>
-        <form onSubmit={addMovement} className="grid grid-cols-1 xl:grid-cols-[160px_1fr_140px_140px_1fr_auto] gap-3 items-end pt-3 border-t border-gray-100">
-          <input type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
-          <select value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
-            {products.length === 0 ? <option value="">상품을 먼저 추가하세요</option> : products.map((product) => <option key={product.id} value={product.id}>{product.itemName}</option>)}
+        <form onSubmit={addProduct} className="grid grid-cols-1 xl:grid-cols-[170px_1fr_auto] gap-3 items-end">
+          <select value={classification} onChange={(e) => setClassification(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+            {LIQUOR_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <input value={inbound} onChange={(e) => setInbound(e.target.value.replace(/[^0-9-]/g, ""))} inputMode="numeric" placeholder="입고" className="px-3 py-2.5 border border-blue-100 bg-blue-50/60 rounded-xl text-sm font-mono text-right font-black" />
-          <input value={sold} onChange={(e) => setSold(e.target.value.replace(/[^0-9-]/g, ""))} inputMode="numeric" placeholder="판매" className="px-3 py-2.5 border border-rose-100 bg-rose-50/60 rounded-xl text-sm font-mono text-right font-black" />
-          <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" />
-          <button className="h-[42px] px-5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">기록</button>
+          <label className="relative group">
+            <input value={itemName} onChange={(e) => setItemName(e.target.value)} title={VENDOR_HINT} placeholder="상품명 예: 크룩 그랑뀌베, 돔페리뇽" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+            <span className="pointer-events-none absolute left-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
+          </label>
+          <button className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
         </form>
       </section>
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
+            <span className="text-xs text-gray-400 font-bold">선택한 날짜가 표 오른쪽에 표시됩니다.</span>
+          </div>
+          <button type="button" onClick={saveDrafts} className="h-[42px] px-5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:bg-gray-300" disabled={!(Object.values(draftCells) as Array<{ inbound: string; sold: string }>).some((cell) => cell.inbound || cell.sold)}>저장하기</button>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-xs">
+          <table className="w-full min-w-[980px] text-xs">
             <thead className="bg-[#202A5A] text-white font-black">
               <tr>
                 <th rowSpan={2} className="p-3 text-left">분류</th>
-                <th rowSpan={2} className="p-3 text-left">수입사</th>
                 <th rowSpan={2} className="p-3 text-left min-w-[180px]">상품명</th>
-                <th rowSpan={2} className="p-3 text-right">판매가</th>
-                <th rowSpan={2} className="p-3 text-right">원가</th>
-                <th rowSpan={2} className="p-3 text-right">마진율</th>
                 <th rowSpan={2} className="p-3 text-center bg-slate-700">현재 재고</th>
                 {visibleDates.map((date) => <th key={date} colSpan={3} className="p-2 text-center border-l border-white/20">{date.slice(5)}</th>)}
               </tr>
@@ -4254,27 +4284,24 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {products.length === 0 ? (
-                <tr><td colSpan={7 + visibleDates.length * 3} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
+                <tr><td colSpan={3 + visibleDates.length * 3} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
               ) : products.map((product) => {
-                const margin = Number(product.salePrice || 0) ? Math.round((1 - Number(product.costPrice || 0) / Number(product.salePrice || 1)) * 1000) / 10 : 0;
                 return (
                   <tr key={product.id} className="hover:bg-slate-50/70">
                     <td className="p-3 font-bold">{product.classification}</td>
-                    <td className="p-3">{product.importer || "-"}</td>
                     <td className="p-3 font-black text-gray-900">{product.itemName}</td>
-                    <td className="p-3 text-right font-mono text-blue-700">{formatNumber(Number(product.salePrice || 0))}</td>
-                    <td className="p-3 text-right font-mono text-emerald-700">{formatNumber(Number(product.costPrice || 0))}</td>
-                    <td className="p-3 text-right font-mono text-purple-700">{margin ? margin + "%" : "-"}</td>
                     <td className="p-3 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
                     {visibleDates.map((date) => {
-                      const dayRows = movements.filter((movement) => movement.productId === product.id && movement.movementDate === date);
-                      const inSum = dayRows.reduce((sum, movement) => sum + Number(movement.inbound || 0), 0);
-                      const soldSum = dayRows.reduce((sum, movement) => sum + Number(movement.sold || 0), 0);
+                      const key = product.id + "|" + date;
+                      const inSum = savedAmount(product.id, date, "inbound");
+                      const soldSum = savedAmount(product.id, date, "sold");
+                      const draft = draftCells[key] || { inbound: "", sold: "" };
+                      const previewStock = stockOf(product.id, date) + Number(draft.inbound || 0) - Number(draft.sold || 0);
                       return (
                         <React.Fragment key={date}>
-                          <td className="p-3 text-center font-mono bg-blue-50">{inSum || ""}</td>
-                          <td className="p-3 text-center font-mono bg-rose-50">{soldSum || ""}</td>
-                          <td className="p-3 text-center font-mono bg-green-50 font-black">{stockOf(product.id, date)}</td>
+                          <td className="p-2 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, date, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : ""} className="w-16 rounded-md border border-blue-100 bg-white px-2 py-1 text-center font-mono font-black text-blue-800" /></td>
+                          <td className="p-2 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, date, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : ""} className="w-16 rounded-md border border-rose-100 bg-white px-2 py-1 text-center font-mono font-black text-rose-800" /></td>
+                          <td className="p-3 text-center font-mono bg-green-50 font-black">{previewStock}</td>
                         </React.Fragment>
                       );
                     })}
