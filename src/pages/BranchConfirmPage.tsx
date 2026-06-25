@@ -2055,7 +2055,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [newStaffInputName, setNewStaffInputName] = useState<string>("");
   const [newStaffInputDivision, setNewStaffInputDivision] = useState<"정직원" | "파트타이머">("정직원");
   const [newStaffInputResidentNumber, setNewStaffInputResidentNumber] = useState("");
-  const [newStaffInputRank, setNewStaffInputRank] = useState("사원");
+  const [newStaffInputRank, setNewStaffInputRank] = useState("");
   const [newStaffInputEntryDate, setNewStaffInputEntryDate] = useState("");
 
   // Expenses
@@ -2469,7 +2469,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               residentNumber: formatResidentNumber(s.residentNumber || ""),
               contractType: s.division === "정직원" ? "4대보험" as const : "3.3%" as const,
               entryDate: s.entryDate || "",
-              ...(s.division === "정직원" ? { rank: s.rank || "사원" } : {})
+              ...(s.division === "정직원" ? { rank: s.rank || "" } : {})
             };
             updatedRoster.push(newEmp);
             rosterUpdated = true;
@@ -3300,6 +3300,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               onChange={(e) => setNewStaffInputRank(e.target.value)}
               className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer"
             >
+              <option value="">직급 선택</option>
               {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
                 <option key={rank} value={rank}>{rank}</option>
               ))}
@@ -3350,7 +3351,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               setStaffRows(prev => [...prev, newRow]);
               setNewStaffInputName("");
               setNewStaffInputResidentNumber("");
-              setNewStaffInputRank("사원");
+              setNewStaffInputRank("");
               setNewStaffInputEntryDate("");
               triggerToast(`${name} 님이 추가되었습니다 (마감 제출 시 직원현황 자동 등록)`);
             }}
@@ -3886,7 +3887,7 @@ function RosterTab({ branchName }: { branchName: string }) {
 
   const [newName, setNewName] = useState("");
   const [division, setDivision] = useState<"정직원" | "파트타이머" >("정직원");
-  const [selectedRank, setSelectedRank] = useState<string>("사원");
+  const [selectedRank, setSelectedRank] = useState<string>("");
   const [customRankInput, setCustomRankInput] = useState<string>("");
   const [newResidentNumber, setNewResidentNumber] = useState("");
   const [newContractType, setNewContractType] = useState<"4대보험" | "3.3%">("4대보험");
@@ -3910,7 +3911,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [employeeToEdit, setEmployeeToEdit] = useState<Employee | null>(null);
   const [editName, setEditName] = useState("");
   const [editDivision, setEditDivision] = useState<"정직원" | "파트타이머">("정직원");
-  const [editRank, setEditRank] = useState("사원");
+  const [editRank, setEditRank] = useState("");
   const [editCustomRank, setEditCustomRank] = useState("");
   const [editResidentNumber, setEditResidentNumber] = useState("");
   const [editContractType, setEditContractType] = useState<"4대보험" | "3.3%">("4대보험");
@@ -3965,7 +3966,7 @@ function RosterTab({ branchName }: { branchName: string }) {
     setEmployeeToEdit(emp);
     setEditName(emp.name);
     setEditDivision(emp.division);
-    setEditRank(emp.rank || "사원");
+    setEditRank(emp.rank || "");
     setEditCustomRank(emp.customRank || "");
     setEditResidentNumber(formatResidentNumber(emp.residentNumber || ""));
     setEditContractType(emp.contractType || "4대보험");
@@ -4045,7 +4046,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       if (employee.id !== id) return employee;
       const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
       if (field === "division" && value === "파트타이머") {
-        updated.rank = "사원";
+        updated.rank = "";
         updated.contractType = "3.3%";
       }
       if (field === "division" && value === "정직원") updated.contractType = "4대보험";
@@ -4094,7 +4095,7 @@ function RosterTab({ branchName }: { branchName: string }) {
     const updated = [...employees, nextEmp];
     saveEmployees(updated);
     setNewName("");
-    setSelectedRank("사원");
+    setSelectedRank("");
     setCustomRankInput("");
     setNewResidentNumber("");
     setNewContractType("4대보험");
@@ -4272,7 +4273,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                       const div = e.target.value as "정직원" | "파트타이머";
                       setEditDivision(div);
                       if (div === "파트타이머") {
-                        setEditRank("사원");
+                        setEditRank("");
                         setEditCustomRank("");
                       }
                     }}
@@ -4297,6 +4298,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                       }}
                       className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-750 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
                     >
+                      <option value="">직급 선택</option>
                       {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rk) => (
                         <option key={rk} value={rk}>{rk}</option>
                       ))}
@@ -4439,6 +4441,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                 }}
                 className="px-3.5 py-2.5 border border-gray-200 rounded-xl font-bold bg-gray-50/50 text-sm focus:bg-white focus:outline-hidden focus:border-[#2E6DB4]"
               >
+                <option value="">직급 선택</option>
                 {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rk) => (
                   <option key={rk} value={rk}>{rk}</option>
                 ))}
@@ -4609,15 +4612,16 @@ function RosterTab({ branchName }: { branchName: string }) {
                       {emp.division === "정직원" ? (
                         isEditing ? (
                         <select
-                          value={emp.rank || "사원"}
+                          value={emp.rank || ""}
                           onChange={(e) => updateEmployeeField(emp.id, "rank", e.target.value)}
                           className="px-2 py-1 border border-gray-200 rounded-md bg-white text-xs font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
                         >
+                          <option value="">직급 선택</option>
                           {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
                             <option key={rank} value={rank}>{rank}</option>
                           ))}
                         </select>
-                        ) : <span>{emp.rank || "사원"}</span>
+                        ) : <span>{emp.rank || "-"}</span>
                       ) : (
                         <span className="text-gray-300 font-normal">-</span>
                       )}
