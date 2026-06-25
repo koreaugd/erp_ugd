@@ -1985,87 +1985,11 @@ function AdminLaborContractsSection() {
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchName, setSearchName] = useState("");
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const data = await gasClient.getAllLaborContracts();
-      setContracts(data || []);
-    } catch (err) {
-      console.error("Failed to load labor contracts:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const loadData = async () => { try { setLoading(true); const data = await gasClient.getAllLaborContracts(); setContracts(data || []); } catch (err) { console.error("Failed to load labor contracts:", err); } finally { setLoading(false); } };
   useEffect(() => { void loadData(); }, []);
-
-  const saveBranchContracts = async (branchName: string, next: any[]) => {
-    await gasClient.saveSharedData("labor_contracts:" + branchName, next);
-    await gasClient.saveSharedData("labor_contracts_" + branchName, next);
-    await loadData();
-  };
-
-  const updateStatus = async (row: any, status: string) => {
-    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
-    const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item);
-    await saveBranchContracts(row.branchName, next);
-  };
-
-  const deleteContract = async (row: any) => {
-    if (!window.confirm(row.branchName + " / " + row.name + " ??? ??????")) return;
-    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
-    await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id));
-  };
-
-  const filteredContracts = useMemo(() => {
-    return contracts.filter((c) => {
-      const matchBranch = !searchBranch || c.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
-      const matchName = !searchName || c.name?.toLowerCase().includes(searchName.toLowerCase());
-      return matchBranch && matchName;
-    }).sort((a, b) => {
-      if (a.deleteRequested !== b.deleteRequested) return a.deleteRequested ? -1 : 1;
-      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-    });
-  }, [contracts, searchBranch, searchName]);
-
-  return (
-    <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
-      <div className="bg-white p-6 rounded-2xl border shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> ? ?? ????? ??</h3>
-            <p className="text-xs text-gray-400 mt-1">???? ??/????? ????? ?? ??? ????? ????? ?????.</p>
-          </div>
-          <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">????</button>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-          <input value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} placeholder="??? ??" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
-          <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="??? ??" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-sm">
-            <thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4">???</th><th className="py-4 px-3">???</th><th className="py-4 px-3">??</th><th className="py-4 px-3">???</th><th className="py-4 px-3 text-right">??</th><th className="py-4 px-3 text-center">??</th><th className="py-4 px-3 text-center">?? ??</th><th className="py-4 px-3 text-center">??</th></tr></thead>
-            <tbody>
-              {loading ? <tr><td colSpan={8} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : filteredContracts.length === 0 ? <tr><td colSpan={8} className="p-12 text-center text-gray-400 font-bold">????? ?? ??? ????.</td></tr> : filteredContracts.map((c, idx) => (
-                <tr key={c.id || idx} className="border-b hover:bg-slate-50/50">
-                  <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td>
-                  <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{c.branchName}</td>
-                  <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{c.name}</td>
-                  <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{c.phone}</td>
-                  <td className="py-4 px-3 text-right font-black text-zinc-700 whitespace-nowrap">{Number(c.salary || 0).toLocaleString("ko-KR")}?</td>
-                  <td className="py-4 px-3 text-center">{c.deleteRequested ? <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-black">????</span> : c.editRequestedAt ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black">???</span> : "-"}</td>
-                  <td className="py-4 px-3 text-center"><select value={c.status || "?? ??"} onChange={(e) => void updateStatus(c, e.target.value)} className="border rounded-lg px-2 py-1 text-xs font-black"><option>?? ??</option><option>?? ??</option><option>?? ??</option><option>??</option></select></td>
-                  <td className="py-4 px-3 text-center"><button onClick={() => void deleteContract(c)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">??</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+  const saveBranchContracts = async (branchName: string, next: any[]) => { await gasClient.saveSharedData("labor_contracts:" + branchName, next); await gasClient.saveSharedData("labor_contracts_" + branchName, next); await loadData(); };
+  const updateStatus = async (row: any, status: string) => { const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || []; const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item); await saveBranchContracts(row.branchName, next); };
+  const deleteContract = async (row: any) => { if (!window.confirm(row.branchName + " / " + row.name + " 내역을 삭제할까요?")) return; const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || []; await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id)); };
+  const filteredContracts = useMemo(() => contracts.filter((c) => { const matchBranch = !searchBranch || c.branchName?.toLowerCase().includes(searchBranch.toLowerCase()); const matchName = !searchName || c.name?.toLowerCase().includes(searchName.toLowerCase()); return matchBranch && matchName; }).sort((a, b) => { if (a.deleteRequested !== b.deleteRequested) return a.deleteRequested ? -1 : 1; return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }), [contracts, searchBranch, searchName]);
+  return <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section"><div className="bg-white p-6 rounded-2xl border shadow-sm"><div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 전 지점 근로계약서 관리</h3><p className="text-xs text-gray-400 mt-1">지점에서 등록/수정요청한 인적사항의 진행 상태를 변경하거나 삭제요청을 처리합니다.</p></div><button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5"><input value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} placeholder="지점명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /></div></div><div className="bg-white rounded-2xl border overflow-hidden shadow-2xs"><div className="overflow-x-auto"><table className="w-full min-w-[920px] text-sm"><thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4">등록일</th><th className="py-4 px-3">지점명</th><th className="py-4 px-3">이름</th><th className="py-4 px-3">연락처</th><th className="py-4 px-3 text-right">급여</th><th className="py-4 px-3 text-center">요청</th><th className="py-4 px-3 text-center">진행 상태</th><th className="py-4 px-3 text-center">관리</th></tr></thead><tbody>{loading ? <tr><td colSpan={8} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : filteredContracts.length === 0 ? <tr><td colSpan={8} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr> : filteredContracts.map((c, idx) => <tr key={c.id || idx} className="border-b hover:bg-slate-50/50"><td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td><td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{c.branchName}</td><td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{c.name}</td><td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{c.phone}</td><td className="py-4 px-3 text-right font-black text-zinc-700 whitespace-nowrap">{Number(c.salary || 0).toLocaleString("ko-KR")}원</td><td className="py-4 px-3 text-center">{c.deleteRequested ? <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-black">삭제요청</span> : c.editRequestedAt ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black">수정됨</span> : "-"}</td><td className="py-4 px-3 text-center"><select value={c.status || "발송 대기"} onChange={(e) => void updateStatus(c, e.target.value)} className="border rounded-lg px-2 py-1 text-xs font-black"><option>발송 대기</option><option>발송 완료</option><option>서명 완료</option><option>보류</option></select></td><td className="py-4 px-3 text-center"><button onClick={() => void deleteContract(c)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제</button></td></tr>)}</tbody></table></div></div></div>;
 }
