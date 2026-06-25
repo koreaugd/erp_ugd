@@ -129,7 +129,7 @@ interface ExpenseRow {
   amount: string;
 }
 
-type OrderCategory = "식자재" | "주류" | "식음료외 기타";
+type OrderCategory = "식자재" | "부식비" | "주류" | "식음료외 기타";
 
 interface OrderItem {
   id: string;
@@ -3875,7 +3875,7 @@ function OrderManagementTab({ branchName }: { branchName: string }) {
     return orders.reduce<Record<OrderCategory, number>>((acc, item) => {
       acc[item.category] += Number(item.amount || 0);
       return acc;
-    }, { "식자재": 0, "주류": 0, "식음료외 기타": 0 });
+    }, { "식자재": 0, "부식비": 0, "주류": 0, "식음료외 기타": 0 });
   }, [orders]);
 
   return (
@@ -3886,7 +3886,7 @@ function OrderManagementTab({ branchName }: { branchName: string }) {
           <p className="text-xs text-gray-400 mt-1">대분류, 거래처, 금액, 기타내용을 입력해 발주 내역을 정리합니다.</p>
         </div>
         <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-[160px_220px_180px_1fr_auto] gap-3 items-end">
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>대분류</span><select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800"><option value="식자재">식자재</option><option value="주류">주류</option><option value="식음료외 기타">식음료외 기타</option></select></label>
+          <label className="space-y-1 text-xs font-bold text-gray-500"><span>대분류</span><select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800"><option value="식자재">식자재</option><option value="부식비">부식비</option><option value="주류">주류</option><option value="식음료외 기타">식음료외 기타</option></select></label>
           <label className="space-y-1 text-xs font-bold text-gray-500"><span>거래처</span><select value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-800">{vendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}</select></label>
           <label className="space-y-1 text-xs font-bold text-gray-500"><span>금액</span><input value={formatWithCommas(amount)} onChange={(e) => setAmount(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="0" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-right font-mono font-black" /></label>
           <label className="space-y-1 text-xs font-bold text-gray-500"><span>기타내용</span><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="품목, 요청사항, 비고" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl" /></label>
@@ -3911,9 +3911,10 @@ function LiquorInventoryTab({ branchName }: { branchName: string }) {
   return <div className="space-y-5" id="liquor-inventory-tab"><section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm"><h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고</h3><form onSubmit={addRow} className="grid grid-cols-1 md:grid-cols-[1fr_140px_1fr_auto] gap-3 mt-4 items-end"><input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="주류명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="재고수량" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" /><button className="px-5 py-2.5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">등록</button></form></section><section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">확인일</th><th className="p-3">주류명</th><th className="p-3">재고수량</th><th className="p-3">비고</th></tr></thead><tbody className="divide-y divide-gray-100">{rows.length === 0 ? <tr><td colSpan={4} className="p-10 text-center text-gray-400 font-bold">등록된 주류 재고가 없습니다.</td></tr> : rows.map((row) => <tr key={row.id}><td className="p-3 font-mono text-xs text-gray-500">{row.checkedAt}</td><td className="p-3 font-black">{row.itemName}</td><td className="p-3">{row.stockQty || "-"}</td><td className="p-3 text-gray-600">{row.memo || "-"}</td></tr>)}</tbody></table></section></div>;
 }
 
-const ORDER_CATEGORIES: OrderCategory[] = ["식자재", "주류", "식음료외 기타"];
+const ORDER_CATEGORIES: OrderCategory[] = ["식자재", "부식비", "주류", "식음료외 기타"];
 const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
   식자재: ["비알(식자재)", "쿠팡(식자재)", "네이버(식자재)"],
+  부식비: [],
   주류: [],
   "식음료외 기타": []
 };
@@ -3950,6 +3951,7 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
         } else if (parsed && typeof parsed === "object") {
           setVendorsByCategory({
             식자재: Array.isArray(parsed.식자재) ? parsed.식자재 : ORDER_DEFAULT_VENDORS.식자재,
+            부식비: Array.isArray(parsed.부식비) ? parsed.부식비 : [],
             주류: Array.isArray(parsed.주류) ? parsed.주류 : [],
             "식음료외 기타": Array.isArray(parsed["식음료외 기타"]) ? parsed["식음료외 기타"] : []
           });
