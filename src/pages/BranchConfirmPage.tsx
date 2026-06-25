@@ -804,7 +804,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             <div className="max-w-7xl mx-auto px-4 sm:px-6">
               <div className="flex space-x-6 overflow-x-auto no-scrollbar scroll-smooth">
                 {[
-                  { id: "purchaseSales", label: "매입매출 대장", icon: FileText },
+                  { id: "purchaseSales", label: "매입매출", icon: FileText },
                   { id: "partTimeSalary", label: "파트타이머 급여대장", icon: Users },
                   { id: "cashExpenses", label: "현금지출 일람", icon: Coins },
                   { id: "cashManagement", label: "현금관리 집계", icon: CircleDollarSign },
@@ -1162,7 +1162,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                           <label className="text-xs font-bold text-gray-750 block mb-2">엑셀에 저장할 시트 범위 지정 (체크한 시트만 다운로드)</label>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
                             {[
-                              { key: "purchaseSales", label: "매입매출 대장" },
+                              { key: "purchaseSales", label: "매입매출" },
                               { key: "partTimeSalary", label: "파트타이머 급여대장" },
                               { key: "cashExpenses", label: "현금지출 일람" },
                               { key: "cashManagement", label: "현금관리 집계" },
@@ -5200,8 +5200,8 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           psRows = JSON.parse(saved);
         } else {
           psRows = [
-            { category: "식재료비", vendorName: "주식회사 식자재창고", transferAmount: "1250000", bank: "국민은행", accountNumber: "123-456-789012", isPrepaid: false, monthlyUsageAmount: "1250000", memo: "일반 후불 외상 결제" },
-            { category: "식음료외 기타", vendorName: "드림 물류 (선입금 업체)", transferAmount: "0", bank: "신한은행", accountNumber: "987-654-321098", isPrepaid: true, monthlyUsageAmount: "450000", memo: "매월 선충전 후 발주금액 차감 방식" }
+            { category: "식재료비", vendorName: "주식회사 식자재창고", transferAmount: "1250000", bank: "국민은행", accountNumber: "123-456-789012", isPrepaid: false, prepaidChargeAmount: "", monthlyUsageAmount: "1250000", memo: "일반 후불 외상 결제" },
+            { category: "식음료외 기타", vendorName: "드림 물류 (선입금 업체)", transferAmount: "0", bank: "신한은행", accountNumber: "987-654-321098", isPrepaid: true, prepaidChargeAmount: "0", monthlyUsageAmount: "450000", memo: "매월 선충전 후 발주금액 차감 방식" }
           ];
         }
       } catch {}
@@ -5210,6 +5210,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
         "송금/사용 대상업체명": r.vendorName,
         "선입금 충전방식?": r.isPrepaid ? "선입금" : "후불이체",
         "이체필요 금액 (원)": Number(r.transferAmount) || 0,
+        "충전금액 (원)": Number(r.prepaidChargeAmount) || 0,
         "실제 이달사용액 (원)": Number(r.monthlyUsageAmount) || 0,
         "은행": r.bank,
         "계좌번호": r.accountNumber,
@@ -5596,7 +5597,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
 }
 
 // ----------------------------------------------------------------------------
-// 2-1. SUB TAB: 매입매출 대장
+// 2-1. SUB TAB: 매입매출
 // ----------------------------------------------------------------------------
 interface PurchaseSalesRow {
   id: string;
@@ -5606,6 +5607,7 @@ interface PurchaseSalesRow {
   bank: string;
   accountNumber: string;
   isPrepaid: boolean;
+  prepaidChargeAmount?: string;
   monthlyUsageAmount: string;
   memo: string;
 }
@@ -5626,7 +5628,7 @@ function MonthlyPurchaseSalesSubTab({
     try {
       const saved = localStorage.getItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`);
       if (saved) {
-        setRows(JSON.parse(saved));
+        setRows(JSON.parse(saved).map((row: PurchaseSalesRow) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" })));
       } else {
         // Defaults to help user start
         setRows([
@@ -5638,6 +5640,7 @@ function MonthlyPurchaseSalesSubTab({
             bank: "국민은행",
             accountNumber: "123-456-789012",
             isPrepaid: false,
+            prepaidChargeAmount: "",
             monthlyUsageAmount: "1250000",
             memo: "일반 후불 외상 결제"
           },
@@ -5649,6 +5652,7 @@ function MonthlyPurchaseSalesSubTab({
             bank: "신한은행",
             accountNumber: "987-654-321098",
             isPrepaid: true,
+            prepaidChargeAmount: "0",
             monthlyUsageAmount: "450000",
             memo: "매월 선충전 후 발주금액 차감 방식"
           }
@@ -5663,7 +5667,7 @@ function MonthlyPurchaseSalesSubTab({
     const loadSharedPurchases = async () => {
       try {
         const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
-        if (Array.isArray(remote)) setRows(remote);
+        if (Array.isArray(remote)) setRows(remote.map((row) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" })));
       } catch (error) {
         console.warn("월 매입 공통 데이터를 불러오지 못했습니다.", error);
       }
@@ -5675,7 +5679,7 @@ function MonthlyPurchaseSalesSubTab({
     try {
       localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(rows));
       await gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, rows);
-      triggerToast("매입매출 대장 내용이 로컬 오프라인 데이터베이스에 성공적으로 안전 보존되었습니다!", "success");
+      triggerToast("매입매출 내용이 저장되었습니다!", "success");
     } catch {
       triggerToast("저장 중 부득이한 에러발생", "error");
     }
@@ -5690,14 +5694,7 @@ function MonthlyPurchaseSalesSubTab({
         if (field === "transferAmount" && !updated.isPrepaid) {
           updated.monthlyUsageAmount = val;
         }
-        // If isPrepaid toggles from false to true, usually reset transfer to 0
-        if (field === "isPrepaid") {
-          if (val === true) {
-            updated.transferAmount = "0";
-          } else {
-            updated.transferAmount = updated.monthlyUsageAmount;
-          }
-        }
+        if (field === "isPrepaid" && val === true && !updated.prepaidChargeAmount) updated.prepaidChargeAmount = updated.transferAmount || "";
         return updated;
       })
     );
@@ -5712,6 +5709,7 @@ function MonthlyPurchaseSalesSubTab({
       bank: "",
       accountNumber: "",
       isPrepaid: false,
+      prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       memo: ""
     };
@@ -5724,6 +5722,7 @@ function MonthlyPurchaseSalesSubTab({
 
   // Calculations
   const totalTransfer = rows.reduce((acc, r) => acc + (Number(r.transferAmount) || 0), 0);
+  const totalPrepaidCharge = rows.reduce((acc, r) => acc + (Number(r.prepaidChargeAmount) || 0), 0);
   const totalUsage = rows.reduce((acc, r) => acc + (Number(r.monthlyUsageAmount) || 0), 0);
 
   return (
@@ -5756,7 +5755,16 @@ function MonthlyPurchaseSalesSubTab({
       </div>
 
       {/* Aggregate Banner cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
+          <div>
+            <span className="text-[10px] text-gray-400 font-black font-sans">선입금 충전금액 합계</span>
+            <p className="text-xl font-black text-blue-700 font-mono mt-0.5">{formatNumber(totalPrepaidCharge)} 원</p>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-700">
+            <Landmark className="w-5 h-5" />
+          </div>
+        </div>
         <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
           <div>
             <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 실제 현금이체 합계</span>
@@ -5786,6 +5794,7 @@ function MonthlyPurchaseSalesSubTab({
               <th className="py-3 px-3">송금/사용 대상업체명</th>
               <th className="py-3 px-3 w-32">선입금 충전방식?</th>
               <th className="py-3 px-3 w-36">이체필요 금액 (원)</th>
+              <th className="py-3 px-3 w-32">충전금액 (원)</th>
               <th className="py-3 px-3 w-32">실제 이달사용액 (원)</th>
               <th className="py-3 px-3 w-28">은행</th>
               <th className="py-3 px-3">계좌번호</th>
@@ -5796,8 +5805,8 @@ function MonthlyPurchaseSalesSubTab({
           <tbody className="divide-y divide-gray-100 text-[11px]">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-gray-400">
-                  매입매출 대장에 등록된 매입처가 없습니다. 상단의 '매입 업체 추가'를 클릭해 작성해주세요.
+                <td colSpan={10} className="py-16 text-center text-gray-400">
+                  매입매출에 등록된 거래처가 없습니다. 상단의 '매입 업체 추가'를 클릭해 작성해주세요.
                 </td>
               </tr>
             ) : (
@@ -5837,14 +5846,20 @@ function MonthlyPurchaseSalesSubTab({
                   <td className="py-2 px-2.5">
                     <input
                       type="number"
-                      disabled={row.isPrepaid}
                       value={row.transferAmount}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
-                      placeholder={row.isPrepaid ? "실 송금 없음" : "송금 필요 잔고"}
+                      placeholder="송금 필요 금액"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right focus:outline-none focus:border-[#2E6DB4] text-red-650"
+                    />
+                  </td>
+                  <td className="py-2 px-2.5">
+                    <input
+                      type="number"
+                      value={row.prepaidChargeAmount || ""}
+                      onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
+                      placeholder={row.isPrepaid ? "충전 금액" : "-"}
                       className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        row.isPrepaid 
-                          ? "bg-zinc-100 text-gray-400 border-gray-200" 
-                          : "border-gray-200 focus:border-[#2E6DB4] text-red-650"
+                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-blue-700" : "bg-zinc-100 text-gray-400 border-gray-200"
                       }`}
                     />
                   </td>
