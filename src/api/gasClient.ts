@@ -409,10 +409,10 @@ export const gasClient = {
   /**
    * 관리자용: 신규 지점 등록
    */
-  async addBranch(branchName: string, pinHash: string, brand: string, role?: string): Promise<{ success: boolean }> {
+  async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string): Promise<{ success: boolean }> {
     const result = await callApi("addBranch", { branchName, pinHash, brand, role });
     if (result && result.success !== false) {
-      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, is_active: true });
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, rawPin, is_active: true });
     }
     return result;
   },
@@ -532,4 +532,3 @@ export const gasClient = {
 export interface AdminBranchSetting extends BranchSetting {
   isActive: boolean;
 }
-
