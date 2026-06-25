@@ -1216,6 +1216,20 @@ function AdminAnnualLeaveSection() {
     return `${String(date.getFullYear()).slice(2)}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
   };
 
+  const formatTenureText = (value: string) => {
+    if (!value) return "-";
+    const normalized = String(value).replace(/\./g, "-");
+    const start = new Date(normalized);
+    if (Number.isNaN(start.getTime())) return "-";
+    const today = new Date();
+    let months = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+    if (today.getDate() < start.getDate()) months -= 1;
+    if (months < 0) months = 0;
+    const years = Math.floor(months / 12);
+    const remainMonths = months % 12;
+    return years > 0 ? `${years}년 ${remainMonths}개월` : `${remainMonths}개월`;
+  };
+
   const calcDays = (from: string, to: string) => {
     const start = new Date(`${from}T00:00:00`);
     const end = new Date(`${to}T00:00:00`);
@@ -1332,12 +1346,13 @@ function AdminAnnualLeaveSection() {
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1060px] text-sm">
             <thead className="bg-slate-50 text-left text-xs text-gray-500">
               <tr>
                 <th className="px-4 py-3">지점</th>
                 <th className="px-4 py-3">직원</th>
                 <th className="px-4 py-3">입사일</th>
+                <th className="px-4 py-3">근속년수</th>
                 <th className="px-4 py-3 text-center">부여일수</th>
                 <th className="px-4 py-3 text-center">사용일수</th>
                 <th className="px-4 py-3 text-center">잔여일수</th>
@@ -1346,14 +1361,15 @@ function AdminAnnualLeaveSection() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="py-16 text-center"><LoadingSpinner size="sm" /></td></tr>
+                <tr><td colSpan={8} className="py-16 text-center"><LoadingSpinner size="sm" /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="py-16 text-center text-gray-400 font-bold">표시할 정직원 데이터가 없습니다.</td></tr>
+                <tr><td colSpan={8} className="py-16 text-center text-gray-400 font-bold">표시할 정직원 데이터가 없습니다.</td></tr>
               ) : rows.map(({ employee, logs, used, grant, remain }) => (
                 <tr key={`${employee.branchName}-${employee.id}`} className="hover:bg-slate-50/60">
                   <td className="px-4 py-3 font-bold text-gray-500">{employee.branchName}</td>
                   <td className="px-4 py-3 font-black text-gray-800">{employee.name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500">{formatShortDate(employee.entryDate)}</td>
+                  <td className="px-4 py-3 font-bold text-gray-600">{formatTenureText(employee.entryDate)}</td>
                   <td className="px-4 py-3 text-center">
                     <input
                       type="number"

@@ -1777,10 +1777,11 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 function BranchDashboardTab({ branchName }: { branchName: string }) {
   const [loading, setLoading] = useState(true);
   const [notices, setNotices] = useState<any[]>([]);
-  const [issues, setIssues] = useState<Array<{ type: string; message: string; level: "warn" | "danger" | "info" }>>([]);
+  const [issues, setIssues] = useState<Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }>>([]);
 
-  const getTodayDateStr = () => {
+  const getDateStr = (offsetDays = 0) => {
     const local = new Date();
+    local.setDate(local.getDate() + offsetDays);
     return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
   };
 
@@ -1790,26 +1791,26 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
       const [savedNotices, roster, today] = await Promise.all([
         gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
         gasClient.getBranchOwnRoster(branchName).catch(() => []),
-        gasClient.getDailyFormBootstrap(branchName, getTodayDateStr()).catch(() => null)
+        gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null)
       ]);
       setNotices(Array.isArray(savedNotices) ? savedNotices : []);
 
-      const nextIssues: Array<{ type: string; message: string; level: "warn" | "danger" | "info" }> = [];
+      const nextIssues: Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }> = [];
       if (!today?.exists) {
-        nextIssues.push({ type: "일일마감", message: "오늘 일일마감정산이 아직 제출되지 않았습니다.", level: "info" });
+        nextIssues.push({ type: "전일마감", message: `${getDateStr(-1)} 일일마감 미제출`, level: "info" });
       }
 
       const missingResident = (roster || []).filter((employee: any) => !residentBirthKey(employee.residentNumber)).map((employee: any) => employee.name).filter(Boolean);
       const missingEntryDate = (roster || []).filter((employee: any) => !employee.entryDate).map((employee: any) => employee.name).filter(Boolean);
       const missingRank = (roster || []).filter((employee: any) => employee.division === "정직원" && !employee.rank).map((employee: any) => employee.name).filter(Boolean);
       if (missingResident.length > 0) {
-        nextIssues.push({ type: "직원현황", message: `주민등록번호 입력 필요 인원: ${missingResident.join(", ")}`, level: "warn" });
+        nextIssues.push({ type: "직원현황", message: "주민등록번호 입력 필요", names: missingResident, level: "warn" });
       }
       if (missingEntryDate.length > 0) {
-        nextIssues.push({ type: "직원현황", message: `입사일 입력 필요 인원: ${missingEntryDate.join(", ")}`, level: "warn" });
+        nextIssues.push({ type: "직원현황", message: "입사일 입력 필요", names: missingEntryDate, level: "warn" });
       }
       if (missingRank.length > 0) {
-        nextIssues.push({ type: "직원현황", message: `직급 선택 필요 인원: ${missingRank.join(", ")}`, level: "warn" });
+        nextIssues.push({ type: "직원현황", message: "직급 선택 필요", names: missingRank, level: "warn" });
       }
 
       const byName = new Map<string, any[]>();
@@ -1826,8 +1827,9 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         nextIssues.push({
           type: "동명이인 확인",
           message: hasMissing
-            ? `동명이인/동일인 확인 필요: ${name} (주민등록번호 미입력 인원 포함)`
-            : `동명이인 확인 필요: ${name} (${Array.from(distinct).join(", ")})`,
+            ? "동명이인/동일인 확인 필요 (주민등록번호 미입력 포함)"
+            : `동명이인 확인 필요 (${Array.from(distinct).join(", ")})`,
+          names: [name],
           level: "danger"
         });
       });
@@ -1865,11 +1867,22 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
           ) : issues.length === 0 ? (
             <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-5 text-sm font-bold text-emerald-800">현재 확인 필요한 미결사항이 없습니다.</div>
           ) : (
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {issues.map((issue, index) => (
                 <div key={index} className={`rounded-2xl border p-4 text-sm ${issue.level === "danger" ? "bg-rose-50 border-rose-100 text-rose-800" : issue.level === "warn" ? "bg-amber-50 border-amber-100 text-amber-800" : "bg-sky-50 border-sky-100 text-sky-800"}`}>
-                  <p className="text-[11px] font-black opacity-70">{issue.type}</p>
-                  <p className="font-bold mt-1">{issue.message}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-black opacity-70">{issue.type}</p>
+                    {issue.names && <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-black">{issue.names.length}명</span>}
+                  </div>
+                  <p className="font-black mt-1">{issue.message}</p>
+                  {issue.names && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {issue.names.slice(0, 12).map((name) => (
+                        <span key={name} className="rounded-full bg-white/75 border border-current/10 px-2 py-1 text-[11px] font-bold">{name}</span>
+                      ))}
+                      {issue.names.length > 12 && <span className="rounded-full bg-white/75 px-2 py-1 text-[11px] font-black">+{issue.names.length - 12}</span>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
