@@ -197,6 +197,9 @@ async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id
     }
   } catch (err) {
     console.warn("[Firebase Direct Mirror Error] Failed during live direct browser backup:", err);
+    if (type === "setting" || type === "delete_setting") {
+      throw err;
+    }
   }
 }
 
