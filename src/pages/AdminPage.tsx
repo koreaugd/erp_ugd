@@ -72,14 +72,14 @@ export default function AdminPage() {
   const [movementHistory, setMovementHistory] = useState<Array<any>>([]);
   const [directoryBranches, setDirectoryBranches] = useState<Array<any>>([]);
   const [showEmployeeRegistration, setShowEmployeeRegistration] = useState(false);
-  const [registrationRows, setRegistrationRows] = useState<Array<any>>([{ branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }]);
+  const [registrationRows, setRegistrationRows] = useState<Array<any>>([{ branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }]);
   const [uploadingPayroll, setUploadingPayroll] = useState(false);
   const [salaryUnlocked, setSalaryUnlocked] = useState(false);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
   const [cleaningRosters, setCleaningRosters] = useState(false);
   const [clearingDirectory, setClearingDirectory] = useState(false);
-  const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash">("dashboard");
+  const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks">("dashboard");
   const employeeIdSequence = useRef(1);
   // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
   const employeeDirectoryEnabled = false;
@@ -237,6 +237,16 @@ export default function AdminPage() {
   };
   const formatDate = (value?: string) => value ? String(value).replace(/-/g, ".") : "-";
   const formatBirthDate = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6) || "-";
+  const formatResidentNumber = (value?: string) => {
+    const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
+    if (digits.length <= 6) return digits;
+    return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+  };
+  const maskResidentNumber = (value?: string) => {
+    const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
+    if (digits.length <= 6) return digits || "-";
+    return `${digits.slice(0, 6)}-${"*".repeat(Math.min(7, digits.length - 6))}`;
+  };
   const formatTenure = (entryDate?: string) => {
     if (!entryDate) return "-";
     const start = new Date(entryDate);
@@ -256,16 +266,34 @@ export default function AdminPage() {
       grouped.set(row.branchName, list);
     });
     if (grouped.size === 0) return triggerToast("지점과 직원명을 입력해 주세요.", "error");
+    const invalidResident = registrationRows.find((row) => row.branchName && row.name.trim() && formatResidentNumber(row.residentNumber).replace(/\D/g, "").length !== 13);
+    if (invalidResident) return triggerToast("주민등록번호 13자리를 모두 입력해 주세요.", "error");
     await Promise.all(Array.from(grouped.entries()).map(async ([branchName, rows]) => {
       const current = await gasClient.getStaffRoster(branchName);
-      const next = [...current, ...rows.map((row) => ({
-        id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        employeeId: makeEmployeeId(), name: row.name.trim(), division: "정직원", rank: row.rank || "사원",
-        birthDate: row.birthDate, entryDate: row.entryDate, salary: toMoney(row.salary), contractType: "4대보험" as const
-      }))];
+      const next = [...current, ...rows.map((row) => {
+        const formattedResident = formatResidentNumber(row.residentNumber);
+        const effectiveEntryDate = row.addReason === "신규입사" ? row.hireDate || row.entryDate : row.entryDate;
+        return {
+          id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          employeeId: makeEmployeeId(),
+          name: row.name.trim(),
+          division: "정직원",
+          rank: row.rank || "사원",
+          residentNumber: formattedResident,
+          birthDate: formattedResident.replace(/\D/g, "").slice(0, 6),
+          entryDate: effectiveEntryDate,
+          salary: toMoney(row.salary),
+          contractType: "4대보험" as const,
+          addReason: row.addReason || "신규입사",
+          fromBranch: row.addReason === "지점이동" ? row.fromBranch : "",
+          transferDate: row.addReason === "지점이동" ? row.transferDate : "",
+          hireDate: row.addReason === "신규입사" ? row.hireDate || row.entryDate : "",
+          addReasonMemo: row.addReason === "기타" ? row.addReasonMemo : ""
+        };
+      })];
       await gasClient.saveStaffRoster(branchName, next);
     }));
-    setRegistrationRows([{ branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }]);
+    setRegistrationRows([{ branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }]);
     setShowEmployeeRegistration(false);
     await loadEmployeeDirectory();
     triggerToast("직원명부를 등록했습니다.");
@@ -340,7 +368,47 @@ export default function AdminPage() {
   };
 
   const loadClosingAnomalies = async () => {
-    try { setAnomalyLoading(true); const branches = await gasClient.getBranchList(); const records = await Promise.all(branches.map(async (branch) => { const history = await gasClient.getBranchHistory(branch.branchName); return history.flatMap((record: any) => { try { const meta = JSON.parse(String(record.memo || "").split("\n---\nMETADATA:")[1] || "{}"); const expenses = (meta.cashExpenses || []).reduce((sum: number, item: any) => sum + (Number(item.amount) || 0), 0); const cashDifference = (Number(meta.cashBalance) || 0) - ((Number(meta.prevDayCash) || 0) + (Number(record.cashSales) || 0) - expenses); const overtime = (meta.staffRows || []).filter((staff: any) => staff.division === "정직원" && Number(staff.overtime) > 0).map((staff: any) => `${staff.name} +${staff.overtime}h`).join(", "); return cashDifference || overtime ? [{ branchName: branch.branchName, date: record.settleDate, issues: [cashDifference ? "현금 차이" : "", overtime ? "초과근무" : ""].filter(Boolean), cashDifference, overtime, reason: meta.cashDiffReason || "" }] : []; } catch { return []; } }); })); setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)))); } finally { setAnomalyLoading(false); }
+    try {
+      setAnomalyLoading(true);
+      const branches = await gasClient.getBranchList();
+      const records = await Promise.all(branches.map(async (branch) => {
+        const history = await gasClient.getBranchHistory(branch.branchName);
+        return history.flatMap((record: any) => {
+          try {
+            const memoText = String(record.memo || "");
+            const meta = JSON.parse(memoText.split("\n---\nMETADATA:")[1] || "{}");
+            const visibleMemo = memoText.split("\n---\nMETADATA:")[0] || "";
+            const section = (title: string) => {
+              const match = visibleMemo.match(new RegExp("\\[" + title + "\\]\\n([\\s\\S]*?)(?=\\n\\n\\[|$)"));
+              return (match?.[1] || "").trim();
+            };
+            const remarks = {
+              staffMemo: meta.staffMemo || section("등록 저장??"),
+              reviewMemo: meta.reviewMemo || section("등록 저장??"),
+              otherMemo: meta.otherMemo || section("등록 저장??")
+            };
+            const expenses = (meta.cashExpenses || []).reduce((sum: number, item: any) => sum + (Number(item.amount) || 0), 0);
+            const cashDifference = (Number(meta.cashBalance) || 0) - ((Number(meta.prevDayCash) || 0) + (Number(record.cashSales) || 0) - expenses);
+            const overtime = (meta.staffRows || []).filter((staff: any) => staff.division === "정직원" && Number(staff.overtime) > 0).map((staff: any) => `${staff.name} +${staff.overtime}h`).join(", ");
+            const hasRemark = Boolean(remarks.staffMemo || remarks.reviewMemo || remarks.otherMemo);
+            if (!cashDifference && !overtime && !hasRemark) return [];
+            return [{
+              branchName: branch.branchName,
+              date: record.settleDate,
+              writer: record.submittedBy || record.modifiedBy || "-",
+              issues: [cashDifference ? "현금 차이" : "", overtime ? "초과근무" : "", hasRemark ? "특이사항" : ""].filter(Boolean),
+              cashDifference,
+              overtime,
+              reason: meta.cashDiffReason || "",
+              remarks
+            }];
+          } catch { return []; }
+        });
+      }));
+      setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date))));
+    } finally {
+      setAnomalyLoading(false);
+    }
   };
   useEffect(() => { if (adminSection === "dashboard") void loadClosingAnomalies(); }, [adminSection]);
 
@@ -630,8 +698,8 @@ export default function AdminPage() {
 
               <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
-                <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button></div>
-                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div></div>}
+                <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button></div>
+                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div></div>}
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead className="border-b text-left text-gray-500">
@@ -653,7 +721,9 @@ export default function AdminPage() {
                       ) : (
                         anomalyRecords
                           .filter((item) =>
-                            closingView === "dashboard" || closingView === "cash"
+                            closingView === "remarks"
+                              ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo || item.remarks?.otherMemo)
+                              : closingView === "dashboard" || closingView === "cash"
                               ? Boolean(item.cashDifference)
                               : Boolean(item.overtime)
                           )
@@ -670,6 +740,8 @@ export default function AdminPage() {
                                   ? "현금 차이"
                                   : closingView === "overtime"
                                   ? "초과근무"
+                                  : closingView === "remarks"
+                                  ? "특이사항"
                                   : item.issues.join(", ")}
                                 {(index === 0 || item.date === list[0]?.date) && (
                                   <span className="ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
@@ -680,6 +752,8 @@ export default function AdminPage() {
                               <td>
                                 {closingView === "cash"
                                   ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
+                                  : closingView === "remarks"
+                                  ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p><p><b>기타</b> {item.remarks?.otherMemo || "-"}</p></div>
                                   : item.overtime || "-"}
                               </td>
                             </tr>
@@ -935,13 +1009,13 @@ export default function AdminPage() {
                     <button onClick={() => void downloadEmployeeDirectory()} className="px-4 py-2 rounded-xl bg-slate-700 text-white text-xs font-bold">엑셀 다운로드</button>
                     <button onClick={() => salaryUnlocked ? setSalaryUnlocked(false) : void unlockSalary()} className="px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold">{salaryUnlocked ? "급여 다시 잠금" : "급여 열람 잠금 해제"}</button>
                   </div>
-                  {showEmployeeRegistration && <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-xs"><thead><tr className="text-gray-500"><th className="text-left pb-2">지점</th><th className="text-left pb-2">이름</th><th className="text-left pb-2">생년월일</th><th className="text-left pb-2">직급</th><th className="text-left pb-2">입사일</th><th className="text-left pb-2">급여</th></tr></thead><tbody>{registrationRows.map((row, index) => <tr key={index}><td className="pr-2 pb-2"><select value={row.branchName} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, branchName: e.target.value } : item))} className="w-full p-2 rounded border"><option value="">지점 선택</option>{directoryBranches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input value={row.name} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input type="date" value={row.birthDate} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, birthDate: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input value={row.rank} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, rank: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input type="date" value={row.entryDate} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, entryDate: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pb-2"><input type="number" value={row.salary} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, salary: e.target.value } : item))} className="w-full p-2 rounded border" /></td></tr>)}</tbody></table></div><div className="flex gap-2"><button onClick={() => setRegistrationRows((rows) => [...rows, { branchName: "", name: "", birthDate: "", rank: "사원", entryDate: "", salary: "" }])} className="px-3 py-2 bg-white border rounded-lg text-xs font-bold">입력칸 추가</button><button onClick={() => void saveRegistrationRows()} className="px-3 py-2 bg-[#2E6DB4] text-white rounded-lg text-xs font-bold">등록 저장</button></div></div>}
+                  {showEmployeeRegistration && <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3"><div className="overflow-x-auto"><table className="w-full min-w-[1280px] text-xs"><thead><tr className="text-gray-500"><th className="text-left pb-2">지점</th><th className="text-left pb-2">이름</th><th className="text-left pb-2">주민등록번호</th><th className="text-left pb-2">직급</th><th className="text-left pb-2">추가 사유</th><th className="text-left pb-2">신규입사일</th><th className="text-left pb-2">이동 전 지점</th><th className="text-left pb-2">이동일</th><th className="text-left pb-2">기타 내용</th><th className="text-left pb-2">급여</th></tr></thead><tbody>{registrationRows.map((row, index) => <tr key={index}><td className="pr-2 pb-2"><select value={row.branchName} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, branchName: e.target.value } : item))} className="w-full p-2 rounded border"><option value="">지점 선택</option>{directoryBranches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input value={row.name} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input value={row.residentNumber || ""} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, residentNumber: formatResidentNumber(e.target.value) } : item))} placeholder="000000-0000000" className="w-full p-2 rounded border font-mono" /></td><td className="pr-2 pb-2"><input value={row.rank} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, rank: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><select value={row.addReason || "신규입사"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, addReason: e.target.value } : item))} className="w-full p-2 rounded border"><option value="신규입사">신규입사</option><option value="지점이동">지점이동</option><option value="기타">기타</option></select></td><td className="pr-2 pb-2"><input type="date" value={row.hireDate || row.entryDate || ""} disabled={(row.addReason || "신규입사") !== "신규입사"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, hireDate: e.target.value, entryDate: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pr-2 pb-2"><select value={row.fromBranch || ""} disabled={row.addReason !== "지점이동"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, fromBranch: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100"><option value="">이동 전 지점</option>{directoryBranches.filter((branch) => branch.branchName !== row.branchName).map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input type="date" value={row.transferDate || ""} disabled={row.addReason !== "지점이동"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, transferDate: e.target.value, entryDate: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pr-2 pb-2"><input value={row.addReasonMemo || ""} disabled={row.addReason !== "기타"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, addReasonMemo: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pb-2"><input type="number" value={row.salary} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, salary: e.target.value } : item))} className="w-full p-2 rounded border" /></td></tr>)}</tbody></table></div><p className="text-[11px] text-gray-500 font-bold">수정 추천: 주민등록번호처럼 민감한 정보는 목록에서는 마스킹하고, 수정 버튼을 눌러 별도 확인 후 편집하는 방식이 가장 안전합니다.</p><div className="flex gap-2"><button onClick={() => setRegistrationRows((rows) => [...rows, { branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }])} className="px-3 py-2 bg-white border rounded-lg text-xs font-bold">입력칸 추가</button><button onClick={() => void saveRegistrationRows()} className="px-3 py-2 bg-[#2E6DB4] text-white rounded-lg text-xs font-bold">등록 저장</button></div></div>}
                   <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-3 text-left">직원ID</th><th className="px-4 py-3 text-left">지점</th><th className="px-4 py-3 text-left">이름</th><th className="px-4 py-3 text-left">생년월일</th><th className="px-4 py-3 text-left">직급</th><th className="px-4 py-3 text-left">입사일</th><th className="px-4 py-3 text-right">급여</th><th className="px-4 py-3 text-left">재직년수</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-4 py-3 font-mono text-xs">{employee.employeeId || employee.id}</td><td className="px-4 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-4 py-3 font-bold">{employee.name}</td><td className="px-4 py-3 font-mono">{formatBirthDate(employee.birthDate || employee.residentNumber)}</td><td className="px-4 py-3">{employee.rank || "사원"}</td><td className="px-4 py-3 font-mono">{formatDate(employee.entryDate)}</td><td className="px-4 py-3 text-right font-mono">{salaryUnlocked && employee.salary ? formatNumber(employee.salary) : "잠김"}</td><td className="px-4 py-3">{formatTenure(employee.entryDate)}</td></tr>) : <tr><td colSpan={8} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
                 </>
               )}
               {directoryLoading ? <div className="py-20 text-center"><LoadingSpinner size="md" /></div> : directoryTab === "roster" ? (
                 <div className="hidden">
-                  <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">지점</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">직급</th><th className="px-5 py-3 text-left">주민등록번호</th><th className="px-5 py-3 text-left">입사일</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-5 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-5 py-3 font-bold">{employee.name}</td><td className="px-5 py-3">{employee.rank || "사원"}</td><td className="px-5 py-3 font-mono">{employee.residentNumber || "-"}</td><td className="px-5 py-3 font-mono">{employee.entryDate || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
+                  <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">지점</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">직급</th><th className="px-5 py-3 text-left">주민등록번호</th><th className="px-5 py-3 text-left">입사일</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-5 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-5 py-3 font-bold">{employee.name}</td><td className="px-5 py-3">{employee.rank || "사원"}</td><td className="px-5 py-3 font-mono">{maskResidentNumber(employee.residentNumber)}</td><td className="px-5 py-3 font-mono">{employee.entryDate || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
                 </div>
               ) : (
                 <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">처리일</th><th className="px-5 py-3 text-left">구분</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">기존 지점</th><th className="px-5 py-3 text-left">이동 지점</th></tr></thead><tbody className="divide-y divide-gray-100">{movementHistory.length ? movementHistory.map((item, index) => <tr key={item.id || index}><td className="px-5 py-3 font-mono">{item.effectiveDate || "-"}</td><td className="px-5 py-3 font-bold">{item.type || "-"}</td><td className="px-5 py-3 font-bold">{item.employeeName || "-"}</td><td className="px-5 py-3">{item.fromBranch || "-"}</td><td className="px-5 py-3">{item.toBranch || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 퇴사 또는 지점이동 내역이 없습니다.</td></tr>}</tbody></table></div></div>
