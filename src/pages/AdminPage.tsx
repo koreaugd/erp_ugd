@@ -529,6 +529,13 @@ export default function AdminPage() {
             <Calendar className="w-5 h-5" />
             연차관리
           </button>
+          <button
+            onClick={() => navigate("/branch-confirm")}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            <ClipboardList className="w-5 h-5" />
+            지점 대시보드
+          </button>
           {employeeDirectoryEnabled && <button
             onClick={() => setAdminSection("employeeDirectory")}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "employeeDirectory" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}

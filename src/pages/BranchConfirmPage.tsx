@@ -1799,15 +1799,18 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         nextIssues.push({ type: "일일마감", message: "오늘 일일마감정산이 아직 제출되지 않았습니다.", level: "info" });
       }
 
-      (roster || []).forEach((employee: any) => {
-        const missing: string[] = [];
-        if (!residentBirthKey(employee.residentNumber)) missing.push("주민등록번호");
-        if (!employee.entryDate) missing.push("입사일");
-        if (employee.division === "정직원" && !employee.rank) missing.push("직급");
-        if (missing.length > 0) {
-          nextIssues.push({ type: "직원현황", message: `${employee.name}님: ${missing.join(", ")} 입력이 필요합니다.`, level: "warn" });
-        }
-      });
+      const missingResident = (roster || []).filter((employee: any) => !residentBirthKey(employee.residentNumber)).map((employee: any) => employee.name).filter(Boolean);
+      const missingEntryDate = (roster || []).filter((employee: any) => !employee.entryDate).map((employee: any) => employee.name).filter(Boolean);
+      const missingRank = (roster || []).filter((employee: any) => employee.division === "정직원" && !employee.rank).map((employee: any) => employee.name).filter(Boolean);
+      if (missingResident.length > 0) {
+        nextIssues.push({ type: "직원현황", message: `주민등록번호 입력 필요 인원: ${missingResident.join(", ")}`, level: "warn" });
+      }
+      if (missingEntryDate.length > 0) {
+        nextIssues.push({ type: "직원현황", message: `입사일 입력 필요 인원: ${missingEntryDate.join(", ")}`, level: "warn" });
+      }
+      if (missingRank.length > 0) {
+        nextIssues.push({ type: "직원현황", message: `직급 선택 필요 인원: ${missingRank.join(", ")}`, level: "warn" });
+      }
 
       const byName = new Map<string, any[]>();
       (roster || []).forEach((employee: any) => {
@@ -1823,8 +1826,8 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         nextIssues.push({
           type: "동명이인 확인",
           message: hasMissing
-            ? `${name} 이름의 직원이 여러 명이고 주민등록번호가 비어있는 인원이 있습니다. 같은 사람인지 확인해주세요.`
-            : `${name} 이름의 직원이 여러 명입니다. 주민등록번호 앞 6자리로 동명이인 여부를 확인해주세요. (${Array.from(distinct).join(", ")})`,
+            ? `동명이인/동일인 확인 필요: ${name} (주민등록번호 미입력 인원 포함)`
+            : `동명이인 확인 필요: ${name} (${Array.from(distinct).join(", ")})`,
           level: "danger"
         });
       });
@@ -1889,6 +1892,52 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
             </div>
           )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+type AdminEditField = { key: string; label: string; value: string; type?: "text" | "number" };
+
+function AdminRecordEditModal({
+  title,
+  fields,
+  onChange,
+  onCancel,
+  onSave
+}: {
+  title: string;
+  fields: AdminEditField[];
+  onChange: (key: string, value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+      <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <h3 className="text-sm font-black text-gray-900">{title}</h3>
+          <button onClick={onCancel} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          {fields.map((field) => (
+            <label key={field.key} className="block space-y-1.5">
+              <span className="text-xs font-black text-gray-500">{field.label}</span>
+              <input
+                type={field.type || "text"}
+                value={field.value}
+                onChange={(e) => onChange(field.key, e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-bold focus:outline-hidden focus:border-[#2E6DB4]"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 bg-gray-50 px-5 py-4">
+          <button onClick={onCancel} className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-xs font-bold text-gray-600">취소</button>
+          <button onClick={onSave} className="px-5 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">저장</button>
+        </div>
       </div>
     </div>
   );
@@ -4344,7 +4393,7 @@ function RosterTab({ branchName }: { branchName: string }) {
 
           {division === "정직원" && (
             <div className="flex flex-col space-y-1.5 animate-in fade-in duration-200">
-              <span className="font-bold text-gray-500">직급 선택 (정직원 필수)</span>
+              <span className="font-bold text-gray-500">직급 선택</span>
               <select
                 value={selectedRank}
                 onChange={(e) => {
@@ -4576,6 +4625,7 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   const [manualHours, setManualHours] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [editOvertime, setEditOvertime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -4609,38 +4659,47 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
     setManualName(""); setManualHours(""); setManualReason(""); await loadData();
   };
 
-  const handleEditOvertimeRow = async (row: any) => {
-    const nextHours = window.prompt("초과근무 시간을 수정하세요. 예: 1.5 또는 -1", toNumberPromptValue(row.overtime));
-    if (nextHours === null) return;
-    const hours = Number(nextHours);
+  const handleEditOvertimeRow = (row: any) => {
+    setEditOvertime({
+      row,
+      fields: {
+        overtime: toNumberPromptValue(row.overtime),
+        reason: row.overtimeReason === "-" ? "" : String(row.overtimeReason || "")
+      }
+    });
+  };
+
+  const saveEditOvertimeRow = async () => {
+    if (!editOvertime) return;
+    const { row, fields } = editOvertime;
+    const hours = Number(fields.overtime);
     if (!Number.isFinite(hours)) {
       alert("숫자 형식으로 입력해주세요.");
       return;
     }
-    const nextReason = window.prompt("초과근무/조기퇴근 사유를 입력하세요.", row.overtimeReason === "-" ? "" : String(row.overtimeReason || ""));
-    if (nextReason === null) return;
-    if (!nextReason.trim()) {
+    if (!fields.reason.trim()) {
       alert("초과근무 시간이 0이 아니면 사유가 필요합니다.");
       return;
     }
     if (row.manual) {
       const key = `manual_overtime:${branchName}`;
       const saved = (await gasClient.getSharedData<any[]>(key)) || [];
-      await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason: nextReason.trim() } : item));
+      await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason: fields.reason.trim() } : item));
     } else if (row.recordId) {
       await updateDailyMetadata(row.recordId, (metadata, detail) => {
         const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
         const nextRows = staffRows.map((staff: any) => {
           const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtime: hours, overtimeReason: nextReason.trim() } : staff;
+          return name === row.staffName ? { ...staff, overtime: hours, overtimeReason: fields.reason.trim() } : staff;
         });
         const nextStaff = (detail.staff || []).map((staff: any) => {
           const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtimeHours: hours, memo: nextReason.trim() } : staff;
+          return name === row.staffName ? { ...staff, overtimeHours: hours, memo: fields.reason.trim() } : staff;
         });
         return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
       });
     }
+    setEditOvertime(null);
     await loadData();
   };
 
@@ -4669,6 +4728,18 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {editOvertime && (
+        <AdminRecordEditModal
+          title={`${editOvertime.row.staffName} 초과근무 수정`}
+          fields={[
+            { key: "overtime", label: "초과근무 시간", value: editOvertime.fields.overtime, type: "number" },
+            { key: "reason", label: "초과/조기퇴근 사유", value: editOvertime.fields.reason }
+          ]}
+          onChange={(key, value) => setEditOvertime((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
+          onCancel={() => setEditOvertime(null)}
+          onSave={() => void saveEditOvertimeRow()}
+        />
+      )}
       {/* List Table Left */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
         <div className="flex items-center justify-between border-b border-gray-100 pb-3">
@@ -4802,6 +4873,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
+  const [editPartTime, setEditPartTime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -4821,15 +4893,15 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
     loadData();
   }, [loadData]);
 
-  const handleEditPartTimeRow = async (row: any) => {
+  const handleEditPartTimeRow = (row: any) => {
     if (!row.recordId) return;
-    const nextClockIn = window.prompt("출근시간을 수정하세요. 예: 09:00", String(row.clockIn || ""));
-    if (nextClockIn === null) return;
-    const nextClockOut = window.prompt("퇴근시간을 수정하세요. 예: 18:00", String(row.clockOut || ""));
-    if (nextClockOut === null) return;
-    const nextWorkHours = window.prompt("실근무시간을 수정하세요.", toNumberPromptValue(row.workHours));
-    if (nextWorkHours === null) return;
-    const workHours = Number(nextWorkHours);
+    setEditPartTime({ row, fields: { clockIn: String(row.clockIn || ""), clockOut: String(row.clockOut || ""), workHours: toNumberPromptValue(row.workHours) } });
+  };
+
+  const saveEditPartTimeRow = async () => {
+    if (!editPartTime) return;
+    const { row, fields } = editPartTime;
+    const workHours = Number(fields.workHours);
     if (!Number.isFinite(workHours)) {
       alert("근무시간은 숫자로 입력해주세요.");
       return;
@@ -4838,7 +4910,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
       const nextRows = staffRows.map((staff: any) => {
         const name = staff.staffName || staff.name;
-        return name === row.staffName ? { ...staff, clockIn: nextClockIn.trim(), clockOut: nextClockOut.trim(), workHours } : staff;
+        return name === row.staffName ? { ...staff, clockIn: fields.clockIn.trim(), clockOut: fields.clockOut.trim(), workHours } : staff;
       });
       const nextStaff = (detail.staff || []).map((staff: any) => {
         const name = staff.staffName || staff.name;
@@ -4846,6 +4918,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       });
       return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
     });
+    setEditPartTime(null);
     await loadData();
   };
 
@@ -4862,6 +4935,19 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {editPartTime && (
+        <AdminRecordEditModal
+          title={`${editPartTime.row.staffName} 파트타이머 근무 수정`}
+          fields={[
+            { key: "clockIn", label: "출근시간", value: editPartTime.fields.clockIn },
+            { key: "clockOut", label: "퇴근시간", value: editPartTime.fields.clockOut },
+            { key: "workHours", label: "실근무시간", value: editPartTime.fields.workHours, type: "number" }
+          ]}
+          onChange={(key, value) => setEditPartTime((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
+          onCancel={() => setEditPartTime(null)}
+          onSave={() => void saveEditPartTimeRow()}
+        />
+      )}
       {/* List Table Left */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
         <div className="flex items-center justify-between border-b border-gray-100 pb-3">
@@ -6298,6 +6384,7 @@ function MonthlyCashExpensesSubTab({
   refreshHistory?: () => Promise<void>;
 }) {
   const [items, setItems] = useState<any[]>([]);
+  const [editExpense, setEditExpense] = useState<{ item: any; fields: Record<string, string> } | null>(null);
 
   useEffect(() => {
     const cashList: any[] = [];
@@ -6339,26 +6426,25 @@ function MonthlyCashExpensesSubTab({
 
   const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
 
-  const handleEditExpense = async (item: any) => {
+  const handleEditExpense = (item: any) => {
     if (!item.recordId) return;
-    const amountText = window.prompt("현금지출 금액을 수정하세요.", toNumberPromptValue(item.amount));
-    if (amountText === null) return;
-    const amount = Number(amountText);
+    setEditExpense({ item, fields: { amount: toNumberPromptValue(item.amount), usage: item.usage || "", classification: item.classification || "", detail: item.detail || "" } });
+  };
+
+  const saveEditExpense = async () => {
+    if (!editExpense) return;
+    const { item, fields } = editExpense;
+    const amount = Number(fields.amount);
     if (!Number.isFinite(amount)) {
       alert("금액은 숫자로 입력해주세요.");
       return;
     }
-    const usage = window.prompt("사용처를 수정하세요.", item.usage || "");
-    if (usage === null) return;
-    const classification = window.prompt("지출분류를 수정하세요.", item.classification || "");
-    if (classification === null) return;
-    const detail = window.prompt("지출내역을 수정하세요.", item.detail || "");
-    if (detail === null) return;
     await updateDailyMetadata(item.recordId, (metadata) => {
       const cashExpenses = Array.isArray(metadata.cashExpenses) ? [...metadata.cashExpenses] : [];
-      cashExpenses[item.metaIndex] = { ...(cashExpenses[item.metaIndex] || {}), amount: String(amount), usage: usage.trim(), classification: classification.trim(), detail: detail.trim() };
+      cashExpenses[item.metaIndex] = { ...(cashExpenses[item.metaIndex] || {}), amount: String(amount), usage: fields.usage.trim(), classification: fields.classification.trim(), detail: fields.detail.trim() };
       return { metadata: { ...metadata, cashExpenses } };
     });
+    setEditExpense(null);
     await refreshHistory?.();
   };
 
@@ -6374,6 +6460,20 @@ function MonthlyCashExpensesSubTab({
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-expenses-subtab">
+      {editExpense && (
+        <AdminRecordEditModal
+          title="현금지출 수정"
+          fields={[
+            { key: "amount", label: "지출 금액", value: editExpense.fields.amount, type: "number" },
+            { key: "usage", label: "거래처/사용처", value: editExpense.fields.usage },
+            { key: "classification", label: "분류 항목", value: editExpense.fields.classification },
+            { key: "detail", label: "지출내용", value: editExpense.fields.detail }
+          ]}
+          onChange={(key, value) => setEditExpense((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
+          onCancel={() => setEditExpense(null)}
+          onSave={() => void saveEditExpense()}
+        />
+      )}
       <div className="flex justify-between items-center pb-3 border-b border-gray-50">
         <div>
           <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5 font-sans">
@@ -6467,6 +6567,7 @@ function MonthlyCashManagementSubTab({
   refreshHistory?: () => Promise<void>;
 }) {
   const [logs, setLogs] = useState<any[]>([]);
+  const [editCashManagement, setEditCashManagement] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
   useEffect(() => {
     const cashMgmt: any[] = [];
@@ -6513,25 +6614,24 @@ function MonthlyCashManagementSubTab({
     setLogs(cashMgmt);
   }, [selectedMonth, history]);
 
-  const handleEditCashManagement = async (row: any) => {
+  const handleEditCashManagement = (row: any) => {
     if (!row.recordId) return;
-    const prevDayCash = window.prompt("전일 금고현금을 수정하세요.", toNumberPromptValue(row.prevDayCash));
-    if (prevDayCash === null) return;
-    const cashSales = window.prompt("금일 현금매출을 수정하세요.", toNumberPromptValue(row.cashSales));
-    if (cashSales === null) return;
-    const actualCashBalance = window.prompt("금고 실사 현금을 수정하세요.", toNumberPromptValue(row.actualCashBalance));
-    if (actualCashBalance === null) return;
-    const reason = window.prompt("차액 사유를 수정하세요.", row.reason || "");
-    if (reason === null) return;
+    setEditCashManagement({ row, fields: { prevDayCash: toNumberPromptValue(row.prevDayCash), cashSales: toNumberPromptValue(row.cashSales), actualCashBalance: toNumberPromptValue(row.actualCashBalance), reason: row.reason || "" } });
+  };
+
+  const saveEditCashManagement = async () => {
+    if (!editCashManagement) return;
+    const { row, fields } = editCashManagement;
     await updateDailyMetadata(row.recordId, (metadata) => ({
       metadata: {
         ...metadata,
-        prevDayCash: String(Number(prevDayCash) || 0),
-        cashBalance: String(Number(actualCashBalance) || 0),
-        cashDiffReason: reason.trim()
+        prevDayCash: String(Number(fields.prevDayCash) || 0),
+        cashBalance: String(Number(fields.actualCashBalance) || 0),
+        cashDiffReason: fields.reason.trim()
       },
-      masterPatch: { cashSales: Number(cashSales) || 0 }
+      masterPatch: { cashSales: Number(fields.cashSales) || 0 }
     }));
+    setEditCashManagement(null);
     await refreshHistory?.();
   };
 
@@ -6546,6 +6646,20 @@ function MonthlyCashManagementSubTab({
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-management-subtab">
+      {editCashManagement && (
+        <AdminRecordEditModal
+          title={`${editCashManagement.row.date} 현금관리 수정`}
+          fields={[
+            { key: "prevDayCash", label: "전일 금고현금", value: editCashManagement.fields.prevDayCash, type: "number" },
+            { key: "cashSales", label: "금일 현금매출", value: editCashManagement.fields.cashSales, type: "number" },
+            { key: "actualCashBalance", label: "금고 실사 현금", value: editCashManagement.fields.actualCashBalance, type: "number" },
+            { key: "reason", label: "차액 사유", value: editCashManagement.fields.reason }
+          ]}
+          onChange={(key, value) => setEditCashManagement((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
+          onCancel={() => setEditCashManagement(null)}
+          onSave={() => void saveEditCashManagement()}
+        />
+      )}
       <div>
         <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
           <CircleDollarSign className="w-5 h-5 text-emerald-600" />
@@ -6644,6 +6758,7 @@ function MonthlyCardExpensesSubTab({
   refreshHistory?: () => Promise<void>;
 }) {
   const [items, setItems] = useState<any[]>([]);
+  const [editCardExpense, setEditCardExpense] = useState<{ item: any; fields: Record<string, string> } | null>(null);
 
   useEffect(() => {
     const cardList: any[] = [];
@@ -6684,26 +6799,25 @@ function MonthlyCardExpensesSubTab({
 
   const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
 
-  const handleEditCardExpense = async (item: any) => {
+  const handleEditCardExpense = (item: any) => {
     if (!item.recordId) return;
-    const amountText = window.prompt("카드지출 금액을 수정하세요.", toNumberPromptValue(item.amount));
-    if (amountText === null) return;
-    const amount = Number(amountText);
+    setEditCardExpense({ item, fields: { amount: toNumberPromptValue(item.amount), usage: item.usage || "", classification: item.classification || "", detail: item.detail || "" } });
+  };
+
+  const saveEditCardExpense = async () => {
+    if (!editCardExpense) return;
+    const { item, fields } = editCardExpense;
+    const amount = Number(fields.amount);
     if (!Number.isFinite(amount)) {
       alert("금액은 숫자로 입력해주세요.");
       return;
     }
-    const usage = window.prompt("사용처를 수정하세요.", item.usage || "");
-    if (usage === null) return;
-    const classification = window.prompt("지출분류를 수정하세요.", item.classification || "");
-    if (classification === null) return;
-    const detail = window.prompt("지출내역을 수정하세요.", item.detail || "");
-    if (detail === null) return;
     await updateDailyMetadata(item.recordId, (metadata) => {
       const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
-      cardExpenses[item.metaIndex] = { ...(cardExpenses[item.metaIndex] || {}), amount: String(amount), usage: usage.trim(), classification: classification.trim(), detail: detail.trim() };
+      cardExpenses[item.metaIndex] = { ...(cardExpenses[item.metaIndex] || {}), amount: String(amount), usage: fields.usage.trim(), classification: fields.classification.trim(), detail: fields.detail.trim() };
       return { metadata: { ...metadata, cardExpenses } };
     });
+    setEditCardExpense(null);
     await refreshHistory?.();
   };
 
@@ -6719,6 +6833,20 @@ function MonthlyCardExpensesSubTab({
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="card-expenses-subtab">
+      {editCardExpense && (
+        <AdminRecordEditModal
+          title="카드지출 수정"
+          fields={[
+            { key: "amount", label: "지출 금액", value: editCardExpense.fields.amount, type: "number" },
+            { key: "usage", label: "사용처", value: editCardExpense.fields.usage },
+            { key: "classification", label: "분류 항목", value: editCardExpense.fields.classification },
+            { key: "detail", label: "지출내용", value: editCardExpense.fields.detail }
+          ]}
+          onChange={(key, value) => setEditCardExpense((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
+          onCancel={() => setEditCardExpense(null)}
+          onSave={() => void saveEditCardExpense()}
+        />
+      )}
       <div className="flex justify-between items-center pb-3 border-b border-gray-50 font-sans">
         <div>
           <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
