@@ -34,6 +34,46 @@ const toDateInputValue = (value: string) => {
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 };
 
+const splitDailyMemoMetadata = (memo?: string | null) => {
+  const raw = String(memo || "");
+  const parts = raw.split("\n---\nMETADATA:");
+  let metadata: any = {};
+  if (parts[1]) {
+    try {
+      metadata = JSON.parse(parts.slice(1).join("\n---\nMETADATA:").trim()) || {};
+    } catch {
+      metadata = {};
+    }
+  }
+  return { visibleMemo: parts[0] || "", metadata };
+};
+
+const joinDailyMemoMetadata = (visibleMemo: string, metadata: any) => `${visibleMemo || ""}\n---\nMETADATA:\n${JSON.stringify(metadata || {})}`;
+
+const updateDailyMetadata = async (
+  recordId: string,
+  updater: (metadata: any, detail: DailySettleDetail) => { metadata: any; staff?: any[]; expenses?: any[]; masterPatch?: any } | void
+) => {
+  const detail = await gasClient.getDailyDetail(recordId);
+  const { visibleMemo, metadata } = splitDailyMemoMetadata(detail.master?.memo);
+  const result = updater(metadata, detail) || { metadata };
+  const nextMetadata = result.metadata || metadata;
+  const masterPatch = {
+    ...detail.master,
+    ...(result.masterPatch || {}),
+    memo: joinDailyMemoMetadata(visibleMemo, nextMetadata)
+  };
+  await gasClient.updateDaily(
+    recordId,
+    masterPatch,
+    result.expenses || detail.expenses,
+    result.staff || detail.staff,
+    "관리자"
+  );
+};
+
+const toNumberPromptValue = (value: any) => String(value ?? "").replace(/,/g, "");
+
 // ----------------------------------------------------
 // Constants & Types
 // ----------------------------------------------------
@@ -787,9 +827,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeTab === "settle" && <DailySettleTab branchName={activeBranchName} />}
                 {activeTab === "orders" && <OrderManagementTab branchName={activeBranchName} />}
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
-                {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} />}
+                {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
                 {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
-                {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} />}
+                {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
               </motion.div>
             </AnimatePresence>
           )}
@@ -798,6 +838,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             <MonthlySettleTab
               branchName={activeBranchName}
               activeSubTab={monthlyTab}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -4362,7 +4403,7 @@ function AnnualLeaveTab({ branchName }: { branchName: string }) {
 // ----------------------------------------------------
 // TAB 4: Overtime Log Tab (초과근무일지)
 // ----------------------------------------------------
-function OvertimeLogTab({ branchName }: { branchName: string }) {
+function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
@@ -4401,6 +4442,64 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
     const previous = (await gasClient.getSharedData<any[]>(key)) || [];
     await gasClient.saveSharedData(key, [{ id: `manual-${Date.now()}`, staffName: manualName.trim(), settleDate: manualDate, overtime: hours, reason: manualReason.trim(), createdAt: new Date().toISOString() }, ...previous]);
     setManualName(""); setManualHours(""); setManualReason(""); await loadData();
+  };
+
+  const handleEditOvertimeRow = async (row: any) => {
+    const nextHours = window.prompt("초과근무 시간을 수정하세요. 예: 1.5 또는 -1", toNumberPromptValue(row.overtime));
+    if (nextHours === null) return;
+    const hours = Number(nextHours);
+    if (!Number.isFinite(hours)) {
+      alert("숫자 형식으로 입력해주세요.");
+      return;
+    }
+    const nextReason = window.prompt("초과근무/조기퇴근 사유를 입력하세요.", row.overtimeReason === "-" ? "" : String(row.overtimeReason || ""));
+    if (nextReason === null) return;
+    if (!nextReason.trim()) {
+      alert("초과근무 시간이 0이 아니면 사유가 필요합니다.");
+      return;
+    }
+    if (row.manual) {
+      const key = `manual_overtime:${branchName}`;
+      const saved = (await gasClient.getSharedData<any[]>(key)) || [];
+      await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason: nextReason.trim() } : item));
+    } else if (row.recordId) {
+      await updateDailyMetadata(row.recordId, (metadata, detail) => {
+        const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+        const nextRows = staffRows.map((staff: any) => {
+          const name = staff.staffName || staff.name;
+          return name === row.staffName ? { ...staff, overtime: hours, overtimeReason: nextReason.trim() } : staff;
+        });
+        const nextStaff = (detail.staff || []).map((staff: any) => {
+          const name = staff.staffName || staff.name;
+          return name === row.staffName ? { ...staff, overtimeHours: hours, memo: nextReason.trim() } : staff;
+        });
+        return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+      });
+    }
+    await loadData();
+  };
+
+  const handleDeleteOvertimeRow = async (row: any) => {
+    if (!window.confirm(`${row.staffName}님의 ${row.settleDate} 초과근무 기록을 삭제할까요?`)) return;
+    if (row.manual) {
+      const key = `manual_overtime:${branchName}`;
+      const saved = (await gasClient.getSharedData<any[]>(key)) || [];
+      await gasClient.saveSharedData(key, saved.filter((item) => item.id !== row.id));
+    } else if (row.recordId) {
+      await updateDailyMetadata(row.recordId, (metadata, detail) => {
+        const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+        const nextRows = staffRows.map((staff: any) => {
+          const name = staff.staffName || staff.name;
+          return name === row.staffName ? { ...staff, overtime: 0, overtimeReason: "" } : staff;
+        });
+        const nextStaff = (detail.staff || []).map((staff: any) => {
+          const name = staff.staffName || staff.name;
+          return name === row.staffName ? { ...staff, overtimeHours: 0, memo: "" } : staff;
+        });
+        return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+      });
+    }
+    await loadData();
   };
 
   return (
@@ -4449,12 +4548,13 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
                   <th className="py-2.5 px-2 text-center">기준근무</th>
                   <th className="py-2.5 px-2 text-center">초과시간</th>
                   <th className="py-2.5 px-2 max-w-[150px]">초과사유 및 경위</th>
+                  {isAdmin && <th className="py-2.5 px-2 text-center">관리</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-gray-400">
+                    <td colSpan={isAdmin ? 9 : 8} className="py-16 text-center text-gray-400">
                       기록된 임직원 초과근무가 전혀 없습니다.
                     </td>
                   </tr>
@@ -4481,6 +4581,14 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
                       <td className="py-3 px-2 max-w-[150px] truncate scrollbar-none font-bold text-gray-500" title={r.overtimeReason}>
                         {r.overtimeReason}
                       </td>
+                      {isAdmin && (
+                        <td className="py-3 px-2">
+                          <div className="flex justify-center gap-1">
+                            <button onClick={() => void handleEditOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                            <button onClick={() => void handleDeleteOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -4525,7 +4633,7 @@ function OvertimeLogTab({ branchName }: { branchName: string }) {
 // ----------------------------------------------------
 // TAB 5: Part-Timer Log Tab (파트타이머일지)
 // ----------------------------------------------------
-function PartTimeLogTab({ branchName }: { branchName: string }) {
+function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
@@ -4547,6 +4655,45 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const handleEditPartTimeRow = async (row: any) => {
+    if (!row.recordId) return;
+    const nextClockIn = window.prompt("출근시간을 수정하세요. 예: 09:00", String(row.clockIn || ""));
+    if (nextClockIn === null) return;
+    const nextClockOut = window.prompt("퇴근시간을 수정하세요. 예: 18:00", String(row.clockOut || ""));
+    if (nextClockOut === null) return;
+    const nextWorkHours = window.prompt("실근무시간을 수정하세요.", toNumberPromptValue(row.workHours));
+    if (nextWorkHours === null) return;
+    const workHours = Number(nextWorkHours);
+    if (!Number.isFinite(workHours)) {
+      alert("근무시간은 숫자로 입력해주세요.");
+      return;
+    }
+    await updateDailyMetadata(row.recordId, (metadata, detail) => {
+      const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+      const nextRows = staffRows.map((staff: any) => {
+        const name = staff.staffName || staff.name;
+        return name === row.staffName ? { ...staff, clockIn: nextClockIn.trim(), clockOut: nextClockOut.trim(), workHours } : staff;
+      });
+      const nextStaff = (detail.staff || []).map((staff: any) => {
+        const name = staff.staffName || staff.name;
+        return name === row.staffName ? { ...staff, workHours } : staff;
+      });
+      return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+    });
+    await loadData();
+  };
+
+  const handleDeletePartTimeRow = async (row: any) => {
+    if (!row.recordId || !window.confirm(`${row.staffName}님의 ${row.settleDate} 파트타이머 근무기록을 삭제할까요?`)) return;
+    await updateDailyMetadata(row.recordId, (metadata, detail) => {
+      const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+      const nextRows = staffRows.filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
+      const nextStaff = (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
+      return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+    });
+    await loadData();
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -4584,12 +4731,13 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
                   <th className="py-2.5 px-3">퇴근</th>
                   <th className="py-2.5 px-3 text-center">근무시간</th>
                   <th className="py-2.5 px-3">작성자 (결재)</th>
+                  {isAdmin && <th className="py-2.5 px-3 text-center">관리</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-16 text-center text-gray-400">
+                    <td colSpan={isAdmin ? 7 : 6} className="py-16 text-center text-gray-400">
                       해당 지점에 기록된 파트타이머 출근 기록이 없습니다.
                     </td>
                   </tr>
@@ -4606,6 +4754,14 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
                         </span>
                       </td>
                       <td className="py-3.5 px-3 text-gray-400 font-bold">{r.writer}</td>
+                      {isAdmin && (
+                        <td className="py-3.5 px-3">
+                          <div className="flex justify-center gap-1">
+                            <button onClick={() => void handleEditPartTimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                            <button onClick={() => void handleDeletePartTimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -4651,9 +4807,10 @@ function PartTimeLogTab({ branchName }: { branchName: string }) {
 interface MonthlySettleTabProps {
   branchName: string;
   activeSubTab: "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses";
+  isAdmin?: boolean;
 }
 
-function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
+function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: MonthlySettleTabProps) {
   const [adminSettings, setAdminSettings] = useState(() => {
     const saved = localStorage.getItem("erp_admin_settings");
     if (saved) {
@@ -5107,13 +5264,13 @@ function MonthlySettleTab({ branchName, activeSubTab }: MonthlySettleTabProps) {
             <MonthlyPartTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} history={history} triggerToast={triggerToast} />
           )}
           {activeSubTab === "cashExpenses" && (
-            <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} />
+            <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
           )}
           {activeSubTab === "cashManagement" && (
-            <MonthlyCashManagementSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} />
+            <MonthlyCashManagementSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
           )}
           {activeSubTab === "cardExpenses" && (
-            <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} />
+            <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
           )}
         </div>
       )}
@@ -5965,11 +6122,15 @@ function MonthlyPartTimeSalarySubTab({
 function MonthlyCashExpensesSubTab({ 
   branchName, 
   selectedMonth, 
-  history 
+  history,
+  isAdmin = false,
+  refreshHistory
 }: { 
   branchName: string; 
   selectedMonth: string; 
-  history: any[] 
+  history: any[];
+  isAdmin?: boolean;
+  refreshHistory?: () => Promise<void>;
 }) {
   const [items, setItems] = useState<any[]>([]);
 
@@ -5987,6 +6148,8 @@ function MonthlyCashExpensesSubTab({
                 const itemAmount = Number(exp.amount) || 0;
                 if (itemAmount > 0) {
                   cashList.push({
+                    recordId: m.recordId,
+                    metaIndex: index,
                     date: m.settleDate,
                     paymentType: "현금",
                     amount: itemAmount,
@@ -6010,6 +6173,39 @@ function MonthlyCashExpensesSubTab({
   }, [selectedMonth, history]);
 
   const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
+
+  const handleEditExpense = async (item: any) => {
+    if (!item.recordId) return;
+    const amountText = window.prompt("현금지출 금액을 수정하세요.", toNumberPromptValue(item.amount));
+    if (amountText === null) return;
+    const amount = Number(amountText);
+    if (!Number.isFinite(amount)) {
+      alert("금액은 숫자로 입력해주세요.");
+      return;
+    }
+    const usage = window.prompt("사용처를 수정하세요.", item.usage || "");
+    if (usage === null) return;
+    const classification = window.prompt("지출분류를 수정하세요.", item.classification || "");
+    if (classification === null) return;
+    const detail = window.prompt("지출내역을 수정하세요.", item.detail || "");
+    if (detail === null) return;
+    await updateDailyMetadata(item.recordId, (metadata) => {
+      const cashExpenses = Array.isArray(metadata.cashExpenses) ? [...metadata.cashExpenses] : [];
+      cashExpenses[item.metaIndex] = { ...(cashExpenses[item.metaIndex] || {}), amount: String(amount), usage: usage.trim(), classification: classification.trim(), detail: detail.trim() };
+      return { metadata: { ...metadata, cashExpenses } };
+    });
+    await refreshHistory?.();
+  };
+
+  const handleDeleteExpense = async (item: any) => {
+    if (!item.recordId || !window.confirm(`${item.date} 현금지출 ${formatNumber(item.amount)}원을 삭제할까요?`)) return;
+    await updateDailyMetadata(item.recordId, (metadata) => {
+      const cashExpenses = Array.isArray(metadata.cashExpenses) ? [...metadata.cashExpenses] : [];
+      cashExpenses.splice(item.metaIndex, 1);
+      return { metadata: { ...metadata, cashExpenses } };
+    });
+    await refreshHistory?.();
+  };
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-expenses-subtab">
@@ -6043,12 +6239,13 @@ function MonthlyCashExpensesSubTab({
               <th className="py-3 px-4">비고</th>
               <th className="py-3 px-4">작성자</th>
               <th className="py-3 px-4">입력 시각</th>
+              {isAdmin && <th className="py-3 px-4 text-center">관리</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-150 text-[11px] font-sans">
             {items.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-20 text-center text-gray-400 font-bold">
+                <td colSpan={isAdmin ? 10 : 9} className="py-20 text-center text-gray-400 font-bold">
                   선택한 월에 일일마감 시 접수된 현금지출 전표가 한 건도 존재하지 않습니다.
                 </td>
               </tr>
@@ -6070,6 +6267,14 @@ function MonthlyCashExpensesSubTab({
                   <td className="py-3.5 px-4 text-gray-400 font-bold">확인완료</td>
                   <td className="py-3.5 px-4 text-zinc-600 font-bold">{it.author}</td>
                   <td className="py-3.5 px-4 font-mono text-gray-400">{it.timestamp}</td>
+                  {isAdmin && (
+                    <td className="py-3.5 px-4">
+                      <div className="flex justify-center gap-1">
+                        <button onClick={() => void handleEditExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                        <button onClick={() => void handleDeleteExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -6086,11 +6291,15 @@ function MonthlyCashExpensesSubTab({
 function MonthlyCashManagementSubTab({ 
   branchName, 
   selectedMonth, 
-  history 
+  history,
+  isAdmin = false,
+  refreshHistory
 }: { 
   branchName: string; 
   selectedMonth: string; 
-  history: any[] 
+  history: any[];
+  isAdmin?: boolean;
+  refreshHistory?: () => Promise<void>;
 }) {
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -6120,6 +6329,7 @@ function MonthlyCashManagementSubTab({
         const difference = vaultVal - theoryVal;
 
         cashMgmt.push({
+          recordId: m.recordId,
           date: m.settleDate,
           prevDayCash: prevVal,
           cashSales: salesVal,
@@ -6137,6 +6347,37 @@ function MonthlyCashManagementSubTab({
     cashMgmt.sort((a,b) => a.date.localeCompare(b.date));
     setLogs(cashMgmt);
   }, [selectedMonth, history]);
+
+  const handleEditCashManagement = async (row: any) => {
+    if (!row.recordId) return;
+    const prevDayCash = window.prompt("전일 금고현금을 수정하세요.", toNumberPromptValue(row.prevDayCash));
+    if (prevDayCash === null) return;
+    const cashSales = window.prompt("금일 현금매출을 수정하세요.", toNumberPromptValue(row.cashSales));
+    if (cashSales === null) return;
+    const actualCashBalance = window.prompt("금고 실사 현금을 수정하세요.", toNumberPromptValue(row.actualCashBalance));
+    if (actualCashBalance === null) return;
+    const reason = window.prompt("차액 사유를 수정하세요.", row.reason || "");
+    if (reason === null) return;
+    await updateDailyMetadata(row.recordId, (metadata) => ({
+      metadata: {
+        ...metadata,
+        prevDayCash: String(Number(prevDayCash) || 0),
+        cashBalance: String(Number(actualCashBalance) || 0),
+        cashDiffReason: reason.trim()
+      },
+      masterPatch: { cashSales: Number(cashSales) || 0 }
+    }));
+    await refreshHistory?.();
+  };
+
+  const handleClearCashManagement = async (row: any) => {
+    if (!row.recordId || !window.confirm(`${row.date} 현금관리 값을 비울까요?`)) return;
+    await updateDailyMetadata(row.recordId, (metadata) => ({
+      metadata: { ...metadata, prevDayCash: "", cashBalance: "", cashDiffReason: "" },
+      masterPatch: { cashSales: 0 }
+    }));
+    await refreshHistory?.();
+  };
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-management-subtab">
@@ -6163,12 +6404,13 @@ function MonthlyCashManagementSubTab({
               <th className="py-3.5 px-4 text-right">차액 (불일치)</th>
               <th className="py-3.5 px-4">대조 불일치 사유 소명</th>
               <th className="py-3.5 px-4 text-center">점검 작성자</th>
+              {isAdmin && <th className="py-3.5 px-4 text-center">관리</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[11px] font-sans">
             {logs.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-20 text-center text-gray-400 font-bold">
+                <td colSpan={isAdmin ? 10 : 9} className="py-20 text-center text-gray-400 font-bold">
                   선택한 월에 대조할 수 있는 일일 금고 보고데이터가 없습니다.
                 </td>
               </tr>
@@ -6201,6 +6443,14 @@ function MonthlyCashManagementSubTab({
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-center font-bold text-gray-650">{row.writer}</td>
+                    {isAdmin && (
+                      <td className="py-3.5 px-4">
+                        <div className="flex justify-center gap-1">
+                          <button onClick={() => void handleEditCashManagement(row)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                          <button onClick={() => void handleClearCashManagement(row)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })
@@ -6218,11 +6468,15 @@ function MonthlyCashManagementSubTab({
 function MonthlyCardExpensesSubTab({ 
   branchName, 
   selectedMonth, 
-  history 
+  history,
+  isAdmin = false,
+  refreshHistory
 }: { 
   branchName: string; 
   selectedMonth: string; 
-  history: any[] 
+  history: any[];
+  isAdmin?: boolean;
+  refreshHistory?: () => Promise<void>;
 }) {
   const [items, setItems] = useState<any[]>([]);
 
@@ -6236,10 +6490,12 @@ function MonthlyCardExpensesSubTab({
           try {
             const meta = JSON.parse(parts[1].trim());
             if (meta && meta.cardExpenses) {
-              meta.cardExpenses.forEach((exp: any) => {
+              meta.cardExpenses.forEach((exp: any, index: number) => {
                 const itemAmount = Number(exp.amount) || 0;
                 if (itemAmount > 0) {
                   cardList.push({
+                    recordId: m.recordId,
+                    metaIndex: index,
                     date: m.settleDate,
                     paymentType: "카드",
                     amount: itemAmount,
@@ -6262,6 +6518,39 @@ function MonthlyCardExpensesSubTab({
   }, [selectedMonth, history]);
 
   const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
+
+  const handleEditCardExpense = async (item: any) => {
+    if (!item.recordId) return;
+    const amountText = window.prompt("카드지출 금액을 수정하세요.", toNumberPromptValue(item.amount));
+    if (amountText === null) return;
+    const amount = Number(amountText);
+    if (!Number.isFinite(amount)) {
+      alert("금액은 숫자로 입력해주세요.");
+      return;
+    }
+    const usage = window.prompt("사용처를 수정하세요.", item.usage || "");
+    if (usage === null) return;
+    const classification = window.prompt("지출분류를 수정하세요.", item.classification || "");
+    if (classification === null) return;
+    const detail = window.prompt("지출내역을 수정하세요.", item.detail || "");
+    if (detail === null) return;
+    await updateDailyMetadata(item.recordId, (metadata) => {
+      const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
+      cardExpenses[item.metaIndex] = { ...(cardExpenses[item.metaIndex] || {}), amount: String(amount), usage: usage.trim(), classification: classification.trim(), detail: detail.trim() };
+      return { metadata: { ...metadata, cardExpenses } };
+    });
+    await refreshHistory?.();
+  };
+
+  const handleDeleteCardExpense = async (item: any) => {
+    if (!item.recordId || !window.confirm(`${item.date} 카드지출 ${formatNumber(item.amount)}원을 삭제할까요?`)) return;
+    await updateDailyMetadata(item.recordId, (metadata) => {
+      const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
+      cardExpenses.splice(item.metaIndex, 1);
+      return { metadata: { ...metadata, cardExpenses } };
+    });
+    await refreshHistory?.();
+  };
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="card-expenses-subtab">
@@ -6299,7 +6588,7 @@ function MonthlyCardExpensesSubTab({
           <tbody className="divide-y divide-gray-150 text-[11px]">
             {items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-20 text-center text-gray-400 font-bold">
+                <td colSpan={isAdmin ? 9 : 8} className="py-20 text-center text-gray-400 font-bold">
                   이번 달에 일일보고에 기록된 카드 지출 영수증이 존재하지 않습니다.
                 </td>
               </tr>
@@ -6320,6 +6609,14 @@ function MonthlyCardExpensesSubTab({
                   <td className="py-3.5 px-4 text-gray-550 font-semibold">{it.detail || "공란"}</td>
                   <td className="py-3.5 px-4 text-gray-450 font-bold">확인증빙필</td>
                   <td className="py-3.5 px-4 text-zinc-650 font-bold">{it.author}</td>
+                  {isAdmin && (
+                    <td className="py-3.5 px-4">
+                      <div className="flex justify-center gap-1">
+                        <button onClick={() => void handleEditCardExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                        <button onClick={() => void handleDeleteCardExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
