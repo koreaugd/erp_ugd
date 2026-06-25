@@ -1134,13 +1134,19 @@ export default function AdminPage() {
 
 function AdminNoticeManager() {
   const [notices, setNotices] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [targetBranch, setTargetBranch] = useState("전체");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const saved = await gasClient.getSharedData<any[]>("admin_notices").catch(() => []);
+    const [saved, branchList] = await Promise.all([
+      gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
+      gasClient.getBranchList().catch(() => [])
+    ]);
     setNotices(Array.isArray(saved) ? saved : []);
+    setBranches(Array.isArray(branchList) ? branchList : []);
   }, []);
 
   useEffect(() => {
@@ -1151,7 +1157,7 @@ function AdminNoticeManager() {
     if (!title.trim() && !body.trim()) return;
     try {
       setSaving(true);
-      const next = [{ id: `notice-${Date.now()}`, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
+      const next = [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
       await gasClient.saveSharedData("admin_notices", next);
       setNotices(next);
       setTitle("");
@@ -1174,7 +1180,11 @@ function AdminNoticeManager() {
         <h2 className="text-lg font-black text-[#2C3E50]">지점 공지사항</h2>
         <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-[180px_180px_1fr_auto] gap-2">
+        <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+          <option value="전체">전체공지</option>
+          {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+        </select>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
         <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
         <button onClick={() => void saveNotice()} disabled={saving} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
@@ -1184,7 +1194,7 @@ function AdminNoticeManager() {
           {notices.slice(0, 3).map((notice) => (
             <div key={notice.id} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
               <div>
-                <p className="text-sm font-black text-gray-800">{notice.title}</p>
+                <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
                 <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
               </div>
               <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
@@ -1207,6 +1217,7 @@ function AdminAnnualLeaveSection() {
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
+  const [editLeave, setEditLeave] = useState<{ branchName: string; entry: any; fields: { startDate: string; endDate: string; days: string; reason: string } } | null>(null);
 
   const formatShortDate = (value: string) => {
     if (!value) return "-";
@@ -1308,6 +1319,31 @@ function AdminAnnualLeaveSection() {
     setReason("");
   };
 
+  const saveEditedLeave = async () => {
+    if (!editLeave) return;
+    const key = `annual_leave:${editLeave.branchName}`;
+    const previous = entriesByBranch[editLeave.branchName] || [];
+    const nextEntries = previous.map((entry) => entry.id === editLeave.entry.id ? {
+      ...entry,
+      startDate: editLeave.fields.startDate,
+      endDate: editLeave.fields.endDate,
+      date: editLeave.fields.startDate,
+      days: Number(editLeave.fields.days) || calcDays(editLeave.fields.startDate, editLeave.fields.endDate),
+      reason: editLeave.fields.reason.trim()
+    } : entry);
+    await gasClient.saveSharedData(key, nextEntries);
+    setEntriesByBranch((prev) => ({ ...prev, [editLeave.branchName]: nextEntries }));
+    setEditLeave(null);
+  };
+
+  const deleteLeaveEntry = async (branchName: string, entryId: string) => {
+    if (!window.confirm("선택한 연차 사용기록을 삭제할까요?")) return;
+    const key = `annual_leave:${branchName}`;
+    const nextEntries = (entriesByBranch[branchName] || []).filter((entry) => entry.id !== entryId);
+    await gasClient.saveSharedData(key, nextEntries);
+    setEntriesByBranch((prev) => ({ ...prev, [branchName]: nextEntries }));
+  };
+
   const rows = employees.map((employee) => {
     const branchEntries = entriesByBranch[employee.branchName] || [];
     const logs = branchEntries.filter((entry) => entry.employeeId === employee.id);
@@ -1318,6 +1354,26 @@ function AdminAnnualLeaveSection() {
 
   return (
     <section className="space-y-6">
+      {editLeave && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-sm font-black text-gray-900">연차 사용기록 수정</h3>
+              <button onClick={() => setEditLeave(null)} className="text-gray-400">×</button>
+            </div>
+            <div className="p-5 grid grid-cols-1 gap-3 text-sm">
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">시작일</span><input type="date" value={editLeave.fields.startDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, startDate: e.target.value, days: String(calcDays(e.target.value, cur.fields.endDate)) } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">종료일</span><input type="date" value={editLeave.fields.endDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, endDate: e.target.value, days: String(calcDays(cur.fields.startDate, e.target.value)) } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사용일수</span><input type="number" value={editLeave.fields.days} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, days: e.target.value } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사유</span><input value={editLeave.fields.reason} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, reason: e.target.value } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+            </div>
+            <div className="px-5 py-4 bg-gray-50 flex justify-end gap-2">
+              <button onClick={() => setEditLeave(null)} className="px-4 py-2 rounded-xl bg-white border text-xs font-bold">취소</button>
+              <button onClick={() => void saveEditedLeave()} className="px-5 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 직원 연차 통합 관리</h2>
@@ -1382,7 +1438,19 @@ function AdminAnnualLeaveSection() {
                   <td className="px-4 py-3 text-center font-black text-rose-600">{used}</td>
                   <td className={`px-4 py-3 text-center font-black ${remain < 0 ? "text-rose-700" : "text-[#2E6DB4]"}`}>{remain}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">
-                    {logs.length === 0 ? "-" : logs.map((entry) => `${entry.startDate || entry.date}${entry.endDate && entry.endDate !== (entry.startDate || entry.date) ? `~${entry.endDate}` : ""} (${entry.days}일, ${entry.reason || "-"})`).join(", ")}
+                    {logs.length === 0 ? "-" : (
+                      <div className="space-y-1">
+                        {logs.map((entry) => (
+                          <div key={entry.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1">
+                            <span>{entry.startDate || entry.date}{entry.endDate && entry.endDate !== (entry.startDate || entry.date) ? `~${entry.endDate}` : ""} ({entry.days}일, {entry.reason || "-"})</span>
+                            <span className="flex gap-1">
+                              <button onClick={() => setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } })} className="text-[10px] font-black text-[#2E6DB4]">수정</button>
+                              <button onClick={() => void deleteLeaveEntry(employee.branchName, entry.id)} className="text-[10px] font-black text-rose-600">삭제</button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

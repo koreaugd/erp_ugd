@@ -1778,6 +1778,7 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
   const [loading, setLoading] = useState(true);
   const [notices, setNotices] = useState<any[]>([]);
   const [issues, setIssues] = useState<Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }>>([]);
+  const [expandedIssueIndexes, setExpandedIssueIndexes] = useState<Record<number, boolean>>({});
 
   const getDateStr = (offsetDays = 0) => {
     const local = new Date();
@@ -1793,7 +1794,7 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         gasClient.getBranchOwnRoster(branchName).catch(() => []),
         gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null)
       ]);
-      setNotices(Array.isArray(savedNotices) ? savedNotices : []);
+      setNotices((Array.isArray(savedNotices) ? savedNotices : []).filter((notice) => !notice.targetBranch || notice.targetBranch === "전체" || notice.targetBranch === branchName));
 
       const nextIssues: Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }> = [];
       if (!today?.exists) {
@@ -1877,10 +1878,18 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
                   <p className="font-black mt-1">{issue.message}</p>
                   {issue.names && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
-                      {issue.names.slice(0, 12).map((name) => (
+                      {(expandedIssueIndexes[index] ? issue.names : issue.names.slice(0, 12)).map((name) => (
                         <span key={name} className="rounded-full bg-white/75 border border-current/10 px-2 py-1 text-[11px] font-bold">{name}</span>
                       ))}
-                      {issue.names.length > 12 && <span className="rounded-full bg-white/75 px-2 py-1 text-[11px] font-black">+{issue.names.length - 12}</span>}
+                      {issue.names.length > 12 && !expandedIssueIndexes[index] && (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedIssueIndexes((current) => ({ ...current, [index]: true }))}
+                          className="rounded-full bg-white/90 px-2 py-1 text-[11px] font-black underline"
+                        >
+                          +{issue.names.length - 12}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2458,7 +2467,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               name: s.name,
               division: s.division,
               residentNumber: formatResidentNumber(s.residentNumber || ""),
-              contractType: "4대보험" as const,
+              contractType: s.division === "정직원" ? "4대보험" as const : "3.3%" as const,
               entryDate: s.entryDate || "",
               ...(s.division === "정직원" ? { rank: s.rank || "사원" } : {})
             };
@@ -3882,6 +3891,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [newResidentNumber, setNewResidentNumber] = useState("");
   const [newContractType, setNewContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [newEntryDate, setNewEntryDate] = useState("");
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
   // Deletion Modal States
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -4018,7 +4028,11 @@ function RosterTab({ branchName }: { branchName: string }) {
   }, [branchName]);
 
   const saveEmployees = (updated: Employee[]) => {
-    const normalized = updated.map((employee) => ({ ...employee, residentNumber: formatResidentNumber(employee.residentNumber || "") }));
+    const normalized = updated.map((employee) => ({
+      ...employee,
+      residentNumber: formatResidentNumber(employee.residentNumber || ""),
+      contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%")
+    }));
     setEmployees(normalized);
     localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(normalized));
     gasClient.saveBranchOwnRoster(branchName, normalized).catch((error) => {
@@ -4026,11 +4040,15 @@ function RosterTab({ branchName }: { branchName: string }) {
     });
   };
 
-  const updateEmployeeField = (id: string, field: "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
+  const updateEmployeeField = (id: string, field: "name" | "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
     setEmployees((current) => current.map((employee) => {
       if (employee.id !== id) return employee;
       const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
-      if (field === "division" && value === "파트타이머") updated.rank = "사원";
+      if (field === "division" && value === "파트타이머") {
+        updated.rank = "사원";
+        updated.contractType = "3.3%";
+      }
+      if (field === "division" && value === "정직원") updated.contractType = "4대보험";
       return updated;
     }));
   };
@@ -4390,7 +4408,11 @@ function RosterTab({ branchName }: { branchName: string }) {
                   <button
                     key={btn.val}
                     type="button"
-                    onClick={() => setDivision(btn.val as any)}
+                    onClick={() => {
+                      const nextDivision = btn.val as "정직원" | "파트타이머";
+                      setDivision(nextDivision);
+                      setNewContractType(nextDivision === "정직원" ? "4대보험" : "3.3%");
+                    }}
                     className={`py-3 rounded-xl border font-extrabold text-xs transition-all cursor-pointer ${
                       checked
                         ? "bg-[#2E6DB4] border-[#2E6DB4] text-white shadow-xs"
@@ -4518,81 +4540,107 @@ function RosterTab({ branchName }: { branchName: string }) {
                   </td>
                 </tr>
               ) : (
-                sortedEmployees.map((emp, idx) => (
+                sortedEmployees.map((emp, idx) => {
+                  const isEditing = editingEmployeeId === emp.id;
+                  return (
                   <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold">
                     <td className="py-3 px-3 text-gray-400 font-mono whitespace-nowrap">#{idx + 1}</td>
-                    <td className="py-3 px-3 text-gray-800 font-extrabold text-sm whitespace-nowrap">{emp.name}</td>
-                    <td className="py-3 px-3">
-                      <input
-                        type="text"
-                        value={emp.residentNumber || ""}
-                        onChange={(e) => updateEmployeeField(emp.id, "residentNumber", e.target.value)}
-                        onBlur={() => saveEmployees(employees)}
-                        placeholder=""
-                        className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
-                      />
+                    <td className="py-3 px-3 text-gray-800 font-extrabold text-sm whitespace-nowrap">
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={emp.name}
+                          onChange={(e) => updateEmployeeField(emp.id, "name", e.target.value)}
+                          className="w-24 px-2 py-1 border border-gray-200 rounded-md text-xs font-bold focus:border-[#2E6DB4] focus:outline-hidden"
+                        />
+                      ) : emp.name}
                     </td>
                     <td className="py-3 px-3">
-                      <select
-                        value={emp.contractType || "4대보험"}
-                        onChange={(e) => updateEmployeeField(emp.id, "contractType", e.target.value)}
-                        onBlur={() => saveEmployees(employees)}
-                        className="px-2 py-1 border border-violet-100 rounded-md text-[10px] font-black bg-violet-50 text-violet-700 focus:outline-hidden focus:border-violet-400"
-                      >
-                        <option value="4대보험">4대보험</option>
-                        <option value="3.3%">3.3%</option>
-                      </select>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={emp.residentNumber || ""}
+                          onChange={(e) => updateEmployeeField(emp.id, "residentNumber", e.target.value)}
+                          placeholder=""
+                          className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                        />
+                      ) : <span className="font-mono text-xs text-gray-600">{emp.residentNumber || "-"}</span>}
                     </td>
                     <td className="py-3 px-3">
-                      <input
-                        type="date"
-                        value={emp.entryDate || ""}
-                        onChange={(e) => updateEmployeeField(emp.id, "entryDate", e.target.value)}
-                        onBlur={() => saveEmployees(employees)}
-                        onClick={(e) => e.currentTarget.showPicker?.()}
-                        className="px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
-                      />
+                      {isEditing ? (
+                        <select
+                          value={emp.contractType || (emp.division === "정직원" ? "4대보험" : "3.3%")}
+                          onChange={(e) => updateEmployeeField(emp.id, "contractType", e.target.value)}
+                          className="px-2 py-1 border border-violet-100 rounded-md text-[10px] font-black bg-violet-50 text-violet-700 focus:outline-hidden focus:border-violet-400"
+                        >
+                          <option value="4대보험">4대보험</option>
+                          <option value="3.3%">3.3%</option>
+                        </select>
+                      ) : <span className="px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-[10px] font-black">{emp.contractType || (emp.division === "정직원" ? "4대보험" : "3.3%")}</span>}
                     </td>
                     <td className="py-3 px-3">
-                      <select
-                        value={emp.division}
-                        onChange={(e) => updateEmployeeField(emp.id, "division", e.target.value)}
-                        onBlur={() => saveEmployees(employees)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
-                          emp.division === "정직원"
-                            ? "bg-amber-50 text-amber-700 border-amber-200 focus:border-amber-400"
-                            : "bg-blue-50 text-[#2E6DB4] border-blue-200 focus:border-blue-400"
-                        }`}
-                      >
-                        <option value="정직원">정직원</option>
-                        <option value="파트타이머">파트타이머</option>
-                      </select>
+                      {isEditing ? (
+                        <input
+                          type="date"
+                          value={emp.entryDate || ""}
+                          onChange={(e) => updateEmployeeField(emp.id, "entryDate", e.target.value)}
+                          onClick={(e) => e.currentTarget.showPicker?.()}
+                          className="px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
+                        />
+                      ) : <span className="font-mono text-xs text-gray-600">{emp.entryDate || "-"}</span>}
+                    </td>
+                    <td className="py-3 px-3">
+                      {isEditing ? (
+                        <select
+                          value={emp.division}
+                          onChange={(e) => updateEmployeeField(emp.id, "division", e.target.value)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
+                            emp.division === "정직원"
+                              ? "bg-amber-50 text-amber-700 border-amber-200 focus:border-amber-400"
+                              : "bg-blue-50 text-[#2E6DB4] border-blue-200 focus:border-blue-400"
+                          }`}
+                        >
+                          <option value="정직원">정직원</option>
+                          <option value="파트타이머">파트타이머</option>
+                        </select>
+                      ) : <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${emp.division === "정직원" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-[#2E6DB4]"}`}>{emp.division}</span>}
                     </td>
                     <td className="py-3 px-3 font-bold text-gray-750">
                       {emp.division === "정직원" ? (
+                        isEditing ? (
                         <select
                           value={emp.rank || "사원"}
                           onChange={(e) => updateEmployeeField(emp.id, "rank", e.target.value)}
-                          onBlur={() => saveEmployees(employees)}
                           className="px-2 py-1 border border-gray-200 rounded-md bg-white text-xs font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
                         >
                           {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
                             <option key={rank} value={rank}>{rank}</option>
                           ))}
                         </select>
+                        ) : <span>{emp.rank || "사원"}</span>
                       ) : (
                         <span className="text-gray-300 font-normal">-</span>
                       )}
                     </td>
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenEditModal(emp)}
-                          className="text-gray-400 hover:text-[#2E6DB4] p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-                          title="정보 수정"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                        {isEditing ? (
+                          <button
+                            onClick={() => { saveEmployees(employees); setEditingEmployeeId(null); }}
+                            className="px-2 py-1 rounded-lg bg-[#2E6DB4] text-white text-[10px] font-black"
+                            title="저장"
+                          >
+                            저장
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setEditingEmployeeId(emp.id)}
+                            className="text-gray-400 hover:text-[#2E6DB4] p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                            title="정보 수정"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setEmployeeToDelete(emp);
@@ -4607,7 +4655,8 @@ function RosterTab({ branchName }: { branchName: string }) {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -5679,10 +5728,10 @@ function MonthlyPurchaseSalesSubTab({
         <div>
           <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
             <FileText className="w-4 h-4 text-[#2E6DB4]" />
-            지점 월간 매입매출 및 송금 내역서
+            월말 이체 필요한 거래처 등록
           </h3>
           <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
-            이번 달 지출 청구 업체 목록에 이체할 은행 송금액 또는 선입금 방식 충전 계약 업체의 실제 사용금액을 기산합니다.
+            이체 필요한 업체만 기입을 하세요. 쿠팡,네이버는 등록x
           </p>
         </div>
 
