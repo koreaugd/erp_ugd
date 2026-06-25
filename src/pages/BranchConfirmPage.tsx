@@ -3933,14 +3933,10 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const [vendorsByCategory, setVendorsByCategory] = useState<Record<OrderCategory, string[]>>(ORDER_DEFAULT_VENDORS);
   const [vendorCategory, setVendorCategory] = useState<OrderCategory>("식자재");
   const [vendorText, setVendorText] = useState("");
-  const [category, setCategory] = useState<OrderCategory>("식자재");
-  const [vendorName, setVendorName] = useState(ORDER_DEFAULT_VENDORS.식자재[0]);
-  const [amount, setAmount] = useState("");
-  const [memo, setMemo] = useState("");
-  const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [reportCategory, setReportCategory] = useState<OrderCategory | "전체">("식자재");
+  const [reportCategory, setReportCategory] = useState<OrderCategory>("식자재");
   const [reportVendor, setReportVendor] = useState("전체");
+  const [orderDraftCells, setOrderDraftCells] = useState<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -3953,9 +3949,9 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
           setVendorsByCategory({ ...ORDER_DEFAULT_VENDORS, 식자재: Array.from(new Set([...ORDER_DEFAULT_VENDORS.식자재, ...parsed])) });
         } else if (parsed && typeof parsed === "object") {
           setVendorsByCategory({
-            식자재: Array.from(new Set([...ORDER_DEFAULT_VENDORS.식자재, ...(parsed.식자재 || [])])),
-            주류: Array.from(new Set([...(parsed.주류 || [])])),
-            "식음료외 기타": Array.from(new Set([...(parsed["식음료외 기타"] || [])]))
+            식자재: Array.isArray(parsed.식자재) ? parsed.식자재 : ORDER_DEFAULT_VENDORS.식자재,
+            주류: Array.isArray(parsed.주류) ? parsed.주류 : [],
+            "식음료외 기타": Array.isArray(parsed["식음료외 기타"]) ? parsed["식음료외 기타"] : []
           });
         }
       }
@@ -3964,17 +3960,13 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     }
   }, [storageKey, vendorKey]);
 
-  const currentVendors = vendorsByCategory[category] || [];
   const reportVendors = useMemo(() => {
-    const categories = reportCategory === "전체" ? ORDER_CATEGORIES : [reportCategory];
-    const names = categories.flatMap((item) => vendorsByCategory[item] || []);
+    const names = [
+      ...(vendorsByCategory[reportCategory] || []),
+      ...orders.filter((order) => order.category === reportCategory).map((order) => order.vendorName)
+    ];
     return Array.from(new Set(names));
-  }, [reportCategory, vendorsByCategory]);
-
-  useEffect(() => {
-    const list = vendorsByCategory[category] || [];
-    setVendorName((prev) => list.includes(prev) ? prev : (list[0] || ""));
-  }, [category, vendorsByCategory]);
+  }, [orders, reportCategory, vendorsByCategory]);
 
   useEffect(() => {
     if (reportVendor !== "전체" && !reportVendors.includes(reportVendor)) setReportVendor("전체");
@@ -3999,29 +3991,56 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     };
     saveVendors(next);
     setVendorText("");
-    if (category === vendorCategory && !vendorName) setVendorName(names[0]);
   };
 
-  const handlePlaceOrder = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!category || !vendorName.trim() || !amount.trim()) return;
-    const newOrder: OrderItem = {
-      id: "ord-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
-      category,
-      vendorName: vendorName.trim(),
-      amount: cleanNumeric(amount),
-      memo: memo.trim(),
-      orderDate
+  const deleteVendor = (targetCategory: OrderCategory, targetVendor: string) => {
+    if (!window.confirm(targetVendor + " 거래처를 목록에서 삭제할까요? 기존 발주내역은 유지됩니다.")) return;
+    const next = {
+      ...vendorsByCategory,
+      [targetCategory]: (vendorsByCategory[targetCategory] || []).filter((vendor) => vendor !== targetVendor)
     };
-    saveOrders([newOrder, ...orders]);
-    setAmount("");
-    setMemo("");
+    saveVendors(next);
+  };
+
+  const cellAmount = (dateKey: string, vendor: string) => {
+    return orders
+      .filter((order) => order.category === reportCategory && order.orderDate === dateKey && order.vendorName === vendor)
+      .reduce((sum, order) => sum + Number(order.amount || 0), 0);
+  };
+
+  const updateOrderDraft = (dateKey: string, vendor: string, value: string) => {
+    setOrderDraftCells((prev) => ({ ...prev, [dateKey + "|" + vendor]: cleanNumeric(value) }));
+  };
+
+  const saveOrderDrafts = () => {
+    const entries = Object.entries(orderDraftCells).filter(([, value]) => value !== "");
+    if (entries.length === 0) return;
+    const touched = new Set(entries.map(([key]) => key));
+    const kept = orders.filter((order) => {
+      if (order.category !== reportCategory) return true;
+      return !touched.has(order.orderDate + "|" + order.vendorName);
+    });
+    const nextOrders = entries
+      .filter(([, value]) => Number(value) > 0)
+      .map(([key, value], index) => {
+        const [orderDate, vendorName] = key.split("|");
+        return {
+          id: "ord-cell-" + Date.now() + "-" + index,
+          category: reportCategory,
+          vendorName,
+          amount: value,
+          memo: "",
+          orderDate
+        };
+      });
+    saveOrders([...nextOrders, ...kept]);
+    setOrderDraftCells({});
   };
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
       const sameMonth = String(order.orderDate || "").startsWith(reportMonth);
-      const sameCategory = reportCategory === "전체" || order.category === reportCategory;
+      const sameCategory = order.category === reportCategory;
       const sameVendor = reportVendor === "전체" || order.vendorName === reportVendor;
       return sameMonth && sameCategory && sameVendor;
     });
@@ -4046,26 +4065,21 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
           </label>
           <label className="space-y-1 text-xs font-bold text-gray-500 relative group">
             <span>거래처명</span>
-            <input value={vendorText} onChange={(e) => setVendorText(e.target.value)} title={VENDOR_HINT} placeholder="예: 대정, 크리스탈, 카나와인" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+            <textarea value={vendorText} onChange={(e) => setVendorText(e.target.value)} title={VENDOR_HINT} rows={1} placeholder="예: 대정, 크리스탈, 카나와인" className="w-full h-[42px] px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none overflow-y-auto" />
             <span className="pointer-events-none absolute left-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
           </label>
           <button type="button" onClick={addVendors} className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 업체 추가</button>
         </div>
-      </section>
-
-      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <div>
-          <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><FileText className="w-5 h-5 text-[#2E6DB4]" /> 발주 등록</h3>
-          <p className="text-xs text-gray-400 mt-1">날짜, 대분류, 거래처, 금액, 기타내용을 입력하면 아래 리포트에 날짜별로 반영됩니다.</p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {(vendorsByCategory[vendorCategory] || []).length === 0 ? (
+            <span className="text-xs text-gray-400 font-bold">등록된 거래처가 없습니다.</span>
+          ) : (vendorsByCategory[vendorCategory] || []).map((vendor) => (
+            <span key={vendor} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-700">
+              {vendor}
+              <button type="button" onClick={() => deleteVendor(vendorCategory, vendor)} className="text-slate-400 hover:text-rose-600" aria-label={vendor + " 삭제"}><X className="w-3.5 h-3.5" /></button>
+            </span>
+          ))}
         </div>
-        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 xl:grid-cols-[160px_160px_220px_160px_1fr_auto] gap-3 items-end">
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>발주일</span><input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl font-mono font-bold" /></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>대분류</span><select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800">{ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>거래처</span><select value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-800">{currentVendors.length === 0 ? <option value="">거래처를 먼저 추가하세요</option> : currentVendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}</select></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>금액</span><input value={formatWithCommas(amount)} onChange={(e) => setAmount(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="0" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-right font-mono font-black" /></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>기타내용</span><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="품목, 요청사항, 비고" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl" /></label>
-          <button type="submit" className="h-[42px] px-5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 등록</button>
-        </form>
       </section>
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -4073,14 +4087,16 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3>
-              <p className="text-xs text-gray-400 mt-1">대분류와 거래처를 선택하면 해당 월의 날짜별 입력 금액을 표로 확인할 수 있습니다.</p>
+              <p className="text-xs text-gray-400 mt-1">대분류를 선택한 뒤 날짜별 칸에 금액을 직접 입력하고 저장하세요.</p>
             </div>
-            <div className="px-3 py-2 rounded-xl bg-[#2E6DB4]/10 text-[#1A3C6E] text-xs font-black">월 합계 {formatNumber(monthTotal)}원</div>
+            <div className="flex items-center gap-2">
+              <div className="px-3 py-2 rounded-xl bg-[#2E6DB4]/10 text-[#1A3C6E] text-xs font-black">월 합계 {formatNumber(monthTotal)}원</div>
+              <button type="button" onClick={saveOrderDrafts} disabled={Object.values(orderDraftCells).every((value) => value === "")} className="h-[38px] px-4 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:bg-gray-300">저장하기</button>
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
-            <select value={reportCategory} onChange={(e) => setReportCategory(e.target.value as OrderCategory | "전체")} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
-              <option value="전체">전체 대분류</option>
+            <select value={reportCategory} onChange={(e) => { setReportCategory(e.target.value as OrderCategory); setOrderDraftCells({}); }} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
               {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
             <select value={reportVendor} onChange={(e) => setReportVendor(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
@@ -4101,12 +4117,24 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
             <tbody className="divide-y divide-gray-100">
               {monthDays(reportMonth).map((day) => {
                 const dateKey = reportMonth + "-" + day;
-                const rowValues = matrixVendors.map((vendor) => filteredOrders.filter((order) => order.orderDate === dateKey && order.vendorName === vendor).reduce((sum, order) => sum + Number(order.amount || 0), 0));
+                const rowValues = matrixVendors.map((vendor) => {
+                  const draftValue = orderDraftCells[dateKey + "|" + vendor];
+                  return draftValue !== undefined ? Number(draftValue || 0) : cellAmount(dateKey, vendor);
+                });
                 const rowTotal = rowValues.reduce((sum, item) => sum + item, 0);
                 return (
                   <tr key={dateKey} className="hover:bg-slate-50/70">
                     <td className="sticky left-0 bg-white p-3 text-center font-mono font-black text-gray-600 border-r">{Number(day)}</td>
-                    {rowValues.map((value, index) => <td key={matrixVendors[index]} className="p-3 text-right font-mono border-r">{value ? formatNumber(value) : ""}</td>)}
+                    {rowValues.map((value, index) => {
+                      const vendor = matrixVendors[index];
+                      const draftKey = dateKey + "|" + vendor;
+                      const draftValue = orderDraftCells[draftKey];
+                      return (
+                        <td key={vendor} className="p-2 text-right font-mono border-r">
+                          <input value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")} onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)} inputMode="numeric" className="w-full min-w-[92px] rounded-lg border border-gray-200 px-2 py-1.5 text-right font-mono font-black focus:border-[#2E6DB4] focus:outline-none" />
+                        </td>
+                      );
+                    })}
                     <td className="p-3 text-right font-mono font-black bg-slate-50">{rowTotal ? formatNumber(rowTotal) : ""}</td>
                   </tr>
                 );
@@ -4191,6 +4219,19 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     setItemName("");
   };
 
+  const deleteProduct = (product: InventoryProduct) => {
+    if (!window.confirm(product.itemName + " 상품을 삭제할까요? 해당 상품의 입고/판매 기록도 함께 삭제됩니다.")) return;
+    saveProducts(products.filter((item) => item.id !== product.id));
+    saveMovements(movements.filter((movement) => movement.productId !== product.id));
+    setDraftCells((prev) => {
+      const next: Record<string, { inbound: string; sold: string }> = {};
+      (Object.entries(prev) as Array<[string, { inbound: string; sold: string }]>).forEach(([key, value]) => {
+        if (!key.startsWith(product.id + "|")) next[key] = value;
+      });
+      return next;
+    });
+  };
+
   const updateDraft = (productId: string, date: string, field: "inbound" | "sold", value: string) => {
     const key = productId + "|" + date;
     setDraftCells((prev) => ({
@@ -4234,7 +4275,14 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       .reduce((sum, movement) => sum + Number(movement[field] || 0), 0);
   };
 
-  const visibleDates: string[] = Array.from(new Set<string>([...movements.map((movement) => movement.movementDate), draftDate])).sort().slice(-10);
+  const visibleDates: string[] = useMemo(() => {
+    const base = new Date(draftDate + "T00:00:00");
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(base);
+      date.setDate(base.getDate() - 6 + index);
+      return date.toISOString().slice(0, 10);
+    });
+  }, [draftDate]);
 
   return (
     <div className="space-y-5" id="liquor-inventory-tab">
@@ -4248,7 +4296,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
             {LIQUOR_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
           <label className="relative group">
-            <input value={itemName} onChange={(e) => setItemName(e.target.value)} title={VENDOR_HINT} placeholder="상품명 예: 크룩 그랑뀌베, 돔페리뇽" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
+            <textarea value={itemName} onChange={(e) => setItemName(e.target.value)} title={VENDOR_HINT} rows={1} placeholder="상품명 예: 크룩 그랑뀌베, 돔페리뇽" className="w-full h-[42px] px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none overflow-y-auto" />
             <span className="pointer-events-none absolute left-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
           </label>
           <button className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
@@ -4259,25 +4307,25 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
             <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
-            <span className="text-xs text-gray-400 font-bold">선택한 날짜가 표 오른쪽에 표시됩니다.</span>
+            <span className="text-xs text-gray-400 font-bold">선택한 날짜 기준 최근 7일이 표시됩니다.</span>
           </div>
           <button type="button" onClick={saveDrafts} className="h-[42px] px-5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:bg-gray-300" disabled={!(Object.values(draftCells) as Array<{ inbound: string; sold: string }>).some((cell) => cell.inbound || cell.sold)}>저장하기</button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-xs">
+          <table className="w-full min-w-[900px] text-xs">
             <thead className="bg-[#202A5A] text-white font-black">
               <tr>
-                <th rowSpan={2} className="p-3 text-left">분류</th>
-                <th rowSpan={2} className="p-3 text-left min-w-[180px]">상품명</th>
-                <th rowSpan={2} className="p-3 text-center bg-slate-700">현재 재고</th>
-                {visibleDates.map((date) => <th key={date} colSpan={3} className="p-2 text-center border-l border-white/20">{date.slice(5)}</th>)}
+                <th rowSpan={2} className="p-2 text-left w-20">분류</th>
+                <th rowSpan={2} className="p-2 text-left w-36">상품명</th>
+                <th rowSpan={2} className="p-2 text-center bg-slate-700 w-16">현재</th>
+                {visibleDates.map((date) => <th key={date} colSpan={3} className="p-1.5 text-center border-l border-white/20">{date.slice(5)}</th>)}
               </tr>
               <tr>
                 {visibleDates.map((date) => (
                   <React.Fragment key={date}>
-                    <th className="p-2 bg-blue-100 text-blue-900">입고</th>
-                    <th className="p-2 bg-rose-100 text-rose-900">판매</th>
-                    <th className="p-2 bg-green-100 text-green-900">재고</th>
+                    <th className="p-1 bg-blue-100 text-blue-900 w-11">입</th>
+                    <th className="p-1 bg-rose-100 text-rose-900 w-11">판</th>
+                    <th className="p-1 bg-green-100 text-green-900 w-11">재</th>
                   </React.Fragment>
                 ))}
               </tr>
@@ -4288,9 +4336,14 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
               ) : products.map((product) => {
                 return (
                   <tr key={product.id} className="hover:bg-slate-50/70">
-                    <td className="p-3 font-bold">{product.classification}</td>
-                    <td className="p-3 font-black text-gray-900">{product.itemName}</td>
-                    <td className="p-3 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
+                    <td className="p-2 font-bold whitespace-nowrap">{product.classification}</td>
+                    <td className="p-2 font-black text-gray-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate" title={product.itemName}>{product.itemName}</span>
+                        <button type="button" onClick={() => deleteProduct(product)} className="shrink-0 text-gray-300 hover:text-rose-600" aria-label={product.itemName + " 삭제"}><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </td>
+                    <td className="p-2 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
                     {visibleDates.map((date) => {
                       const key = product.id + "|" + date;
                       const inSum = savedAmount(product.id, date, "inbound");
@@ -4299,9 +4352,9 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                       const previewStock = stockOf(product.id, date) + Number(draft.inbound || 0) - Number(draft.sold || 0);
                       return (
                         <React.Fragment key={date}>
-                          <td className="p-2 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, date, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : ""} className="w-16 rounded-md border border-blue-100 bg-white px-2 py-1 text-center font-mono font-black text-blue-800" /></td>
-                          <td className="p-2 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, date, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : ""} className="w-16 rounded-md border border-rose-100 bg-white px-2 py-1 text-center font-mono font-black text-rose-800" /></td>
-                          <td className="p-3 text-center font-mono bg-green-50 font-black">{previewStock}</td>
+                          <td className="p-1 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, date, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : ""} className="w-10 rounded-md border border-blue-100 bg-white px-1 py-1 text-center font-mono font-black text-blue-800" /></td>
+                          <td className="p-1 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, date, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : ""} className="w-10 rounded-md border border-rose-100 bg-white px-1 py-1 text-center font-mono font-black text-rose-800" /></td>
+                          <td className="p-1 text-center font-mono bg-green-50 font-black">{previewStock}</td>
                         </React.Fragment>
                       );
                     })}
