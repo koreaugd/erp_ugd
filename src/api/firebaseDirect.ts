@@ -86,8 +86,13 @@ export async function firebaseGetBranchHistory(branchName: string, month?: strin
 
 export async function firebaseGetEditLogs() {
   const snapshot = await getDocs(collection(getDirectDb(), "edit_logs"));
-  return snapshot.docs.map((item) => item.data() as any)
+  return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
     .sort((a: any, b: any) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
+export async function firebaseDeleteEditLog(logId: string) {
+  await deleteDoc(doc(getDirectDb(), "edit_logs", logId));
+  return { success: true };
 }
 
 export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string) {

@@ -13,7 +13,7 @@ import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
-  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase
+  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase, Trash2
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { loginWithAdminPin } from "../api/firebaseAuth";
@@ -763,6 +763,8 @@ export default function AdminPage() {
                   </table>
                 </div>
               </section>
+
+              <AdminMonthlyClosingStatusSection />
 
               {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1723,6 +1725,18 @@ function AdminModificationLogsSection() {
     });
   }, [logs, searchBranch, searchDate]);
 
+  const deleteLog = async (log: any) => {
+    if (!log?.id) return;
+    if (!window.confirm(`${log.branchName || ""} ${log.settleDate || ""} 변경이력 로그를 삭제할까요?`)) return;
+    try {
+      await gasClient.deleteEditLog(log.id);
+      await loadLogs();
+    } catch (error) {
+      console.error("변경이력 삭제 실패:", error);
+      alert("변경이력 삭제에 실패했습니다.");
+    }
+  };
+
   const formatShortDate = (isoString: string) => {
     if (!isoString) return "-";
     const date = new Date(isoString);
@@ -1868,18 +1882,19 @@ function AdminModificationLogsSection() {
                     <th className="py-4 px-3 w-32">마감 대상일</th>
                     <th className="py-4 px-3 w-28">작업자</th>
                     <th className="py-4 px-3">수정 전 ➔ 수정 후 세부 내역</th>
+                    <th className="py-4 px-3 w-20 text-center">관리</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="p-12 text-center text-gray-400 font-semibold">
+                      <td colSpan={6} className="p-12 text-center text-gray-400 font-semibold">
                         <LoadingSpinner size="sm" />
                       </td>
                     </tr>
                   ) : filteredLogs.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-12 text-center text-gray-400 font-bold">
+                      <td colSpan={6} className="p-12 text-center text-gray-400 font-bold">
                         기록된 마감 수정 이력이 없습니다.
                       </td>
                     </tr>
@@ -1903,6 +1918,16 @@ function AdminModificationLogsSection() {
                         <td className="py-4 px-3">
                           {getChangesSummary(log)}
                         </td>
+                        <td className="py-4 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => void deleteLog(log)}
+                            className="inline-flex items-center justify-center rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
+                            title="변경이력 삭제"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1915,6 +1940,112 @@ function AdminModificationLogsSection() {
         <AdminManualOvertimesSection />
       )}
     </div>
+  );
+}
+
+function AdminMonthlyClosingStatusSection() {
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [branches, setBranches] = useState<any[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [branchList, monthlyRecords] = await Promise.all([
+        gasClient.getBranchList(),
+        gasClient.getSharedData<any[]>("monthly_closings")
+      ]);
+      setBranches((branchList || []).filter((branch: any) => branch.role === "branch"));
+      setRecords(Array.isArray(monthlyRecords) ? monthlyRecords : []);
+    } catch (error) {
+      console.error("월말마감 현황 로드 실패:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const rows = useMemo(() => {
+    return branches.map((branch) => {
+      const matched = records
+        .filter((record) => record.branchName === branch.branchName && record.month === selectedMonth)
+        .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0];
+      return { branch, record: matched };
+    });
+  }, [branches, records, selectedMonth]);
+
+  const stats = useMemo(() => {
+    const confirmed = rows.filter((row) => row.record?.status === "confirmed").length;
+    const editing = rows.filter((row) => row.record?.status === "editing").length;
+    return { confirmed, editing, pending: Math.max(rows.length - confirmed - editing, 0), total: rows.length };
+  }, [rows]);
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black text-[#2C3E50]">월말마감 제출 현황</h2>
+          <p className="text-xs text-gray-400 mt-1">선택한 월 기준으로 지점별 월말마감 확정/수정 상태를 확인합니다.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black"
+          />
+          <button onClick={() => void loadData()} className="px-3 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">
+            새로고침
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">대상 지점</p><p className="text-2xl font-black">{stats.total}</p></div>
+        <div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs text-emerald-600 font-bold">확정</p><p className="text-2xl font-black text-emerald-700">{stats.confirmed}</p></div>
+        <div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">수정중</p><p className="text-2xl font-black text-amber-700">{stats.editing}</p></div>
+        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">미제출</p><p className="text-2xl font-black text-rose-700">{stats.pending}</p></div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-gray-100">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black">
+            <tr>
+              <th className="py-3 px-4">월</th>
+              <th className="py-3 px-4">지점</th>
+              <th className="py-3 px-4">상태</th>
+              <th className="py-3 px-4">처리자</th>
+              <th className="py-3 px-4">처리시각</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading ? (
+              <tr><td colSpan={5} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={5} className="py-10 text-center text-gray-400 font-bold">등록된 지점이 없습니다.</td></tr>
+            ) : rows.map(({ branch, record }) => {
+              const status = record?.status || "pending";
+              const label = status === "confirmed" ? "월말마감 확정" : status === "editing" ? "수정중" : "미제출";
+              const badge = status === "confirmed" ? "bg-emerald-50 text-emerald-700" : status === "editing" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700";
+              const date = record?.updatedAt || record?.confirmedAt || "";
+              return (
+                <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">
+                  <td className="py-3 px-4 font-mono text-xs font-bold">{selectedMonth}</td>
+                  <td className="py-3 px-4 font-black text-gray-800">{branch.branchName}</td>
+                  <td className="py-3 px-4"><span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-black ${badge}`}>{label}</span></td>
+                  <td className="py-3 px-4 text-xs font-bold text-gray-600">{record?.writer || "-"}</td>
+                  <td className="py-3 px-4 font-mono text-xs text-gray-500">{date ? new Date(date).toLocaleString("ko-KR") : "-"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -1951,6 +2082,21 @@ function AdminManualOvertimesSection() {
       return dateB.localeCompare(dateA);
     });
   }, [records, searchBranch, searchName]);
+
+  const deleteManualRecord = async (record: any) => {
+    if (!record?.branchName || !record?.id) return;
+    if (!window.confirm(`${record.branchName} ${record.staffName || ""} ${record.settleDate || ""} 수기 초과근무 내역을 삭제할까요?`)) return;
+    try {
+      const key = `manual_overtime:${record.branchName}`;
+      const previous = await gasClient.getSharedData<any[]>(key);
+      const next = (previous || []).filter((item: any) => item.id !== record.id);
+      await gasClient.saveSharedData(key, next);
+      await loadData();
+    } catch (error) {
+      console.error("수기 초과근무 삭제 실패:", error);
+      alert("수기 초과근무 삭제에 실패했습니다.");
+    }
+  };
 
   const formatShortDate = (isoStr?: string) => {
     if (!isoStr) return "-";
@@ -2023,18 +2169,19 @@ function AdminManualOvertimesSection() {
                 <th className="py-4 px-3 w-32">직원명</th>
                 <th className="py-4 px-3 w-28 text-center">초과시간</th>
                 <th className="py-4 px-3">수기 입력 사유</th>
+                <th className="py-4 px-3 w-20 text-center">관리</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-gray-400 font-semibold">
+                  <td colSpan={7} className="p-12 text-center text-gray-400 font-semibold">
                     <LoadingSpinner size="sm" />
                   </td>
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-12 text-center text-gray-400 font-bold">
+                  <td colSpan={7} className="p-12 text-center text-gray-400 font-bold">
                     수기로 등록된 초과근무 내역이 없습니다.
                   </td>
                 </tr>
@@ -2060,6 +2207,16 @@ function AdminManualOvertimesSection() {
                     </td>
                     <td className="py-4 px-3 text-gray-700 font-medium max-w-sm truncate">
                       {r.reason || "-"}
+                    </td>
+                    <td className="py-4 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => void deleteManualRecord(r)}
+                        className="inline-flex items-center justify-center rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
+                        title="수기 내역 삭제"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </td>
                   </tr>
                 ))

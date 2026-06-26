@@ -182,6 +182,7 @@ interface StaffRow {
   overtimeReason: string;
   officeWorkType?: "근무" | "휴무";
   officeTaskMemo?: string;
+  officeWorkplace?: string;
 }
 
 interface ExpenseRow {
@@ -192,6 +193,7 @@ interface ExpenseRow {
 }
 
 type OrderCategory = "식자재" | "부식비" | "주류" | "식음료외 기타";
+type BranchDailyTab = "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog" | "officeWorkLog";
 
 interface OrderItem {
   id: string;
@@ -254,7 +256,7 @@ export default function BranchConfirmPage() {
   // ----------------------------------------------------
   // Tabs State
   // ----------------------------------------------------
-  const [activeTab, setActiveTab] = useState<"dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog">("dashboard");
+  const [activeTab, setActiveTab] = useState<BranchDailyTab>("dashboard");
 
   // ----------------------------------------------------
   // Branch Selector State
@@ -404,15 +406,25 @@ interface WorkspaceProps {
   branch: { branchName: string; brand: string; role: string };
   logout: () => void;
   selectBranch: (branch: any) => void;
-  activeTab: "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog";
-  setActiveTab: (tab: "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog") => void;
+  activeTab: BranchDailyTab;
+  setActiveTab: (tab: BranchDailyTab) => void;
   isAdmin: boolean;
 }
 
 function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin }: WorkspaceProps) {
   const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
+  const isHeadOfficeBranch = activeBranchName === "본사";
   const activeBranchBrand = branch?.brand || "";
+
+  useEffect(() => {
+    if (isHeadOfficeBranch && ["orders", "liquorInventory", "overtimeLog"].includes(activeTab)) {
+      setActiveTab("settle");
+    }
+    if (!isHeadOfficeBranch && activeTab === "officeWorkLog") {
+      setActiveTab("settle");
+    }
+  }, [activeTab, isHeadOfficeBranch, setActiveTab]);
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
@@ -848,10 +860,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               <div className="flex space-x-6 overflow-x-auto no-scrollbar scroll-smooth">
                 {[
                   { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
-                  { id: "orders", label: "발주관리", icon: ShoppingCart },
-                  { id: "liquorInventory", label: "주류 재고", icon: Database },
+                  ...(!isHeadOfficeBranch ? [
+                    { id: "orders", label: "발주관리", icon: ShoppingCart },
+                    { id: "liquorInventory", label: "주류 재고", icon: Database }
+                  ] : []),
                   { id: "roster", label: "직원현황", icon: User },
-                  { id: "overtimeLog", label: "초과근무일지", icon: Clock },
+                  ...(isHeadOfficeBranch ? [{ id: "officeWorkLog", label: "근무내역", icon: ClipboardList }] : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
                   { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
                 ].map((t) => {
                   const IconComp = t.icon;
@@ -949,6 +963,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeTab === "orders" && <OrderManagementTabV2 branchName={activeBranchName} />}
                 {activeTab === "liquorInventory" && <LiquorInventoryTabV2 branchName={activeBranchName} />}
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
+                {activeTab === "officeWorkLog" && <OfficeWorkLogTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
                 {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
                 {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
@@ -2128,7 +2143,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     branchName === "대골뼈국";
 
   const isHeadOffice = branchName === "본사";
-  const defaultStandardHours = isHeadOffice ? 0 : isExtraHoursBranch ? 10.5 : 10;
+  const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
 
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
   // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
@@ -2194,12 +2209,41 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [submittedResult, setSubmittedResult] = useState<any | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [validationErrors, setValidationErrors] = useState<boolean>(false);
+  const [draftReady, setDraftReady] = useState<boolean>(false);
+
+  const draftKey = `erp_daily_draft_${branchName}_${settleDate}`;
 
   // Toast trigger helper
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  const restoreDraftIfAvailable = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (!saved) return false;
+      const draft = JSON.parse(saved);
+      setWriter(draft.writer || "");
+      setCashSales(draft.cashSales || "");
+      setCardSales(draft.cardSales || "");
+      setTransferSales(draft.transferSales || "");
+      setDeliverySales(draft.deliverySales || "");
+      setCashBalance(draft.cashBalance || "");
+      setPrevDayCash(draft.prevDayCash || "0");
+      setCashDiffReason(draft.cashDiffReason || "");
+      setStaffMemo(draft.staffMemo || "");
+      setReviewMemo(draft.reviewMemo || "");
+      setOtherMemo(draft.otherMemo || "");
+      setCashExpenses(Array.isArray(draft.cashExpenses) ? draft.cashExpenses : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+      setCardExpenses(Array.isArray(draft.cardExpenses) ? draft.cardExpenses : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+      setStaffRows(Array.isArray(draft.staffRows) ? draft.staffRows : []);
+      return true;
+    } catch (error) {
+      console.warn("일일마감 임시저장 복원 실패:", error);
+      return false;
+    }
+  }, [draftKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2272,7 +2316,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       overtime: 0,
       overtimeReason: "",
       officeWorkType: "근무",
-      officeTaskMemo: ""
+      officeTaskMemo: "",
+      officeWorkplace: branchName
     }));
     setStaffRows(mappedRows);
   }, [getRoster, defaultStandardHours]);
@@ -2354,7 +2399,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         overtime: 0,
         overtimeReason: "",
         officeWorkType: "근무",
-        officeTaskMemo: ""
+        officeTaskMemo: "",
+        officeWorkplace: branchName
       });
     }
 
@@ -2397,6 +2443,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const checkDuplicateAndLoad = async () => {
       try {
         setChecking(true);
+        setDraftReady(false);
         const res = await gasClient.getDailyFormBootstrap(branchName, settleDate);
         const prevCashVal = res.previousCash || "0";
 
@@ -2497,7 +2544,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                  overtime: matchedS && emp.division === "정직원" ? (matchedS.workHours - defaultStandardHours) : 0,
                  overtimeReason: "",
                  officeWorkType: matchedS && matchedS.workHours > 0 ? "근무" : "휴무",
-                 officeTaskMemo: ""
+                 officeTaskMemo: "",
+                 officeWorkplace: branchName
                };
              });
              setStaffRows(mapStaff);
@@ -2541,6 +2589,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setReviewMemo("");
           setOtherMemo("");
           initRosterInForm();
+          setTimeout(() => restoreDraftIfAvailable(), 0);
         }
       } catch (err: any) {
         console.error("Duplicate checking error:", err);
@@ -2556,13 +2605,15 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         setReviewMemo("");
         setOtherMemo("");
         initRosterInForm();
+        setTimeout(() => restoreDraftIfAvailable(), 0);
       } finally {
         setChecking(false);
+        setDraftReady(true);
       }
     };
 
     checkDuplicateAndLoad();
-  }, [settleDate, branchName, getRoster, initRosterInForm]);
+  }, [settleDate, branchName, getRoster, initRosterInForm, restoreDraftIfAvailable]);
 
   // Real-time Sum calculations
   const totalSales = useMemo(() => {
@@ -2576,6 +2627,34 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const cardExpensesSum = useMemo(() => {
     return cardExpenses.reduce((acc, exp) => acc + (Number(exp.amount) || 0), 0);
   }, [cardExpenses]);
+
+  useEffect(() => {
+    if (!draftReady || checking || submittedResult) return;
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          writer,
+          cashSales,
+          cardSales,
+          transferSales,
+          deliverySales,
+          cashBalance,
+          prevDayCash,
+          cashDiffReason,
+          staffMemo,
+          reviewMemo,
+          otherMemo,
+          cashExpenses,
+          cardExpenses,
+          staffRows,
+          savedAt: new Date().toISOString()
+        }));
+      } catch (error) {
+        console.warn("일일마감 임시저장 실패:", error);
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [draftReady, checking, submittedResult, draftKey, writer, cashSales, cardSales, transferSales, deliverySales, cashBalance, prevDayCash, cashDiffReason, staffMemo, reviewMemo, otherMemo, cashExpenses, cardExpenses, staffRows]);
 
   // Core Math - Decimal Time Parsing
   const parseTimeToDecimal = (timeStr: string): number => {
@@ -2604,12 +2683,22 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           row.workHours = 0;
           row.clockIn = "";
           row.clockOut = "";
+          row.standardHours = 0;
           row.overtime = 0;
           row.overtimeReason = "";
         } else {
-          row.workHours = Number.isFinite(Number(row.workHours)) ? Number(row.workHours) : 0;
-          row.overtime = 0;
-          row.overtimeReason = "";
+          if (!row.standardHours) row.standardHours = defaultStandardHours;
+          row.officeWorkplace = row.officeWorkplace || branchName;
+          const inDec = parseTimeToDecimal(row.clockIn);
+          const outDec = parseTimeToDecimal(row.clockOut);
+          let calculatedWorkHours = 0;
+          if (row.clockIn && row.clockOut && (row.clockIn !== "00:00" || row.clockOut !== "00:00")) {
+            calculatedWorkHours = outDec - inDec;
+            if (calculatedWorkHours < 0) calculatedWorkHours += 24;
+          }
+          row.workHours = parseFloat(calculatedWorkHours.toFixed(1));
+          row.overtime = parseFloat((row.workHours - (Number(row.standardHours) || 0)).toFixed(1));
+          if (row.overtime === 0) row.overtimeReason = "";
         }
         copy[index] = row;
         return copy;
@@ -2707,13 +2796,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
-    if (!isHeadOffice && Object.keys(timeErrors).length > 0) {
+    if (Object.keys(timeErrors).length > 0) {
       triggerToast("출퇴근 시간 입력 오류를 수정한 뒤 마감 제출해 주세요.", "error");
       return;
     }
 
     const missingOfficeWork = isHeadOffice
-      ? staffRows.filter((staff) => staff.officeWorkType !== "휴무" && (!(Number(staff.workHours) > 0) || !String(staff.officeTaskMemo || "").trim()))
+      ? staffRows.filter((staff) => staff.officeWorkType !== "휴무" && (!(Number(staff.workHours) > 0) || !staff.clockIn || !staff.clockOut || !String(staff.officeTaskMemo || "").trim() || !String(staff.officeWorkplace || "").trim()))
       : [];
     if (missingOfficeWork.length > 0) {
       setValidationErrors(true);
@@ -2721,14 +2810,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
-    const missingOvertimeReason = isHeadOffice ? [] : staffRows.filter((staff) => staff.overtime !== 0 && !staff.overtimeReason.trim());
+    const missingOvertimeReason = staffRows.filter((staff) => staff.overtime > 0 && !staff.overtimeReason.trim());
     if (missingOvertimeReason.length > 0) {
       setValidationErrors(true);
       triggerToast(`${missingOvertimeReason.map((staff) => staff.name).join(", ")} 님의 초과근무 또는 조기퇴근 사유를 입력해 주세요.`, "error");
       return;
     }
 
-    const longShift = isHeadOffice ? [] : staffRows.filter((staff) => staff.workHours > 13);
+    const longShift = staffRows.filter((staff) => staff.workHours > 13);
     if (longShift.length > 0 && !window.confirm(`${longShift.map((staff) => `${staff.name} ${staff.workHours}시간`).join(", ")} 근무가 13시간을 초과합니다. 출퇴근 시간 입력이 맞습니까?`)) return;
 
     setSubmitting(true);
@@ -2752,7 +2841,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       const formattedStaffSummaryStr = staffRows
         .map(
           (s) => isHeadOffice
-            ? `- ${s.name}: ${s.officeWorkType === "휴무" ? "휴무" : `${s.workHours}h 근무`} ${s.officeTaskMemo ? `(${s.officeTaskMemo})` : ""}`
+            ? `- ${s.name}: ${s.officeWorkType === "휴무" ? "휴무" : `${s.clockIn}~${s.clockOut} ${s.workHours}h 근무 / 근무지점 ${s.officeWorkplace || branchName} / 초과 ${s.overtime > 0 ? "+" : ""}${s.overtime}h`} ${s.officeTaskMemo ? `(${s.officeTaskMemo})` : ""}${s.overtimeReason ? ` (초과사유: ${s.overtimeReason})` : ""}`
             : `- ${s.name} (${s.division}): 출근 ${s.clockIn}, 퇴근 ${s.clockOut} [기준 ${s.standardHours}h, 근무 ${s.workHours}h, 초과 ${s.overtime > 0 ? "+" : ""}${s.overtime}h] ${
                 s.overtimeReason ? `(사유: ${s.overtimeReason})` : ""
               }`
@@ -2855,6 +2944,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         total: totalSales,
         recordId: existingRecordId || (response as any)?.recordId || `uid-${Date.now()}`
       });
+      localStorage.removeItem(draftKey);
 
       // Refresh completed dates list
       void refreshCompletedDates();
@@ -2886,6 +2976,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setStaffMemo("");
     setReviewMemo("");
     setOtherMemo("");
+    localStorage.removeItem(draftKey);
     initRosterInForm();
   };
 
@@ -3340,7 +3431,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                     return;
                   }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setWriter("");
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); initRosterInForm(); setIsEditApproved(true);
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
@@ -3804,30 +3895,49 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         {isHeadOffice && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs min-w-[760px]">
+            <table className="w-full text-left border-collapse text-xs min-w-[1120px]">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
                   <th className="py-3 px-2 w-28">이름</th>
+                  <th className="py-3 px-2 w-36">근무지점</th>
                   <th className="py-3 px-2 w-24 text-center">휴무</th>
-                  <th className="py-3 px-2 w-32">업무시간</th>
+                  <th className="py-3 px-2 w-24">기준</th>
+                  <th className="py-3 px-2 w-24">업무시작</th>
+                  <th className="py-3 px-2 w-24">업무마감</th>
+                  <th className="py-3 px-2 w-24">근무</th>
+                  <th className="py-3 px-2 w-24">초과</th>
                   <th className="py-3 px-2">업무내용</th>
+                  <th className="py-3 px-2 w-44">초과 사유</th>
                   <th className="py-3 px-2 w-10 text-center">삭제</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
                 {staffRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-10 text-center text-gray-400">
+                    <td colSpan={11} className="py-10 text-center text-gray-400">
                       등록된 본사 직원이 없습니다. 추가 입력을 통해 인원을 생성해주세요.
                     </td>
                   </tr>
                 ) : (
                   staffRows.map((s, idx) => {
                     const isDayOff = s.officeWorkType === "휴무";
-                    const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !String(s.officeTaskMemo || "").trim());
+                    const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !s.clockIn || !s.clockOut || !String(s.officeTaskMemo || "").trim() || !String(s.officeWorkplace || "").trim());
                     return (
                       <tr key={idx} className="hover:bg-gray-50/50">
                         <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
+                        <td className="py-3.5 px-2">
+                          <select
+                            disabled={isDayOff}
+                            value={s.officeWorkplace || branchName}
+                            onChange={(e) => executeStaffCalculation(idx, { officeWorkplace: e.target.value, officeWorkType: "근무" })}
+                            className={`w-32 px-2 py-1.5 border rounded-lg bg-white text-xs font-bold disabled:bg-gray-100 ${
+                              needsWork && !String(s.officeWorkplace || "").trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                            }`}
+                          >
+                            <option value="본사">본사</option>
+                            {transferBranchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+                          </select>
+                        </td>
                         <td className="py-3.5 px-2 text-center">
                           <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
                             <input
@@ -3840,18 +3950,46 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           </label>
                         </td>
                         <td className="py-3.5 px-2">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.5"
+                          <select
                             disabled={isDayOff}
-                            value={isDayOff ? "" : s.workHours || ""}
-                            onChange={(e) => executeStaffCalculation(idx, { workHours: Number(e.target.value) || 0, officeWorkType: "근무" })}
-                            placeholder="0"
-                            className={`w-24 px-2 py-1.5 border rounded-lg text-right font-mono text-xs font-bold disabled:bg-gray-100 disabled:text-gray-400 ${
-                              needsWork && !(Number(s.workHours) > 0) ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
-                            }`}
+                            value={String(s.standardHours)}
+                            onChange={(e) => executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" })}
+                            className="w-20 px-2 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
+                          >
+                            <option value="0">0h</option>
+                            <option value="8">8h</option>
+                            <option value="9">9h</option>
+                            <option value="10">10h</option>
+                            <option value="10.5">10.5h</option>
+                          </select>
+                        </td>
+                        <td className="py-3.5 px-2">
+                          <input
+                            type="text"
+                            disabled={isDayOff}
+                            value={s.clockIn}
+                            onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value, officeWorkType: "근무" })}
+                            onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
+                            placeholder="09:00"
+                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                           />
+                        </td>
+                        <td className="py-3.5 px-2">
+                          <input
+                            type="text"
+                            disabled={isDayOff}
+                            value={s.clockOut}
+                            onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value, officeWorkType: "근무" })}
+                            onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
+                            placeholder="18:00"
+                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                          />
+                        </td>
+                        <td className="py-3.5 px-2 font-mono font-black text-sky-700">{s.workHours || 0}h</td>
+                        <td className="py-3.5 px-2 font-mono font-black">
+                          <span className={s.overtime > 0 ? "text-emerald-600" : s.overtime < 0 ? "text-rose-500" : "text-gray-400"}>
+                            {s.overtime > 0 ? "+" : ""}{s.overtime || 0}h
+                          </span>
                         </td>
                         <td className="py-3.5 px-2">
                           <input
@@ -3862,6 +4000,18 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             placeholder={isDayOff ? "휴무" : "오늘 진행한 업무내용"}
                             className={`w-full px-3 py-1.5 border rounded-lg text-xs disabled:bg-gray-100 disabled:text-gray-400 ${
                               needsWork && !String(s.officeTaskMemo || "").trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                            }`}
+                          />
+                        </td>
+                        <td className="py-3.5 px-2">
+                          <input
+                            type="text"
+                            disabled={isDayOff || s.overtime <= 0}
+                            value={s.overtimeReason}
+                            onChange={(e) => executeStaffCalculation(idx, { overtimeReason: e.target.value })}
+                            placeholder={s.overtime > 0 ? "초과 사유" : "사유 불필요"}
+                            className={`w-full px-2 py-1.5 border rounded-lg text-xs disabled:bg-gray-100 disabled:text-gray-400 ${
+                              validationErrors && s.overtime > 0 && !s.overtimeReason.trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
                             }`}
                           />
                         </td>
@@ -4122,6 +4272,113 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     )}
   </div>
 );
+}
+
+function OfficeWorkLogTab({ branchName }: { branchName: string }) {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const history = await gasClient.getBranchHistory(branchName, month);
+      const nextRows: any[] = [];
+      history.forEach((record: any) => {
+        const metadataText = String(record.memo || "").split("\n---\nMETADATA:")[1];
+        if (!metadataText) return;
+        try {
+          const metadata = JSON.parse(metadataText.trim());
+          (metadata.staffRows || []).forEach((staff: any) => {
+            nextRows.push({
+              id: `${record.recordId || record.settleDate}-${staff.name}`,
+              date: record.settleDate,
+              writer: record.submittedBy || "",
+              name: staff.name,
+              workplace: staff.officeWorkplace || branchName,
+              workType: staff.officeWorkType || (Number(staff.workHours || 0) > 0 ? "근무" : "휴무"),
+              clockIn: staff.clockIn || "",
+              clockOut: staff.clockOut || "",
+              workHours: Number(staff.workHours || 0),
+              standardHours: Number(staff.standardHours || 0),
+              overtime: Number(staff.overtime || 0),
+              overtimeReason: staff.overtimeReason || "",
+              taskMemo: staff.officeTaskMemo || ""
+            });
+          });
+        } catch (error) {
+          console.warn("본사 근무내역 메타데이터 파싱 실패:", error);
+        }
+      });
+      setRows(nextRows.sort((a, b) => String(b.date).localeCompare(String(a.date))));
+    } catch (error) {
+      console.error("본사 근무내역 로드 실패:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [branchName, month]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="office-work-log-tab">
+      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-[#2E6DB4]" /> 본사 근무내역
+          </h3>
+          <p className="text-xs text-gray-400 mt-1">월별로 본사 직원의 근무시간, 근무지점, 업무내용을 확인합니다.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black" />
+          <button type="button" onClick={() => void load()} className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-black">새로고침</button>
+        </div>
+      </section>
+
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b">
+              <tr>
+                <th className="p-3 w-28">날짜</th>
+                <th className="p-3 w-24">직원</th>
+                <th className="p-3 w-32">근무지점</th>
+                <th className="p-3 w-20">상태</th>
+                <th className="p-3 w-28">시간</th>
+                <th className="p-3 w-24 text-right">근무</th>
+                <th className="p-3 w-24 text-right">초과</th>
+                <th className="p-3">업무내용</th>
+                <th className="p-3 w-40">초과 사유</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading ? (
+                <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">선택한 월의 본사 근무내역이 없습니다.</td></tr>
+              ) : rows.map((row) => (
+                <tr key={row.id} className="hover:bg-slate-50/60">
+                  <td className="p-3 font-mono text-xs text-gray-500">{row.date}</td>
+                  <td className="p-3 font-black text-gray-800">{row.name}</td>
+                  <td className="p-3 text-xs font-bold text-gray-600">{row.workplace}</td>
+                  <td className="p-3">
+                    <span className={`rounded-lg px-2 py-1 text-xs font-black ${row.workType === "휴무" ? "bg-gray-100 text-gray-500" : "bg-sky-50 text-sky-700"}`}>{row.workType}</span>
+                  </td>
+                  <td className="p-3 font-mono text-xs">{row.workType === "휴무" ? "-" : `${row.clockIn}~${row.clockOut}`}</td>
+                  <td className="p-3 text-right font-mono font-black text-sky-700">{row.workHours}h</td>
+                  <td className={`p-3 text-right font-mono font-black ${row.overtime > 0 ? "text-emerald-600" : row.overtime < 0 ? "text-rose-500" : "text-gray-400"}`}>{row.overtime > 0 ? "+" : ""}{row.overtime}h</td>
+                  <td className="p-3 text-gray-700">{row.taskMemo || "-"}</td>
+                  <td className="p-3 text-xs text-gray-500">{row.overtimeReason || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 // ----------------------------------------------------
@@ -6320,6 +6577,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [monthlyCloseStatus, setMonthlyCloseStatus] = useState<any | null>(null);
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -6336,6 +6594,39 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     } finally {
       setLoading(false);
     }
+  }, [branchName, selectedMonth]);
+
+  const fetchMonthlyCloseStatus = useCallback(async () => {
+    try {
+      const records = await gasClient.getSharedData<any[]>("monthly_closings");
+      const current = Array.isArray(records)
+        ? records
+            .filter((record) => record.branchName === branchName && record.month === selectedMonth)
+            .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0]
+        : null;
+      setMonthlyCloseStatus(current || null);
+    } catch (error) {
+      console.warn("월말마감 상태를 불러오지 못했습니다.", error);
+    }
+  }, [branchName, selectedMonth]);
+
+  const saveMonthlyCloseStatus = useCallback(async (status: "confirmed" | "editing") => {
+    const previous = await gasClient.getSharedData<any[]>("monthly_closings");
+    const list = Array.isArray(previous) ? previous : [];
+    const now = new Date().toISOString();
+    const nextRecord = {
+      id: `${branchName}-${selectedMonth}`,
+      branchName,
+      month: selectedMonth,
+      status,
+      writer: branchName,
+      confirmedAt: status === "confirmed" ? now : list.find((record) => record.branchName === branchName && record.month === selectedMonth)?.confirmedAt || "",
+      updatedAt: now
+    };
+    const next = [nextRecord, ...list.filter((record) => !(record.branchName === branchName && record.month === selectedMonth))];
+    await gasClient.saveSharedData("monthly_closings", next);
+    setMonthlyCloseStatus(nextRecord);
+    return nextRecord;
   }, [branchName, selectedMonth]);
 
   const handleDownloadExcel = useCallback(async () => {
@@ -6729,9 +7020,36 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     }
   }, [branchName, selectedMonth, history, triggerToast, adminSettings]);
 
+  const handleConfirmMonthlyClose = useCallback(async () => {
+    try {
+      await saveMonthlyCloseStatus("confirmed");
+      triggerToast(`${selectedMonth} 월말마감이 확정되었습니다.`, "success");
+      if (window.confirm("월말마감이 확정되었습니다. 결산자료 엑셀을 다운로드할까요?")) {
+        await handleDownloadExcel();
+      }
+    } catch (error: any) {
+      console.error(error);
+      triggerToast(error?.message || "월말마감 확정 저장에 실패했습니다.", "error");
+    }
+  }, [handleDownloadExcel, saveMonthlyCloseStatus, selectedMonth, triggerToast]);
+
+  const handleEditMonthlyClose = useCallback(async () => {
+    try {
+      await saveMonthlyCloseStatus("editing");
+      triggerToast(`${selectedMonth} 월말마감이 수정중 상태로 변경되었습니다.`, "success");
+    } catch (error: any) {
+      console.error(error);
+      triggerToast(error?.message || "월말마감 수정 상태 저장에 실패했습니다.", "error");
+    }
+  }, [saveMonthlyCloseStatus, selectedMonth, triggerToast]);
+
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
+
+  useEffect(() => {
+    void fetchMonthlyCloseStatus();
+  }, [fetchMonthlyCloseStatus]);
 
   return (
     <div className="space-y-6 animate-fade-in" id="monthly-settle-tab-root">
@@ -6778,13 +7096,34 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
             이력 갱신
           </button>
           <button
-            onClick={handleDownloadExcel}
+            onClick={handleConfirmMonthlyClose}
             className="p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
           >
-            <FileText className="w-4 h-4 text-emerald-200" />
-            결산자료 엑셀 다운로드
+            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+            월말마감확정
+          </button>
+          <button
+            onClick={handleEditMonthlyClose}
+            className="p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+          >
+            <Pencil className="w-4 h-4 text-amber-100" />
+            월말마감 수정
           </button>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-100 bg-white px-5 py-3 text-xs font-bold text-slate-600 flex flex-wrap items-center gap-2">
+        <span className="text-slate-400">현재 월말마감 상태</span>
+        <span className={`rounded-lg px-2.5 py-1 font-black ${
+          monthlyCloseStatus?.status === "confirmed"
+            ? "bg-emerald-50 text-emerald-700"
+            : monthlyCloseStatus?.status === "editing"
+            ? "bg-amber-50 text-amber-700"
+            : "bg-rose-50 text-rose-700"
+        }`}>
+          {monthlyCloseStatus?.status === "confirmed" ? "확정" : monthlyCloseStatus?.status === "editing" ? "수정중" : "미제출"}
+        </span>
+        <span className="font-mono text-slate-400">{selectedMonth}</span>
       </div>
 
       {loading ? (
