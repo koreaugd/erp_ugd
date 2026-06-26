@@ -80,7 +80,7 @@ export default function AdminPage() {
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
   const [cleaningRosters, setCleaningRosters] = useState(false);
   const [clearingDirectory, setClearingDirectory] = useState(false);
-  const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks">("dashboard");
+  const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks" | "otherMemo">("dashboard");
   const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
   const [dailyLogsSubTab, setDailyLogsSubTab] = useState<"logs" | "manualOvertimes">("logs");
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
@@ -396,13 +396,14 @@ export default function AdminPage() {
             const expenses = (meta.cashExpenses || []).reduce((sum: number, item: any) => sum + (Number(item.amount) || 0), 0);
             const cashDifference = (Number(meta.cashBalance) || 0) - ((Number(meta.prevDayCash) || 0) + (Number(record.cashSales) || 0) - expenses);
             const overtime = (meta.staffRows || []).filter((staff: any) => staff.division === "정직원" && Number(staff.overtime) > 0).map((staff: any) => `${staff.name} +${staff.overtime}h`).join(", ");
-            const hasRemark = Boolean(remarks.staffMemo || remarks.reviewMemo || remarks.otherMemo);
-            if (!cashDifference && !overtime && !hasRemark) return [];
+            const hasRemark = Boolean(remarks.staffMemo || remarks.reviewMemo);
+            const hasOtherMemo = Boolean(remarks.otherMemo);
+            if (!cashDifference && !overtime && !hasRemark && !hasOtherMemo) return [];
             return [{
               branchName: branch.branchName,
               date: record.settleDate,
               writer: record.submittedBy || record.modifiedBy || "-",
-              issues: [cashDifference ? "현금 차이" : "", overtime ? "초과근무" : "", hasRemark ? "특이사항" : ""].filter(Boolean),
+              issues: [cashDifference ? "현금 차이" : "", overtime ? "초과근무" : "", hasRemark ? "특이사항" : "", hasOtherMemo ? "기타메모" : ""].filter(Boolean),
               cashDifference,
               overtime,
               reason: meta.cashDiffReason || "",
@@ -411,7 +412,7 @@ export default function AdminPage() {
           } catch { return []; }
         });
       }));
-      setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date))));
+      setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName), "ko")));
     } finally {
       setAnomalyLoading(false);
     }
@@ -771,9 +772,9 @@ export default function AdminPage() {
               />
 
               <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
-                <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button></div>
-                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div></div>}
+                <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다. 어제 날짜({getYesterdayDateString()}) 마감 내용만 강조 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
+                <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button><button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>기타메모</button></div>
+                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs text-blue-600 font-bold">기타메모</p><p className="text-2xl font-black text-blue-700">{anomalyRecords.filter((item) => item.remarks?.otherMemo).length}건</p></div></div>}
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead className="border-b text-left text-gray-500">
@@ -796,15 +797,17 @@ export default function AdminPage() {
                         anomalyRecords
                           .filter((item) =>
                             closingView === "remarks"
-                              ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo || item.remarks?.otherMemo)
+                              ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)
+                              : closingView === "otherMemo"
+                              ? Boolean(item.remarks?.otherMemo)
                               : closingView === "dashboard" || closingView === "cash"
                               ? Boolean(item.cashDifference)
                               : Boolean(item.overtime)
                           )
-                          .map((item, index, list) => (
+                          .map((item, index) => (
                             <tr
                               key={`${item.branchName}-${item.date}-${index}`}
-                              className={index === 0 || item.date === list[0]?.date ? "bg-sky-50" : ""}
+                              className={item.date === getYesterdayDateString() ? "bg-sky-50" : ""}
                             >
                               <td className="py-3 font-mono">{item.date}</td>
                               <td className="font-bold">{item.branchName}</td>
@@ -816,10 +819,12 @@ export default function AdminPage() {
                                   ? "초과근무"
                                   : closingView === "remarks"
                                   ? "특이사항"
+                                  : closingView === "otherMemo"
+                                  ? "기타메모"
                                   : item.issues.join(", ")}
-                                {(index === 0 || item.date === list[0]?.date) && (
+                                {item.date === getYesterdayDateString() && (
                                   <span className="ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
-                                    NEW
+                                    어제
                                   </span>
                                 )}
                               </td>
@@ -827,7 +832,9 @@ export default function AdminPage() {
                                 {closingView === "cash"
                                   ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
                                   : closingView === "remarks"
-                                  ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p><p><b>기타</b> {item.remarks?.otherMemo || "-"}</p></div>
+                                  ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p></div>
+                                  : closingView === "otherMemo"
+                                  ? <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{item.remarks?.otherMemo || "-"}</div>
                                   : item.overtime || "-"}
                               </td>
                             </tr>
