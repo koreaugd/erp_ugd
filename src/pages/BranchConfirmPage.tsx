@@ -2398,46 +2398,18 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         return;
       }
 
-      const formattedResident = formatResidentNumber(draft.residentNumber);
-      if (formattedResident.replace(/\D/g, "").length !== 13) {
-        triggerToast(`${name} 님의 주민등록번호 13자리를 모두 입력해 주세요.`, "error");
-        return;
-      }
-      if (draft.addReason === "신규입사" && !draft.entryDate) {
-        triggerToast(`${name} 님의 신규입사일을 선택해 주세요.`, "error");
-        return;
-      }
-      if (draft.addReason === "신규입사" && toPhoneTail8(draft.phoneDigits).length !== 8) {
-        triggerToast(`${name} 님의 핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.`, "error");
-        return;
-      }
-      if (draft.addReason === "지점이동" && (!draft.fromBranch.trim() || !draft.transferDate)) {
-        triggerToast(`${name} 님의 이동 전 지점과 이동일을 입력해 주세요.`, "error");
-        return;
-      }
-      if (draft.addReason === "기타" && !draft.addReasonMemo.trim()) {
-        triggerToast(`${name} 님의 기타 추가 사유를 입력해 주세요.`, "error");
-        return;
-      }
-
-      const warning = getSameNameWarning(name, formattedResident, getRoster());
-      if (warning) {
-        alert(warning);
+      if (draft.division === "정직원" && !draft.rank) {
+        triggerToast(`${name} 님의 직급을 선택해 주세요.`, "error");
         return;
       }
 
       nextRows.push({
         division: draft.division,
         name,
-        residentNumber: formattedResident,
+        residentNumber: "",
         rank: draft.division === "정직원" ? draft.rank : undefined,
-        entryDate: draft.addReason === "지점이동" ? draft.transferDate : draft.entryDate,
-        phone: draft.addReason === "신규입사" ? formatMobilePhone(draft.phoneDigits) : "",
-        addReason: draft.addReason,
-        fromBranch: draft.addReason === "지점이동" ? draft.fromBranch.trim() : "",
-        transferDate: draft.addReason === "지점이동" ? draft.transferDate : "",
-        hireDate: draft.addReason === "신규입사" ? draft.entryDate : "",
-        addReasonMemo: draft.addReason === "기타" ? draft.addReasonMemo.trim() : "",
+        entryDate: "",
+        phone: "",
         standardHours: draft.division === "정직원" ? defaultStandardHours : 0,
         clockIn: "",
         clockOut: "",
@@ -3286,8 +3258,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
 4. 특이사항
 - 직원 특이사항: ${staffMemo.trim() || "없음"}
-- 리뷰 특이사항: ${reviewMemo.trim() || "없음"}
-- 기타 특이사항: ${otherMemo.trim() || "없음"}`;
+- 리뷰 특이사항: ${reviewMemo.trim() || "없음"}`;
     };
 
     return (
@@ -3944,43 +3915,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 <option value="정직원">정직원</option>
                 <option value="파트타이머">파트타이머</option>
               </select>
-              <input type="text" placeholder="주민등록번호" value={draft.residentNumber} onChange={(e) => updateStaffAddDraft(draft.id, { residentNumber: formatResidentNumber(e.target.value) })} className="w-36 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono" />
               {draft.division === "정직원" && (
                 <select value={draft.rank} onChange={(e) => updateStaffAddDraft(draft.id, { rank: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
                   <option value="">직급 선택</option>
                   {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => <option key={rank} value={rank}>{rank}</option>)}
                 </select>
               )}
-              <select value={draft.addReason} onChange={(e) => updateStaffAddDraft(draft.id, { addReason: e.target.value as StaffAddReason })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
-                <option value="신규입사">신규입사</option>
-                <option value="지점이동">지점이동</option>
-                <option value="기타">기타</option>
-              </select>
-              {draft.addReason === "신규입사" && (
-                <>
-                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
-                    <span>입사일</span>
-                    <input type="date" value={draft.entryDate} onChange={(e) => updateStaffAddDraft(draft.id, { entryDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="신규입사일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
-                  </label>
-                  <label className="flex items-center border border-gray-200 rounded-lg bg-white overflow-hidden text-xs">
-                    <span className="px-2 py-1.5 bg-gray-100 text-gray-500 font-extrabold border-r border-gray-200">010</span>
-                    <input type="text" inputMode="numeric" placeholder="12345678" value={draft.phoneDigits} onChange={(e) => updateStaffAddDraft(draft.id, { phoneDigits: toPhoneTail8(e.target.value) })} className="w-24 px-2 py-1.5 bg-white focus:outline-hidden font-mono font-bold" aria-label="핸드폰번호 뒤 8자리" />
-                  </label>
-                </>
-              )}
-              {draft.addReason === "지점이동" && (
-                <>
-                  <select value={draft.fromBranch} onChange={(e) => updateStaffAddDraft(draft.id, { fromBranch: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32">
-                    <option value="">{loadingTransferBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
-                    {transferBranchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-                  </select>
-                  <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
-                    <span>이동일</span>
-                    <input type="date" value={draft.transferDate} onChange={(e) => updateStaffAddDraft(draft.id, { transferDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="이동일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
-                  </label>
-                </>
-              )}
-              {draft.addReason === "기타" && <input type="text" placeholder="추가 사유" value={draft.addReasonMemo} onChange={(e) => updateStaffAddDraft(draft.id, { addReasonMemo: e.target.value })} className="w-40 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden" />}
               {staffAddDrafts.length > 1 && (
                 <button type="button" onClick={() => setStaffAddDrafts((current) => current.filter((item) => item.id !== draft.id))} className="px-2 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-rose-600 font-black">삭제</button>
               )}
@@ -4339,15 +4279,20 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         </div>}
 
         <div className="space-y-1.5">
-          <label className="text-xs font-bold text-gray-600 block">
-            {isHeadOffice ? "기타 전달 메모" : "📝 기타 전달 메모"}
+          <label className="text-xs font-bold text-gray-600 flex flex-wrap items-center gap-2">
+            <span>{isHeadOffice ? "기타 전달 메모" : "📝 기타 전달 메모"}</span>
+            {!isHeadOffice && (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700 ring-1 ring-amber-100">
+                ERP 오류·개선 제안은 여기에 남겨주세요
+              </span>
+            )}
           </label>
           <textarea
             value={otherMemo}
             onChange={(e) => setOtherMemo(e.target.value)}
-            placeholder="그 외 단체 예약 소품 교체 요청 등 자유롭게 전하고 싶은 내용을 적어주세요."
+            placeholder={isHeadOffice ? "그 외 전달할 내용을 적어주세요." : "예: 일일마감 저장 오류, 화면 사용 중 불편한 점, 추가되면 좋을 기능 등을 적어주세요. 카톡 보고에는 포함되지 않습니다."}
             rows={2}
-            className="w-full p-3 border border-gray-200 rounded-xl text-xs focus:outline-hidden focus:border-zinc-800 transition-all bg-gray-50/20"
+            className="w-full p-3 border border-amber-200 rounded-xl text-xs focus:outline-hidden focus:border-amber-500 transition-all bg-amber-50/20"
           />
         </div>
       </div>
@@ -5192,40 +5137,55 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editContractType, setEditContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [editEntryDate, setEditEntryDate] = useState("");
 
-  // 지점 전용 branch_own_rosters 컬렉션을 사용합니다.
-  // staff_rosters에서 이 지점 소속이 아닌 인원(다른 지점코드 또는 외부 등록 인원)을 자동으로 걸러냅니다.
+  // 지점 직원현황은 지점 전용 branch_own_rosters만 기준으로 사용합니다.
+  // 관리자 직원명부(staff_rosters)는 재설계 전까지 지점 직원현황에 병합하지 않습니다.
   useEffect(() => {
     let cancelled = false;
     const syncRoster = async () => {
       try {
-        // 지점 소속 직원 판별: employeeId가 UGD-{지점코드}- 형식이거나 설정되지 않은 경우
-        // 지점코드 = 지점명에서 공백/괄호/점 제거 (예: "대물섬 한남점" → "대물섬한남")
-        const branchCode = branchName.replace(/[\s()점]/g, "");
-        const isBranchEmployee = (emp: any) => {
-          const eid = String(emp.employeeId || "");
-          return !eid || eid.startsWith(`UGD-${branchCode}-`);
-        };
-
-        // staff_rosters에서 이 지점 소속 직원만 추출
-        const staffRoster = await gasClient.getStaffRoster(branchName);
-        if (cancelled) return;
-        const staffFiltered = staffRoster.filter(isBranchEmployee).filter((employee: any) => !isSampleEmployee(employee));
-
-        // branch_own_rosters를 우선 사용 (사용자 편집 내용 보존)
-        // staff_rosters는 branch_own_rosters에 없는 신규 인원만 추가
         const ownRoster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        const ownFiltered = ownRoster.filter(isBranchEmployee).filter((employee: any) => !isSampleEmployee(employee));
-        const ownIds = new Set(ownFiltered.map((e: any) => e.id));
-        const staffOnlyNew = staffFiltered.filter((e: any) => !ownIds.has(e.id));
-        const merged = [...ownFiltered, ...staffOnlyNew];
+        const ownFiltered = ownRoster.filter((employee: any) => !isSampleEmployee(employee));
+        const merged: any[] = [...ownFiltered];
+        const mergedNames = new Set(merged.map((employee: any) => String(employee.name || "").trim()).filter(Boolean));
+
+        const recentCutoff = new Date();
+        recentCutoff.setDate(recentCutoff.getDate() - 7);
+        const history = await gasClient.getBranchHistory(branchName).catch(() => []);
+        history.forEach((record: any) => {
+          const recordDate = new Date(`${record.settleDate}T00:00:00`);
+          if (!record.settleDate || Number.isNaN(recordDate.getTime()) || recordDate < recentCutoff) return;
+          try {
+            const metadataText = String(record.memo || "").split("\n---\nMETADATA:")[1] || "{}";
+            const metadata = JSON.parse(metadataText);
+            (metadata.staffRows || []).forEach((staff: any) => {
+              const name = String(staff.name || staff.staffName || "").trim();
+              if (!name || mergedNames.has(name) || isSampleEmployee(staff)) return;
+              merged.push({
+                id: `daily-${record.settleDate}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                name,
+                division: staff.division === "정직원" ? "정직원" : "파트타이머",
+                residentNumber: formatResidentNumber(staff.residentNumber || ""),
+                contractType: staff.division === "정직원" ? "4대보험" : "3.3%",
+                entryDate: staff.entryDate || staff.hireDate || "",
+                phone: staff.phone || "",
+                addReason: staff.addReason,
+                fromBranch: staff.fromBranch || "",
+                transferDate: staff.transferDate || "",
+                hireDate: staff.hireDate || "",
+                addReasonMemo: staff.addReasonMemo || "",
+                ...(staff.division === "정직원" ? { rank: staff.rank || "" } : {})
+              });
+              mergedNames.add(name);
+            });
+          } catch {}
+        });
 
         setEmployees(merged as Employee[]);
         localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(merged));
 
-        // 오염이 있거나 결과가 달라진 경우 branch_own_rosters 정리
-        const needsUpdate = ownRoster.some((e: any) => !isBranchEmployee(e) || isSampleEmployee(e))
-          || ownRoster.length !== merged.length;
+        // 샘플 제거 또는 최근 일일마감 근무자 복구가 필요한 경우 branch_own_rosters 정리
+        const needsUpdate = ownRoster.some((e: any) => isSampleEmployee(e)) || ownRoster.length !== merged.length;
         if (needsUpdate) {
           await gasClient.saveBranchOwnRoster(branchName, merged);
         }
