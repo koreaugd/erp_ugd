@@ -2296,32 +2296,77 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   }, [submitting]);
 
   // Prepopulate standard worker checklist
+  const mapEmployeeToStaffRow = useCallback((emp: Employee): StaffRow => ({
+    division: emp.division,
+    name: emp.name,
+    residentNumber: emp.residentNumber || "",
+    rank: emp.rank || "",
+    entryDate: emp.entryDate || "",
+    phone: emp.phone || "",
+    addReason: emp.addReason,
+    fromBranch: emp.fromBranch || "",
+    transferDate: emp.transferDate || "",
+    hireDate: emp.hireDate || "",
+    addReasonMemo: emp.addReasonMemo || "",
+    standardHours: emp.division === "정직원" ? defaultStandardHours : 0,
+    clockIn: "",
+    clockOut: "",
+    workHours: 0,
+    overtime: 0,
+    overtimeReason: "",
+    officeWorkType: "근무",
+    officeTaskMemo: "",
+    officeWorkplace: branchName
+  }), [branchName, defaultStandardHours]);
+
+  const hasStaffWorkInput = (row: StaffRow) =>
+    Boolean(
+      row.clockIn ||
+      row.clockOut ||
+      Number(row.workHours || 0) > 0 ||
+      Number(row.overtime || 0) > 0 ||
+      String(row.overtimeReason || "").trim() ||
+      String(row.officeTaskMemo || "").trim()
+    );
+
+  const reconcileDraftStaffRows = useCallback((rows: StaffRow[]) => {
+    const roster = getRoster();
+    const rosterKeys = new Set(roster.map((emp) => `${emp.name}|${emp.residentNumber || ""}`));
+    const rosterNames = new Set(roster.map((emp) => emp.name));
+    const usedKeys = new Set<string>();
+
+    const keptRows = rows.filter((row) => {
+      const key = `${row.name}|${row.residentNumber || ""}`;
+      const inRoster = rosterKeys.has(key) || rosterNames.has(row.name);
+      if (inRoster) {
+        usedKeys.add(key);
+        usedKeys.add(`${row.name}|`);
+        return true;
+      }
+      return hasStaffWorkInput(row);
+    });
+
+    const nextRows = [...keptRows];
+    roster.forEach((emp) => {
+      const key = `${emp.name}|${emp.residentNumber || ""}`;
+      const exists = nextRows.some((row) =>
+        `${row.name}|${row.residentNumber || ""}` === key ||
+        (!emp.residentNumber && row.name === emp.name) ||
+        (emp.residentNumber && row.name === emp.name && !row.residentNumber)
+      );
+      if (!exists && !usedKeys.has(key)) {
+        nextRows.push(mapEmployeeToStaffRow(emp));
+      }
+    });
+
+    return isHeadOffice ? distributeHeadOfficeOvertime(nextRows) : nextRows;
+  }, [getRoster, isHeadOffice, mapEmployeeToStaffRow]);
+
   const initRosterInForm = useCallback(() => {
     const list = getRoster();
-    const mappedRows: StaffRow[] = list.map((emp) => ({
-      division: emp.division,
-      name: emp.name,
-      residentNumber: emp.residentNumber || "",
-      rank: emp.rank || "",
-      entryDate: emp.entryDate || "",
-      phone: emp.phone || "",
-      addReason: emp.addReason,
-      fromBranch: emp.fromBranch || "",
-      transferDate: emp.transferDate || "",
-      hireDate: emp.hireDate || "",
-      addReasonMemo: emp.addReasonMemo || "",
-      standardHours: emp.division === "정직원" ? defaultStandardHours : 0,
-      clockIn: "",
-      clockOut: "",
-      workHours: 0,
-      overtime: 0,
-      overtimeReason: "",
-      officeWorkType: "근무",
-      officeTaskMemo: "",
-      officeWorkplace: branchName
-    }));
+    const mappedRows: StaffRow[] = list.map(mapEmployeeToStaffRow);
     setStaffRows(mappedRows);
-  }, [getRoster, defaultStandardHours]);
+  }, [getRoster, mapEmployeeToStaffRow]);
 
   const updateStaffAddDraft = (id: string, patch: Partial<StaffAddDraft>) => {
     setStaffAddDrafts((current) => current.map((draft) => {
@@ -2590,7 +2635,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setReviewMemo("");
           setOtherMemo("");
           initRosterInForm();
-          setTimeout(() => restoreDraftIfAvailable(), 0);
+          setTimeout(() => {
+            if (restoreDraftIfAvailable()) {
+              setStaffRows((current) => reconcileDraftStaffRows(current));
+            }
+          }, 0);
         }
       } catch (err: any) {
         console.error("Duplicate checking error:", err);
@@ -2606,7 +2655,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         setReviewMemo("");
         setOtherMemo("");
         initRosterInForm();
-        setTimeout(() => restoreDraftIfAvailable(), 0);
+        setTimeout(() => {
+          if (restoreDraftIfAvailable()) {
+            setStaffRows((current) => reconcileDraftStaffRows(current));
+          }
+        }, 0);
       } finally {
         setChecking(false);
         setDraftReady(true);
@@ -2614,7 +2667,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     };
 
     checkDuplicateAndLoad();
-  }, [settleDate, branchName, getRoster, initRosterInForm, restoreDraftIfAvailable]);
+  }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable]);
 
   // Real-time Sum calculations
   const totalSales = useMemo(() => {
