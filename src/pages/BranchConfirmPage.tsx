@@ -2483,7 +2483,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
           if (metadataParsed) {
             // Restore from perfect JSON metadata
-            setStaffRows(metadataParsed.staffRows || []);
+            setStaffRows(isHeadOffice ? distributeHeadOfficeOvertime(metadataParsed.staffRows || []) : metadataParsed.staffRows || []);
             setCashExpenses(metadataParsed.cashExpenses || []);
             setCardExpenses(metadataParsed.cardExpenses || []);
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
@@ -2673,6 +2673,31 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     executeStaffCalculation(index, { [field]: `${hour}:${match[2] || match[4]}` });
   };
 
+  const distributeHeadOfficeOvertime = (rows: StaffRow[]) => {
+    const groups = new Map<string, number[]>();
+    rows.forEach((row, index) => {
+      const key = row.name || `row-${index}`;
+      groups.set(key, [...(groups.get(key) || []), index]);
+    });
+
+    const next = rows.map((row) => ({ ...row, overtime: 0 }));
+    groups.forEach((indexes) => {
+      const activeIndexes = indexes.filter((index) => next[index].officeWorkType !== "휴무");
+      const standard = activeIndexes.reduce((value, index) => value || Number(next[index].standardHours || 0), 0) || defaultStandardHours;
+      let cumulativeHours = 0;
+      let allocatedOvertime = 0;
+      activeIndexes.forEach((index) => {
+        cumulativeHours += Number(next[index].workHours || 0);
+        const totalOvertime = Math.max(0, cumulativeHours - standard);
+        const rowOvertime = parseFloat((totalOvertime - allocatedOvertime).toFixed(1));
+        allocatedOvertime = totalOvertime;
+        next[index].overtime = rowOvertime;
+        if (rowOvertime <= 0) next[index].overtimeReason = "";
+      });
+    });
+    return next;
+  };
+
   // Interactive Staff updates with calculation triggers
   const executeStaffCalculation = (index: number, updatedFields: Partial<StaffRow>) => {
     setStaffRows((prev) => {
@@ -2702,7 +2727,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           if (row.overtime === 0) row.overtimeReason = "";
         }
         copy[index] = row;
-        return copy;
+        return distributeHeadOfficeOvertime(copy);
       }
 
       const inDec = parseTimeToDecimal(row.clockIn);
@@ -3918,20 +3943,20 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         {isHeadOffice && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs min-w-[1240px]">
+            <table className="w-full text-left border-collapse text-xs min-w-[1160px]">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                  <th className="py-3 px-2 w-28">이름</th>
+                  <th className="py-3 px-2 w-20">이름</th>
                   <th className="py-3 px-2 w-36">근무지점</th>
                   <th className="py-3 px-2 w-24 text-center">휴무</th>
-                  <th className="py-3 px-2 w-24">기준</th>
+                  <th className="py-3 px-1 w-16">기준</th>
                   <th className="py-3 px-2 w-24">업무시작</th>
                   <th className="py-3 px-2 w-24">업무마감</th>
                   <th className="py-3 px-1 w-14 text-right">근무</th>
                   <th className="py-3 px-1 w-14 text-right">초과</th>
                   <th className="py-3 px-2 min-w-[280px]">업무내용</th>
                   <th className="py-3 px-2 w-44">초과 사유</th>
-                  <th className="py-3 px-2 w-16 text-center">분리</th>
+                  <th className="py-3 px-1 w-14 text-center">분리</th>
                   <th className="py-3 px-2 w-10 text-center">삭제</th>
                 </tr>
               </thead>
@@ -3948,7 +3973,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                     const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !s.clockIn || !s.clockOut || !String(s.officeTaskMemo || "").trim() || !String(s.officeWorkplace || "").trim());
                     return (
                       <tr key={idx} className="hover:bg-gray-50/50">
-                        <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
+                        <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">{s.name}</td>
                         <td className="py-3.5 px-2">
                           <select
                             disabled={isDayOff}
@@ -3973,12 +3998,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             휴무
                           </label>
                         </td>
-                        <td className="py-3.5 px-2">
+                        <td className="py-3.5 px-1">
                           <select
                             disabled={isDayOff}
                             value={String(s.standardHours)}
                             onChange={(e) => executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" })}
-                            className="w-20 px-2 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
+                            className="w-14 px-1 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
                           >
                             <option value="0">0h</option>
                             <option value="8">8h</option>
@@ -4039,11 +4064,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             }`}
                           />
                         </td>
-                        <td className="py-3.5 px-2 text-center">
+                        <td className="py-3.5 px-1 text-center">
                           <button
                             type="button"
                             onClick={() => addOfficeWorkSegment(idx)}
-                            className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black hover:bg-blue-100"
+                            className="whitespace-nowrap px-1.5 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black hover:bg-blue-100"
                           >
                             행 추가
                           </button>
