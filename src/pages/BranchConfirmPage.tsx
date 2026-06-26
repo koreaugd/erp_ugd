@@ -6460,7 +6460,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       const headerStyle = {
         font: { bold: true, sz: 10, color: { rgb: "1F2937" } },
         fill: { patternType: "solid", fgColor: { rgb: "F1C232" } },
-        alignment: { horizontal: "center", vertical: "center", wrapText: true },
+        alignment: { horizontal: "center", vertical: "center", wrapText: false },
         border: { top: { style: "thin", color: { rgb: "B08A00" } }, bottom: { style: "thin", color: { rgb: "B08A00" } }, left: { style: "thin", color: { rgb: "B08A00" } }, right: { style: "thin", color: { rgb: "B08A00" } } }
       };
       const titleStyle = { font: { bold: true, sz: 10, color: { rgb: "17365D" } }, alignment: { vertical: "center" } };
