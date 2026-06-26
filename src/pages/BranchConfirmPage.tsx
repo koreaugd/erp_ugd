@@ -912,9 +912,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {[
                   { id: "purchaseSales", label: "매입매출", icon: FileText },
                   { id: "partTimeSalary", label: "파트타이머 급여대장", icon: Users },
-                  { id: "cashExpenses", label: "현금지출 일람", icon: Coins },
-                  { id: "cashManagement", label: "현금관리 집계", icon: CircleDollarSign },
-                  { id: "cardExpenses", label: "카드지출 일람", icon: ShoppingCart }
+                  { id: "cashManagement", label: "현금관리", icon: CircleDollarSign },
+                  { id: "cashExpenses", label: "현금지출", icon: Coins },
+                  { id: "cardExpenses", label: "카드지출", icon: ShoppingCart }
                 ].map((t) => {
                   const IconComp = t.icon;
                   const active = monthlyTab === t.id;
@@ -1274,9 +1274,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                             {[
                               { key: "purchaseSales", label: "매입매출" },
                               { key: "partTimeSalary", label: "파트타이머 급여대장" },
-                              { key: "cashExpenses", label: "현금지출 일람" },
-                              { key: "cashManagement", label: "현금관리 집계" },
-                              { key: "cardExpenses", label: "카드지출 일람" },
+                              { key: "cashManagement", label: "현금관리" },
+                              { key: "cashExpenses", label: "현금지출" },
+                              { key: "cardExpenses", label: "카드지출" },
                             ].map((sh) => (
                               <label key={sh.key} className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg hover:bg-gray-50 text-[11px] font-bold text-gray-700 cursor-pointer">
                                 <input
