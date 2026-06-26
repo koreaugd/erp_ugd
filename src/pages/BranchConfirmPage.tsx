@@ -1941,8 +1941,36 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4">
+      <section className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-amber-50 shadow-sm p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#2E6DB4] px-3 py-1 text-[11px] font-black text-white shadow-sm">
+              <Info className="w-3.5 h-3.5" />
+              관리자 공지
+            </div>
+            <h3 className="mt-3 text-lg font-black text-gray-900">관리자 공지사항</h3>
+          </div>
+          <span className="rounded-full bg-white/85 px-3 py-1 text-xs font-black text-[#2E6DB4] border border-blue-100">{notices.length}건</span>
+        </div>
+        {loading ? (
+          <div className="py-10 flex justify-center"><LoadingSpinner size="md" /></div>
+        ) : notices.length === 0 ? (
+          <div className="rounded-2xl bg-white/75 border border-blue-100 p-5 text-sm font-bold text-gray-500 text-center">등록된 공지사항이 없습니다.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {notices.slice(0, 6).map((notice, index) => (
+              <div key={notice.id || index} className="rounded-2xl bg-white border border-blue-100 p-4 shadow-xs">
+                <p className="text-sm font-black text-gray-900">{notice.title || "공지사항"}</p>
+                <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
+                <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="grid grid-cols-1 gap-6">
+        <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500" /> 미결 확인사항</h3>
             <span className="text-xs font-black text-gray-400">{issues.length}건</span>
@@ -1976,23 +2004,6 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
                       )}
                     </div>
                   )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4">
-          <h3 className="text-sm font-black text-gray-800 flex items-center gap-2"><Info className="w-4 h-4 text-[#2E6DB4]" /> 관리자 공지사항</h3>
-          {notices.length === 0 ? (
-            <p className="text-xs text-gray-400 py-8 text-center">등록된 공지사항이 없습니다.</p>
-          ) : (
-            <div className="space-y-3">
-              {notices.slice(0, 5).map((notice, index) => (
-                <div key={notice.id || index} className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
-                  <p className="text-sm font-black text-gray-800">{notice.title || "공지사항"}</p>
-                  <p className="text-xs text-gray-500 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
-                  <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
                 </div>
               ))}
             </div>
