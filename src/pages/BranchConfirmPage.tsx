@@ -6578,6 +6578,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monthlyCloseStatus, setMonthlyCloseStatus] = useState<any | null>(null);
+  const [purchaseResetToken, setPurchaseResetToken] = useState(0);
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -6610,17 +6611,18 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     }
   }, [branchName, selectedMonth]);
 
-  const saveMonthlyCloseStatus = useCallback(async (status: "confirmed" | "editing") => {
+  const saveMonthlyCloseStatus = useCallback(async (status: "confirmed" | "editing" | "pending") => {
     const previous = await gasClient.getSharedData<any[]>("monthly_closings");
     const list = Array.isArray(previous) ? previous : [];
     const now = new Date().toISOString();
+    const current = list.find((record) => record.branchName === branchName && record.month === selectedMonth);
     const nextRecord = {
       id: `${branchName}-${selectedMonth}`,
       branchName,
       month: selectedMonth,
       status,
       writer: branchName,
-      confirmedAt: status === "confirmed" ? now : list.find((record) => record.branchName === branchName && record.month === selectedMonth)?.confirmedAt || "",
+      confirmedAt: status === "confirmed" ? now : current?.confirmedAt || "",
       updatedAt: now
     };
     const next = [nextRecord, ...list.filter((record) => !(record.branchName === branchName && record.month === selectedMonth))];
@@ -7043,6 +7045,52 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     }
   }, [saveMonthlyCloseStatus, selectedMonth, triggerToast]);
 
+  const resetMonthlyPurchaseAmounts = useCallback(async () => {
+    let purchaseRows: any[] = [];
+    try {
+      const remote = await gasClient.getSharedData<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
+      if (Array.isArray(remote)) purchaseRows = remote;
+    } catch {}
+    if (purchaseRows.length === 0) {
+      try {
+        const saved = localStorage.getItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`);
+        if (saved) purchaseRows = JSON.parse(saved);
+      } catch {}
+    }
+    if (purchaseRows.length === 0) return;
+    const resetRows = purchaseRows.map((row) => ({
+      ...row,
+      transferAmount: "",
+      prepaidChargeAmount: "",
+      monthlyUsageAmount: ""
+    }));
+    localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(resetRows));
+    await gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, resetRows);
+  }, [branchName, selectedMonth]);
+
+  const handleCancelMonthlyClose = useCallback(async () => {
+    if (!window.confirm("월말마감을 취소하고 거래처 금액 입력값만 초기화할까요?\n거래처명, 은행, 계좌, 기타내용은 유지됩니다.")) return;
+    try {
+      await saveMonthlyCloseStatus("pending");
+      await resetMonthlyPurchaseAmounts();
+      setPurchaseResetToken((value) => value + 1);
+      triggerToast(`${selectedMonth} 월말마감이 취소되었고 거래처 금액이 초기화되었습니다.`, "success");
+    } catch (error: any) {
+      console.error(error);
+      triggerToast(error?.message || "월말마감 취소에 실패했습니다.", "error");
+    }
+  }, [resetMonthlyPurchaseAmounts, saveMonthlyCloseStatus, selectedMonth, triggerToast]);
+
+  const handleCancelMonthlyEdit = useCallback(async () => {
+    try {
+      await saveMonthlyCloseStatus("confirmed");
+      triggerToast(`${selectedMonth} 월말마감 수정이 취소되고 확정 상태로 돌아갔습니다.`, "success");
+    } catch (error: any) {
+      console.error(error);
+      triggerToast(error?.message || "월말마감 수정 취소에 실패했습니다.", "error");
+    }
+  }, [saveMonthlyCloseStatus, selectedMonth, triggerToast]);
+
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
@@ -7100,14 +7148,31 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
             className="p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
           >
             <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-            월말마감확정
+            월말마감 확정
           </button>
+          {monthlyCloseStatus?.status === "editing" ? (
+            <button
+              onClick={handleCancelMonthlyEdit}
+              className="p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            >
+              <X className="w-4 h-4 text-slate-200" />
+              월말마감 수정 취소
+            </button>
+          ) : (
+            <button
+              onClick={handleEditMonthlyClose}
+              className="p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            >
+              <Pencil className="w-4 h-4 text-amber-100" />
+              월말마감 수정
+            </button>
+          )}
           <button
-            onClick={handleEditMonthlyClose}
-            className="p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            onClick={handleCancelMonthlyClose}
+            className="p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
           >
-            <Pencil className="w-4 h-4 text-amber-100" />
-            월말마감 수정
+            <Trash2 className="w-4 h-4 text-rose-200" />
+            월말마감 취소
           </button>
         </div>
       </div>
@@ -7134,7 +7199,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       ) : (
         <div className="space-y-6">
           {activeSubTab === "purchaseSales" && (
-            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} />
+            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} />
           )}
           {activeSubTab === "partTimeSalary" && (
             <MonthlyPartTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} history={history} triggerToast={triggerToast} />
@@ -7173,11 +7238,13 @@ interface PurchaseSalesRow {
 function MonthlyPurchaseSalesSubTab({
   branchName,
   selectedMonth,
-  triggerToast
+  triggerToast,
+  resetToken = 0
 }: {
   branchName: string;
   selectedMonth: string;
   triggerToast: (msg: string, type?: "success" | "error") => void;
+  resetToken?: number;
 }) {
   const [rows, setRows] = useState<PurchaseSalesRow[]>([]);
 
@@ -7244,13 +7311,16 @@ function MonthlyPurchaseSalesSubTab({
   };
 
   const handleUpdateRow = (id: string, field: keyof PurchaseSalesRow, val: any) => {
+    const nextValue = ["transferAmount", "prepaidChargeAmount", "monthlyUsageAmount"].includes(String(field))
+      ? cleanNumeric(String(val || ""))
+      : val;
     setRows(prev =>
       prev.map(r => {
         if (r.id !== id) return r;
-        const updated = { ...r, [field]: val };
+        const updated = { ...r, [field]: nextValue };
         // If it's regular vendor and transferAmount changes, sync usageAmount
         if (field === "transferAmount" && !updated.isPrepaid) {
-          updated.monthlyUsageAmount = val;
+          updated.monthlyUsageAmount = nextValue;
         }
         if (field === "isPrepaid" && val === true && !updated.prepaidChargeAmount) {
           updated.prepaidChargeAmount = updated.transferAmount || "";
@@ -7283,6 +7353,21 @@ function MonthlyPurchaseSalesSubTab({
   const handleDeleteRow = (id: string) => {
     setRows(prev => prev.filter(r => r.id !== id));
   };
+
+  useEffect(() => {
+    if (!resetToken) return;
+    const resetRows = rows.map((row) => ({
+      ...row,
+      transferAmount: "",
+      prepaidChargeAmount: "",
+      monthlyUsageAmount: ""
+    }));
+    setRows(resetRows);
+    localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(resetRows));
+    gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, resetRows).catch((error) => {
+      console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
+    });
+  }, [resetToken]);
 
   // Calculations
   const totalTransfer = rows.reduce((acc, r) => acc + (Number(r.transferAmount) || 0), 0);
@@ -7409,8 +7494,9 @@ function MonthlyPurchaseSalesSubTab({
                   </td>
                   <td className="py-2 px-2.5">
                     <input
-                      type="number"
-                      value={row.prepaidChargeAmount || ""}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatWithCommas(row.prepaidChargeAmount || "")}
                       disabled={!row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "충전 금액" : "-"}
@@ -7421,8 +7507,9 @@ function MonthlyPurchaseSalesSubTab({
                   </td>
                   <td className="py-2 px-2.5">
                     <input
-                      type="number"
-                      value={row.transferAmount}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatWithCommas(row.transferAmount)}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
                       placeholder="송금 필요 금액"
                       className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right focus:outline-none focus:border-[#2E6DB4] text-red-650"
@@ -7430,8 +7517,9 @@ function MonthlyPurchaseSalesSubTab({
                   </td>
                   <td className="py-2 px-2.5">
                     <input
-                      type="number"
-                      value={row.monthlyUsageAmount}
+                      type="text"
+                      inputMode="numeric"
+                      value={formatWithCommas(row.monthlyUsageAmount)}
                       disabled={!row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "발주액 합계" : "-"}
