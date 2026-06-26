@@ -13,7 +13,8 @@ import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
-  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase, Trash2
+  X, Plus, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase, Trash2,
+  Coins
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { loginWithAdminPin } from "../api/firebaseAuth";
@@ -65,7 +66,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -80,6 +81,11 @@ export default function AdminPage() {
   const [cleaningRosters, setCleaningRosters] = useState(false);
   const [clearingDirectory, setClearingDirectory] = useState(false);
   const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks">("dashboard");
+  const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
+  const [dailyLogsSubTab, setDailyLogsSubTab] = useState<"logs" | "manualOvertimes">("logs");
+  const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
+  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   const employeeIdSequence = useRef(1);
   // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
   const employeeDirectoryEnabled = false;
@@ -412,6 +418,60 @@ export default function AdminPage() {
   };
   useEffect(() => { if (adminSection === "dashboard") void loadClosingAnomalies(); }, [adminSection]);
 
+  const loadDashboardAlerts = useCallback(async () => {
+    try {
+      setDashboardAlertsLoading(true);
+      const editAck = localStorage.getItem("admin_dashboard_ack_edit_logs") || "";
+      const manualAck = localStorage.getItem("admin_dashboard_ack_manual_overtimes") || "";
+      const [editLogs, manualOvertimes] = await Promise.all([
+        gasClient.getEditLogs().catch(() => []),
+        gasClient.getAllManualOvertimes().catch(() => [])
+      ]);
+      const afterAck = (value: string | undefined, ack: string) => {
+        if (!value) return !ack;
+        if (!ack) return true;
+        return String(value) > ack;
+      };
+      const editNew = (editLogs || []).filter((log: any) => afterAck(log.modifiedAt || log.createdAt, editAck));
+      const manualNew = (manualOvertimes || []).filter((record: any) => afterAck(record.createdAt || record.updatedAt || record.settleDate, manualAck));
+      const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
+        const value = fields.map((field) => item?.[field]).find(Boolean) || "";
+        return String(value) > max ? String(value) : max;
+      }, "");
+      setDashboardAlerts({
+        editLogs: editNew.length,
+        manualOvertimes: manualNew.length,
+        latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
+        latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
+      });
+    } finally {
+      setDashboardAlertsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminSection === "dashboard") void loadDashboardAlerts();
+  }, [adminSection, loadDashboardAlerts]);
+
+  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes") => {
+    if (target === "dailyPending") {
+      setAdminSection("dailySettlement");
+      setDailySettlementTab("status");
+      return;
+    }
+    setAdminSection("dailySettlement");
+    setDailySettlementTab("logs");
+    if (target === "editLogs") {
+      localStorage.setItem("admin_dashboard_ack_edit_logs", dashboardAlerts.latestEditLogAt || new Date().toISOString());
+      setDailyLogsSubTab("logs");
+      setDashboardAlerts((current) => ({ ...current, editLogs: 0 }));
+    } else {
+      localStorage.setItem("admin_dashboard_ack_manual_overtimes", dashboardAlerts.latestManualOvertimeAt || new Date().toISOString());
+      setDailyLogsSubTab("manualOvertimes");
+      setDashboardAlerts((current) => ({ ...current, manualOvertimes: 0 }));
+    }
+  };
+
   const brandList = useMemo(() => {
     const brands = new Set<string>();
     brands.add("전체");
@@ -615,7 +675,21 @@ export default function AdminPage() {
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "dashboard" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
           >
             <TrendingUp className="w-5 h-5" />
-            마감현황
+            대시보드
+          </button>
+          <button
+            onClick={() => setAdminSection("dailySettlement")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "dailySettlement" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <FileSpreadsheet className="w-5 h-5" />
+            일일 정산현황
+          </button>
+          <button
+            onClick={() => setAdminSection("monthlyClosing")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "monthlyClosing" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <Coins className="w-5 h-5" />
+            월말마감
           </button>
           <button
             onClick={() => setAdminSection("annualLeave")}
@@ -623,13 +697,6 @@ export default function AdminPage() {
           >
             <Calendar className="w-5 h-5" />
             연차관리
-          </button>
-          <button
-            onClick={() => setAdminSection("modificationLogs")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "modificationLogs" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
-          >
-            <ShieldAlert className="w-5 h-5" />
-            변경이력 & 수기대장
           </button>
           <button
             onClick={() => setAdminSection("laborContracts")}
@@ -640,7 +707,7 @@ export default function AdminPage() {
           </button>
           <button
             onClick={() => navigate("/branch-confirm")}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors text-white/80 hover:bg-white/10 hover:text-white"
+            className="w-full flex items-center gap-3 px-4 py-3 mt-8 pt-5 border-t border-white/10 rounded-xl font-bold text-sm transition-colors text-white/80 hover:bg-white/10 hover:text-white"
           >
             <ClipboardList className="w-5 h-5" />
             지점 대시보드
@@ -695,6 +762,13 @@ export default function AdminPage() {
           {adminSection === "dashboard" && (
             <>
               <AdminNoticeManager />
+              <AdminDashboardAlertHub
+                pendingDailyCount={stats.pending}
+                alerts={dashboardAlerts}
+                loading={dashboardAlertsLoading}
+                onRefresh={() => void loadDashboardAlerts()}
+                onOpen={handleDashboardAlertClick}
+              />
 
               <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
@@ -764,9 +838,8 @@ export default function AdminPage() {
                 </div>
               </section>
 
-              <AdminMonthlyClosingStatusSection />
-
               {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
+              <div className="hidden">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전일 정산 현황</h2>
@@ -977,10 +1050,47 @@ export default function AdminPage() {
               </table>
             </div>
           </div>
+              </div>
             </>
           )}
 
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
+
+          {adminSection === "dailySettlement" && (
+            <section className="space-y-5 animate-fade-in">
+              <div className="flex gap-2 border-b border-gray-200">
+                <button onClick={() => setDailySettlementTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
+                <button onClick={() => setDailySettlementTab("logs")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변경이력 & 수기대장</button>
+              </div>
+              {dailySettlementTab === "status" ? (
+                <AdminDailySettlementStatusSection
+                  selectedDate={selectedDate}
+                  setSelectedDate={setSelectedDate}
+                  selectedBrand={selectedBrand}
+                  setSelectedBrand={setSelectedBrand}
+                  brandList={brandList}
+                  stats={stats}
+                  loading={loading}
+                  filteredList={filteredList}
+                  handleDownloadExcel={handleDownloadExcel}
+                  handleOpenDetail={handleOpenDetail}
+                />
+              ) : <AdminModificationLogsSection defaultSubTab={dailyLogsSubTab} />}
+            </section>
+          )}
+
+          {adminSection === "monthlyClosing" && (
+            <section className="space-y-5 animate-fade-in">
+              <div className="flex gap-2 border-b border-gray-200">
+                <button onClick={() => setMonthlyClosingTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>월말마감 제출현황</button>
+                <button onClick={() => setMonthlyClosingTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
+                <button onClick={() => setMonthlyClosingTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
+              </div>
+              {monthlyClosingTab === "status" && <AdminMonthlyClosingStatusSection />}
+              {monthlyClosingTab === "cashManagement" && <AdminCashManagementSection fixedTab="cashManagement" />}
+              {monthlyClosingTab === "cashExpenses" && <AdminCashManagementSection fixedTab="cashExpenses" />}
+            </section>
+          )}
 
           {adminSection === "modificationLogs" && <AdminModificationLogsSection />}
 
@@ -1306,19 +1416,21 @@ export default function AdminPage() {
 function AdminNoticeManager() {
   const [notices, setNotices] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [noticeTab, setNoticeTab] = useState<"admin" | "branch">("branch");
   const [targetBranch, setTargetBranch] = useState("전체");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const noticeStorageKey = noticeTab === "admin" ? "admin_dashboard_notices" : "admin_notices";
 
   const load = useCallback(async () => {
     const [saved, branchList] = await Promise.all([
-      gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
+      gasClient.getSharedData<any[]>(noticeStorageKey).catch(() => []),
       gasClient.getBranchList().catch(() => [])
     ]);
     setNotices(Array.isArray(saved) ? saved : []);
     setBranches(Array.isArray(branchList) ? branchList : []);
-  }, []);
+  }, [noticeStorageKey]);
 
   useEffect(() => {
     void load();
@@ -1329,7 +1441,7 @@ function AdminNoticeManager() {
     try {
       setSaving(true);
       const next = [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
-      await gasClient.saveSharedData("admin_notices", next);
+      await gasClient.saveSharedData(noticeStorageKey, next);
       setNotices(next);
       setTitle("");
       setBody("");
@@ -1341,7 +1453,7 @@ function AdminNoticeManager() {
   const deleteNotice = async (id: string) => {
     if (!window.confirm("공지사항을 삭제할까요?")) return;
     const next = notices.filter((notice) => notice.id !== id);
-    await gasClient.saveSharedData("admin_notices", next);
+    await gasClient.saveSharedData(noticeStorageKey, next);
     setNotices(next);
   };
 
@@ -1351,8 +1463,12 @@ function AdminNoticeManager() {
         <h2 className="text-lg font-black text-[#2C3E50]">지점 공지사항</h2>
         <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
       </div>
+      <div className="flex rounded-xl bg-slate-100 p-1 w-fit">
+        <button onClick={() => setNoticeTab("admin")} className={`px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "bg-white text-[#2E6DB4] shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
+        <button onClick={() => setNoticeTab("branch")} className={`px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "bg-white text-[#2E6DB4] shadow-sm" : "text-gray-500"}`}>지점 공지사항</button>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-[180px_180px_1fr_auto] gap-2">
-        <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+        <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold disabled:bg-gray-100 disabled:text-gray-400">
           <option value="전체">전체공지</option>
           {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
         </select>
@@ -1373,6 +1489,321 @@ function AdminNoticeManager() {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function AdminDashboardAlertHub({
+  pendingDailyCount,
+  alerts,
+  loading,
+  onRefresh,
+  onOpen
+}: {
+  pendingDailyCount: number;
+  alerts: { editLogs: number; manualOvertimes: number };
+  loading: boolean;
+  onRefresh: () => void;
+  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes") => void;
+}) {
+  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes;
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black text-[#2C3E50]">새로 확인할 항목</h2>
+          <p className="text-xs text-gray-400 mt-1">버튼을 누르면 해당 사이드바 탭으로 이동하고, 신규 변경 항목은 확인 처리됩니다.</p>
+        </div>
+        <button onClick={onRefresh} className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-black">
+          {loading ? "확인 중..." : "새로고침"}
+        </button>
+      </div>
+
+      {totalAlerts === 0 ? (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-sm font-bold text-emerald-700">
+          새로 확인할 항목이 없습니다.
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {pendingDailyCount > 0 && (
+            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-sm font-black hover:bg-amber-100">
+              일일정산 미제출: {pendingDailyCount}건
+            </button>
+          )}
+          {alerts.editLogs > 0 && (
+            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-sm font-black hover:bg-blue-100">
+              정산 변경: {alerts.editLogs}건
+            </button>
+          )}
+          {alerts.manualOvertimes > 0 && (
+            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-sm font-black hover:bg-violet-100">
+              초과근무 수기작성: {alerts.manualOvertimes}건
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AdminDailySettlementStatusSection({
+  selectedDate,
+  setSelectedDate,
+  selectedBrand,
+  setSelectedBrand,
+  brandList,
+  stats,
+  loading,
+  filteredList,
+  handleDownloadExcel,
+  handleOpenDetail
+}: {
+  selectedDate: string;
+  setSelectedDate: (value: string) => void;
+  selectedBrand: string;
+  setSelectedBrand: (value: string) => void;
+  brandList: string[];
+  stats: { total: number; submitted: number; pending: number; revenue: number };
+  loading: boolean;
+  filteredList: DailyListRow[];
+  handleDownloadExcel: () => void;
+  handleOpenDetail: (row: DailyListRow) => void;
+}) {
+  return (
+    <section className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전일 정산현황</h2>
+          <p className="text-xs text-gray-400 mt-0.5 font-medium">선택한 날짜 기준으로 지점별 제출 상태와 매출 합계를 확인합니다.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 border border-gray-200 bg-white py-2 px-3 rounded-xl shadow-xs">
+            <Calendar className="w-4 h-4 text-[#2E6DB4]" />
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="font-mono text-xs font-extrabold text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-32"
+            />
+          </div>
+          <button onClick={handleDownloadExcel} className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer">
+            <Download className="w-4 h-4" /> 엑셀 다운로드
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">제출 지점</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{stats.submitted} <span className="text-xs font-bold text-gray-300 font-sans">/ {stats.total}</span></span></div>
+          <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600"><CheckCircle2 className="w-6 h-6" /></div>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">미제출 지점</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{stats.pending}</span></div>
+          <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]"><AlertTriangle className="w-6 h-6" /></div>
+        </div>
+        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
+          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">총 수집 매출</span><span className="text-2xl font-mono font-black text-[#2E6DB4]">{formatNumber(stats.revenue)}원</span></div>
+          <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl"><TrendingUp className="w-6 h-6" /></div>
+        </div>
+      </div>
+
+      <div className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 flex flex-wrap gap-4 items-center justify-between">
+        <div className="flex items-center gap-2"><Filter className="w-4 h-4 text-gray-400 shrink-0" /><span className="text-xs font-bold text-gray-500">브랜드 필터</span></div>
+        <div className="flex gap-1.5 overflow-x-auto pb-1 max-w-full">
+          {brandList.map((brand) => (
+            <button key={brand} onClick={() => setSelectedBrand(brand)} className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-colors whitespace-nowrap ${selectedBrand === brand ? "bg-[#2E6DB4] text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
+              {brand}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-xs border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] border-collapse">
+            <thead><tr className="bg-[#D6E4F0]/30 border-b border-gray-100 text-left"><th className="px-6 py-4 text-xs font-bold text-gray-500">지점명</th><th className="px-6 py-4 text-xs font-bold text-gray-500">브랜드</th><th className="px-6 py-4 text-xs font-bold text-gray-500 text-right">총 매출</th><th className="px-4 py-4 text-xs font-bold text-gray-400 text-right">현금</th><th className="px-4 py-4 text-xs font-bold text-gray-400 text-right">카드</th><th className="px-6 py-4 text-xs font-bold text-gray-500">상태</th><th className="px-6 py-4 text-xs font-bold text-gray-500 text-center">관리</th></tr></thead>
+            <tbody className="divide-y divide-gray-100 text-sm">
+              {loading ? (
+                <tr><td colSpan={7} className="text-center py-16"><LoadingSpinner size="md" /></td></tr>
+              ) : filteredList.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-16 text-gray-400 text-xs">조건에 맞는 지점이 없습니다.</td></tr>
+              ) : filteredList.map((item) => {
+                const record = item.record;
+                return (
+                  <tr key={item.branchName} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-6 py-4 font-bold text-[#2C3E50]">{item.branchName}</td>
+                    <td className="px-6 py-4 text-xs text-gray-500 font-semibold">{item.brand}</td>
+                    <td className="px-6 py-4 text-right font-mono font-bold text-[#1A3C6E]">{record ? `${formatNumber(record.totalSales)}원` : "-"}</td>
+                    <td className="px-4 py-4 text-right font-mono text-xs text-gray-500">{record ? formatNumber(record.cashSales) : "-"}</td>
+                    <td className="px-4 py-4 text-right font-mono text-xs text-gray-500">{record ? formatNumber(record.cardSales) : "-"}</td>
+                    <td className="px-6 py-4">{item.submitted ? <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full"><CheckCircle2 className="w-3.5 h-3.5" /> 완료</span> : <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-[#F39C12] text-xs font-bold rounded-full"><AlertTriangle className="w-3.5 h-3.5" /> 미제출</span>}</td>
+                    <td className="px-6 py-4 text-center">{item.submitted ? <button onClick={() => handleOpenDetail(item)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-[#D6E4F0]/60 text-gray-600 hover:text-[#1A3C6E] text-xs font-bold rounded-xl transition-all cursor-pointer"><Eye className="w-3.5 h-3.5" /> 상세 보기</button> : <span className="text-xs text-gray-300 font-semibold">대기중</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" | "cashExpenses" } = {}) {
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [selectedBranch, setSelectedBranch] = useState("전체");
+  const [activeTab, setActiveTab] = useState<"cashManagement" | "cashExpenses">(fixedTab || "cashManagement");
+  const [branches, setBranches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [cashRows, setCashRows] = useState<any[]>([]);
+  const [expenseRows, setExpenseRows] = useState<any[]>([]);
+
+  const parseMetadata = (memo?: string | null) => {
+    const parts = String(memo || "").split("\n---\nMETADATA:");
+    if (!parts[1]) return {};
+    try {
+      return JSON.parse(parts[1].trim());
+    } catch {
+      return {};
+    }
+  };
+
+  useEffect(() => {
+    if (fixedTab) setActiveTab(fixedTab);
+  }, [fixedTab]);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const branchList = await gasClient.getBranchList();
+      const activeBranches = (Array.isArray(branchList) ? branchList : []).filter((branch: any) => branch?.role === "branch" && branch.branchName);
+      setBranches(activeBranches);
+      const targets = selectedBranch === "전체"
+        ? activeBranches
+        : activeBranches.filter((branch: any) => branch.branchName === selectedBranch);
+
+      const histories = await Promise.all(targets.map(async (branch: any) => ({
+        branch,
+        history: await gasClient.getBranchHistory(branch.branchName, selectedMonth).catch(() => [])
+      })));
+
+      const nextCashRows: any[] = [];
+      const nextExpenseRows: any[] = [];
+
+      histories.forEach(({ branch, history }) => {
+        (history || []).forEach((record: any) => {
+          if (!String(record.settleDate || "").startsWith(selectedMonth)) return;
+          const meta = parseMetadata(record.memo);
+          const cashExpenses = Array.isArray(meta.cashExpenses) ? meta.cashExpenses : [];
+          const cashExpenseTotal = cashExpenses.reduce((sum: number, item: any) => sum + (Number(item.amount) || 0), 0);
+          const prevDayCash = Number(meta.prevDayCash ?? record.prevDayCash ?? 0) || 0;
+          const cashSales = Number(record.cashSales ?? meta.cashSales ?? 0) || 0;
+          const actualCash = Number(meta.cashBalance ?? record.cashBalance ?? 0) || 0;
+          const theoreticalCash = prevDayCash + cashSales - cashExpenseTotal;
+          nextCashRows.push({
+            branchName: branch.branchName,
+            brand: branch.brand || branch.branchName,
+            date: record.settleDate,
+            prevDayCash,
+            cashSales,
+            cashExpenseTotal,
+            theoreticalCash,
+            actualCash,
+            diff: actualCash - theoreticalCash,
+            transfer: Number(meta.transferSales ?? record.transferSales ?? 0) || 0,
+            reason: meta.cashDiffReason || ""
+          });
+          cashExpenses.forEach((expense: any, index: number) => {
+            const amount = Number(expense.amount) || 0;
+            if (amount <= 0) return;
+            nextExpenseRows.push({
+              id: `${branch.branchName}-${record.settleDate}-${index}`,
+              branchName: branch.branchName,
+              brand: branch.brand || branch.branchName,
+              date: record.settleDate,
+              classification: expense.classification || "-",
+              usage: expense.usage || "-",
+              detail: expense.detail || "",
+              amount,
+              writer: record.submittedBy || record.modifiedBy || ""
+            });
+          });
+        });
+      });
+
+      setCashRows(nextCashRows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName))));
+      setExpenseRows(nextExpenseRows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName))));
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBranch, selectedMonth]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const summary = useMemo(() => ({
+    cashExpenseTotal: expenseRows.reduce((sum, row) => sum + row.amount, 0),
+    diffTotal: cashRows.reduce((sum, row) => sum + row.diff, 0)
+  }), [cashRows, expenseRows]);
+
+  return (
+    <section className="space-y-5 animate-fade-in">
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-[#2C3E50]">현금관리</h2>
+            <p className="text-xs text-gray-400 mt-1">전 지점 월말마감의 현금관리 집계와 현금지출 일람을 모아 확인합니다.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold min-w-40">
+              <option value="전체">전체 지점</option>
+              {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+            </select>
+            <button onClick={() => void load()} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">새로고침</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">현금관리 집계</p><p className="text-2xl font-black">{cashRows.length}건</p></div>
+          <div className="rounded-xl bg-orange-50 p-4"><p className="text-xs font-bold text-orange-600">현금지출 합계</p><p className="text-2xl font-black text-orange-700">{formatNumber(summary.cashExpenseTotal)}원</p></div>
+          <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs font-bold text-rose-600">현금 차이 합계</p><p className="text-2xl font-black text-rose-700">{formatNumber(summary.diffTotal)}원</p></div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        {!fixedTab && (
+          <div className="flex gap-2 border-b border-gray-100 px-5">
+            <button onClick={() => setActiveTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
+            <button onClick={() => setActiveTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          {activeTab === "cashManagement" ? (
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">마감일자</th><th className="p-3">지점</th><th className="p-3 text-right">전일현금</th><th className="p-3 text-right">현금매출</th><th className="p-3 text-right">현금지출</th><th className="p-3 text-right">현금잔액</th><th className="p-3 text-right">실사현금</th><th className="p-3 text-right">차이</th><th className="p-3">비고</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : cashRows.length === 0 ? <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">현금관리 내역이 없습니다.</td></tr> : cashRows.map((row) => (
+                  <tr key={`${row.branchName}-${row.date}`}><td className="p-3 font-mono text-xs">{row.date}</td><td className="p-3 font-black">{row.branchName}</td><td className="p-3 text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="p-3 text-right font-mono">{formatNumber(row.cashSales)}</td><td className="p-3 text-right font-mono text-orange-600">{formatNumber(row.cashExpenseTotal)}</td><td className="p-3 text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="p-3 text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`p-3 text-right font-mono font-black ${row.diff ? "text-rose-600" : "text-emerald-600"}`}>{formatNumber(row.diff)}</td><td className="p-3 text-xs text-gray-500">{row.reason || "-"}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full min-w-[860px] text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">일자</th><th className="p-3">지점</th><th className="p-3">분류</th><th className="p-3">사용처</th><th className="p-3">상세</th><th className="p-3 text-right">금액</th><th className="p-3">작성자</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading ? <tr><td colSpan={7} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : expenseRows.length === 0 ? <tr><td colSpan={7} className="p-12 text-center text-gray-400 font-bold">현금지출 내역이 없습니다.</td></tr> : expenseRows.map((row) => (
+                  <tr key={row.id}><td className="p-3 font-mono text-xs">{row.date}</td><td className="p-3 font-black">{row.branchName}</td><td className="p-3">{row.classification}</td><td className="p-3">{row.usage}</td><td className="p-3 text-gray-500">{row.detail || "-"}</td><td className="p-3 text-right font-mono font-black">{formatNumber(row.amount)}</td><td className="p-3 text-xs text-gray-500">{row.writer || "-"}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1694,8 +2125,8 @@ function AdminAnnualLeaveSection() {
   );
 }
 
-function AdminModificationLogsSection() {
-  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">("logs");
+function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTab?: "logs" | "manualOvertimes" } = {}) {
+  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">(defaultSubTab);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
@@ -1716,6 +2147,10 @@ function AdminModificationLogsSection() {
   useEffect(() => {
     loadLogs();
   }, []);
+
+  useEffect(() => {
+    setSubTab(defaultSubTab);
+  }, [defaultSubTab]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
