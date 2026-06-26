@@ -282,6 +282,13 @@ export const gasClient = {
     return await firebaseGetEditLogs();
   },
 
+  async deleteEditLog(logId: string): Promise<{ success: boolean }> {
+    const { firebaseDeleteEditLog } = await import("./firebaseDirect");
+    const result = await firebaseDeleteEditLog(logId);
+    clearReadCache();
+    return result;
+  },
+
   /**
    * 특정 일자의 전체 지점 마감 리스트 조회
    */
