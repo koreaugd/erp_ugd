@@ -1941,7 +1941,7 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         </div>
       </div>
 
-      <section className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-amber-50 shadow-sm p-6 space-y-4">
+      <section className="rounded-3xl border-2 border-rose-500 bg-gradient-to-br from-rose-50 via-white to-amber-50 shadow-sm p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-[#2E6DB4] px-3 py-1 text-[11px] font-black text-white shadow-sm">
@@ -1950,16 +1950,16 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
             </div>
             <h3 className="mt-3 text-lg font-black text-gray-900">관리자 공지사항</h3>
           </div>
-          <span className="rounded-full bg-white/85 px-3 py-1 text-xs font-black text-[#2E6DB4] border border-blue-100">{notices.length}건</span>
+          <span className="rounded-full bg-white/85 px-3 py-1 text-xs font-black text-rose-600 border border-rose-200">{notices.length}건</span>
         </div>
         {loading ? (
           <div className="py-10 flex justify-center"><LoadingSpinner size="md" /></div>
         ) : notices.length === 0 ? (
-          <div className="rounded-2xl bg-white/75 border border-blue-100 p-5 text-sm font-bold text-gray-500 text-center">등록된 공지사항이 없습니다.</div>
+          <div className="rounded-2xl bg-white/75 border border-rose-100 p-5 text-sm font-bold text-gray-500 text-center">등록된 공지사항이 없습니다.</div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {notices.slice(0, 6).map((notice, index) => (
-              <div key={notice.id || index} className="rounded-2xl bg-white border border-blue-100 p-4 shadow-xs">
+              <div key={notice.id || index} className="rounded-2xl bg-white border border-rose-100 p-4 shadow-xs">
                 <p className="text-sm font-black text-gray-900">{notice.title || "공지사항"}</p>
                 <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
                 <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
