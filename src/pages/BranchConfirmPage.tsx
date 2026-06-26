@@ -6243,6 +6243,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
         "분류항목": r.category,
         "송금/사용 대상업체명": r.vendorName,
         "선입금 충전방식?": r.isPrepaid ? "선입금" : "후불이체",
+        "_선입금여부": Boolean(r.isPrepaid),
         "이체필요 금액 (원)": Number(r.transferAmount) || 0,
         "충전금액 (원)": Number(r.prepaidChargeAmount) || 0,
         "실제 이달사용액 (원)": Number(r.monthlyUsageAmount) || 0,
@@ -6396,6 +6397,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
             "이론상 잔액 (원)": theoryVal,
             "금고 실사 현금 (원)": vaultVal,
             "차액 (불일치)": difference,
+            "계좌이체": Number(m.transferSales) || 0,
             "대조 불일치 사유 소명": metaParsed.cashDiffReason || "",
             "점검 작성자": m.submittedBy || m.submitted_by || (m as any).writer || "매니저",
             "_입력원본": m.submittedAt || "",
@@ -6456,12 +6458,12 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       };
 
       const headerStyle = {
-        font: { bold: true, color: { rgb: "FFFFFF" } },
-        fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+        font: { bold: true, sz: 10, color: { rgb: "1F2937" } },
+        fill: { patternType: "solid", fgColor: { rgb: "F1C232" } },
         alignment: { horizontal: "center", vertical: "center", wrapText: true },
-        border: { top: { style: "thin", color: { rgb: "B7C9D6" } }, bottom: { style: "thin", color: { rgb: "B7C9D6" } }, left: { style: "thin", color: { rgb: "B7C9D6" } }, right: { style: "thin", color: { rgb: "B7C9D6" } } }
+        border: { top: { style: "thin", color: { rgb: "B08A00" } }, bottom: { style: "thin", color: { rgb: "B08A00" } }, left: { style: "thin", color: { rgb: "B08A00" } }, right: { style: "thin", color: { rgb: "B08A00" } } }
       };
-      const titleStyle = { font: { bold: true, sz: 14, color: { rgb: "17365D" } }, alignment: { vertical: "center" } };
+      const titleStyle = { font: { bold: true, sz: 10, color: { rgb: "17365D" } }, alignment: { vertical: "center" } };
       const bodyBorder = { top: { style: "thin", color: { rgb: "D9E2F3" } }, bottom: { style: "thin", color: { rgb: "D9E2F3" } }, left: { style: "thin", color: { rgb: "D9E2F3" } }, right: { style: "thin", color: { rgb: "D9E2F3" } } };
 
       const makeSheet = (headers: string[], rows: any[][], widths: number[], includeTitle: boolean, numericColumns: number[] = [], textColumns: number[] = []) => {
@@ -6487,18 +6489,17 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
             const address = XLSX.utils.encode_cell({ r: row, c: col });
             const cell = sheet[address];
             if (!cell) continue;
-            cell.s = { border: bodyBorder, alignment: { vertical: "center", wrapText: col === headers.length - 1 } };
+            cell.s = { font: { sz: 10 }, border: bodyBorder, alignment: { vertical: "center", wrapText: col === headers.length - 1 } };
             if (numericColumns.includes(col)) cell.z = "#,##0";
             if (textColumns.includes(col)) cell.z = "@";
           }
         }
-        sheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: Math.max(headerRow, source.length - 1), c: headers.length - 1 } }) };
         return sheet;
       };
 
       // 기준 파일의 시트명, 제목행, 헤더 순서와 열 폭을 그대로 사용합니다.
       const purchaseHeaders = ["매출항목", "업체명", "이체 필요금액", "은행", "계좌번호", "기타내용", "이달사용금액", "오류"];
-      const purchaseRows = psData.map((row) => [row["분류항목"], row["송금/사용 대상업체명"], row["이체필요 금액 (원)"], row["은행"], row["계좌번호"], row["거래 비고 고지"], row["실제 이달사용액 (원)"], ""]);
+      const purchaseRows = psData.map((row) => [row["분류항목"], row["송금/사용 대상업체명"], row["이체필요 금액 (원)"], row["은행"], row["계좌번호"], row["거래 비고 고지"], row["_선입금여부"] ? row["실제 이달사용액 (원)"] : "", ""]);
       const psWS = makeSheet(purchaseHeaders, purchaseRows, [17.17, 14, 12.17, 13.33, 40.83, 60.17, 14.83, 10.33], true, [2, 6], [4]);
 
       const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
@@ -6513,13 +6514,13 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       });
       const cashWS = makeSheet(expenseHeaders, cashRows, [11.3, 6.8, 16.4, 11.3, 24.8, 11.9, 6.8, 10.2, 11, 28.8], false, [2]);
 
-      const cashManagementHeaders = ["마감일자", "전일현금", "현금매출", "현금지출", "현금잔액", "실사현금", "차이", "계좌이체", "거래처", "항목", "품목명", "비고", "작성자", "입력시각", "마감키"];
+      const cashManagementHeaders = ["마감일자", "전일현금", "현금매출", "현금지출", "현금잔액", "실사현금", "차이", "계좌이체", "비고", "작성자", "입력시각"];
       const mgmtRows = cashMgmt.map((row) => {
         const date = String(row["_마감원본"] || row["마감 일자"] || "");
         const writer = String(row["점검 작성자"] || "");
-        return [formatDate(date), row["전일 금고현금"], row["금일 현금매출"], row["현금지출 합계"], row["이론상 잔액 (원)"], row["금고 실사 현금 (원)"], row["차액 (불일치)"], 0, "", "", "", row["대조 불일치 사유 소명"], writer, formatInputDate(row["_입력원본"], date), `${date}|${writer}`];
+        return [formatDate(date), row["전일 금고현금"], row["금일 현금매출"], row["현금지출 합계"], row["이론상 잔액 (원)"], row["금고 실사 현금 (원)"], row["차액 (불일치)"], row["계좌이체"], row["대조 불일치 사유 소명"], writer, formatInputDate(row["_입력원본"], date)];
       });
-      const mgmtWS = makeSheet(cashManagementHeaders, mgmtRows, [10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 23.23, 10.08, 10.08, 10.08], false, [1, 2, 3, 4, 5, 6, 7]);
+      const mgmtWS = makeSheet(cashManagementHeaders, mgmtRows, [10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 10.08, 23.23, 10.08, 10.08], false, [1, 2, 3, 4, 5, 6, 7]);
 
       const cardRows = cardList.map((row) => {
         const date = String(row["_마감원본"] || row["마감 일자"] || "");
@@ -6531,8 +6532,8 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       XLSX.utils.book_append_sheet(wb, psWS, "매입매출");
       XLSX.utils.book_append_sheet(wb, ptWS, "파트타이머급여");
       XLSX.utils.book_append_sheet(wb, cashWS, "현금지출");
-      XLSX.utils.book_append_sheet(wb, mgmtWS, "현금관리");
       XLSX.utils.book_append_sheet(wb, cardWS, "카드지출");
+      XLSX.utils.book_append_sheet(wb, mgmtWS, "현금관리");
 
       const fileName = `월말정산_${branchName}${monthNumber}월.xlsx`;
 
