@@ -154,6 +154,14 @@ const createStaffAddDraft = (): StaffAddDraft => ({
   addReasonMemo: ""
 });
 
+const SAMPLE_EMPLOYEE_IDS = new Set(["e1", "e2", "e3", "e4"]);
+const SAMPLE_EMPLOYEE_NAMES = new Set(["김철수", "이영희", "박민수", "최정우"]);
+const isSampleEmployee = (employee: any) =>
+  SAMPLE_EMPLOYEE_IDS.has(String(employee?.id || "")) &&
+  SAMPLE_EMPLOYEE_NAMES.has(String(employee?.name || "")) &&
+  !employee?.residentNumber &&
+  !employee?.entryDate;
+
 interface StaffRow {
   division: "정직원" | "파트타이머";
   name: string;
@@ -2070,7 +2078,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
       if (saved) {
         const parsed: Employee[] = JSON.parse(saved);
-        return [...parsed].sort((a, b) => {
+        const cleaned = parsed.filter((employee) => !isSampleEmployee(employee));
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(cleaned));
+        }
+        return [...cleaned].sort((a, b) => {
           if (a.division === "정직원" && b.division !== "정직원") return -1;
           if (a.division !== "정직원" && b.division === "정직원") return 1;
           return a.name.localeCompare(b.name, "ko");
@@ -2079,20 +2091,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     } catch (e) {
       console.error("Failed to parse employee roster", e);
     }
-    // Default fallback roster if none set up
-    const defaults: Employee[] = [
-      { id: "e1", name: "김철수", division: "정직원" },
-      { id: "e2", name: "이영희", division: "정직원" },
-      { id: "e3", name: "박민수", division: "파트타이머" },
-      { id: "e4", name: "최정우", division: "파트타이머" },
-    ];
-    const sortedDefaults = [...defaults].sort((a, b) => {
-      if (a.division === "정직원" && b.division !== "정직원") return -1;
-      if (a.division !== "정직원" && b.division === "정직원") return 1;
-      return a.name.localeCompare(b.name, "ko");
-    });
-    localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(sortedDefaults));
-    return sortedDefaults;
+    return [];
   }, [branchName]);
 
   const getTodayDateStr = () => {
@@ -4566,18 +4565,9 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [employees, setEmployees] = useState<Employee[]>(() => {
     try {
       const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
-      if (saved) return JSON.parse(saved);
+      if (saved) return JSON.parse(saved).filter((employee: any) => !isSampleEmployee(employee));
     } catch {}
-
-    // Default fallback roster
-    const defaults: Employee[] = [
-      { id: "e1", name: "김철수", division: "정직원" },
-      { id: "e2", name: "이영희", division: "정직원" },
-      { id: "e3", name: "박민수", division: "파트타이머" },
-      { id: "e4", name: "최정우", division: "파트타이머" },
-    ];
-    localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(defaults));
-    return defaults;
+    return [];
   });
 
   const [newName, setNewName] = useState("");
@@ -4635,13 +4625,13 @@ function RosterTab({ branchName }: { branchName: string }) {
         // staff_rosters에서 이 지점 소속 직원만 추출
         const staffRoster = await gasClient.getStaffRoster(branchName);
         if (cancelled) return;
-        const staffFiltered = staffRoster.filter(isBranchEmployee);
+        const staffFiltered = staffRoster.filter(isBranchEmployee).filter((employee: any) => !isSampleEmployee(employee));
 
         // branch_own_rosters를 우선 사용 (사용자 편집 내용 보존)
         // staff_rosters는 branch_own_rosters에 없는 신규 인원만 추가
         const ownRoster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        const ownFiltered = ownRoster.filter(isBranchEmployee);
+        const ownFiltered = ownRoster.filter(isBranchEmployee).filter((employee: any) => !isSampleEmployee(employee));
         const ownIds = new Set(ownFiltered.map((e: any) => e.id));
         const staffOnlyNew = staffFiltered.filter((e: any) => !ownIds.has(e.id));
         const merged = [...ownFiltered, ...staffOnlyNew];
@@ -4650,7 +4640,7 @@ function RosterTab({ branchName }: { branchName: string }) {
         localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(merged));
 
         // 오염이 있거나 결과가 달라진 경우 branch_own_rosters 정리
-        const needsUpdate = ownRoster.some((e: any) => !isBranchEmployee(e))
+        const needsUpdate = ownRoster.some((e: any) => !isBranchEmployee(e) || isSampleEmployee(e))
           || ownRoster.length !== merged.length;
         if (needsUpdate) {
           await gasClient.saveBranchOwnRoster(branchName, merged);
@@ -6222,7 +6212,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     }
   }, [branchName, selectedMonth]);
 
-  const handleDownloadExcel = useCallback(() => {
+  const handleDownloadExcel = useCallback(async () => {
     try {
       const wb = XLSX.utils.book_new();
 
@@ -6239,6 +6229,15 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           ];
         }
       } catch {}
+      try {
+        const remotePurchases = await gasClient.getSharedData<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remotePurchases) && remotePurchases.length > 0) {
+          psRows = remotePurchases;
+          localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(remotePurchases));
+        }
+      } catch (error) {
+        console.warn("월 매입매출 공통 데이터를 엑셀 다운로드에 반영하지 못했습니다.", error);
+      }
       const psData = psRows.map(r => ({
         "분류항목": r.category,
         "송금/사용 대상업체명": r.vendorName,
@@ -6257,9 +6256,19 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       try {
         const savedRoster = localStorage.getItem(`erp_staff_list_${branchName}`);
         if (savedRoster) {
-          rosterPartTimers = JSON.parse(savedRoster).filter((emp: any) => emp.division === "파트타이머");
+          rosterPartTimers = JSON.parse(savedRoster).filter((emp: any) => emp.division === "파트타이머" && !isSampleEmployee(emp));
         }
       } catch {}
+      try {
+        const remoteRoster = await gasClient.getBranchOwnRoster(branchName);
+        const remotePartTimers = remoteRoster.filter((emp: any) => emp.division === "파트타이머" && !isSampleEmployee(emp));
+        if (remotePartTimers.length > 0) {
+          rosterPartTimers = remotePartTimers;
+          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(remoteRoster.filter((emp: any) => !isSampleEmployee(emp))));
+        }
+      } catch (error) {
+        console.warn("공통 직원현황을 엑셀 다운로드에 반영하지 못했습니다.", error);
+      }
 
       const ptTelemetry: { [name: string]: { hours: number; dates: string[] } } = {};
       history.forEach((m) => {
@@ -6297,8 +6306,55 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           });
         }
       } catch {}
+      try {
+        const remoteSalaries = await gasClient.getSharedData<any[]>(`part_time_salaries:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remoteSalaries) && remoteSalaries.length > 0) {
+          savedSalaryMap = {};
+          remoteSalaries.forEach((item: any) => {
+            savedSalaryMap[item.employeeId] = item;
+          });
+          localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(remoteSalaries));
+        }
+      } catch (error) {
+        console.warn("파트타이머 급여 공통 데이터를 엑셀 다운로드에 반영하지 못했습니다.", error);
+      }
+
+      let excludedEmployeeIdsForExcel: string[] = [];
+      try {
+        const localExcluded = localStorage.getItem(`erp_part_time_salary_exclusions_${branchName}_${selectedMonth}`);
+        if (localExcluded) excludedEmployeeIdsForExcel = JSON.parse(localExcluded);
+        const remoteExcluded = await gasClient.getSharedData<string[]>(`part_time_salary_exclusions:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remoteExcluded)) excludedEmployeeIdsForExcel = remoteExcluded;
+      } catch {}
+
+      let sharedProfiles: Record<string, any> = {};
+      try {
+        const remoteProfiles = await gasClient.getSharedData<Record<string, any>>(`part_time_profiles:${branchName}`);
+        if (remoteProfiles) sharedProfiles = remoteProfiles;
+      } catch (error) {
+        console.warn("파트타이머 프로필 공통 데이터를 엑셀 다운로드에 반영하지 못했습니다.", error);
+      }
+
+      const knownPartTimerIds = new Set(rosterPartTimers.map((pt) => pt.id));
+      Object.values(savedSalaryMap).forEach((salary: any) => {
+        if (salary?.employeeId && !knownPartTimerIds.has(salary.employeeId)) {
+          rosterPartTimers.push({
+            id: salary.employeeId,
+            name: salary.name || salary.staffName || salary.employeeName || salary.employeeId,
+            division: "파트타이머"
+          });
+          knownPartTimerIds.add(salary.employeeId);
+        }
+      });
+      Object.keys(ptTelemetry).forEach((name) => {
+        if (!rosterPartTimers.some((pt) => pt.name === name)) {
+          rosterPartTimers.push({ id: `legacy-${branchName}-${name}`, name, division: "파트타이머" });
+        }
+      });
+      const excludedSetForExcel = new Set(excludedEmployeeIdsForExcel);
 
       const getStoredProfile = (empId: string): any => {
+        if (sharedProfiles[empId]) return sharedProfiles[empId];
         try {
           const stored = localStorage.getItem(`erp_pt_profile_${branchName}_${empId}`);
           if (stored) return JSON.parse(stored);
@@ -6306,14 +6362,16 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
         return {};
       };
 
-      const ptData = rosterPartTimers.map((pt) => {
+      const ptData = rosterPartTimers.filter((pt) => !excludedSetForExcel.has(pt.id)).map((pt) => {
         const tel = ptTelemetry[pt.name] || { hours: 0, dates: [] };
         const saved = savedSalaryMap[pt.id] || {};
         const profile = getStoredProfile(pt.id);
 
         const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
         const accumulatedHours = saved.accumulatedHours !== undefined ? saved.accumulatedHours : String(tel.hours);
-        const calcSalary = String(Number(hourlyRate) * Number(accumulatedHours));
+        const calcSalary = saved.calculatedSalary !== undefined && saved.calculatedSalary !== ""
+          ? saved.calculatedSalary
+          : String(Number(hourlyRate) * Number(accumulatedHours));
         const calcActualPaid = saved.actualPaidAmount || "";
         const attendanceDates = saved.attendanceDates !== undefined
           ? saved.attendanceDates
@@ -7223,11 +7281,16 @@ function MonthlyPartTimeSalarySubTab({
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
             const attendanceDates = work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(",");
             if (existing) {
-              const calculatedSalary = String((Number(existing.hourlyRate) || 0) * work.hours);
+              const accumulatedHours = existing.accumulatedHours !== undefined && existing.accumulatedHours !== ""
+                ? existing.accumulatedHours
+                : String(work.hours);
+              const calculatedSalary = existing.calculatedSalary !== undefined && existing.calculatedSalary !== ""
+                ? existing.calculatedSalary
+                : String((Number(existing.hourlyRate) || 0) * Number(accumulatedHours || 0));
               return {
                 ...existing,
-                accumulatedHours: String(work.hours),
-                attendanceDates,
+                accumulatedHours,
+                attendanceDates: existing.attendanceDates || attendanceDates,
                 calculatedSalary
               };
             }
