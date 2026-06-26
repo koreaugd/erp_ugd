@@ -1553,7 +1553,7 @@ function AdminAnnualLeaveSection() {
     setPartialDeleteLeave(null);
   };
 
-  const rows = employees.map((employee) => {
+  const rows = employees.filter((employee) => !selectedBranch || employee.branchName === selectedBranch).map((employee) => {
     const branchEntries = entriesByBranch[employee.branchName] || [];
     const logs = branchEntries.filter((entry) => entry.employeeId === employee.id);
     const used = logs.reduce((sum, entry) => sum + Number(entry.days || 0), 0);

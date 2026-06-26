@@ -183,6 +183,7 @@ interface StaffRow {
   officeWorkType?: "근무" | "휴무";
   officeTaskMemo?: string;
   officeWorkplace?: string;
+  segmentId?: string;
 }
 
 interface ExpenseRow {
@@ -2762,6 +2763,26 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setList(copy);
   };
 
+  const addOfficeWorkSegment = (index: number) => {
+    setStaffRows((prev) => {
+      const source = prev[index];
+      if (!source) return prev;
+      const nextRow: StaffRow = {
+        ...source,
+        segmentId: `segment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        officeWorkType: "근무",
+        officeWorkplace: branchName,
+        clockIn: "",
+        clockOut: "",
+        workHours: 0,
+        overtime: 0,
+        overtimeReason: "",
+        officeTaskMemo: ""
+      };
+      return [...prev.slice(0, index + 1), nextRow, ...prev.slice(index + 1)];
+    });
+  };
+
   // Submit flow
   const handleSettleSubmit = async () => {
     if (submitting) return;
@@ -2857,11 +2878,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       try {
         const currentRoster = getRoster();
         const currentRosterNames = new Set(currentRoster.map(r => r.name));
+        const newlyAddedRosterNames = new Set<string>();
         let rosterUpdated = false;
         const updatedRoster = [...currentRoster];
 
         staffRows.forEach((s) => {
-          if (!currentRosterNames.has(s.name)) {
+          if (!currentRosterNames.has(s.name) && !newlyAddedRosterNames.has(s.name)) {
             const newEmp = {
               id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               name: s.name,
@@ -2878,6 +2900,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               ...(s.division === "정직원" ? { rank: s.rank || "" } : {})
             };
             updatedRoster.push(newEmp);
+            newlyAddedRosterNames.add(s.name);
             rosterUpdated = true;
           }
         });
@@ -3895,7 +3918,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         {isHeadOffice && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs min-w-[1120px]">
+            <table className="w-full text-left border-collapse text-xs min-w-[1240px]">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
                   <th className="py-3 px-2 w-28">이름</th>
@@ -3904,17 +3927,18 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                   <th className="py-3 px-2 w-24">기준</th>
                   <th className="py-3 px-2 w-24">업무시작</th>
                   <th className="py-3 px-2 w-24">업무마감</th>
-                  <th className="py-3 px-2 w-24">근무</th>
-                  <th className="py-3 px-2 w-24">초과</th>
-                  <th className="py-3 px-2">업무내용</th>
+                  <th className="py-3 px-1 w-14 text-right">근무</th>
+                  <th className="py-3 px-1 w-14 text-right">초과</th>
+                  <th className="py-3 px-2 min-w-[280px]">업무내용</th>
                   <th className="py-3 px-2 w-44">초과 사유</th>
+                  <th className="py-3 px-2 w-16 text-center">분리</th>
                   <th className="py-3 px-2 w-10 text-center">삭제</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
                 {staffRows.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-10 text-center text-gray-400">
+                    <td colSpan={12} className="py-10 text-center text-gray-400">
                       등록된 본사 직원이 없습니다. 추가 입력을 통해 인원을 생성해주세요.
                     </td>
                   </tr>
@@ -3985,8 +4009,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                           />
                         </td>
-                        <td className="py-3.5 px-2 font-mono font-black text-sky-700">{s.workHours || 0}h</td>
-                        <td className="py-3.5 px-2 font-mono font-black">
+                        <td className="py-3.5 px-1 text-right font-mono font-black text-sky-700">{s.workHours || 0}h</td>
+                        <td className="py-3.5 px-1 text-right font-mono font-black">
                           <span className={s.overtime > 0 ? "text-emerald-600" : s.overtime < 0 ? "text-rose-500" : "text-gray-400"}>
                             {s.overtime > 0 ? "+" : ""}{s.overtime || 0}h
                           </span>
@@ -4014,6 +4038,15 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                               validationErrors && s.overtime > 0 && !s.overtimeReason.trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
                             }`}
                           />
+                        </td>
+                        <td className="py-3.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => addOfficeWorkSegment(idx)}
+                            className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black hover:bg-blue-100"
+                          >
+                            행 추가
+                          </button>
                         </td>
                         <td className="py-3.5 px-2 text-center">
                           <button
@@ -4278,6 +4311,7 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -4291,7 +4325,7 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
           const metadata = JSON.parse(metadataText.trim());
           (metadata.staffRows || []).forEach((staff: any) => {
             nextRows.push({
-              id: `${record.recordId || record.settleDate}-${staff.name}`,
+              id: `${record.recordId || record.settleDate}-${staff.segmentId || staff.name}-${nextRows.length}`,
               date: record.settleDate,
               writer: record.submittedBy || "",
               name: staff.name,
@@ -4322,6 +4356,90 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
     void load();
   }, [load]);
 
+  const calendarSummary = useMemo(() => {
+    const byDate = new Map<string, any[]>();
+    rows.forEach((row) => {
+      const current = byDate.get(row.date) || [];
+      current.push(row);
+      byDate.set(row.date, current);
+    });
+    const workDates = new Set<string>();
+    const offDates = new Set<string>();
+    const dispatchDates = new Set<string>();
+    byDate.forEach((items, date) => {
+      const hasDispatch = items.some((item) => item.workType !== "휴무" && item.workplace && item.workplace !== branchName);
+      const hasWork = items.some((item) => item.workType !== "휴무" && Number(item.workHours || 0) > 0);
+      const allOff = items.length > 0 && items.every((item) => item.workType === "휴무");
+      if (hasDispatch) dispatchDates.add(date);
+      if (hasWork) workDates.add(date);
+      if (allOff) offDates.add(date);
+    });
+    return { byDate, workDates, offDates, dispatchDates };
+  }, [branchName, rows]);
+
+  const renderWorkCalendar = () => {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const firstDay = new Date(year, monthNumber - 1, 1).getDay();
+    const dayCount = new Date(year, monthNumber, 0).getDate();
+    const cells: Array<number | null> = [
+      ...Array.from({ length: firstDay }, () => null),
+      ...Array.from({ length: dayCount }, (_, index) => index + 1)
+    ];
+    while (cells.length % 7 !== 0) cells.push(null);
+    return (
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2 text-xs font-black">
+            <span className="rounded-lg bg-sky-50 px-2.5 py-1 text-sky-700">근무 {calendarSummary.workDates.size}일</span>
+            <span className="rounded-lg bg-gray-100 px-2.5 py-1 text-gray-600">휴무 {calendarSummary.offDates.size}일</span>
+            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-700">지점파견 {calendarSummary.dispatchDates.size}일</span>
+          </div>
+          <div className="flex gap-2 text-[11px] font-bold text-gray-500">
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" />근무</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-gray-400" />휴무</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" />지점파견</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-xs">
+          {["일", "월", "화", "수", "목", "금", "토"].map((day) => (
+            <div key={day} className={`py-2 font-black ${day === "일" ? "text-rose-500" : day === "토" ? "text-blue-500" : "text-gray-400"}`}>{day}</div>
+          ))}
+          {cells.map((day, index) => {
+            if (!day) return <div key={`empty-${index}`} className="min-h-20 rounded-xl bg-gray-50/40" />;
+            const date = `${year}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const items = calendarSummary.byDate.get(date) || [];
+            const hasDispatch = calendarSummary.dispatchDates.has(date);
+            const hasWork = calendarSummary.workDates.has(date);
+            const isOff = calendarSummary.offDates.has(date);
+            const bg = hasDispatch ? "border-amber-200 bg-amber-50" : hasWork ? "border-sky-200 bg-sky-50" : isOff ? "border-gray-200 bg-gray-100" : "border-gray-100 bg-white";
+            return (
+              <div key={date} className={`min-h-20 rounded-xl border p-2 text-left ${bg}`}>
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-gray-800">{day}</span>
+                  <div className="flex gap-1">
+                    {hasWork && <span className="h-2 w-2 rounded-full bg-sky-500" />}
+                    {isOff && <span className="h-2 w-2 rounded-full bg-gray-400" />}
+                    {hasDispatch && <span className="h-2 w-2 rounded-full bg-amber-500" />}
+                  </div>
+                </div>
+                {items.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {items.slice(0, 3).map((item, itemIndex) => (
+                      <div key={`${date}-${item.name}-${itemIndex}`} className="truncate text-[10px] font-bold text-gray-600">
+                        {item.name} {item.workType === "휴무" ? "휴무" : item.workplace}
+                      </div>
+                    ))}
+                    {items.length > 3 && <div className="text-[10px] font-black text-gray-400">+{items.length - 3}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div className="space-y-5 animate-fade-in" id="office-work-log-tab">
       <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -4333,9 +4451,14 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
         </div>
         <div className="flex items-center gap-2">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black" />
+          <button type="button" onClick={() => setShowCalendar((value) => !value)} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-black text-[#2E6DB4]">
+            달력 {showCalendar ? "닫기" : "보기"}
+          </button>
           <button type="button" onClick={() => void load()} className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-black">새로고침</button>
         </div>
       </section>
+
+      {showCalendar && renderWorkCalendar()}
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -6315,7 +6438,8 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
       const nextRows = staffRows.map((staff: any) => {
         const name = staff.staffName || staff.name;
-        return name === row.staffName ? { ...staff, clockIn: fields.clockIn.trim(), clockOut: fields.clockOut.trim(), workHours } : staff;
+        const sameRow = row.segmentId ? staff.segmentId === row.segmentId : name === row.staffName;
+        return sameRow ? { ...staff, clockIn: fields.clockIn.trim(), clockOut: fields.clockOut.trim(), workHours } : staff;
       });
       const nextStaff = (detail.staff || []).map((staff: any) => {
         const name = staff.staffName || staff.name;
@@ -6339,8 +6463,8 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       if (!row.recordId || !window.confirm(`${row.staffName}님의 ${row.settleDate} 파트타이머 근무기록을 삭제할까요?`)) return;
       await updateDailyMetadata(row.recordId, (metadata, detail) => {
         const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
-        const nextRows = staffRows.filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
-        const nextStaff = (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
+        const nextRows = staffRows.filter((staff: any) => row.segmentId ? staff.segmentId !== row.segmentId : (staff.staffName || staff.name) !== row.staffName);
+        const nextStaff = row.segmentId ? (detail.staff || []) : (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
         return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
       });
       await loadData();
@@ -6451,6 +6575,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
                   <th className="py-2.5 px-3">마감일자</th>
                   <th className="py-2.5 px-3">직원명</th>
+                  {branchName === "본사" && <th className="py-2.5 px-3">근무지점</th>}
                   <th className="py-2.5 px-3">출근</th>
                   <th className="py-2.5 px-3">퇴근</th>
                   <th className="py-2.5 px-3 text-center">근무시간</th>
@@ -6461,7 +6586,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
               <tbody className="divide-y divide-gray-100">
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={isAdmin ? 7 : 6} className="py-16 text-center text-gray-400">
+                    <td colSpan={(isAdmin ? 7 : 6) + (branchName === "본사" ? 1 : 0)} className="py-16 text-center text-gray-400">
                       해당 지점에 기록된 파트타이머 출근 기록이 없습니다.
                     </td>
                   </tr>
@@ -6470,6 +6595,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
                     <tr key={idx} className="hover:bg-gray-50/50">
                       <td className="py-3.5 px-3 font-mono text-[11px] text-gray-400">{r.settleDate}</td>
                       <td className="py-3.5 px-3 font-extrabold text-gray-800 text-sm">{r.staffName}</td>
+                      {branchName === "본사" && <td className="py-3.5 px-3 text-xs font-bold text-gray-600">{r.officeWorkplace || "본사"}</td>}
                       <td className="py-3.5 px-3 font-mono text-gray-650">{r.clockIn}</td>
                       <td className="py-3.5 px-3 font-mono text-gray-650">{r.clockOut}</td>
                       <td className="py-3.5 px-3 text-center">
