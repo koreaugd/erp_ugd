@@ -30,7 +30,7 @@ service cloud.firestore {
         && request.resource.data.master is map
         && request.resource.data.expenses is list
         && request.resource.data.staff is list;
-      allow delete: if isAdmin();
+      allow delete: if signedIn();
     }
 
     match /staff_rosters/{branchId} {
