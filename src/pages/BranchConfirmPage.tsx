@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import {
   Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
   CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
@@ -6535,7 +6535,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       XLSX.utils.book_append_sheet(wb, cardWS, "카드지출");
       XLSX.utils.book_append_sheet(wb, mgmtWS, "현금관리");
 
-      const fileName = `월말정산_${branchName}${monthNumber}월.xlsx`;
+      const fileName = `월말정산_${branchName}${monthNumber}월_결산자료.xlsx`;
 
       XLSX.writeFile(wb, fileName);
       triggerToast("엑셀 파일 다운로드 성공!", "success");
