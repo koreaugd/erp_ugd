@@ -180,6 +180,8 @@ interface StaffRow {
   workHours: number; // calculated
   overtime: number; // calculated
   overtimeReason: string;
+  officeWorkType?: "근무" | "휴무";
+  officeTaskMemo?: string;
 }
 
 interface ExpenseRow {
@@ -2125,7 +2127,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     branchName === "오키스테이크하우스" ||
     branchName === "대골뼈국";
 
-  const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
+  const isHeadOffice = branchName === "본사";
+  const defaultStandardHours = isHeadOffice ? 0 : isExtraHoursBranch ? 10.5 : 10;
 
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
   // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
@@ -2267,7 +2270,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       clockOut: "",
       workHours: 0,
       overtime: 0,
-      overtimeReason: ""
+      overtimeReason: "",
+      officeWorkType: "근무",
+      officeTaskMemo: ""
     }));
     setStaffRows(mappedRows);
   }, [getRoster, defaultStandardHours]);
@@ -2347,7 +2352,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         clockOut: "",
         workHours: 0,
         overtime: 0,
-        overtimeReason: ""
+        overtimeReason: "",
+        officeWorkType: "근무",
+        officeTaskMemo: ""
       });
     }
 
@@ -2488,7 +2495,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                  clockOut: matchedS && matchedS.workHours > 0 ? (matchedS.workHours === 9 ? "18:00" : "19:00") : "00:00",
                  workHours: matchedS ? matchedS.workHours : 0,
                  overtime: matchedS && emp.division === "정직원" ? (matchedS.workHours - defaultStandardHours) : 0,
-                 overtimeReason: ""
+                 overtimeReason: "",
+                 officeWorkType: matchedS && matchedS.workHours > 0 ? "근무" : "휴무",
+                 officeTaskMemo: ""
                };
              });
              setStaffRows(mapStaff);
@@ -2590,6 +2599,22 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       const copy = [...prev];
       const row = { ...copy[index], ...updatedFields };
 
+      if (isHeadOffice) {
+        if (row.officeWorkType === "휴무") {
+          row.workHours = 0;
+          row.clockIn = "";
+          row.clockOut = "";
+          row.overtime = 0;
+          row.overtimeReason = "";
+        } else {
+          row.workHours = Number.isFinite(Number(row.workHours)) ? Number(row.workHours) : 0;
+          row.overtime = 0;
+          row.overtimeReason = "";
+        }
+        copy[index] = row;
+        return copy;
+      }
+
       const inDec = parseTimeToDecimal(row.clockIn);
       const outDec = parseTimeToDecimal(row.clockOut);
 
@@ -2658,7 +2683,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
       return;
     }
-    if (!cashSales || !cardSales || (!hasExistingRecord && !cashBalance)) {
+    if (!isHeadOffice && (!cashSales || !cardSales || (!hasExistingRecord && !cashBalance))) {
       setValidationErrors(true);
       triggerToast("일일 매출 필수 요건(현금, 카드 매출액 및 금고 현금 잔액)을 모두 채워주십시오.", "error");
       return;
@@ -2671,7 +2696,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     const actualCashInVault = Number(cashBalance) || 0;
     const diff = actualCashInVault - theoreticalBalance;
 
-    if (cashBalance !== "" && diff !== 0 && !cashDiffReason.trim()) {
+    if (!isHeadOffice && cashBalance !== "" && diff !== 0 && !cashDiffReason.trim()) {
       setValidationErrors(true);
       triggerToast("이론상 잔액과 금고 실사 현금이 일치하지 않습니다. 불일치 사유를 반드시 작성해 주셔야 제출 가능합니다.", "error");
       return;
@@ -2682,19 +2707,28 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
-    if (Object.keys(timeErrors).length > 0) {
+    if (!isHeadOffice && Object.keys(timeErrors).length > 0) {
       triggerToast("출퇴근 시간 입력 오류를 수정한 뒤 마감 제출해 주세요.", "error");
       return;
     }
 
-    const missingOvertimeReason = staffRows.filter((staff) => staff.overtime !== 0 && !staff.overtimeReason.trim());
+    const missingOfficeWork = isHeadOffice
+      ? staffRows.filter((staff) => staff.officeWorkType !== "휴무" && (!(Number(staff.workHours) > 0) || !String(staff.officeTaskMemo || "").trim()))
+      : [];
+    if (missingOfficeWork.length > 0) {
+      setValidationErrors(true);
+      triggerToast(`${missingOfficeWork.map((staff) => staff.name).join(", ")} 님의 업무시간과 업무내용을 입력하거나 휴무로 체크해 주세요.`, "error");
+      return;
+    }
+
+    const missingOvertimeReason = isHeadOffice ? [] : staffRows.filter((staff) => staff.overtime !== 0 && !staff.overtimeReason.trim());
     if (missingOvertimeReason.length > 0) {
       setValidationErrors(true);
       triggerToast(`${missingOvertimeReason.map((staff) => staff.name).join(", ")} 님의 초과근무 또는 조기퇴근 사유를 입력해 주세요.`, "error");
       return;
     }
 
-    const longShift = staffRows.filter((staff) => staff.workHours > 13);
+    const longShift = isHeadOffice ? [] : staffRows.filter((staff) => staff.workHours > 13);
     if (longShift.length > 0 && !window.confirm(`${longShift.map((staff) => `${staff.name} ${staff.workHours}시간`).join(", ")} 근무가 13시간을 초과합니다. 출퇴근 시간 입력이 맞습니까?`)) return;
 
     setSubmitting(true);
@@ -2717,14 +2751,17 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       // Human-readable textual schedule summary to append into spreadsheet cell
       const formattedStaffSummaryStr = staffRows
         .map(
-          (s) =>
-            `- ${s.name} (${s.division}): 출근 ${s.clockIn}, 퇴근 ${s.clockOut} [기준 ${s.standardHours}h, 근무 ${s.workHours}h, 초과 ${s.overtime > 0 ? "+" : ""}${s.overtime}h] ${
-              s.overtimeReason ? `(사유: ${s.overtimeReason})` : ""
-            }`
+          (s) => isHeadOffice
+            ? `- ${s.name}: ${s.officeWorkType === "휴무" ? "휴무" : `${s.workHours}h 근무`} ${s.officeTaskMemo ? `(${s.officeTaskMemo})` : ""}`
+            : `- ${s.name} (${s.division}): 출근 ${s.clockIn}, 퇴근 ${s.clockOut} [기준 ${s.standardHours}h, 근무 ${s.workHours}h, 초과 ${s.overtime > 0 ? "+" : ""}${s.overtime}h] ${
+                s.overtimeReason ? `(사유: ${s.overtimeReason})` : ""
+              }`
         )
         .join("\n");
 
-      const visibleMemo = `[직원 특이사항]\n${staffMemo.trim()}\n\n[리뷰 특이사항]\n${reviewMemo.trim()}\n\n[기타 특이사항]\n${otherMemo.trim()}`;
+      const visibleMemo = isHeadOffice
+        ? `[본사 업무 특이사항]\n${otherMemo.trim()}`
+        : `[직원 특이사항]\n${staffMemo.trim()}\n\n[리뷰 특이사항]\n${reviewMemo.trim()}\n\n[기타 특이사항]\n${otherMemo.trim()}`;
       const combinedMemo = `${visibleMemo}\n\n[근무 일지 요약]\n${formattedStaffSummaryStr}\n---\nMETADATA:\n${serializeMetaData}`;
 
       // Automatically register any newly added staff in the roster checklist to Roster master list
@@ -2765,7 +2802,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       }
 
       // 2. Format Expenses matching legacy GAS DB row model properties
-      const formattedExpenses = [
+      const formattedExpenses = isHeadOffice ? [] : [
         ...cashExpenses
           .filter((e) => e.amount.trim() !== "")
           .map((e) => ({
@@ -3350,6 +3387,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         </div>
       ) : (
         <>
+          {!isHeadOffice && (
+            <>
           {/* COMPACT SALES ROW (1 Line) */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="sales-section">
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
@@ -3684,6 +3723,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           return null;
         })()}
       </div>
+            </>
+          )}
 
       {/* STAFF HOURS TABLE SECTION */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="staff-attendance-section">
@@ -3694,7 +3735,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               근무자
             </h3>
             <p className="text-[11px] text-gray-400 mt-1 leading-normal">
-              이 Roster 목록은 <strong>'직원현황'</strong> 메뉴에서 관리되며, 매 마무리기록 시 마다 자동배치됩니다. (30분 간격 입출 근무 자동연산)
+              {isHeadOffice
+                ? "본사 직원별 오늘 업무시간과 업무내용을 기록하고, 쉬는 날은 휴무로 체크합니다."
+                : <>이 Roster 목록은 <strong>'직원현황'</strong> 메뉴에서 관리되며, 매 마무리기록 시 마다 자동배치됩니다. (30분 간격 입출 근무 자동연산)</>}
             </p>
           </div>
         </div>
@@ -3759,6 +3802,88 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           </div>
         </div>
 
+        {isHeadOffice && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs min-w-[760px]">
+              <thead>
+                <tr className="border-b border-gray-100 text-gray-400 font-bold">
+                  <th className="py-3 px-2 w-28">이름</th>
+                  <th className="py-3 px-2 w-24 text-center">휴무</th>
+                  <th className="py-3 px-2 w-32">업무시간</th>
+                  <th className="py-3 px-2">업무내용</th>
+                  <th className="py-3 px-2 w-10 text-center">삭제</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 font-medium">
+                {staffRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-10 text-center text-gray-400">
+                      등록된 본사 직원이 없습니다. 추가 입력을 통해 인원을 생성해주세요.
+                    </td>
+                  </tr>
+                ) : (
+                  staffRows.map((s, idx) => {
+                    const isDayOff = s.officeWorkType === "휴무";
+                    const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !String(s.officeTaskMemo || "").trim());
+                    return (
+                      <tr key={idx} className="hover:bg-gray-50/50">
+                        <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
+                        <td className="py-3.5 px-2 text-center">
+                          <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isDayOff}
+                              onChange={(e) => executeStaffCalculation(idx, { officeWorkType: e.target.checked ? "휴무" : "근무" })}
+                              className="h-3.5 w-3.5 accent-[#2E6DB4]"
+                            />
+                            휴무
+                          </label>
+                        </td>
+                        <td className="py-3.5 px-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            disabled={isDayOff}
+                            value={isDayOff ? "" : s.workHours || ""}
+                            onChange={(e) => executeStaffCalculation(idx, { workHours: Number(e.target.value) || 0, officeWorkType: "근무" })}
+                            placeholder="0"
+                            className={`w-24 px-2 py-1.5 border rounded-lg text-right font-mono text-xs font-bold disabled:bg-gray-100 disabled:text-gray-400 ${
+                              needsWork && !(Number(s.workHours) > 0) ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                            }`}
+                          />
+                        </td>
+                        <td className="py-3.5 px-2">
+                          <input
+                            type="text"
+                            disabled={isDayOff}
+                            value={s.officeTaskMemo || ""}
+                            onChange={(e) => executeStaffCalculation(idx, { officeTaskMemo: e.target.value, officeWorkType: "근무" })}
+                            placeholder={isDayOff ? "휴무" : "오늘 진행한 업무내용"}
+                            className={`w-full px-3 py-1.5 border rounded-lg text-xs disabled:bg-gray-100 disabled:text-gray-400 ${
+                              needsWork && !String(s.officeTaskMemo || "").trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                            }`}
+                          />
+                        </td>
+                        <td className="py-3.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setStaffRows(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-gray-400 hover:text-rose-500 p-1.5 hover:bg-rose-50 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!isHeadOffice && (
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -3914,16 +4039,17 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* ADDITIONAL FREE NOTES */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="memo-section">
         <label className="text-xs font-extrabold text-[#1C3C6E] flex items-center gap-1.5 border-b border-gray-100 pb-2">
           <FileText className="w-4 h-4 text-[#2E6DB4]" />
-          특이사항 기록 (본부 보고 및 카톡보고 자동 연동)
+          {isHeadOffice ? "본사 특이사항 기록" : "특이사항 기록 (본부 보고 및 카톡보고 자동 연동)"}
         </label>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {!isHeadOffice && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-gray-600 block">
               👤 직원 특이사항
@@ -3949,11 +4075,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               className="w-full p-3 border border-gray-200 rounded-xl text-xs focus:outline-hidden focus:border-zinc-800 transition-all bg-gray-50/20"
             />
           </div>
-        </div>
+        </div>}
 
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-gray-600 block">
-            📝 기타 전달 메모
+            {isHeadOffice ? "기타 전달 메모" : "📝 기타 전달 메모"}
           </label>
           <textarea
             value={otherMemo}
