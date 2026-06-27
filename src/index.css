@@ -572,3 +572,664 @@ input[type=number] {
   }
 }
 
+/* Optional admin design preview: open /admin?designPreview=1 */
+.admin-design-preview main {
+  max-width: 1520px;
+  background: var(--admin-ghost) !important;
+}
+
+.admin-design-preview {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-design-preview #admin-main-container {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-design-preview .admin-hero-panel {
+  background: color-mix(in srgb, var(--admin-ghost) 86%, var(--admin-alice)) !important;
+  border: 1px solid var(--admin-black) !important;
+  padding: 20px 28px !important;
+}
+
+.admin-design-preview .admin-hero-panel h1 {
+  font-size: clamp(22px, 2vw, 30px);
+  line-height: 1.08;
+}
+
+.admin-design-preview .admin-kicker {
+  margin-bottom: 6px;
+}
+
+.admin-latest-notice-headline > button {
+  display: block;
+  max-width: 100%;
+  text-align: left;
+}
+
+.admin-latest-notice-headline h1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-design-preview .admin-latest-notice-headline .admin-registered-notices {
+  margin-top: 14px;
+  max-width: 860px;
+  background: var(--admin-vanilla) !important;
+  border-color: rgba(33, 33, 33, 0.1) !important;
+}
+
+.admin-design-preview .admin-hero-actions button {
+  display: none !important;
+}
+
+.admin-design-preview .admin-hero-actions span {
+  background: var(--admin-ghost) !important;
+  border-color: rgba(33, 33, 33, 0.14) !important;
+  box-shadow: 0 8px 18px rgba(33, 33, 33, 0.035);
+}
+
+.admin-design-preview .admin-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.admin-design-preview .admin-kpi-card {
+  min-height: 82px;
+  border-radius: 24px;
+  border: 1px solid var(--admin-black) !important;
+  padding: 14px 56px 14px 22px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  align-items: center;
+  box-shadow: 0 14px 32px rgba(33, 33, 33, 0.055);
+}
+
+.admin-design-preview .admin-kpi-card::after {
+  top: 50%;
+  right: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: 18px;
+  background: var(--admin-black);
+  color: var(--admin-ghost);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  font-size: 18px;
+}
+
+.admin-design-preview .admin-kpi-card span {
+  max-width: none;
+  font-size: 12px;
+  grid-column: 2;
+}
+
+.admin-design-preview .admin-kpi-card strong {
+  margin: 0;
+  min-width: 52px;
+  font-size: 30px;
+  grid-row: 1 / span 2;
+}
+
+.admin-design-preview .admin-kpi-card small {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  grid-column: 2;
+}
+
+.admin-design-preview main > section:not(.admin-hero-panel):not(.admin-kpi-grid),
+.admin-design-preview main > div > section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.admin-design-preview main > section:nth-of-type(3),
+.admin-design-preview main > div > section:nth-of-type(3) {
+  background: transparent !important;
+}
+
+.admin-design-preview main > section:nth-of-type(4),
+.admin-design-preview main > div > section:nth-of-type(4) {
+  background: transparent !important;
+}
+
+.admin-design-preview main > section:nth-of-type(5),
+.admin-design-preview main > div > section:nth-of-type(5),
+.admin-design-preview section:has(.admin-yesterday-new-row) {
+  background: transparent !important;
+}
+
+.admin-design-preview main > section:nth-of-type(6),
+.admin-design-preview main > div > section:nth-of-type(6) {
+  background: transparent !important;
+}
+
+.admin-design-preview .admin-yesterday-new-row,
+.admin-design-preview .admin-yesterday-new-row:nth-child(even),
+.admin-design-preview .admin-yesterday-new-row:nth-child(odd) {
+  background: var(--admin-vanilla) !important;
+}
+
+.admin-design-preview .admin-yesterday-new-badge {
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+}
+
+.admin-design-preview .admin-dashboard-closing-section thead tr,
+.admin-design-preview .admin-dashboard-closing-section th,
+.admin-design-preview section:has(.admin-yesterday-new-row) thead tr,
+.admin-design-preview section:has(.admin-yesterday-new-row) th {
+  background: var(--admin-alice) !important;
+}
+
+.admin-design-preview .admin-dashboard-closing-section,
+.admin-design-preview section:has(.admin-yesterday-new-row) {
+  border: 1px solid var(--admin-black) !important;
+  outline: 1px solid var(--admin-black) !important;
+  outline-offset: -1px;
+  border-radius: 30px !important;
+  box-shadow: 0 20px 46px rgba(33, 33, 33, 0.055) !important;
+}
+
+.admin-dashboard-compact-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.admin-design-preview main > section,
+.admin-design-preview main > div,
+.admin-design-preview main > div > section {
+  background-clip: padding-box;
+}
+
+.admin-design-preview section button[class*="rounded-full"],
+.admin-design-preview div[class*="rounded-full"],
+.admin-design-preview span[class*="rounded-full"] {
+  border-radius: 18px !important;
+}
+
+.admin-design-preview #stats-cards > div,
+.admin-design-preview #table-card,
+.admin-design-preview div[class*="bg-white"][class*="rounded-3xl"],
+.admin-design-preview div[class*="bg-white"][class*="rounded-2xl"] {
+  background: color-mix(in srgb, var(--admin-ghost) 86%, var(--admin-alice)) !important;
+  border-color: var(--admin-black) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section > div:first-child {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(33, 33, 33, 0.12) !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section #stats-cards > div,
+.admin-design-preview .admin-daily-settlement-section #table-card,
+.admin-design-preview .admin-daily-settlement-section div[class*="bg-white"][class*="rounded-2xl"],
+.admin-design-preview .admin-daily-settlement-section div[class*="bg-white"][class*="rounded-3xl"] {
+  background: color-mix(in srgb, var(--admin-ghost) 94%, #ffffff) !important;
+  border: 1px solid var(--admin-black) !important;
+  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.035) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section #stats-cards div[class*="bg-emerald-50"],
+.admin-design-preview .admin-daily-settlement-section #stats-cards div[class*="bg-amber-50"],
+.admin-design-preview .admin-daily-settlement-section #stats-cards div[class*="bg-blue-50"] {
+  background: color-mix(in srgb, var(--admin-ghost) 66%, var(--admin-alice)) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section #table-card thead tr {
+  background: var(--admin-alice) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section #table-card tbody tr:nth-child(odd),
+.admin-design-preview .admin-daily-settlement-section #table-card tbody tr:nth-child(even) {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section #table-card tbody tr:hover {
+  background: color-mix(in srgb, var(--admin-ghost) 82%, var(--admin-alice)) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section button[class*="rounded-full"] {
+  background: color-mix(in srgb, var(--admin-ghost) 82%, #ffffff) !important;
+}
+
+.admin-design-preview .admin-daily-settlement-section button[class*="bg-[#2E6DB4]"],
+.admin-design-preview .admin-daily-settlement-section button[class*="bg-emerald-600"] {
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+}
+
+.admin-design-preview .admin-monthly-closing-status-section {
+  background: color-mix(in srgb, var(--admin-ghost) 94%, #ffffff) !important;
+  border: 1px solid var(--admin-black) !important;
+  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.035) !important;
+}
+
+.admin-design-preview .admin-monthly-closing-status-section .grid > div,
+.admin-design-preview .admin-monthly-closing-status-section .overflow-x-auto {
+  border: 1px solid var(--admin-black) !important;
+  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.025) !important;
+}
+
+.admin-design-preview .admin-monthly-closing-status-section > div:nth-of-type(2) > div {
+  border: 1px solid var(--admin-black) !important;
+  outline: 1px solid var(--admin-black) !important;
+  outline-offset: -1px;
+}
+
+.admin-design-preview .admin-monthly-closing-status-section thead {
+  background: var(--admin-alice) !important;
+}
+
+.admin-design-preview #stats-cards div[class*="bg-emerald-50"],
+.admin-design-preview #stats-cards div[class*="bg-amber-50"],
+.admin-design-preview #stats-cards div[class*="bg-blue-50"] {
+  border-radius: 18px !important;
+}
+
+.admin-design-preview .admin-dashboard-compact-grid > section {
+  background: color-mix(in srgb, var(--admin-ghost) 86%, var(--admin-alice)) !important;
+  border: 1px solid var(--admin-black) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 12px 30px rgba(33, 33, 33, 0.035) !important;
+  padding: 18px !important;
+}
+
+.admin-design-preview .admin-dashboard-compact-grid h2,
+.admin-design-preview .admin-dashboard-compact-grid h3 {
+  font-size: 16px !important;
+}
+
+.admin-design-preview .admin-dashboard-compact-grid p {
+  font-size: 11px;
+}
+
+.admin-design-preview .admin-notice-manager .grid {
+  grid-template-columns: 130px minmax(0, 1fr) !important;
+}
+
+.admin-design-preview .admin-notice-manager .grid input:nth-of-type(2),
+.admin-design-preview .admin-notice-manager .grid button {
+  grid-column: 1 / -1;
+}
+
+.admin-registered-notices {
+  background: color-mix(in srgb, var(--admin-ghost) 86%, var(--admin-alice)) !important;
+}
+
+.admin-design-preview .admin-registered-notices {
+  background: color-mix(in srgb, var(--admin-alice) 58%, var(--admin-ghost)) !important;
+}
+
+.admin-registered-notices .admin-notice-item {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-registered-notices span {
+  background: var(--admin-vanilla);
+  color: var(--admin-black);
+}
+
+.admin-design-preview section div[class*="grid-cols-1"][class*="sm:grid-cols-4"] > div {
+  border-radius: 22px !important;
+  border: 1px solid rgba(33, 33, 33, 0.08) !important;
+}
+
+@media (max-width: 1180px) {
+  .admin-design-preview .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-dashboard-compact-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-design-preview .admin-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-design-preview .admin-kpi-card {
+    min-height: 74px;
+  }
+}
+
+/* Branch redesign scoped to branch-confirm screens only */
+.branch-redesign {
+  --branch-alice: #D8DFE9;
+  --branch-honey: #CFDECA;
+  --branch-vanilla: #EFF0A3;
+  --branch-black: #212121;
+  --branch-ghost: #F6F5FA;
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black);
+}
+
+.branch-redesign aside {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+  box-shadow: 14px 0 38px rgba(33, 33, 33, 0.045);
+}
+
+.branch-redesign aside > div:first-child,
+.branch-redesign aside > div:last-child,
+.branch-redesign aside > div[style] {
+  background: var(--branch-alice) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+}
+
+.branch-redesign aside h1,
+.branch-redesign aside span,
+.branch-redesign aside button,
+.branch-redesign aside svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav button {
+  min-height: 46px;
+  border-radius: 999px;
+  color: rgba(33, 33, 33, 0.68) !important;
+  font-weight: 900;
+}
+
+.branch-redesign aside nav button:hover {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav button[style] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.16) !important;
+}
+
+.branch-redesign aside nav button[style] span,
+.branch-redesign aside nav button[style] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside .bg-white\/10,
+.branch-redesign aside .bg-white\/5 {
+  background: rgba(246, 245, 250, 0.72) !important;
+}
+
+.branch-redesign aside .border-white\/10,
+.branch-redesign aside .border-white\/5 {
+  border-color: rgba(33, 33, 33, 0.1) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign main {
+  max-width: 1500px;
+}
+
+.branch-redesign main > section,
+.branch-redesign main > div > section,
+.branch-redesign section.bg-white,
+.branch-redesign .bg-white {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign main > section,
+.branch-redesign main > div > section,
+.branch-redesign section.bg-white,
+.branch-redesign .rounded-3xl,
+.branch-redesign .rounded-2xl {
+  border-color: rgba(33, 33, 33, 0.08) !important;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045);
+}
+
+.branch-redesign .sticky {
+  background: color-mix(in srgb, var(--branch-ghost) 86%, var(--branch-alice)) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+}
+
+.branch-redesign .sticky button[class*="border-b-2"] {
+  border-bottom-width: 0 !important;
+  border-radius: 999px;
+  margin: 10px 0;
+  padding: 10px 16px;
+}
+
+.branch-redesign .sticky button[class*="border-[#2E6DB4]"],
+.branch-redesign .sticky button[class*="text-[#2E6DB4]"] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .sticky button[class*="border-[#2E6DB4]"] svg,
+.branch-redesign .sticky button[class*="text-[#2E6DB4]"] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .sticky [class*="tabUnderline"] {
+  display: none;
+}
+
+.branch-redesign input,
+.branch-redesign select,
+.branch-redesign textarea {
+  background: var(--branch-ghost) !important;
+  border-color: rgba(33, 33, 33, 0.13) !important;
+  border-radius: 18px !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign input:focus,
+.branch-redesign select:focus,
+.branch-redesign textarea:focus {
+  border-color: rgba(33, 33, 33, 0.34) !important;
+  box-shadow: 0 0 0 3px rgba(216, 223, 233, 0.75) !important;
+}
+
+.branch-redesign button[class*="bg-[#2E6DB4]"],
+.branch-redesign button[class*="bg-blue-"],
+.branch-redesign button[class*="bg-sky-"],
+.branch-redesign button[class*="bg-indigo-"],
+.branch-redesign button[class*="bg-emerald-"],
+.branch-redesign button[class*="bg-rose-"],
+.branch-redesign button[class*="bg-red-"],
+.branch-redesign button[class*="bg-slate-700"],
+.branch-redesign button[class*="bg-zinc-900"] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border-color: transparent !important;
+}
+
+.branch-redesign button[class*="bg-[#2E6DB4]"] svg,
+.branch-redesign button[class*="bg-blue-"] svg,
+.branch-redesign button[class*="bg-sky-"] svg,
+.branch-redesign button[class*="bg-indigo-"] svg,
+.branch-redesign button[class*="bg-emerald-"] svg,
+.branch-redesign button[class*="bg-rose-"] svg,
+.branch-redesign button[class*="bg-red-"] svg,
+.branch-redesign button[class*="bg-slate-700"] svg,
+.branch-redesign button[class*="bg-zinc-900"] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .bg-blue-50,
+.branch-redesign .bg-sky-50,
+.branch-redesign .bg-indigo-50,
+.branch-redesign .bg-\[\#D6E4F0\]\/20,
+.branch-redesign .bg-\[\#D6E4F0\]\/30 {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .bg-emerald-50,
+.branch-redesign .bg-green-50 {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign .bg-amber-50,
+.branch-redesign .bg-orange-50,
+.branch-redesign .bg-yellow-50 {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .bg-rose-50,
+.branch-redesign .bg-red-50,
+.branch-redesign .bg-violet-50,
+.branch-redesign .bg-purple-50 {
+  background: color-mix(in srgb, var(--branch-alice) 72%, var(--branch-ghost)) !important;
+}
+
+.branch-redesign .bg-slate-50,
+.branch-redesign .bg-slate-100,
+.branch-redesign .bg-gray-50,
+.branch-redesign .bg-gray-100,
+.branch-redesign .bg-zinc-50,
+.branch-redesign .bg-zinc-100 {
+  background: color-mix(in srgb, var(--branch-ghost) 82%, var(--branch-alice)) !important;
+}
+
+.branch-redesign table {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign thead tr,
+.branch-redesign th {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--branch-ghost) 86%, var(--branch-alice)) !important;
+}
+
+.branch-redesign tbody tr:nth-child(odd) {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign tbody tr:hover {
+  background: color-mix(in srgb, var(--branch-ghost) 70%, var(--branch-honey)) !important;
+}
+
+.branch-redesign .text-blue-700,
+.branch-redesign .text-blue-600,
+.branch-redesign .text-sky-700,
+.branch-redesign .text-indigo-700,
+.branch-redesign .text-emerald-700,
+.branch-redesign .text-green-700,
+.branch-redesign .text-amber-700,
+.branch-redesign .text-orange-700,
+.branch-redesign .text-rose-700,
+.branch-redesign .text-red-700,
+.branch-redesign .text-violet-700,
+.branch-redesign .text-\[\#2E6DB4\] {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .text-gray-400,
+.branch-redesign .text-gray-500,
+.branch-redesign .text-gray-600,
+.branch-redesign .text-gray-700,
+.branch-redesign .text-gray-800,
+.branch-redesign .text-slate-400,
+.branch-redesign .text-slate-500,
+.branch-redesign .text-slate-600,
+.branch-redesign .text-slate-700,
+.branch-redesign .text-zinc-400,
+.branch-redesign .text-zinc-500,
+.branch-redesign .text-zinc-700,
+.branch-redesign .text-zinc-800 {
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign .border-gray-100,
+.branch-redesign .border-gray-200,
+.branch-redesign .border-slate-100,
+.branch-redesign .border-slate-200,
+.branch-redesign .border-zinc-100,
+.branch-redesign .border-zinc-200,
+.branch-redesign .border-blue-100,
+.branch-redesign .border-emerald-100,
+.branch-redesign .border-amber-100,
+.branch-redesign .border-rose-100 {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-select-redesign #branch-select-container > div:first-child span {
+  background: var(--branch-alice) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-select-redesign #branch-card-grid > div {
+  background: var(--branch-alice) !important;
+  border-color: rgba(33, 33, 33, 0.14) !important;
+  border-radius: 22px !important;
+}
+
+.branch-select-redesign #branch-card-grid > div:nth-child(3n + 1) {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-select-redesign #branch-card-grid > div:nth-child(3n + 2) {
+  background: var(--branch-alice) !important;
+}
+
+.branch-select-redesign #branch-card-grid > div:nth-child(3n) {
+  background: var(--branch-honey) !important;
+}
+
+.branch-select-redesign #branch-card-grid > div:hover {
+  background: var(--branch-black) !important;
+}
+
+.branch-select-redesign #branch-card-grid > div:hover h3,
+.branch-select-redesign #branch-card-grid > div:hover div,
+.branch-select-redesign #branch-card-grid > div:hover svg {
+  color: var(--branch-ghost) !important;
+}
+
+@media (max-width: 768px) {
+  .branch-redesign aside {
+    box-shadow: 0 12px 28px rgba(33, 33, 33, 0.06);
+  }
+
+  .branch-redesign main {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .branch-redesign .sticky button[class*="border-b-2"] {
+    padding: 9px 13px;
+  }
+}
+
