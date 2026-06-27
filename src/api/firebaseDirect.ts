@@ -5,6 +5,7 @@ import {
   getFirestore,
   collection,
   getDocs,
+  getDocsFromServer,
   doc,
   setDoc,
   deleteDoc,
@@ -12,7 +13,7 @@ import {
   getDocFromServer
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
-import { gasClient, MasterDaily, ExpenseDetail, StaffRecord } from "./gasClient";
+import { gasClient, MasterDaily, ExpenseDetail, StaffRecord, DailyListRow } from "./gasClient";
 
 const firebaseRecordId = (branchName: string, settleDate: string) => `${encodeURIComponent(branchName)}--${settleDate}`;
 
@@ -38,7 +39,13 @@ function toMaster(data: any): MasterDaily {
 }
 
 async function findDailyDocs(branchName?: string) {
-  const snapshot = await getDocs(collection(getDirectDb(), "daily_settles"));
+  let snapshot;
+  try {
+    snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
+  } catch (error) {
+    console.warn("[Firebase Direct] Server read failed for daily_settles; falling back to cached docs.", error);
+    snapshot = await getDocs(collection(getDirectDb(), "daily_settles"));
+  }
   return snapshot.docs.map((item) => {
     const data: any = item.data();
     return { id: item.id, ...data, master: toMaster(data.master || {}) };
@@ -57,7 +64,13 @@ export async function firebaseGetDailyFormBootstrap(branchName: string, settleDa
 
 export async function firebaseSubmitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]) {
   const recordId = firebaseRecordId(master.branchName, master.settleDate);
-  const existing = await getDoc(doc(getDirectDb(), "daily_settles", recordId));
+  const recordRef = doc(getDirectDb(), "daily_settles", recordId);
+  let existing;
+  try {
+    existing = await getDocFromServer(recordRef);
+  } catch {
+    existing = await getDoc(recordRef);
+  }
   const now = new Date().toISOString();
   const savedMaster = {
     ...master,
@@ -67,12 +80,19 @@ export async function firebaseSubmitDaily(master: MasterDaily, expenses: Expense
     modifiedAt: existing.exists() ? now : "",
     modifiedBy: existing.exists() ? master.submittedBy || "branch" : ""
   };
-  await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master: savedMaster, expenses, staff, updatedAt: now });
+  await setDoc(recordRef, { recordId, master: savedMaster, expenses, staff, updatedAt: now });
   return { recordId };
 }
 
 export async function firebaseGetDailyDetail(recordId: string) {
-  const snapshot = await getDoc(doc(getDirectDb(), "daily_settles", recordId));
+  const recordRef = doc(getDirectDb(), "daily_settles", recordId);
+  let snapshot;
+  try {
+    snapshot = await getDocFromServer(recordRef);
+  } catch (error) {
+    console.warn("[Firebase Direct] Server read failed for daily detail; falling back to cached doc.", error);
+    snapshot = await getDoc(recordRef);
+  }
   if (!snapshot.exists()) throw new Error("해당 마감 데이터를 찾을 수 없습니다.");
   const data: any = snapshot.data();
   return { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
@@ -184,9 +204,13 @@ export async function firebaseGetBranchList() {
   return snapshot.docs.map((item) => item.data() as any).filter((branch) => branch.isActive !== false);
 }
 
-export async function firebaseGetDailyList(settleDate: string) {
+export async function firebaseGetDailyList(settleDate: string): Promise<DailyListRow[]> {
   const [branches, settlements] = await Promise.all([firebaseGetBranchList(), findDailyDocs()]);
-  const byBranch = new Map(settlements.filter((item: any) => item.master?.settleDate === settleDate).map((item: any) => [item.master.branchName, item.master]));
+  const byBranch = new Map<string, MasterDaily>(
+    settlements
+      .filter((item: any) => item.master?.settleDate === settleDate)
+      .map((item: any) => [item.master.branchName, item.master as MasterDaily])
+  );
   return branches.filter((branch: any) => branch.role === "branch").map((branch: any) => ({ branchName: branch.branchName, brand: branch.brand, role: "branch", submitted: byBranch.has(branch.branchName), record: byBranch.get(branch.branchName) || null }));
 }
 

@@ -2220,7 +2220,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const restoreDraftIfAvailable = useCallback(() => {
+  const restoreDraftIfAvailable = useCallback((options?: { preservePrevDayCash?: string }) => {
     try {
       const saved = localStorage.getItem(draftKey);
       if (!saved) return false;
@@ -2231,7 +2231,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       setTransferSales(draft.transferSales || "");
       setDeliverySales(draft.deliverySales || "");
       setCashBalance(draft.cashBalance || "");
-      setPrevDayCash(draft.prevDayCash || "0");
+      setPrevDayCash(options?.preservePrevDayCash ?? draft.prevDayCash ?? "0");
       setCashDiffReason(draft.cashDiffReason || "");
       setStaffMemo(draft.staffMemo || "");
       setReviewMemo(draft.reviewMemo || "");
@@ -2504,7 +2504,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             setCashExpenses(metadataParsed.cashExpenses || []);
             setCardExpenses(metadataParsed.cardExpenses || []);
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
-            setPrevDayCash(metadataParsed.prevDayCash !== undefined ? String(metadataParsed.prevDayCash) : prevCashVal);
+            setPrevDayCash(prevCashVal);
             setCashDiffReason(metadataParsed.cashDiffReason || "");
             setStaffMemo(metadataParsed.staffMemo || "");
             setReviewMemo(metadataParsed.reviewMemo || "");
@@ -2608,7 +2608,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setOtherMemo("");
           initRosterInForm();
           setTimeout(() => {
-            if (restoreDraftIfAvailable()) {
+            if (restoreDraftIfAvailable({ preservePrevDayCash: prevCashVal })) {
               setStaffRows((current) => reconcileDraftStaffRows(current));
             }
           }, 0);
@@ -2628,7 +2628,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         setOtherMemo("");
         initRosterInForm();
         setTimeout(() => {
-          if (restoreDraftIfAvailable()) {
+          if (restoreDraftIfAvailable({ preservePrevDayCash: "0" })) {
             setStaffRows((current) => reconcileDraftStaffRows(current));
           }
         }, 0);
