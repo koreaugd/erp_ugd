@@ -334,7 +334,7 @@ export default function BranchConfirmPage() {
   // Render branch selector if none selected
   if (!selectedBranch || !selectedBranch.branchName) {
     return (
-      <div className="min-h-screen bg-white flex flex-col justify-between py-12 px-6">
+      <div className="branch-redesign branch-select-redesign min-h-screen bg-white flex flex-col justify-between py-12 px-6">
         <div className="max-w-md mx-auto w-full space-y-6" id="branch-select-container">
           <div className="text-center space-y-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-zinc-100 text-zinc-800 text-xs font-bold rounded-full border border-zinc-200">
@@ -705,7 +705,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
+    <div className="branch-redesign min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
       {/* Sidebar Layout */}
       <aside
         className={`w-full md:w-64 shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40 text-zinc-150 border-zinc-850`}

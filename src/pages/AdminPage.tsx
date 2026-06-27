@@ -659,9 +659,10 @@ export default function AdminPage() {
   };
 
   if (!user) return null;
+  const designPreview = new URLSearchParams(window.location.search).get("designPreview") === "1";
 
   return (
-    <div className="admin-redesign min-h-screen bg-[#F6F5FA] flex" id="admin-layout-wrapper">
+    <div className={`admin-redesign ${designPreview ? "admin-design-preview" : ""} min-h-screen bg-[#F6F5FA] flex`} id="admin-layout-wrapper">
       
       {/* PC 전전 사이드바 레이아웃 */}
       <aside className="hidden lg:flex flex-col w-64 bg-[#1A3C6E] text-white p-6 shrink-0" id="sidebar">
@@ -765,11 +766,9 @@ export default function AdminPage() {
               <section className="admin-hero-panel">
                 <div>
                   <p className="admin-kicker">UGD Finance Control</p>
-                  <h1>Hi Admin, 오늘 확인할 본사 운영 현황입니다.</h1>
+                  <AdminLatestNoticeHeadline />
                 </div>
                 <div className="admin-hero-actions">
-                  <button type="button" aria-label="검색"><Eye className="w-5 h-5" /></button>
-                  <button type="button" aria-label="필터"><Filter className="w-5 h-5" /></button>
                   <span><Calendar className="w-4 h-4" /> {getTodayDateString()}</span>
                 </div>
               </section>
@@ -780,10 +779,10 @@ export default function AdminPage() {
                   <strong>{stats.pending}</strong>
                   <small>클릭해서 지점별 제출 상태 확인</small>
                 </button>
-                <button type="button" onClick={() => setAdminSection("dailySettlement")} className="admin-kpi-card admin-kpi-blue">
-                  <span>정산 제출</span>
-                  <strong>{stats.submitted}</strong>
-                  <small>전체 {stats.total}개 지점 기준</small>
+                <button type="button" onClick={() => setClosingView("cash")} className="admin-kpi-card admin-kpi-blue">
+                  <span>현금차이</span>
+                  <strong>{anomalyRecords.filter((item) => item.cashDifference).length}</strong>
+                  <small>마감현황의 현금 차이 확인</small>
                 </button>
                 <button type="button" onClick={() => setClosingView("otherMemo")} className="admin-kpi-card admin-kpi-honey">
                   <span>ERP 기타메모</span>
@@ -797,16 +796,7 @@ export default function AdminPage() {
                 </button>
               </section>
 
-              <AdminNoticeManager />
-              <AdminDashboardAlertHub
-                pendingDailyCount={stats.pending}
-                alerts={dashboardAlerts}
-                loading={dashboardAlertsLoading}
-                onRefresh={() => void loadDashboardAlerts()}
-                onOpen={handleDashboardAlertClick}
-              />
-
-              <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+              <section className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다. 어제 날짜({getYesterdayDateString()}) 마감 내용만 강조 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
                 <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button><button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>기타메모</button></div>
                 {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs text-blue-600 font-bold">기타메모</p><p className="text-2xl font-black text-blue-700">{anomalyRecords.filter((item) => item.remarks?.otherMemo).length}건</p></div></div>}
@@ -842,7 +832,7 @@ export default function AdminPage() {
                           .map((item, index) => (
                             <tr
                               key={`${item.branchName}-${item.date}-${index}`}
-                              className={item.date === getYesterdayDateString() ? "bg-sky-50" : ""}
+                              className={item.date === getYesterdayDateString() ? "admin-yesterday-new-row bg-sky-50" : ""}
                             >
                               <td className="py-3 font-mono">{item.date}</td>
                               <td className="font-bold">{item.branchName}</td>
@@ -858,7 +848,7 @@ export default function AdminPage() {
                                   ? "기타메모"
                                   : item.issues.join(", ")}
                                 {item.date === getYesterdayDateString() && (
-                                  <span className="ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
+                                  <span className="admin-yesterday-new-badge ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
                                     어제
                                   </span>
                                 )}
@@ -879,6 +869,17 @@ export default function AdminPage() {
                   </table>
                 </div>
               </section>
+
+              <div className="admin-dashboard-compact-grid">
+                <AdminDashboardAlertHub
+                  pendingDailyCount={stats.pending}
+                  alerts={dashboardAlerts}
+                  loading={dashboardAlertsLoading}
+                  onRefresh={() => void loadDashboardAlerts()}
+                  onOpen={handleDashboardAlertClick}
+                />
+                <AdminNoticeManager />
+              </div>
 
               {/* 상단 웰컴 인사 및 기준 일자 헤더 */}
               <div className="hidden">
@@ -1099,7 +1100,7 @@ export default function AdminPage() {
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
 
           {adminSection === "dailySettlement" && (
-            <section className="space-y-5 animate-fade-in">
+            <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200">
                 <button onClick={() => setDailySettlementTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
                 <button onClick={() => setDailySettlementTab("logs")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변경이력 & 수기대장</button>
@@ -1455,6 +1456,49 @@ export default function AdminPage() {
   );
 }
 
+function AdminLatestNoticeHeadline() {
+  const [notices, setNotices] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    const saved = await gasClient.getSharedData<any[]>("admin_dashboard_notices").catch(() => []);
+    setNotices(Array.isArray(saved) ? saved.filter((notice) => notice?.title || notice?.body) : []);
+  }, []);
+
+  useEffect(() => {
+    void load();
+    window.addEventListener("admin_dashboard_notices_updated", load);
+    return () => window.removeEventListener("admin_dashboard_notices_updated", load);
+  }, [load]);
+
+  if (notices.length === 0) {
+    return <h1>등록된 관리자 공지사항이 없습니다.</h1>;
+  }
+
+  const latest = notices[0];
+
+  return (
+    <div className="admin-latest-notice-headline">
+      <button type="button" onClick={() => setOpen((current) => !current)}>
+        <h1>{latest.title}</h1>
+      </button>
+      {open && (
+        <div className="admin-registered-notices rounded-2xl border border-gray-100 p-4 space-y-2">
+          {notices.slice(0, 3).map((notice) => (
+            <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl border border-slate-100 p-3">
+              <div>
+                <p className="text-sm font-black text-gray-800">{notice.title}</p>
+                <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
+              </div>
+              <span className="rounded-full px-2 py-1 text-[10px] font-black">관리자 공지</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminNoticeManager() {
   const [notices, setNotices] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
@@ -1485,6 +1529,7 @@ function AdminNoticeManager() {
       const next = [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
       await gasClient.saveSharedData(noticeStorageKey, next);
       setNotices(next);
+      if (noticeTab === "admin") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
       setTitle("");
       setBody("");
     } finally {
@@ -1497,17 +1542,18 @@ function AdminNoticeManager() {
     const next = notices.filter((notice) => notice.id !== id);
     await gasClient.saveSharedData(noticeStorageKey, next);
     setNotices(next);
+    if (noticeTab === "admin") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
   };
 
   return (
-    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+    <section className="admin-notice-manager bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
       <div>
-        <h2 className="text-lg font-black text-[#2C3E50]">지점 공지사항</h2>
+        <h2 className="text-lg font-black text-[#2C3E50]">공지사항</h2>
         <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
       </div>
       <div className="flex rounded-xl bg-slate-100 p-1 w-fit">
         <button onClick={() => setNoticeTab("admin")} className={`admin-notice-tab admin-notice-tab-admin px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "is-active shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
-        <button onClick={() => setNoticeTab("branch")} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>지점 공지사항</button>
+        <button onClick={() => setNoticeTab("branch")} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>공지사항</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[180px_180px_1fr_auto] gap-2">
         <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold disabled:bg-gray-100 disabled:text-gray-400">
@@ -1518,7 +1564,7 @@ function AdminNoticeManager() {
         <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
         <button onClick={() => void saveNotice()} disabled={saving} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
       </div>
-      {notices.length > 0 && (
+      {notices.length > 0 ? (
         <div className="space-y-2">
           {notices.slice(0, 3).map((notice) => (
             <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
@@ -1529,6 +1575,10 @@ function AdminNoticeManager() {
               <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
             </div>
           ))}
+        </div>
+      ) : (
+        <div className="admin-notice-empty rounded-xl border border-slate-100 p-3 text-xs font-bold text-gray-500">
+          등록된 {noticeTab === "admin" ? "관리자 공지" : "공지사항"}이 없습니다.
         </div>
       )}
     </section>
@@ -2462,7 +2512,7 @@ function AdminMonthlyClosingStatusSection() {
   }, [rows]);
 
   return (
-    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+    <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-black text-[#2C3E50]">월말마감 제출 현황</h2>
