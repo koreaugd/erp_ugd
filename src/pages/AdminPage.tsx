@@ -661,7 +661,7 @@ export default function AdminPage() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] flex" id="admin-layout-wrapper">
+    <div className="admin-redesign min-h-screen bg-[#F6F5FA] flex" id="admin-layout-wrapper">
       
       {/* PC 전전 사이드바 레이아웃 */}
       <aside className="hidden lg:flex flex-col w-64 bg-[#1A3C6E] text-white p-6 shrink-0" id="sidebar">
@@ -726,7 +726,7 @@ export default function AdminPage() {
           </div>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-white/80 hover:text-white font-semibold text-sm cursor-pointer transition-all"
+            className="admin-logout-link w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-white/80 hover:text-white font-semibold text-sm cursor-pointer transition-all"
           >
             <LogOut className="w-5 h-5" />
             보안 로그아웃
@@ -743,7 +743,7 @@ export default function AdminPage() {
       <div className="grow flex flex-col min-w-0" id="admin-main-container">
         
         {/* 모바일 대형 헤더 */}
-        <header className="lg:hidden bg-[#1A3C6E] text-white px-4 py-4 flex items-center justify-between shadow-md">
+        <header className="admin-mobile-header lg:hidden bg-[#1A3C6E] text-white px-4 py-4 flex items-center justify-between shadow-md">
           <div className="flex flex-col">
             <span className="text-lg font-black tracking-wider text-white">ERP_UGD</span>
             <span className="text-[10px] text-white/75">본사 총괄 대시보드</span>
@@ -762,6 +762,41 @@ export default function AdminPage() {
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
           {adminSection === "dashboard" && (
             <>
+              <section className="admin-hero-panel">
+                <div>
+                  <p className="admin-kicker">UGD Finance Control</p>
+                  <h1>Hi Admin, 오늘 확인할 본사 운영 현황입니다.</h1>
+                </div>
+                <div className="admin-hero-actions">
+                  <button type="button" aria-label="검색"><Eye className="w-5 h-5" /></button>
+                  <button type="button" aria-label="필터"><Filter className="w-5 h-5" /></button>
+                  <span><Calendar className="w-4 h-4" /> {getTodayDateString()}</span>
+                </div>
+              </section>
+
+              <section className="admin-kpi-grid">
+                <button type="button" onClick={() => setAdminSection("dailySettlement")} className="admin-kpi-card admin-kpi-vanilla">
+                  <span>일일정산 미제출</span>
+                  <strong>{stats.pending}</strong>
+                  <small>클릭해서 지점별 제출 상태 확인</small>
+                </button>
+                <button type="button" onClick={() => setAdminSection("dailySettlement")} className="admin-kpi-card admin-kpi-blue">
+                  <span>정산 제출</span>
+                  <strong>{stats.submitted}</strong>
+                  <small>전체 {stats.total}개 지점 기준</small>
+                </button>
+                <button type="button" onClick={() => setClosingView("otherMemo")} className="admin-kpi-card admin-kpi-honey">
+                  <span>ERP 기타메모</span>
+                  <strong>{anomalyRecords.filter((item) => item.remarks?.otherMemo).length}</strong>
+                  <small>오류·개선 제안 확인</small>
+                </button>
+                <button type="button" onClick={() => setAdminSection("monthlyClosing")} className="admin-kpi-card admin-kpi-white">
+                  <span>월말마감</span>
+                  <strong>보기</strong>
+                  <small>현금관리와 제출 현황으로 이동</small>
+                </button>
+              </section>
+
               <AdminNoticeManager />
               <AdminDashboardAlertHub
                 pendingDailyCount={stats.pending}
@@ -1471,8 +1506,8 @@ function AdminNoticeManager() {
         <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
       </div>
       <div className="flex rounded-xl bg-slate-100 p-1 w-fit">
-        <button onClick={() => setNoticeTab("admin")} className={`px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "bg-white text-[#2E6DB4] shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
-        <button onClick={() => setNoticeTab("branch")} className={`px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "bg-white text-[#2E6DB4] shadow-sm" : "text-gray-500"}`}>지점 공지사항</button>
+        <button onClick={() => setNoticeTab("admin")} className={`admin-notice-tab admin-notice-tab-admin px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "is-active shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
+        <button onClick={() => setNoticeTab("branch")} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>지점 공지사항</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[180px_180px_1fr_auto] gap-2">
         <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold disabled:bg-gray-100 disabled:text-gray-400">
@@ -1486,7 +1521,7 @@ function AdminNoticeManager() {
       {notices.length > 0 && (
         <div className="space-y-2">
           {notices.slice(0, 3).map((notice) => (
-            <div key={notice.id} className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
               <div>
                 <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
                 <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
@@ -2472,7 +2507,7 @@ function AdminMonthlyClosingStatusSection() {
             ) : rows.map(({ branch, record }) => {
               const status = record?.status || "pending";
               const label = status === "confirmed" ? "월말마감 확정" : status === "editing" ? "수정중" : "미제출";
-              const badge = status === "confirmed" ? "bg-emerald-50 text-emerald-700" : status === "editing" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700";
+              const badge = status === "confirmed" ? "admin-monthly-status-confirmed" : status === "editing" ? "admin-monthly-status-editing" : "admin-monthly-status-pending";
               const date = record?.updatedAt || record?.confirmedAt || "";
               return (
                 <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">

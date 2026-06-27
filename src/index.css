@@ -24,8 +24,8 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: #F5F7FA;
-  color: #2C3E50;
+  background-color: #F6F5FA;
+  color: #212121;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -40,5 +40,535 @@ input::-webkit-inner-spin-button {
 /* Firefox: disable arrows on number input */
 input[type=number] {
   -moz-appearance: textfield;
+}
+
+/* Admin redesign inspired by the CRM dashboard reference */
+.admin-redesign {
+  --admin-alice: #D8DFE9;
+  --admin-honey: #CFDECA;
+  --admin-vanilla: #EFF0A3;
+  --admin-black: #212121;
+  --admin-ghost: #F6F5FA;
+  background: var(--admin-ghost);
+  color: var(--admin-black);
+}
+
+.admin-redesign #sidebar {
+  width: 280px;
+  background: var(--admin-ghost);
+  color: var(--admin-black);
+  border-right: 1px solid rgba(33, 33, 33, 0.08);
+  box-shadow: 16px 0 40px rgba(33, 33, 33, 0.04);
+}
+
+.admin-redesign #sidebar > div:first-child {
+  border-bottom-color: rgba(33, 33, 33, 0.08);
+}
+
+.admin-redesign #sidebar h2,
+.admin-redesign #admin-role-badge {
+  color: var(--admin-black);
+}
+
+.admin-redesign #sidebar p {
+  color: rgba(33, 33, 33, 0.55);
+}
+
+.admin-redesign #sidebar nav button {
+  min-height: 46px;
+  border-radius: 999px;
+  color: rgba(33, 33, 33, 0.68);
+  font-weight: 900;
+}
+
+.admin-redesign #sidebar nav button:hover {
+  background: var(--admin-alice);
+  color: var(--admin-black);
+}
+
+.admin-redesign #sidebar nav button[class*="bg-[#2E6DB4]"] {
+  background: var(--admin-black) !important;
+  color: #ffffff !important;
+  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.16);
+}
+
+.admin-redesign #sidebar nav button[class*="border-t"] {
+  border-top-color: rgba(33, 33, 33, 0.08);
+}
+
+.admin-redesign #sidebar > div:last-child {
+  background: var(--admin-honey);
+  border-color: transparent;
+  border-radius: 24px;
+}
+
+.admin-redesign main {
+  max-width: 1500px;
+}
+
+.admin-hero-panel {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 34px 0 18px;
+}
+
+.admin-kicker {
+  margin: 0 0 10px;
+  color: rgba(33, 33, 33, 0.52);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-hero-panel h1 {
+  max-width: none;
+  color: var(--admin-black);
+  font-size: clamp(26px, 2.7vw, 40px);
+  line-height: 1.12;
+  font-weight: 900;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.admin-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-hero-actions button,
+.admin-hero-actions span {
+  min-height: 48px;
+  border: 1.5px solid rgba(33, 33, 33, 0.18);
+  border-radius: 999px;
+  background: var(--admin-ghost);
+  color: var(--admin-black);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.admin-hero-actions button {
+  width: 48px;
+  padding: 0;
+}
+
+.admin-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.admin-kpi-card {
+  position: relative;
+  min-height: 170px;
+  border: 1px solid rgba(33, 33, 33, 0.06);
+  border-radius: 28px;
+  padding: 28px;
+  text-align: left;
+  color: var(--admin-black);
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.05);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.admin-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 56px rgba(33, 33, 33, 0.08);
+}
+
+.admin-kpi-card::after {
+  content: "↗";
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.admin-kpi-card span {
+  display: block;
+  max-width: 75%;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.admin-kpi-card strong {
+  display: block;
+  margin-top: 12px;
+  font-size: clamp(34px, 3vw, 46px);
+  line-height: 1;
+  font-weight: 900;
+}
+
+.admin-kpi-card small {
+  display: block;
+  margin-top: 22px;
+  color: rgba(33, 33, 33, 0.54);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-kpi-vanilla { background: var(--admin-vanilla); }
+.admin-kpi-blue { background: var(--admin-alice); }
+.admin-kpi-honey { background: var(--admin-honey); }
+.admin-kpi-white { background: var(--admin-ghost); }
+
+.admin-redesign main > section,
+.admin-redesign main > div > section,
+.admin-redesign section.bg-white {
+  border-radius: 28px !important;
+  border-color: rgba(33, 33, 33, 0.07) !important;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045);
+}
+
+.admin-redesign section h2,
+.admin-redesign section h3 {
+  color: var(--admin-black) !important;
+  letter-spacing: 0;
+}
+
+.admin-redesign button[class*="bg-[#2E6DB4]"],
+.admin-redesign button[class*="bg-slate-700"] {
+  background: var(--admin-black) !important;
+  color: #ffffff !important;
+}
+
+.admin-redesign button[class*="border-b-2"] {
+  border-radius: 999px;
+  border-bottom-width: 0 !important;
+  padding: 10px 18px;
+}
+
+.admin-redesign button[class*="border-[#2E6DB4]"] {
+  background: var(--admin-black);
+  color: #ffffff !important;
+}
+
+.admin-redesign thead tr {
+  background: var(--admin-alice) !important;
+}
+
+.admin-redesign tbody tr:hover {
+  background: rgba(216, 223, 233, 0.35);
+}
+
+.admin-redesign input,
+.admin-redesign select,
+.admin-redesign textarea {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  border-radius: 18px !important;
+}
+
+.admin-redesign .bg-white {
+  background-color: var(--admin-ghost) !important;
+}
+
+.admin-redesign .bg-slate-50,
+.admin-redesign .bg-slate-100,
+.admin-redesign .bg-gray-50,
+.admin-redesign .bg-gray-100,
+.admin-redesign .bg-zinc-50,
+.admin-redesign .bg-zinc-100,
+.admin-redesign .hover\:bg-slate-50\/50:hover,
+.admin-redesign .hover\:bg-slate-50\/60:hover,
+.admin-redesign .hover\:bg-gray-50\/50:hover {
+  background-color: var(--admin-ghost) !important;
+}
+
+.admin-redesign .bg-blue-50,
+.admin-redesign .hover\:bg-blue-100:hover,
+.admin-redesign .hover\:bg-\[\#D6E4F0\]\/60:hover {
+  background-color: var(--admin-alice) !important;
+}
+
+.admin-redesign .bg-amber-50,
+.admin-redesign .bg-orange-50,
+.admin-redesign .hover\:bg-amber-100:hover {
+  background-color: var(--admin-vanilla) !important;
+}
+
+.admin-redesign .bg-emerald-50,
+.admin-redesign .bg-green-50,
+.admin-redesign .hover\:bg-emerald-100\/70:hover {
+  background-color: var(--admin-honey) !important;
+}
+
+.admin-redesign .bg-rose-50,
+.admin-redesign .bg-rose-50\/30,
+.admin-redesign .bg-violet-50,
+.admin-redesign .hover\:bg-rose-100:hover {
+  background-color: var(--admin-honey) !important;
+}
+
+.admin-redesign .bg-sky-50,
+.admin-redesign .bg-\[\#D6E4F0\]\/30,
+.admin-redesign .bg-\[\#D6E4F0\]\/20 {
+  background-color: var(--admin-alice) !important;
+}
+
+.admin-redesign .bg-blue-700,
+.admin-redesign .bg-blue-600,
+.admin-redesign .bg-sky-600,
+.admin-redesign .bg-emerald-600,
+.admin-redesign .bg-emerald-700,
+.admin-redesign .bg-amber-600,
+.admin-redesign .bg-orange-500,
+.admin-redesign .bg-rose-600,
+.admin-redesign .bg-red-700,
+.admin-redesign .bg-violet-700,
+.admin-redesign .bg-\[\#2E6DB4\],
+.admin-redesign .hover\:bg-\[\#1A3C6E\]:hover,
+.admin-redesign .hover\:bg-\[\#20528B\]:hover,
+.admin-redesign .hover\:bg-emerald-700:hover,
+.admin-redesign .active\:bg-emerald-800:active {
+  background-color: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+}
+
+.admin-redesign .text-white {
+  color: var(--admin-ghost) !important;
+}
+
+.admin-redesign .text-blue-700,
+.admin-redesign .text-blue-600,
+.admin-redesign .text-amber-700,
+.admin-redesign .text-amber-600,
+.admin-redesign .text-orange-600,
+.admin-redesign .text-emerald-700,
+.admin-redesign .text-emerald-600,
+.admin-redesign .text-rose-700,
+.admin-redesign .text-rose-600,
+.admin-redesign .text-violet-700,
+.admin-redesign .text-\[\#2E6DB4\],
+.admin-redesign .text-\[\#1A3C6E\],
+.admin-redesign .text-\[\#2C3E50\],
+.admin-redesign .text-\[\#F39C12\] {
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign .text-gray-300,
+.admin-redesign .text-gray-400,
+.admin-redesign .text-gray-500,
+.admin-redesign .text-gray-600,
+.admin-redesign .text-gray-700,
+.admin-redesign .text-gray-800,
+.admin-redesign .text-slate-500,
+.admin-redesign .text-slate-600,
+.admin-redesign .text-slate-700,
+.admin-redesign .text-zinc-700,
+.admin-redesign .text-zinc-800 {
+  color: rgba(33, 33, 33, 0.68) !important;
+}
+
+.admin-redesign .border-gray-100,
+.admin-redesign .border-gray-150,
+.admin-redesign .border-gray-200,
+.admin-redesign .border-slate-100,
+.admin-redesign .border-blue-100,
+.admin-redesign .border-amber-100,
+.admin-redesign .border-amber-200,
+.admin-redesign .border-emerald-100,
+.admin-redesign .border-rose-100,
+.admin-redesign .border-rose-100\/50,
+.admin-redesign .border-\[\#D6E4F0\] {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.admin-redesign .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(33, 33, 33, 0.09) !important;
+}
+
+.admin-redesign .ring-amber-100,
+.admin-redesign .ring-emerald-50 {
+  --tw-ring-color: var(--admin-vanilla) !important;
+}
+
+.admin-redesign .disabled\:bg-gray-100:disabled {
+  background-color: var(--admin-alice) !important;
+}
+
+.admin-redesign .disabled\:text-gray-400:disabled {
+  color: rgba(33, 33, 33, 0.42) !important;
+}
+
+.admin-redesign main > section:not(.admin-kpi-grid),
+.admin-redesign main > div > section {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-redesign main > section:nth-of-type(even):not(.admin-kpi-grid) {
+  background: color-mix(in srgb, var(--admin-ghost) 78%, var(--admin-alice)) !important;
+}
+
+.admin-redesign main > section div[class*="rounded-xl"],
+.admin-redesign main > div > section div[class*="rounded-xl"] {
+  background: color-mix(in srgb, var(--admin-ghost) 86%, var(--admin-alice)) !important;
+}
+
+.admin-redesign section div[class*="grid-cols-1"][class*="sm:grid-cols-4"] > div:nth-child(1) {
+  background: var(--admin-vanilla) !important;
+}
+
+.admin-redesign section div[class*="grid-cols-1"][class*="sm:grid-cols-4"] > div:nth-child(2) {
+  background: var(--admin-alice) !important;
+}
+
+.admin-redesign section div[class*="grid-cols-1"][class*="sm:grid-cols-4"] > div:nth-child(3) {
+  background: var(--admin-honey) !important;
+}
+
+.admin-redesign section div[class*="grid-cols-1"][class*="sm:grid-cols-4"] > div:nth-child(4) {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-redesign #table-card,
+.admin-redesign section .overflow-x-auto.rounded-xl {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-redesign thead tr {
+  background: var(--admin-alice) !important;
+}
+
+.admin-redesign tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--admin-ghost) 84%, var(--admin-alice)) !important;
+}
+
+.admin-redesign tbody tr:nth-child(odd) {
+  background: var(--admin-ghost) !important;
+}
+
+.admin-redesign .admin-hero-panel,
+.admin-redesign .admin-kpi-grid {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.admin-redesign .admin-hero-panel {
+  background: var(--admin-alice) !important;
+  border: 1px solid rgba(33, 33, 33, 0.08) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045) !important;
+  padding: 28px 32px;
+}
+
+.admin-redesign .admin-mobile-header {
+  background: var(--admin-alice) !important;
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign .admin-mobile-header .text-white,
+.admin-redesign .admin-mobile-header .text-white\/75 {
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign .admin-notice-tab {
+  color: var(--admin-black) !important;
+  border: 1px solid rgba(33, 33, 33, 0.08);
+}
+
+.admin-redesign .admin-notice-tab-admin {
+  background: color-mix(in srgb, var(--admin-vanilla) 54%, var(--admin-ghost)) !important;
+}
+
+.admin-redesign .admin-notice-tab-admin.is-active {
+  background: var(--admin-vanilla) !important;
+}
+
+.admin-redesign .admin-notice-tab-branch {
+  background: color-mix(in srgb, var(--admin-honey) 54%, var(--admin-ghost)) !important;
+}
+
+.admin-redesign .admin-notice-tab-branch.is-active {
+  background: var(--admin-honey) !important;
+}
+
+.admin-redesign .admin-notice-item {
+  background: var(--admin-alice) !important;
+}
+
+.admin-redesign .admin-monthly-status-confirmed {
+  background: var(--admin-vanilla) !important;
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign .admin-monthly-status-pending {
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+}
+
+.admin-redesign .admin-monthly-status-editing {
+  background: var(--admin-honey) !important;
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign .admin-logout-link {
+  background: linear-gradient(90deg, var(--admin-alice), var(--admin-honey)) !important;
+  color: var(--admin-black) !important;
+  border: 1px solid rgba(33, 33, 33, 0.08);
+}
+
+.admin-redesign .admin-logout-link:hover {
+  background: linear-gradient(90deg, var(--admin-honey), var(--admin-alice)) !important;
+  color: var(--admin-black) !important;
+}
+
+.admin-redesign section button[class*="bg-amber-50"],
+.admin-redesign section span[class*="bg-amber-50"],
+.admin-redesign section div[class*="bg-amber-50"] {
+  background: var(--admin-vanilla) !important;
+}
+
+.admin-redesign section button[class*="bg-blue-50"],
+.admin-redesign section span[class*="bg-blue-50"],
+.admin-redesign section div[class*="bg-blue-50"] {
+  background: var(--admin-alice) !important;
+}
+
+.admin-redesign section button[class*="bg-emerald-50"],
+.admin-redesign section span[class*="bg-emerald-50"],
+.admin-redesign section div[class*="bg-emerald-50"] {
+  background: var(--admin-honey) !important;
+}
+
+@media (max-width: 1024px) {
+  .admin-hero-panel {
+    flex-direction: column;
+    padding-top: 20px;
+  }
+
+  .admin-hero-actions {
+    justify-content: flex-start;
+  }
+
+  .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-hero-panel h1 {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-kpi-card {
+    min-height: 145px;
+  }
 }
 
