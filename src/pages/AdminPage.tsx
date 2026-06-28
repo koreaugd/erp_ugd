@@ -659,7 +659,7 @@ export default function AdminPage() {
   };
 
   if (!user) return null;
-  const designPreview = new URLSearchParams(window.location.search).get("designPreview") === "1";
+  const designPreview = new URLSearchParams(window.location.search).get("designPreview") !== "0";
 
   return (
     <div className={`admin-redesign ${designPreview ? "admin-design-preview" : ""} min-h-screen bg-[#F6F5FA] flex`} id="admin-layout-wrapper">
