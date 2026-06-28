@@ -3,7 +3,6 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
-import * as XLSX from "xlsx-js-style";
 import {
   Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
   CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
@@ -15,7 +14,6 @@ import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { formatNumber } from "../utils/formatNumber";
 import { hashPin } from "../utils/hashPin";
-import { changeFirebaseLoginPins, loginWithAdminPin } from "../api/firebaseAuth";
 
 const formatWithCommas = (val: string | number | undefined | null) => {
   if (val === undefined || val === null || val === "") return "";
@@ -645,6 +643,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     e.preventDefault();
     try {
       // 별도 로컬 비밀번호 대신 실제 Firebase 관리자 PIN으로 재인증합니다.
+      const { loginWithAdminPin } = await import("../api/firebaseAuth");
       await loginWithAdminPin(passcode);
       setIsPasscodeVerified(true);
       setPasscodeError("");
@@ -702,6 +701,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     }
     try {
       setChangingFirebaseLoginPins(true);
+      const { changeFirebaseLoginPins } = await import("../api/firebaseAuth");
       const result = await changeFirebaseLoginPins({
         currentAdminPin: currentAdminLoginPin,
         currentBranchPin: wantsBranchChange ? currentBranchLoginPin : undefined,
@@ -6923,6 +6923,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
 
   const handleDownloadExcel = useCallback(async () => {
     try {
+      const XLSX = await import("xlsx-js-style");
       const wb = XLSX.utils.book_new();
 
       // 1. 매입매출 대장

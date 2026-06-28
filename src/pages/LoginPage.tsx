@@ -4,7 +4,7 @@ import { AlertOctagon, Lock, LogIn } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuthContext } from "../contexts/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { getFirebaseLoginBranches, LoginBranch } from "../api/firebaseAuth";
+import type { LoginBranch } from "../api/firebaseAuth";
 
 export default function LoginPage() {
   const { user, login, loading, error, failedAttempts, setError } = useAuthContext();
@@ -24,7 +24,8 @@ export default function LoginPage() {
   useEffect(() => {
     if (!showBranchSelect || adminMode) return;
     setLoadingBranches(true);
-    getFirebaseLoginBranches()
+    import("../api/firebaseAuth")
+      .then(({ getFirebaseLoginBranches }) => getFirebaseLoginBranches())
       .then((list) => setBranches(list))
       .catch(() => setBranches([]))
       .finally(() => setLoadingBranches(false));
