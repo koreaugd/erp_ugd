@@ -113,6 +113,20 @@ const updateDailyMetadata = async (
 
 const toNumberPromptValue = (value: any) => String(value ?? "").replace(/,/g, "");
 
+const getMonthlyExpenseCategoryChipClass = (value: string) => {
+  const text = String(value || "");
+  if (text.includes("식재료")) return "monthly-chip-vanilla";
+  if (text.includes("음료")) return "monthly-chip-alice";
+  return "monthly-chip-honey";
+};
+
+const getMonthlyExpenseUsageChipClass = (value: string) => {
+  const text = String(value || "");
+  if (text.includes("쿠팡")) return "monthly-chip-vanilla";
+  if (text.includes("네이버")) return "monthly-chip-honey";
+  return "monthly-chip-alice";
+};
+
 // ----------------------------------------------------
 // Constants & Types
 // ----------------------------------------------------
@@ -122,7 +136,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
   return `${h}:${m}`;
 });
 
-type StaffAddReason = "신규입사" | "지점이동" | "기타";
+type StaffAddReason = "신규입사" | "지점이동" | "기존직원" | "기타";
 
 interface StaffAddDraft {
   id: string;
@@ -746,9 +760,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             </div>
           </div>
 
-          <div className="hidden md:block mt-2.5 px-3 py-1.5 border rounded-lg text-[10px] font-bold w-full text-center transition-all bg-white/5 border-white/10 text-white/70">
-            {mainCategory === "monthly" ? adminSettings.monthlyReportText : adminSettings.dailyPortalText}
-          </div>
         </div>
 
         {/* Categories Navigation */}
@@ -769,7 +780,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                     setActiveTab("annualLeave");
                   }
                 }}
-                className={`flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer whitespace-nowrap w-full text-left justify-center md:justify-start ${
+                className={`branch-main-nav-button ${active ? "branch-main-nav-active" : "branch-main-nav-idle"} flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer whitespace-nowrap w-full text-left justify-center md:justify-start ${
                   active
                     ? "text-white"
                     : mainCategory === "monthly"
@@ -966,7 +977,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
                 {activeTab === "officeWorkLog" && <OfficeWorkLogTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
-                {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
+                {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
                 {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
               </motion.div>
             </AnimatePresence>
@@ -980,9 +991,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             />
           )}
 
-          {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} />}
+          {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
 
-          {mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} />}
+          {mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
         </main>
       </div>
 
@@ -1889,6 +1900,10 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
   const [notices, setNotices] = useState<any[]>([]);
   const [issues, setIssues] = useState<Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }>>([]);
   const [expandedIssueIndexes, setExpandedIssueIndexes] = useState<Record<number, boolean>>({});
+  const [noticeChecks, setNoticeChecks] = useState<Record<string, { name: string; checkedAt: string }>>({});
+  const [noticeCheckNames, setNoticeCheckNames] = useState<Record<string, string>>({});
+  const [pendingNoticeCheckId, setPendingNoticeCheckId] = useState<string | null>(null);
+  const noticeCheckKey = `branch_notice_checks:${branchName}`;
 
   const getDateStr = (offsetDays = 0) => {
     const local = new Date();
@@ -1899,12 +1914,15 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [savedNotices, roster, today] = await Promise.all([
+      const [savedNotices, roster, today, savedNoticeChecks] = await Promise.all([
         gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
         gasClient.getBranchOwnRoster(branchName).catch(() => []),
-        gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null)
+        gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null),
+        gasClient.getSharedData<Record<string, { name: string; checkedAt: string }>>(noticeCheckKey).catch(() => ({}))
       ]);
       setNotices((Array.isArray(savedNotices) ? savedNotices : []).filter((notice) => !notice.targetBranch || notice.targetBranch === "전체" || notice.targetBranch === branchName));
+
+      setNoticeChecks(savedNoticeChecks && typeof savedNoticeChecks === "object" ? savedNoticeChecks : {});
 
       const nextIssues: Array<{ type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] }> = [];
       if (!today?.exists) {
@@ -1949,14 +1967,39 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
     } finally {
       setLoading(false);
     }
-  }, [branchName]);
+  }, [branchName, noticeCheckKey]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const getNoticeId = (notice: any, index: number) => String(notice.id || `${notice.createdAt || "notice"}-${index}`);
+
+  const handleConfirmNotice = async (noticeId: string) => {
+    const name = String(noticeCheckNames[noticeId] || "").trim();
+    if (!name) {
+      window.alert("확인자 이름을 입력해주세요.");
+      return;
+    }
+    const next = {
+      ...noticeChecks,
+      [noticeId]: { name, checkedAt: new Date().toISOString() }
+    };
+    setNoticeChecks(next);
+    setPendingNoticeCheckId(null);
+    setNoticeCheckNames((current) => ({ ...current, [noticeId]: "" }));
+    await gasClient.saveSharedData(noticeCheckKey, next);
+  };
+
+  const handleCancelNotice = async (noticeId: string) => {
+    const next = { ...noticeChecks };
+    delete next[noticeId];
+    setNoticeChecks(next);
+    await gasClient.saveSharedData(noticeCheckKey, next);
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="branch-dashboard-tab space-y-6">
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
@@ -1974,7 +2017,6 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
               <Info className="w-3.5 h-3.5" />
               관리자 공지
             </div>
-            <h3 className="mt-3 text-lg font-black text-gray-900">관리자 공지사항</h3>
           </div>
           <span className="rounded-full bg-white/85 px-3 py-1 text-xs font-black text-rose-600 border border-rose-200">{notices.length}건</span>
         </div>
@@ -1984,13 +2026,37 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
           <div className="rounded-2xl bg-white/75 border border-rose-100 p-5 text-sm font-bold text-gray-500 text-center">등록된 공지사항이 없습니다.</div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {notices.slice(0, 6).map((notice, index) => (
-              <div key={notice.id || index} className="rounded-2xl bg-white border border-rose-100 p-4 shadow-xs">
+            {notices.slice(0, 6).map((notice, index) => {
+              const noticeId = getNoticeId(notice, index);
+              const checked = noticeChecks[noticeId];
+              return (
+              <div key={noticeId} className={`branch-notice-card rounded-2xl border p-4 shadow-xs ${checked ? "branch-notice-checked" : "branch-notice-unchecked"}`}>
                 <p className="text-sm font-black text-gray-900">{notice.title || "공지사항"}</p>
                 <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
                 <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+                  {checked ? (
+                    <>
+                      <span className="text-xs font-black text-gray-800">확인자: {checked.name}</span>
+                      <button type="button" onClick={() => void handleCancelNotice(noticeId)} className="branch-notice-cancel-button rounded-xl px-3 py-2 text-xs font-black">확인취소</button>
+                    </>
+                  ) : pendingNoticeCheckId === noticeId ? (
+                    <>
+                      <input
+                        value={noticeCheckNames[noticeId] || ""}
+                        onChange={(event) => setNoticeCheckNames((current) => ({ ...current, [noticeId]: event.target.value }))}
+                        placeholder="확인자 이름"
+                        className="branch-notice-check-name rounded-xl px-3 py-2 text-xs font-bold outline-none"
+                      />
+                      <button type="button" onClick={() => void handleConfirmNotice(noticeId)} className="branch-notice-check-button rounded-xl px-3 py-2 text-xs font-black">확인완료</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setPendingNoticeCheckId(noticeId)} className="branch-notice-check-button rounded-xl px-3 py-2 text-xs font-black">확인</button>
+                  )}
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -2686,16 +2752,43 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const parseTimeToDecimal = (timeStr: string): number => {
     if (!timeStr) return 0;
     const [h, m] = timeStr.split(":").map(Number);
-    return h + (m === 30 ? 0.5 : 0);
+    return h + ((m || 0) / 60);
   };
 
   const normalizeTimeInput = (index: number, field: "clockIn" | "clockOut", value: string) => {
-    const match = value.trim().match(/^(?:([01]?\d|2[0-3]):([0-5]\d)|([01]?\d|2[0-3])([0-5]\d))$/);
     const key = `${index}-${field}`;
-    if (!match) { setTimeErrors((current) => ({ ...current, [key]: "24시간제 예: 09:00 또는 1530" })); return; }
-    const hour = (match[1] || match[3]).padStart(2, "0");
+    const trimmed = value.trim().replace(/[;；]/g, ":");
+    if (!trimmed) {
+      setTimeErrors((current) => { const next = { ...current }; delete next[key]; return next; });
+      executeStaffCalculation(index, { [field]: "" });
+      return;
+    }
+    let hourText = "";
+    let minuteText = "00";
+    if (/^\d{1,2}$/.test(trimmed)) {
+      hourText = trimmed;
+    } else if (/^\d{3,4}$/.test(trimmed)) {
+      hourText = trimmed.slice(0, -2);
+      minuteText = trimmed.slice(-2);
+    } else {
+      const colonMatch = trimmed.match(/^(\d{1,2}):(\d{0,2})$/);
+      if (!colonMatch) {
+        setTimeErrors((current) => ({ ...current, [key]: "시간 형식을 확인해 주세요. 예: 13 또는 13:30" }));
+        return;
+      }
+      hourText = colonMatch[1];
+      minuteText = colonMatch[2] ? (colonMatch[2].length === 1 ? colonMatch[2].padEnd(2, "0") : colonMatch[2]) : "00";
+    }
+    const hourNumber = Number(hourText);
+    const minuteNumber = Number(minuteText);
+    if (!Number.isInteger(hourNumber) || !Number.isInteger(minuteNumber) || hourNumber < 0 || hourNumber > 23 || minuteNumber < 0 || minuteNumber > 59) {
+      setTimeErrors((current) => ({ ...current, [key]: "시간 형식을 확인해 주세요. 예: 13 또는 13:30" }));
+      return;
+    }
+    const hour = String(hourNumber).padStart(2, "0");
+    const minute = String(minuteNumber).padStart(2, "0");
     setTimeErrors((current) => { const next = { ...current }; delete next[key]; return next; });
-    executeStaffCalculation(index, { [field]: `${hour}:${match[2] || match[4]}` });
+    executeStaffCalculation(index, { [field]: `${hour}:${minute}` });
   };
 
   const distributeHeadOfficeOvertime = (rows: StaffRow[]) => {
@@ -2757,6 +2850,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
       const inDec = parseTimeToDecimal(row.clockIn);
       const outDec = parseTimeToDecimal(row.clockOut);
+
+      if (!row.clockIn || !row.clockOut) {
+        row.workHours = 0;
+        row.overtime = 0;
+        row.overtimeReason = "";
+        copy[index] = row;
+        return copy;
+      }
 
       // Reset hours if clocked out same as clocked in ("00:00" to "00:00")
       let calculatedWorkHours = 0;
@@ -3464,6 +3565,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             ? "bg-rose-50 border-rose-200 text-rose-900 shadow-xs"
             : "bg-red-600 border-red-700 text-white shadow-md"
         } transition-all space-y-4`} id="existing-record-warning-box">
+          <div className="rounded-2xl border border-zinc-900 bg-[#EFF0A3] p-4 text-sm font-black text-zinc-950">
+            기존 마감 기록이 있는 날짜입니다. 수정하려면 아래의 [수정모드로 진행할 것을 승인함] 버튼을 눌러 주세요.
+          </div>
           <div className="flex items-start gap-3">
             <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
             <div className="space-y-1">
@@ -4027,7 +4131,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                           />
                         </td>
-                        <td className="py-3.5 px-1 text-right font-mono font-black text-sky-700">{s.workHours || 0}h</td>
+                        <td className="py-3.5 px-1 text-right font-mono font-black text-sky-700 relative">
+                          {s.workHours || 0}h
+                          {s.workHours > 13 && <span className="absolute z-10 right-0 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">근무시간이 맞는지 확인해 주세요.</span>}
+                        </td>
                         <td className="py-3.5 px-1 text-right font-mono font-black">
                           <span className={s.overtime > 0 ? "text-emerald-600" : s.overtime < 0 ? "text-rose-500" : "text-gray-400"}>
                             {s.overtime > 0 ? "+" : ""}{s.overtime || 0}h
@@ -4110,6 +4217,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               ) : (
                 staffRows.map((s, idx) => {
                   const hasOvertimeDelta = s.division !== "파트타이머" && s.overtime !== 0;
+                  const hasWorkTime = Boolean(s.clockIn && s.clockOut && (s.clockIn !== "00:00" || s.clockOut !== "00:00"));
 
                   return (
                     <tr key={idx} className="hover:bg-gray-50/50">
@@ -4126,7 +4234,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             const std = div === "파트타이머" ? 0 : defaultStandardHours;
                             executeStaffCalculation(idx, { division: div, standardHours: std });
                           }}
-                          className={`px-2 py-1.5 rounded-lg font-bold text-[11px] border ${s.division === "정직원" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}
+                          className={`branch-division-select px-2 py-1.5 rounded-lg font-bold text-[11px] border ${hasWorkTime ? s.division === "정직원" ? "branch-division-active-fulltime bg-amber-50 text-amber-700 border-amber-200" : "branch-division-active-parttime bg-blue-50 text-blue-700 border-blue-200" : "branch-division-idle bg-white text-gray-600 border-gray-200"}`}
                         >
                           <option value="정직원">정직원</option>
                           <option value="파트타이머">파트타이머</option>
@@ -4136,7 +4244,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                       {/* Standard Criterion Hours Dropdown */}
                       <td className="py-3.5 px-2">
                         {s.division === "파트타이머" ? (
-                          <span className="inline-block py-1.5 px-3 bg-gray-100 text-gray-400 font-mono text-center font-bold rounded-lg min-w-[75px]">
+                          <span className="branch-parttime-standard-hours inline-block py-1.5 px-3 bg-gray-100 text-gray-400 font-mono text-center font-bold rounded-lg min-w-[75px]">
                             0h
                           </span>
                         ) : (
@@ -4145,7 +4253,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             onChange={(e) => {
                               executeStaffCalculation(idx, { standardHours: Number(e.target.value) });
                             }}
-                            className="px-2 py-1.5 border border-[#2E6DB4]/30 rounded-lg bg-white font-mono font-bold text-[11px] min-w-[75px] text-[#2E6DB4]"
+                            className="branch-standard-hours-select px-2 py-1.5 border border-[#2E6DB4]/30 rounded-lg bg-white font-mono font-bold text-[11px] min-w-[75px] text-[#2E6DB4]"
                           >
                             <option value="0">0 (휴무)</option>
                             <option value="9">9 시간</option>
@@ -4163,7 +4271,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
                           placeholder="00:00"
-                          className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockIn`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockIn`]}</span>}
                       </td>
@@ -4176,30 +4284,31 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
                           placeholder="00:00"
-                          className={`w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockOut`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockOut`]}</span>}
                       </td>
 
                       {/* Work Hours calculated */}
-                      <td className="py-3.5 px-2 font-mono font-bold text-gray-600">
+                        <td className="py-3.5 px-2 font-mono font-bold text-gray-600 relative">
                         <span className={`py-1 px-2.5 rounded-md ${s.workHours > 0 ? "bg-sky-100 text-sky-700" : "bg-gray-100 text-gray-600"}`}>
                           {s.workHours} h
                         </span>
+                        {s.workHours > 13 && <span className="absolute z-10 left-0 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">근무시간이 맞는지 확인해 주세요.</span>}
                       </td>
 
                       {/* Overtime (over / deficit) */}
                       <td className="py-3.5 px-2">
                         {s.overtime > 0 ? (
-                          <span className="py-1 px-2 bg-emerald-50 text-emerald-600 font-mono font-black rounded-md">
+                          <span className="branch-overtime-chip branch-overtime-positive py-1 px-2 bg-emerald-50 text-emerald-600 font-mono font-black rounded-md">
                             +{s.overtime} h
                           </span>
                         ) : s.overtime < 0 ? (
-                          <span className="py-1 px-2 bg-rose-50 text-rose-500 font-mono font-black rounded-md">
+                          <span className="branch-overtime-chip branch-overtime-negative py-1 px-2 bg-rose-50 text-rose-500 font-mono font-black rounded-md">
                             {s.overtime} h
                           </span>
                         ) : (
-                          <span className="py-1 px-2 bg-gray-100 text-gray-400 font-mono font-bold rounded-md">
+                          <span className="branch-overtime-chip branch-overtime-zero py-1 px-2 bg-gray-100 text-gray-400 font-mono font-bold rounded-md">
                             0 h
                           </span>
                         )}
@@ -5745,6 +5854,7 @@ function RosterTab({ branchName }: { branchName: string }) {
               <select value={draft.addReason} onChange={(e) => updateRosterAddDraft(draft.id, { addReason: e.target.value as StaffAddReason })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
                 <option value="신규입사">신규입사</option>
                 <option value="지점이동">지점이동</option>
+                <option value="기존직원">기존직원</option>
                 <option value="기타">기타</option>
               </select>
               {draft.addReason === "신규입사" && (
@@ -5952,17 +6062,25 @@ function RosterTab({ branchName }: { branchName: string }) {
   );
 }
 
-function AnnualLeaveTab({ branchName }: { branchName: string }) {
+function AnnualLeaveTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
   const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10)); const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10)); const [reason, setReason] = useState("");
   const load = useCallback(async () => { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees((roster as Employee[]).map((employee) => ({ ...employee, entryDate: employee.entryDate ? employee.entryDate.slice(2).replace(/-/g, ".") : "" }))); setEntries(saved || []); }, [branchName]);
   useEffect(() => { void load(); }, [load]);
+  if (!isAdmin) return (
+    <div className="space-y-5" id="annual-leave-maintenance">
+      <section className="bg-white p-6 rounded-2xl border shadow-sm">
+        <h3 className="font-black text-gray-800">연차관리</h3>
+        <p className="text-sm font-bold text-gray-600 mt-2">현재 코드 수정중이므로 작성이 불가능합니다.</p>
+      </section>
+    </div>
+  );
   const save = async () => { const days = Math.floor((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86400000) + 1; if (!employeeId || days < 1 || !reason.trim()) return; const next = [{ id: `leave-${Date.now()}`, employeeId, days, startDate, endDate, date: startDate, reason: reason.trim() }, ...entries]; await gasClient.saveSharedData(`annual_leave:${branchName}`, next); setEntries(next); setReason(""); };
-  return <div className="space-y-5"><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800">연차관리</h3><p className="text-xs text-gray-400 mt-1">시작일과 종료일을 선택하면 사용 일수가 자동 계산됩니다.</p><div className="flex flex-wrap gap-2 mt-4"><select value={employeeId} onChange={e=>setEmployeeId(e.target.value)} className="border rounded px-3 py-2 text-sm"><option value="">직원 선택</option>{employees.filter(e=>e.division === "정직원").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select><label className="text-xs">시작일<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="block border rounded px-2 py-1"/></label><label className="text-xs">종료일<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="block border rounded px-2 py-1"/></label><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="사용 사유" className="border rounded px-3"/><button onClick={()=>void save()} className="bg-[#2E6DB4] text-white rounded px-4 text-sm font-bold">연차 사용 등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">직원</th><th>입사일</th><th>부여</th><th>사용</th><th>잔여</th><th>사용 날짜 기록</th></tr></thead><tbody>{employees.filter(e=>e.division === "정직원").map(e=>{const logs=entries.filter(x=>x.employeeId===e.id);const used=logs.reduce((s,x)=>s+Number(x.days||0),0);return <tr key={e.id} className="border-t"><td className="p-3 font-bold">{e.name}</td><td>{e.entryDate||"-"}</td><td>15일</td><td>{used}일</td><td className="font-bold text-[#2E6DB4]">{15-used}일</td><td className="text-xs text-gray-500">{logs.map(x=>`${x.startDate || x.date}${x.endDate && x.endDate !== (x.startDate || x.date) ? ` ~ ${x.endDate}` : ""}`).join(", ") || "-"}</td></tr>})}</tbody></table></div></div>;
+  return <div className="space-y-5"><section className="bg-white p-4 rounded-2xl border shadow-sm text-sm font-bold text-gray-600">현재 코드 수정중이므로 작성이 불가능합니다.</section><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800">연차관리</h3><p className="text-xs text-gray-400 mt-1">시작일과 종료일을 선택하면 사용 일수가 자동 계산됩니다.</p><div className="flex flex-wrap gap-2 mt-4"><select value={employeeId} onChange={e=>setEmployeeId(e.target.value)} className="border rounded px-3 py-2 text-sm"><option value="">직원 선택</option>{employees.filter(e=>e.division === "정직원").map(e=><option key={e.id} value={e.id}>{e.name}</option>)}</select><label className="text-xs">시작일<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="block border rounded px-2 py-1"/></label><label className="text-xs">종료일<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="block border rounded px-2 py-1"/></label><input value={reason} onChange={e=>setReason(e.target.value)} placeholder="사용 사유" className="border rounded px-3"/><button onClick={()=>void save()} className="bg-[#2E6DB4] text-white rounded px-4 text-sm font-bold">연차 사용 등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">직원</th><th>입사일</th><th>부여</th><th>사용</th><th>잔여</th><th>사용 날짜 기록</th></tr></thead><tbody>{employees.filter(e=>e.division === "정직원").map(e=>{const logs=entries.filter(x=>x.employeeId===e.id);const used=logs.reduce((s,x)=>s+Number(x.days||0),0);return <tr key={e.id} className="border-t"><td className="p-3 font-bold">{e.name}</td><td>{e.entryDate||"-"}</td><td>15일</td><td>{used}일</td><td className="font-bold text-[#2E6DB4]">{15-used}일</td><td className="text-xs text-gray-500">{logs.map(x=>`${x.startDate || x.date}${x.endDate && x.endDate !== (x.startDate || x.date) ? ` ~ ${x.endDate}` : ""}`).join(", ") || "-"}</td></tr>})}</tbody></table></div></div>;
 }
 
-function LaborContractTab({ branchName }: { branchName: string }) {
+function LaborContractTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
@@ -5973,6 +6091,14 @@ function LaborContractTab({ branchName }: { branchName: string }) {
   const [editPhoneDigits, setEditPhoneDigits] = useState("");
   const loadData = async () => { try { setLoading(true); const data = await gasClient.getSharedData<any[]>("labor_contracts_" + branchName); const legacy = data || await gasClient.getSharedData<any[]>("labor_contracts:" + branchName); setContracts(legacy || []); } catch (err) { console.error("Failed to load labor contracts:", err); } finally { setLoading(false); } };
   useEffect(() => { void loadData(); }, [branchName]);
+  if (!isAdmin) return (
+    <div className="space-y-5 animate-fade-in" id="labor-contract-tab">
+      <section className="bg-white p-6 rounded-2xl border shadow-sm">
+        <h3 className="font-black text-gray-800">근로계약서</h3>
+        <p className="text-sm font-bold text-gray-600 mt-2">현재 코드 수정중이므로 작성이 불가능합니다.</p>
+      </section>
+    </div>
+  );
   const formatPhone = (digits: string) => "010-" + digits.slice(0, 4) + "-" + digits.slice(4);
   const parseSalaryInput = (rawVal: string): number => { const raw = rawVal.trim(); if (!raw) return 0; if (raw.includes("만")) return Math.round((parseFloat(raw.replace(/[^0-9.]/g, "")) || 0) * 10000); const numeric = raw.replace(/[,원\s]/g, ""); let parsed = parseFloat(numeric) || 0; if (parsed > 0 && parsed < 1000) parsed *= 10000; else if (parsed >= 1000 && parsed < 10000) parsed *= 1000; return Math.round(parsed); };
   const saveContracts = async (next: any[]) => { await gasClient.saveSharedData("labor_contracts_" + branchName, next); await gasClient.saveSharedData("labor_contracts:" + branchName, next); setContracts(next); };
@@ -5980,7 +6106,7 @@ function LaborContractTab({ branchName }: { branchName: string }) {
   const startEdit = (contract: any) => { setEditingId(contract.id); setEditName(contract.name || ""); setEditPhoneDigits(String(contract.phone || "").replace(/^010-?/, "").replace(/[^0-9]/g, "").slice(0, 8)); };
   const saveEdit = async (id: string) => { const digits = editPhoneDigits.replace(/[^0-9]/g, "").slice(0, 8); if (!editName.trim() || digits.length !== 8) { alert("이름과 연락처 8자리를 확인해 주세요."); return; } const next = contracts.map((item) => item.id === id ? { ...item, name: editName.trim(), phone: formatPhone(digits), editRequestedAt: new Date().toISOString() } : item); await saveContracts(next); setEditingId(null); };
   const requestDelete = async (id: string) => { if (!window.confirm("삭제요청을 관리자에게 전달할까요? 급여가 다른 경우에는 삭제요청 후 새로 등록해 주세요.")) return; const next = contracts.map((item) => item.id === id ? { ...item, deleteRequested: true, deleteRequestedAt: new Date().toISOString() } : item); await saveContracts(next); };
-  return <div className="space-y-5 animate-fade-in" id="labor-contract-tab"><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 근로계약서 발송 인적사항 등록</h3><p className="text-xs text-gray-400 mt-1">급여가 잘못된 경우에는 기존 내역 삭제요청 후 새로 등록해 주세요.</p><div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5 items-end"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="이름" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><div className="flex items-center border border-gray-200 rounded-xl bg-gray-50 overflow-hidden"><span className="bg-gray-100 px-3 py-2 text-sm font-extrabold text-gray-400 border-r">010</span><input value={phoneDigits} onChange={(e) => setPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} placeholder="12345678" className="w-full px-3 py-2 text-sm font-bold bg-transparent outline-none" /></div><input value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="급여 예: 250만" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><button onClick={() => void saveContract()} className="bg-[#2E6DB4] hover:bg-[#20528B] text-white py-2 px-4 rounded-xl text-xs font-black h-10">등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden shadow-2xs"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4 w-36">등록일</th><th className="py-4 px-3 w-40">이름</th><th className="py-4 px-3 w-44">연락처</th><th className="py-4 px-3">안내</th><th className="py-4 px-3 text-center w-44">요청</th></tr></thead><tbody>{loading ? <tr><td colSpan={5} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : contracts.length === 0 ? <tr><td colSpan={5} className="p-12 text-center text-gray-400 font-bold">등록된 인적사항이 없습니다.</td></tr> : contracts.map((c) => <tr key={c.id} className="border-b hover:bg-slate-50/50"><td className="p-4 font-mono text-xs text-gray-500">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td><td className="py-4 px-3 font-black text-gray-800">{editingId === c.id ? <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full border rounded-lg px-2 py-1" /> : c.name}</td><td className="py-4 px-3 font-mono text-xs text-blue-700 font-black">{editingId === c.id ? <div className="flex items-center"><span className="text-gray-400 mr-1">010</span><input value={editPhoneDigits} onChange={(e) => setEditPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} className="w-28 border rounded-lg px-2 py-1" /></div> : c.phone}</td><td className="py-4 px-3 text-xs text-gray-500">{c.deleteRequested ? <span className="font-black text-rose-600">삭제요청됨</span> : "급여 변경은 삭제요청 후 새로 등록"}</td><td className="py-4 px-3 text-center space-x-2">{editingId === c.id ? <button onClick={() => void saveEdit(c.id)} className="px-3 py-1.5 bg-[#2E6DB4] text-white rounded-lg text-xs font-black">저장</button> : <button onClick={() => startEdit(c)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-black">수정</button>}<button onClick={() => void requestDelete(c.id)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제요청</button></td></tr>)}</tbody></table></div></div></div>;
+  return <div className="space-y-5 animate-fade-in" id="labor-contract-tab"><section className="bg-white p-4 rounded-2xl border shadow-sm text-sm font-bold text-gray-600">현재 코드 수정중이므로 작성이 불가능합니다.</section><div className="bg-white p-6 rounded-2xl border shadow-sm"><h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 근로계약서 발송 인적사항 등록</h3><p className="text-xs text-gray-400 mt-1">급여가 잘못된 경우에는 기존 내역 삭제요청 후 새로 등록해 주세요.</p><div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5 items-end"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="이름" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><div className="flex items-center border border-gray-200 rounded-xl bg-gray-50 overflow-hidden"><span className="bg-gray-100 px-3 py-2 text-sm font-extrabold text-gray-400 border-r">010</span><input value={phoneDigits} onChange={(e) => setPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} placeholder="12345678" className="w-full px-3 py-2 text-sm font-bold bg-transparent outline-none" /></div><input value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="급여 예: 250만" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><button onClick={() => void saveContract()} className="bg-[#2E6DB4] hover:bg-[#20528B] text-white py-2 px-4 rounded-xl text-xs font-black h-10">등록</button></div></div><div className="bg-white rounded-2xl border overflow-hidden shadow-2xs"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4 w-36">등록일</th><th className="py-4 px-3 w-40">이름</th><th className="py-4 px-3 w-44">연락처</th><th className="py-4 px-3">안내</th><th className="py-4 px-3 text-center w-44">요청</th></tr></thead><tbody>{loading ? <tr><td colSpan={5} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : contracts.length === 0 ? <tr><td colSpan={5} className="p-12 text-center text-gray-400 font-bold">등록된 인적사항이 없습니다.</td></tr> : contracts.map((c) => <tr key={c.id} className="border-b hover:bg-slate-50/50"><td className="p-4 font-mono text-xs text-gray-500">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td><td className="py-4 px-3 font-black text-gray-800">{editingId === c.id ? <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full border rounded-lg px-2 py-1" /> : c.name}</td><td className="py-4 px-3 font-mono text-xs text-blue-700 font-black">{editingId === c.id ? <div className="flex items-center"><span className="text-gray-400 mr-1">010</span><input value={editPhoneDigits} onChange={(e) => setEditPhoneDigits(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))} className="w-28 border rounded-lg px-2 py-1" /></div> : c.phone}</td><td className="py-4 px-3 text-xs text-gray-500">{c.deleteRequested ? <span className="font-black text-rose-600">삭제요청됨</span> : "급여 변경은 삭제요청 후 새로 등록"}</td><td className="py-4 px-3 text-center space-x-2">{editingId === c.id ? <button onClick={() => void saveEdit(c.id)} className="px-3 py-1.5 bg-[#2E6DB4] text-white rounded-lg text-xs font-black">저장</button> : <button onClick={() => startEdit(c)} className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-black">수정</button>}<button onClick={() => void requestDelete(c.id)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제요청</button></td></tr>)}</tbody></table></div></div></div>;
 }
 
 // ----------------------------------------------------
@@ -7302,14 +7428,14 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           />
           <button
             onClick={fetchHistory}
-            className="p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
+            className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
           >
             <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
             이력 갱신
           </button>
           <button
             onClick={handleConfirmMonthlyClose}
-            className="p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
           >
             <CheckCircle2 className="w-4 h-4 text-emerald-200" />
             월말마감 확정
@@ -7317,7 +7443,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           {monthlyCloseStatus?.status === "editing" ? (
             <button
               onClick={handleCancelMonthlyEdit}
-              className="p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
             >
               <X className="w-4 h-4 text-slate-200" />
               월말마감 수정 취소
@@ -7325,7 +7451,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           ) : (
             <button
               onClick={handleEditMonthlyClose}
-              className="p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              className="monthly-action-edit p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
             >
               <Pencil className="w-4 h-4 text-amber-100" />
               월말마감 수정
@@ -7333,7 +7459,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           )}
           <button
             onClick={handleCancelMonthlyClose}
-            className="p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
           >
             <Trash2 className="w-4 h-4 text-rose-200" />
             월말마감 취소
@@ -7343,12 +7469,12 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
 
       <div className="rounded-2xl border border-slate-100 bg-white px-5 py-3 text-xs font-bold text-slate-600 flex flex-wrap items-center gap-2">
         <span className="text-slate-400">현재 월말마감 상태</span>
-        <span className={`rounded-lg px-2.5 py-1 font-black ${
+        <span className={`monthly-close-status-pill rounded-lg px-2.5 py-1 font-black ${
           monthlyCloseStatus?.status === "confirmed"
-            ? "bg-emerald-50 text-emerald-700"
+            ? "monthly-close-status-confirmed bg-emerald-50 text-emerald-700"
             : monthlyCloseStatus?.status === "editing"
-            ? "bg-amber-50 text-amber-700"
-            : "bg-rose-50 text-rose-700"
+            ? "monthly-close-status-editing bg-amber-50 text-amber-700"
+            : "monthly-close-status-missing bg-rose-50 text-rose-700"
         }`}>
           {monthlyCloseStatus?.status === "confirmed" ? "확정" : monthlyCloseStatus?.status === "editing" ? "수정중" : "미제출"}
         </span>
@@ -7891,8 +8017,8 @@ function MonthlyPartTimeSalarySubTab({
       return {
         employeeId: pt.id,
         name: pt.name,
-        residentNumber: saved.residentNumber || profile.residentNumber || "",
-        entryDate: saved.entryDate || profile.entryDate || "",
+        residentNumber: saved.residentNumber || profile.residentNumber || pt.residentNumber || "",
+        entryDate: saved.entryDate || profile.entryDate || pt.entryDate || "",
         contractStatus: saved.contractStatus || profile.contractStatus || "미작성",
         bank: saved.bank || profile.bank || "",
         accountNumber: saved.accountNumber || profile.accountNumber || "",
@@ -8006,6 +8132,9 @@ function MonthlyPartTimeSalarySubTab({
                 : String((Number(existing.hourlyRate) || 0) * Number(accumulatedHours || 0));
               return {
                 ...existing,
+                residentNumber: existing.residentNumber || employee.residentNumber || "",
+                entryDate: existing.entryDate || employee.entryDate || "",
+                contractStatus: existing.contractStatus || (employee as any).contractStatus || existing.contractStatus,
                 accumulatedHours,
                 attendanceDates: existing.attendanceDates || attendanceDates,
                 calculatedSalary
@@ -8015,8 +8144,8 @@ function MonthlyPartTimeSalarySubTab({
             return {
               employeeId: employee.id,
               name: employee.name,
-              residentNumber: "",
-              entryDate: "",
+              residentNumber: employee.residentNumber || "",
+              entryDate: employee.entryDate || "",
               contractStatus: "미작성",
               bank: "",
               accountNumber: "",
@@ -8291,6 +8420,8 @@ function MonthlyCashExpensesSubTab({
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [editExpense, setEditExpense] = useState<{ item: any; fields: Record<string, string> } | null>(null);
+  const [usageFilter, setUsageFilter] = useState("전체");
+  const [classificationFilter, setClassificationFilter] = useState("전체");
 
   useEffect(() => {
     const cashList: any[] = [];
@@ -8330,7 +8461,24 @@ function MonthlyCashExpensesSubTab({
     setItems(cashList);
   }, [selectedMonth, history]);
 
-  const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
+  const usageOptions = useMemo(
+    () => ["전체", ...Array.from(new Set(items.map((item) => String(item.usage || "").trim()).filter(Boolean)))],
+    [items]
+  );
+  const classificationOptions = useMemo(
+    () => ["전체", ...Array.from(new Set(items.map((item) => String(item.classification || "").trim()).filter(Boolean)))],
+    [items]
+  );
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) => {
+        const matchesUsage = usageFilter === "전체" || item.usage === usageFilter;
+        const matchesClassification = classificationFilter === "전체" || item.classification === classificationFilter;
+        return matchesUsage && matchesClassification;
+      }),
+    [items, usageFilter, classificationFilter]
+  );
+  const totalSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
 
   const handleEditExpense = (item: any) => {
     if (!item.recordId) return;
@@ -8397,6 +8545,31 @@ function MonthlyCashExpensesSubTab({
         </div>
       </div>
 
+      <div className="monthly-expense-filter-bar flex flex-wrap items-center gap-3">
+        <select
+          value={usageFilter}
+          onChange={(e) => setUsageFilter(e.target.value)}
+          className="monthly-expense-filter-select"
+        >
+          {usageOptions.map((option) => (
+            <option key={option} value={option}>
+              사용처: {option}
+            </option>
+          ))}
+        </select>
+        <select
+          value={classificationFilter}
+          onChange={(e) => setClassificationFilter(e.target.value)}
+          className="monthly-expense-filter-select"
+        >
+          {classificationOptions.map((option) => (
+            <option key={option} value={option}>
+              분류항목: {option}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
@@ -8414,14 +8587,14 @@ function MonthlyCashExpensesSubTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-150 text-[11px] font-sans">
-            {items.length === 0 ? (
+            {filteredItems.length === 0 ? (
               <tr>
                 <td colSpan={isAdmin ? 10 : 9} className="py-20 text-center text-gray-400 font-bold">
                   선택한 월에 일일마감 시 접수된 현금지출 전표가 한 건도 존재하지 않습니다.
                 </td>
               </tr>
             ) : (
-              items.map((it, idx) => (
+              filteredItems.map((it, idx) => (
                 <tr key={idx} className="hover:bg-zinc-50/40">
                   <td className="py-3.5 px-4 font-mono font-bold text-gray-500">{it.date}</td>
                   <td className="py-3.5 px-4">
@@ -8432,8 +8605,12 @@ function MonthlyCashExpensesSubTab({
                   <td className="py-3.5 px-4 text-right font-mono font-black text-gray-800 text-xs">
                     {formatNumber(it.amount)} 원
                   </td>
-                  <td className="py-3.5 px-4 font-bold text-zinc-800">{it.usage}</td>
-                  <td className="py-3.5 px-4 font-bold text-blue-650">{it.classification}</td>
+                  <td className="py-3.5 px-4 font-bold text-zinc-800">
+                    <span className={`monthly-expense-chip ${getMonthlyExpenseUsageChipClass(it.usage)}`}>{it.usage}</span>
+                  </td>
+                  <td className="py-3.5 px-4 font-bold text-blue-650">
+                    <span className={`monthly-expense-chip ${getMonthlyExpenseCategoryChipClass(it.classification)}`}>{it.classification}</span>
+                  </td>
                   <td className="py-3.5 px-4 text-gray-550 font-semibold">{it.detail || "공란"}</td>
                   <td className="py-3.5 px-4 text-gray-400 font-bold">확인완료</td>
                   <td className="py-3.5 px-4 text-zinc-600 font-bold">{it.author}</td>
@@ -8665,6 +8842,8 @@ function MonthlyCardExpensesSubTab({
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [editCardExpense, setEditCardExpense] = useState<{ item: any; fields: Record<string, string> } | null>(null);
+  const [usageFilter, setUsageFilter] = useState("전체");
+  const [classificationFilter, setClassificationFilter] = useState("전체");
 
   useEffect(() => {
     const cardList: any[] = [];
@@ -8703,7 +8882,24 @@ function MonthlyCardExpensesSubTab({
     setItems(cardList);
   }, [selectedMonth, history]);
 
-  const totalSum = items.reduce((acc, i) => acc + i.amount, 0);
+  const usageOptions = useMemo(
+    () => ["전체", ...Array.from(new Set(items.map((item) => String(item.usage || "").trim()).filter(Boolean)))],
+    [items]
+  );
+  const classificationOptions = useMemo(
+    () => ["전체", ...Array.from(new Set(items.map((item) => String(item.classification || "").trim()).filter(Boolean)))],
+    [items]
+  );
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) => {
+        const matchesUsage = usageFilter === "전체" || item.usage === usageFilter;
+        const matchesClassification = classificationFilter === "전체" || item.classification === classificationFilter;
+        return matchesUsage && matchesClassification;
+      }),
+    [items, usageFilter, classificationFilter]
+  );
+  const totalSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
 
   const handleEditCardExpense = (item: any) => {
     if (!item.recordId) return;
@@ -8770,6 +8966,31 @@ function MonthlyCardExpensesSubTab({
         </div>
       </div>
 
+      <div className="monthly-expense-filter-bar flex flex-wrap items-center gap-3">
+        <select
+          value={usageFilter}
+          onChange={(e) => setUsageFilter(e.target.value)}
+          className="monthly-expense-filter-select"
+        >
+          {usageOptions.map((option) => (
+            <option key={option} value={option}>
+              사용처: {option}
+            </option>
+          ))}
+        </select>
+        <select
+          value={classificationFilter}
+          onChange={(e) => setClassificationFilter(e.target.value)}
+          className="monthly-expense-filter-select"
+        >
+          {classificationOptions.map((option) => (
+            <option key={option} value={option}>
+              분류항목: {option}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="w-full text-left text-xs border-collapse font-sans">
           <thead>
@@ -8785,14 +9006,14 @@ function MonthlyCardExpensesSubTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-150 text-[11px]">
-            {items.length === 0 ? (
+            {filteredItems.length === 0 ? (
               <tr>
                 <td colSpan={isAdmin ? 9 : 8} className="py-20 text-center text-gray-400 font-bold">
                   이번 달에 일일보고에 기록된 카드 지출 영수증이 존재하지 않습니다.
                 </td>
               </tr>
             ) : (
-              items.map((it, idx) => (
+              filteredItems.map((it, idx) => (
                 <tr key={idx} className="hover:bg-zinc-50/40">
                   <td className="py-3.5 px-4 font-mono font-bold text-gray-500">{it.date}</td>
                   <td className="py-3.5 px-4">
@@ -8803,8 +9024,12 @@ function MonthlyCardExpensesSubTab({
                   <td className="py-3.5 px-4 text-right font-mono font-black text-gray-800 text-xs">
                     {formatNumber(it.amount)} 원
                   </td>
-                  <td className="py-3.5 px-4 font-bold text-zinc-800">{it.usage}</td>
-                  <td className="py-3.5 px-4 font-bold text-indigo-600">{it.classification}</td>
+                  <td className="py-3.5 px-4 font-bold text-zinc-800">
+                    <span className={`monthly-expense-chip ${getMonthlyExpenseUsageChipClass(it.usage)}`}>{it.usage}</span>
+                  </td>
+                  <td className="py-3.5 px-4 font-bold text-indigo-600">
+                    <span className={`monthly-expense-chip ${getMonthlyExpenseCategoryChipClass(it.classification)}`}>{it.classification}</span>
+                  </td>
                   <td className="py-3.5 px-4 text-gray-550 font-semibold">{it.detail || "공란"}</td>
                   <td className="py-3.5 px-4 text-gray-450 font-bold">확인증빙필</td>
                   <td className="py-3.5 px-4 text-zinc-650 font-bold">{it.author}</td>
