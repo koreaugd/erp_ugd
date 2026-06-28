@@ -1233,3 +1233,2001 @@ input[type=number] {
   }
 }
 
+/* Branch palette refinement: keep the same reference colors as the admin UI. */
+.branch-redesign {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside {
+  background: color-mix(in srgb, var(--branch-ghost) 92%, var(--branch-alice)) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+}
+
+.branch-redesign aside > div:first-child,
+.branch-redesign aside > div:last-child,
+.branch-redesign aside > div[style] {
+  background: transparent !important;
+}
+
+.branch-redesign aside nav button {
+  border: 1px solid transparent;
+}
+
+.branch-redesign aside nav button:hover {
+  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
+  border-color: rgba(33, 33, 33, 0.08) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"] {
+  background: color-mix(in srgb, var(--branch-honey) 78%, var(--branch-alice)) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"] svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign main {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign main > section,
+.branch-redesign main > div > section {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign section.bg-white,
+.branch-redesign div.bg-white.rounded-3xl,
+.branch-redesign div.bg-white.rounded-2xl,
+.branch-redesign div[class*="bg-white"][class*="rounded-3xl"],
+.branch-redesign div[class*="bg-white"][class*="rounded-2xl"] {
+  background: color-mix(in srgb, var(--branch-ghost) 94%, #ffffff) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.045) !important;
+}
+
+.branch-redesign .sticky {
+  background: color-mix(in srgb, var(--branch-ghost) 88%, var(--branch-alice)) !important;
+  border-color: rgba(33, 33, 33, 0.1) !important;
+  box-shadow: 0 10px 28px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign .sticky button[class*="border-b-2"] {
+  border-radius: 18px;
+}
+
+.branch-redesign .bg-blue-50,
+.branch-redesign .bg-sky-50,
+.branch-redesign .bg-indigo-50,
+.branch-redesign .bg-\[\#D6E4F0\]\/20,
+.branch-redesign .bg-\[\#D6E4F0\]\/30 {
+  background: color-mix(in srgb, var(--branch-alice) 82%, var(--branch-ghost)) !important;
+}
+
+.branch-redesign .bg-emerald-50,
+.branch-redesign .bg-green-50 {
+  background: color-mix(in srgb, var(--branch-honey) 86%, var(--branch-ghost)) !important;
+}
+
+.branch-redesign .bg-amber-50,
+.branch-redesign .bg-orange-50,
+.branch-redesign .bg-yellow-50 {
+  background: color-mix(in srgb, var(--branch-vanilla) 88%, var(--branch-ghost)) !important;
+}
+
+.branch-redesign .bg-slate-50,
+.branch-redesign .bg-slate-100,
+.branch-redesign .bg-gray-50,
+.branch-redesign .bg-gray-100,
+.branch-redesign .bg-zinc-50,
+.branch-redesign .bg-zinc-100 {
+  background: color-mix(in srgb, var(--branch-ghost) 90%, var(--branch-alice)) !important;
+}
+
+.branch-redesign input,
+.branch-redesign select,
+.branch-redesign textarea {
+  background: color-mix(in srgb, var(--branch-ghost) 94%, #ffffff) !important;
+  border-color: rgba(33, 33, 33, 0.14) !important;
+}
+
+.branch-redesign thead tr,
+.branch-redesign th {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--branch-ghost) 92%, var(--branch-alice)) !important;
+}
+
+.branch-redesign tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, var(--branch-ghost) 96%, #ffffff) !important;
+}
+
+.branch-redesign #purchase-sales-subtab > div[class*="grid"] > div,
+.branch-redesign #parttime-salaries-subtab > div[class*="grid"] > div {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-select-redesign {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside nav button:not(.text-white):not([style]),
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]),
+.branch-redesign aside nav button[class*="hover:bg-white"]:not(.text-white):not([style]) {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav button:not(.text-white):not([style]) span,
+.branch-redesign aside nav button:not(.text-white):not([style]) svg,
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]) span,
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]) svg {
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav button:not(.text-white):not([style]):hover,
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover {
+  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
+  border-color: rgba(33, 33, 33, 0.1) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav button:not(.text-white):not([style]):hover span,
+.branch-redesign aside nav button:not(.text-white):not([style]):hover svg,
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover span,
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav button.text-white,
+.branch-redesign aside nav button[style] {
+  background: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.14) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside nav button.text-white span,
+.branch-redesign aside nav button.text-white svg,
+.branch-redesign aside nav button[style] span,
+.branch-redesign aside nav button[style] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside > div:last-child button:not([class*="bg-rose"]),
+.branch-redesign aside .md\:hidden button:not([class*="bg-rose"]) {
+  background: color-mix(in srgb, var(--branch-ghost) 88%, #ffffff) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside > div:last-child button:not([class*="bg-rose"]) svg,
+.branch-redesign aside .md\:hidden button:not([class*="bg-rose"]) svg {
+  color: var(--branch-black) !important;
+}
+
+/* Branch dashboard: mirror the admin reference palette and section treatment. */
+.branch-redesign .branch-dashboard-tab {
+  color: var(--branch-black);
+}
+
+.branch-redesign .branch-dashboard-tab > div:first-child,
+.branch-redesign .branch-dashboard-tab > section,
+.branch-redesign .branch-dashboard-tab > div > section {
+  border: 1px solid var(--branch-black) !important;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div:first-child {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign .branch-dashboard-tab section[class*="from-rose"],
+.branch-redesign .branch-dashboard-tab section[class*="to-amber"],
+.branch-redesign .branch-dashboard-tab section[class*="via-white"] {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .bg-white,
+.branch-redesign .branch-dashboard-tab .bg-white\/75,
+.branch-redesign .branch-dashboard-tab .bg-white\/85,
+.branch-redesign .branch-dashboard-tab .bg-white\/90 {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .bg-rose-50,
+.branch-redesign .branch-dashboard-tab .bg-red-50,
+.branch-redesign .branch-dashboard-tab .bg-sky-50,
+.branch-redesign .branch-dashboard-tab .bg-blue-50,
+.branch-redesign .branch-dashboard-tab .bg-amber-50,
+.branch-redesign .branch-dashboard-tab .bg-orange-50,
+.branch-redesign .branch-dashboard-tab .bg-emerald-50,
+.branch-redesign .branch-dashboard-tab .bg-green-50 {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .border-rose-100,
+.branch-redesign .branch-dashboard-tab .border-rose-200,
+.branch-redesign .branch-dashboard-tab .border-rose-500,
+.branch-redesign .branch-dashboard-tab .border-sky-100,
+.branch-redesign .branch-dashboard-tab .border-amber-100,
+.branch-redesign .branch-dashboard-tab .border-emerald-100 {
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .text-rose-600,
+.branch-redesign .branch-dashboard-tab .text-rose-800,
+.branch-redesign .branch-dashboard-tab .text-sky-800,
+.branch-redesign .branch-dashboard-tab .text-amber-500,
+.branch-redesign .branch-dashboard-tab .text-amber-800,
+.branch-redesign .branch-dashboard-tab .text-emerald-800,
+.branch-redesign .branch-dashboard-tab .text-gray-900,
+.branch-redesign .branch-dashboard-tab .text-gray-800,
+.branch-redesign .branch-dashboard-tab .text-gray-600,
+.branch-redesign .branch-dashboard-tab .text-gray-500,
+.branch-redesign .branch-dashboard-tab .text-gray-400 {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .bg-\[\#2E6DB4\],
+.branch-redesign .branch-dashboard-tab button[class*="bg-[#2E6DB4]"] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .rounded-full {
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab [class*="border"] {
+  border-color: var(--branch-black) !important;
+}
+
+/* Branch final polish: align sidebar, dashboard and tab surfaces with admin UI. */
+.branch-redesign {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside {
+  background: var(--branch-ghost) !important;
+  border-right: 1px solid var(--branch-alice) !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign aside > div:first-child {
+  padding: 28px 22px 24px !important;
+  border-bottom: 1px solid var(--branch-alice) !important;
+}
+
+.branch-redesign aside > div:first-child > div {
+  align-items: center !important;
+  gap: 14px !important;
+}
+
+.branch-redesign aside > div:first-child .w-10.h-10 {
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 22px !important;
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-alice) !important;
+  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.04) !important;
+}
+
+.branch-redesign aside > div:first-child span {
+  color: var(--branch-black) !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+  opacity: 0.78;
+}
+
+.branch-redesign aside > div:first-child h1 {
+  color: var(--branch-black) !important;
+  font-size: 22px !important;
+  line-height: 1.15 !important;
+  letter-spacing: 0 !important;
+  margin-top: 4px !important;
+}
+
+.branch-redesign aside nav {
+  padding: 22px 18px !important;
+  gap: 14px !important;
+}
+
+.branch-redesign aside nav button {
+  min-height: 58px !important;
+  border-radius: 28px !important;
+  padding: 0 22px !important;
+  gap: 14px !important;
+  font-size: 15px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign aside nav button svg {
+  width: 21px !important;
+  height: 21px !important;
+}
+
+.branch-redesign aside nav button:not(.text-white):not([style]),
+.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]),
+.branch-redesign aside nav button[class*="hover:bg-white"]:not(.text-white):not([style]) {
+  background: transparent !important;
+  color: rgba(33, 33, 33, 0.66) !important;
+  border-color: transparent !important;
+}
+
+.branch-redesign aside nav button.text-white,
+.branch-redesign aside nav button[style] {
+  background: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  box-shadow: 0 18px 34px rgba(33, 33, 33, 0.13) !important;
+}
+
+.branch-redesign aside > div:last-child {
+  padding: 20px 18px 24px !important;
+  border-top: 1px solid var(--branch-alice) !important;
+  background: var(--branch-ghost) !important;
+  gap: 12px !important;
+}
+
+.branch-redesign aside > div:last-child button,
+.branch-redesign aside .md\:hidden button {
+  min-height: 48px;
+  border-radius: 22px !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+}
+
+.branch-redesign aside > div:last-child button:not([class*="bg-rose"]),
+.branch-redesign aside .md\:hidden button:not([class*="bg-rose"]) {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"],
+.branch-redesign aside > div:last-child button[class*="bg-rose"],
+.branch-redesign aside .md\:hidden button[class*="bg-rose"] {
+  background: var(--branch-honey) !important;
+  border: 1px solid var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .sticky {
+  background: var(--branch-ghost) !important;
+  border-bottom: 1px solid var(--branch-alice) !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign .sticky button[class*="border-b-2"] {
+  border-bottom-width: 0 !important;
+  border-radius: 28px !important;
+  margin: 8px 0 !important;
+  padding: 12px 18px !important;
+}
+
+.branch-redesign .sticky button[class*="border-[#2E6DB4]"],
+.branch-redesign .sticky button[class*="text-[#2E6DB4]"] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .sticky button[class*="border-[#2E6DB4]"] svg,
+.branch-redesign .sticky button[class*="text-[#2E6DB4]"] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .sticky button .absolute,
+.branch-redesign .sticky .absolute.bottom-0,
+.branch-redesign .sticky div[class*="h-0.5"] {
+  display: none !important;
+}
+
+.branch-redesign main {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div:first-child {
+  background: var(--branch-alice) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) > div:first-child {
+  border-bottom: 1px solid var(--branch-alice);
+  padding-bottom: 14px;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .inline-flex {
+  background: var(--branch-vanilla) !important;
+  border: 1px solid var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > div {
+  background: var(--branch-alice) !important;
+  border: 1px solid var(--branch-black) !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section .grid > div,
+.branch-redesign .branch-dashboard-tab > div > section [class*="rounded-2xl"] {
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n + 1) {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n + 2) {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n) {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign #tab-view-settle > div,
+.branch-redesign #tab-view-orders > div,
+.branch-redesign #tab-view-liquorInventory > div,
+.branch-redesign #tab-view-roster > div,
+.branch-redesign #tab-view-officeWorkLog > div,
+.branch-redesign #tab-view-overtimeLog > div,
+.branch-redesign #tab-view-annualLeave > div,
+.branch-redesign #tab-view-partTimeLog > div,
+.branch-redesign #purchase-sales-subtab,
+.branch-redesign #parttime-salaries-subtab,
+.branch-redesign #cash-expenses-subtab,
+.branch-redesign #cash-management-subtab,
+.branch-redesign #card-expenses-subtab {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.045) !important;
+}
+
+.branch-redesign #tab-view-settle [class*="rounded-2xl"],
+.branch-redesign #tab-view-orders [class*="rounded-2xl"],
+.branch-redesign #tab-view-liquorInventory [class*="rounded-2xl"],
+.branch-redesign #tab-view-roster [class*="rounded-2xl"],
+.branch-redesign #tab-view-officeWorkLog [class*="rounded-2xl"],
+.branch-redesign #tab-view-overtimeLog [class*="rounded-2xl"],
+.branch-redesign #tab-view-annualLeave [class*="rounded-2xl"],
+.branch-redesign #tab-view-partTimeLog [class*="rounded-2xl"],
+.branch-redesign #purchase-sales-subtab [class*="rounded-2xl"],
+.branch-redesign #parttime-salaries-subtab [class*="rounded-2xl"],
+.branch-redesign #cash-expenses-subtab [class*="rounded-2xl"],
+.branch-redesign #cash-management-subtab [class*="rounded-2xl"],
+.branch-redesign #card-expenses-subtab [class*="rounded-2xl"] {
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .bg-blue-50,
+.branch-redesign .bg-sky-50,
+.branch-redesign .bg-indigo-50,
+.branch-redesign .bg-\[\#D6E4F0\]\/20,
+.branch-redesign .bg-\[\#D6E4F0\]\/30,
+.branch-redesign .bg-slate-50,
+.branch-redesign .bg-slate-100,
+.branch-redesign .bg-gray-50,
+.branch-redesign .bg-gray-100,
+.branch-redesign .bg-zinc-50,
+.branch-redesign .bg-zinc-100 {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .bg-emerald-50,
+.branch-redesign .bg-green-50 {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign .bg-amber-50,
+.branch-redesign .bg-orange-50,
+.branch-redesign .bg-yellow-50,
+.branch-redesign .bg-rose-50,
+.branch-redesign .bg-red-50,
+.branch-redesign .bg-violet-50,
+.branch-redesign .bg-purple-50 {
+  background: var(--branch-vanilla) !important;
+}
+
+/* Branch design corrections: visual-only overrides. */
+.branch-redesign aside nav .branch-main-nav-button {
+  min-height: 48px !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  gap: 12px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-idle,
+.branch-redesign aside nav .branch-main-nav-idle[style] {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-idle span,
+.branch-redesign aside nav .branch-main-nav-idle svg,
+.branch-redesign aside nav .branch-main-nav-idle[style] span,
+.branch-redesign aside nav .branch-main-nav-idle[style] svg {
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-idle:hover,
+.branch-redesign aside nav .branch-main-nav-idle[style]:hover {
+  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
+  border-color: rgba(33, 33, 33, 0.1) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-idle:hover span,
+.branch-redesign aside nav .branch-main-nav-idle:hover svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-active,
+.branch-redesign aside nav .branch-main-nav-active[style] {
+  background: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+  box-shadow: 0 18px 34px rgba(33, 33, 33, 0.13) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-active span,
+.branch-redesign aside nav .branch-main-nav-active svg,
+.branch-redesign aside nav .branch-main-nav-active[style] span,
+.branch-redesign aside nav .branch-main-nav-active[style] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside > div:first-child span {
+  font-size: 10px !important;
+  letter-spacing: 0.12em !important;
+}
+
+.branch-redesign aside > div:first-child h1 {
+  font-size: 16px !important;
+  line-height: 1.15 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 170px !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-unchecked {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-checked {
+  background: var(--branch-honey) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-check-button {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-check-button:hover {
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-cancel-button {
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-check-name {
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid rgba(33, 33, 33, 0.18) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-standard-hours-select {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-overtime-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 58px !important;
+  border: 1px solid var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-overtime-positive {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-overtime-negative {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-overtime-zero {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) h3 {
+  margin-top: 0 !important;
+}
+
+.branch-redesign #tab-view-settle [class*="rounded-2xl"],
+.branch-redesign #tab-view-settle [class*="rounded-3xl"] {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #tab-view-settle > div,
+.branch-redesign #tab-view-settle > section,
+.branch-redesign #tab-view-settle #settle-form,
+.branch-redesign #tab-view-settle [id*="section"],
+.branch-redesign #tab-view-settle [class*="space-y"] > section {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #tab-view-settle input,
+.branch-redesign #tab-view-settle select,
+.branch-redesign #tab-view-settle textarea,
+.branch-redesign #tab-view-settle label,
+.branch-redesign #tab-view-settle [class*="grid"] > div:not(section) {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #settle-header-controls,
+.branch-redesign #sales-section,
+.branch-redesign #cash-closing-section,
+.branch-redesign #staff-attendance-section,
+.branch-redesign #memo-section,
+.branch-redesign #tab-view-settle div[class*="bg-white"][class*="rounded-2xl"] {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #tab-view-settle,
+.branch-redesign #tab-view-settle > div,
+.branch-redesign #tab-view-settle > div > div,
+.branch-redesign #tab-view-settle > div > section,
+.branch-redesign #tab-view-settle section,
+.branch-redesign #tab-view-settle div[class*="rounded-2xl"],
+.branch-redesign #tab-view-settle div[class*="rounded-3xl"] {
+  border-color: rgba(33, 33, 33, 0.1) !important;
+  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.025) !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  border: 1px solid rgba(33, 33, 33, 0.1) !important;
+}
+
+.branch-redesign #tab-view-settle input,
+.branch-redesign #tab-view-settle select,
+.branch-redesign #tab-view-settle textarea {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls label,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #expenses-section > div > div:first-child h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #staff-attendance-section h3,
+.branch-redesign #tab-view-settle #memo-section h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 7px 13px !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls label svg,
+.branch-redesign #tab-view-settle #sales-section > h3 svg,
+.branch-redesign #tab-view-settle #expenses-section h3 svg,
+.branch-redesign #tab-view-settle #expenses-section > div > div:first-child h3 svg,
+.branch-redesign #tab-view-settle #cash-closing-section > h3 svg,
+.branch-redesign #tab-view-settle #staff-attendance-section h3 svg,
+.branch-redesign #tab-view-settle #memo-section h3 svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle #expenses-section h3 span[class*="rounded-full"],
+.branch-redesign #tab-view-settle #expenses-section h3 span[class*="w-2"],
+.branch-redesign #tab-view-settle #expenses-section > div > div:first-child h3 span[class*="rounded-full"],
+.branch-redesign #tab-view-settle #expenses-section > div > div:first-child h3 span[class*="w-2"] {
+  background: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle .bg-orange-50,
+.branch-redesign #tab-view-settle .bg-orange-50\/50,
+.branch-redesign #tab-view-settle .bg-orange-100,
+.branch-redesign #tab-view-settle .bg-amber-50,
+.branch-redesign #tab-view-settle .bg-amber-50\/50,
+.branch-redesign #tab-view-settle .bg-amber-100,
+.branch-redesign #tab-view-settle .bg-yellow-50,
+.branch-redesign #tab-view-settle .bg-yellow-100,
+.branch-redesign .bg-orange-50,
+.branch-redesign .bg-orange-50\/50,
+.branch-redesign .bg-orange-100,
+.branch-redesign .bg-amber-50,
+.branch-redesign .bg-amber-50\/50,
+.branch-redesign .bg-amber-100,
+.branch-redesign .bg-yellow-50,
+.branch-redesign .bg-yellow-100 {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign #tab-view-settle .text-orange-500,
+.branch-redesign #tab-view-settle .text-orange-600,
+.branch-redesign #tab-view-settle .text-orange-700,
+.branch-redesign #tab-view-settle .text-amber-500,
+.branch-redesign #tab-view-settle .text-amber-600,
+.branch-redesign #tab-view-settle .text-amber-700,
+.branch-redesign #tab-view-settle .text-amber-800,
+.branch-redesign #tab-view-settle .text-yellow-600,
+.branch-redesign .text-orange-500,
+.branch-redesign .text-orange-600,
+.branch-redesign .text-orange-700,
+.branch-redesign .text-amber-500,
+.branch-redesign .text-amber-600,
+.branch-redesign .text-amber-700,
+.branch-redesign .text-amber-800,
+.branch-redesign .text-yellow-600 {
+  color: var(--branch-black) !important;
+}
+
+/* Final branch daily-settle pass: newest user direction wins. */
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label,
+.branch-redesign #tab-view-settle #memo-section label:first-child {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label svg,
+.branch-redesign #tab-view-settle #memo-section label:first-child svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-emerald-50,
+.branch-redesign #tab-view-overtimeLog span.bg-emerald-50 {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-rose-50,
+.branch-redesign #tab-view-overtimeLog span.bg-amber-50 {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+/* Daily/monthly final corrections. */
+.branch-redesign #tab-view-settle {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #memo-section > label {
+  font-size: 11px !important;
+  line-height: 1 !important;
+  padding: 6px 12px !important;
+}
+
+.branch-redesign #monthly-settle-tab-root input[type="month"] {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar {
+  background: var(--branch-ghost) !important;
+  border: 1px solid rgba(33, 33, 33, 0.14) !important;
+  border-radius: 18px !important;
+  padding: 10px !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar select {
+  background: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  color: var(--branch-black) !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  padding: 5px 9px !important;
+}
+
+.branch-redesign .monthly-chip-vanilla {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .monthly-chip-alice {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .monthly-chip-honey {
+  background: var(--branch-honey) !important;
+}
+
+/* Consolidated branch surface, notice-state, and edit-warning lock. */
+html body .branch-redesign.branch-redesign,
+html body .branch-redesign.branch-redesign > div,
+html body .branch-redesign.branch-redesign main,
+html body .branch-redesign.branch-redesign main.grow,
+html body .branch-redesign.branch-redesign aside,
+html body .branch-redesign.branch-redesign aside > div:first-child,
+html body .branch-redesign.branch-redesign aside > div:last-child,
+html body .branch-redesign.branch-redesign .sticky {
+  background: #F6F5FA !important;
+  background-color: #F6F5FA !important;
+}
+
+html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) {
+  background: #F6F5FA !important;
+  background-color: #F6F5FA !important;
+  background-image: none !important;
+}
+
+html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab .branch-notice-card.branch-notice-card.branch-notice-unchecked,
+html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) .grid.grid > .branch-notice-card.branch-notice-card.branch-notice-unchecked {
+  background: #D8DFE9 !important;
+  background-color: #D8DFE9 !important;
+  background-image: none !important;
+}
+
+html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab .branch-notice-card.branch-notice-card.branch-notice-checked,
+html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) .grid.grid > .branch-notice-card.branch-notice-card.branch-notice-checked {
+  background: #CFDECA !important;
+  background-color: #CFDECA !important;
+  background-image: none !important;
+}
+
+html body .branch-redesign.branch-redesign #existing-record-warning-box {
+  display: block !important;
+  background: #EFF0A3 !important;
+  background-color: #EFF0A3 !important;
+  border: 1px solid #212121 !important;
+  color: #212121 !important;
+}
+
+html body .branch-redesign.branch-redesign #existing-record-warning-box * {
+  color: #212121 !important;
+}
+
+html body .branch-redesign.branch-redesign #existing-record-warning-box .space-y-1 p {
+  display: none !important;
+}
+
+html body .branch-redesign.branch-redesign #existing-record-warning-box button,
+html body .branch-redesign.branch-redesign #existing-record-warning-box button * {
+  color: #F6F5FA !important;
+}
+
+html body .branch-redesign.branch-redesign #existing-record-warning-box button:first-of-type,
+html body .branch-redesign.branch-redesign #existing-record-warning-box button:first-of-type *,
+html body .branch-redesign.branch-redesign #existing-record-warning-box button:last-of-type,
+html body .branch-redesign.branch-redesign #existing-record-warning-box button:last-of-type * {
+  background: #212121 !important;
+  background-color: #212121 !important;
+  border-color: #212121 !important;
+  color: #F6F5FA !important;
+}
+
+/* Latest branch corrections: keep only the intended rounded section borders. */
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle svg,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle span,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] svg,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] span {
+  color: rgba(33, 33, 33, 0.66) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] {
+  background: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.14) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active svg,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active span,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] svg,
+.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] span {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign #tab-view-settle > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#existing-record-warning-box):not(#edit-mode-locked-placeholder),
+.branch-redesign #tab-view-settle > div > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#expenses-section) {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-close-status-pill {
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-close-status-confirmed {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-close-status-editing {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-close-status-missing {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign #annual-leave-maintenance > section,
+.branch-redesign #labor-contract-tab > section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
+  background: #ffffff !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-card,
+.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-unchecked,
+.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked,
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-unchecked,
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-checked {
+  background: #ffffff !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-card > p:first-child {
+  display: inline-flex !important;
+  width: fit-content !important;
+  background: var(--branch-vanilla) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  padding: 6px 12px !important;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked > p:first-child {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-division-select.branch-division-idle {
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+  border-color: rgba(33, 33, 33, 0.14) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-division-select.branch-division-active-fulltime {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-division-select.branch-division-active-parttime {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-parttime-standard-hours {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #staff-attendance-section .branch-time-input.branch-time-filled {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  border-color: var(--branch-black) !important;
+}
+
+/* Final restore pass after TSX recovery: keep branch UI aligned with admin redesign. */
+@media (min-width: 768px) {
+  .branch-redesign aside {
+    width: 280px !important;
+  }
+}
+
+.branch-redesign aside {
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+  border-right: 1px solid rgba(33, 33, 33, 0.08) !important;
+  box-shadow: 16px 0 40px rgba(33, 33, 33, 0.04) !important;
+}
+
+.branch-redesign aside > div:first-child {
+  background: var(--branch-ghost) !important;
+  border-bottom-color: rgba(33, 33, 33, 0.08) !important;
+}
+
+.branch-redesign aside > div:first-child > div:first-child {
+  align-items: center !important;
+}
+
+.branch-redesign aside nav {
+  gap: 10px !important;
+}
+
+.branch-redesign aside nav button {
+  min-height: 46px !important;
+  border-radius: 999px !important;
+  font-size: 15px !important;
+  font-weight: 900 !important;
+  color: rgba(33, 33, 33, 0.68) !important;
+  background: transparent !important;
+}
+
+.branch-redesign aside nav button span,
+.branch-redesign aside nav button svg {
+  color: inherit !important;
+}
+
+.branch-redesign aside nav button:hover {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside nav button.text-white,
+.branch-redesign aside nav button[style] {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.16) !important;
+}
+
+.branch-redesign aside nav button.text-white span,
+.branch-redesign aside nav button.text-white svg,
+.branch-redesign aside nav button[style] span,
+.branch-redesign aside nav button[style] svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign aside > div:last-child {
+  background: var(--branch-honey) !important;
+  border-color: transparent !important;
+  border-radius: 24px !important;
+  margin: 16px !important;
+}
+
+.branch-redesign aside > div:last-child button:not([class*="bg-rose"]) {
+  background: var(--branch-ghost) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign aside button[class*="bg-rose"] {
+  background: color-mix(in srgb, var(--branch-honey) 78%, var(--branch-alice)) !important;
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div:first-child,
+.branch-redesign .branch-dashboard-tab > section,
+.branch-redesign .branch-dashboard-tab > div > section {
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div:first-child {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
+  background: #F6F5FA !important;
+  background-color: #F6F5FA !important;
+  background-image: none !important;
+}
+
+.branch-redesign .branch-dashboard-tab > div > section {
+  background: var(--branch-ghost) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-refresh {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-confirm {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit,
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit-cancel {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-cancel {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar select {
+  font-size: 10px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #tab-view-annualLeave h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign main > div.space-y-5 > div:first-child > h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+/* Daily/monthly final corrections. */
+.branch-redesign #tab-view-settle {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #memo-section > label {
+  font-size: 11px !important;
+  line-height: 1 !important;
+  padding: 6px 12px !important;
+}
+
+.branch-redesign #monthly-settle-tab-root input[type="month"] {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar {
+  background: var(--branch-ghost) !important;
+  border: 1px solid rgba(33, 33, 33, 0.14) !important;
+  border-radius: 18px !important;
+  padding: 10px !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar select {
+  background: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  color: var(--branch-black) !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  padding: 5px 9px !important;
+}
+
+.branch-redesign .monthly-chip-vanilla {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .monthly-chip-alice {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .monthly-chip-honey {
+  background: var(--branch-honey) !important;
+}
+
+/* Final branch daily-settle pass: newest user direction wins. */
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label,
+.branch-redesign #tab-view-settle #memo-section label:first-child {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label svg,
+.branch-redesign #tab-view-settle #memo-section label:first-child svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-emerald-50,
+.branch-redesign #tab-view-overtimeLog span.bg-emerald-50 {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-rose-50,
+.branch-redesign #tab-view-overtimeLog span.bg-amber-50 {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+/* Latest branch daily-settle corrections. */
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border-color: transparent !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label,
+.branch-redesign #tab-view-settle #memo-section label:first-child {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+  padding-bottom: 6px !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label svg,
+.branch-redesign #tab-view-settle #memo-section label:first-child svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label {
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-emerald-50,
+.branch-redesign #tab-view-overtimeLog span.bg-emerald-50 {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-rose-50,
+.branch-redesign #tab-view-overtimeLog span.bg-amber-50 {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+/* Branch reference-palette pass: keep all branch tabs visually aligned with admin. */
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-unchecked,
+.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-unchecked,
+.branch-redesign .branch-dashboard-tab [class*="grid"] > .branch-notice-card.branch-notice-unchecked {
+  background: var(--branch-alice) !important;
+  background-color: var(--branch-alice) !important;
+  background-image: none !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-checked,
+.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked,
+.branch-redesign .branch-dashboard-tab [class*="grid"] > .branch-notice-card.branch-notice-checked {
+  background: var(--branch-honey) !important;
+  background-color: var(--branch-honey) !important;
+  background-image: none !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .inline-flex,
+.branch-redesign #tab-view-settle #settle-header-controls label,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #staff-attendance-section h3,
+.branch-redesign #tab-view-settle #memo-section h3,
+.branch-redesign #tab-view-orders h3,
+.branch-redesign #tab-view-liquorInventory h3,
+.branch-redesign #tab-view-roster h3,
+.branch-redesign #tab-view-officeWorkLog h3,
+.branch-redesign #tab-view-overtimeLog h3,
+.branch-redesign #tab-view-annualLeave h3,
+.branch-redesign #tab-view-partTimeLog h3,
+.branch-redesign #purchase-sales-subtab h3,
+.branch-redesign #parttime-salaries-subtab h3,
+.branch-redesign #cash-management-subtab h3,
+.branch-redesign #cash-expenses-subtab h3,
+.branch-redesign #card-expenses-subtab h3,
+.branch-redesign #labor-contract-tab h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls label svg,
+.branch-redesign #tab-view-settle #sales-section > h3 svg,
+.branch-redesign #tab-view-settle #expenses-section h3 svg,
+.branch-redesign #tab-view-settle #cash-closing-section > h3 svg,
+.branch-redesign #tab-view-settle #staff-attendance-section h3 svg,
+.branch-redesign #tab-view-settle #memo-section h3 svg,
+.branch-redesign #tab-view-orders h3 svg,
+.branch-redesign #tab-view-liquorInventory h3 svg,
+.branch-redesign #tab-view-roster h3 svg,
+.branch-redesign #tab-view-officeWorkLog h3 svg,
+.branch-redesign #tab-view-overtimeLog h3 svg,
+.branch-redesign #tab-view-annualLeave h3 svg,
+.branch-redesign #tab-view-partTimeLog h3 svg,
+.branch-redesign #purchase-sales-subtab h3 svg,
+.branch-redesign #parttime-salaries-subtab h3 svg,
+.branch-redesign #cash-management-subtab h3 svg,
+.branch-redesign #cash-expenses-subtab h3 svg,
+.branch-redesign #card-expenses-subtab h3 svg,
+.branch-redesign #labor-contract-tab h3 svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle select.border-blue-200,
+.branch-redesign #tab-view-settle select.border-amber-200,
+.branch-redesign #staff-attendance-section select[class*="border-blue-"],
+.branch-redesign #staff-attendance-section select[class*="border-amber-"],
+.branch-redesign #staff-attendance-section select {
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-ghost) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .border-blue-200,
+.branch-redesign .border-sky-200,
+.branch-redesign .border-indigo-200,
+.branch-redesign .border-emerald-200,
+.branch-redesign .border-green-200,
+.branch-redesign .border-rose-200,
+.branch-redesign .border-red-200,
+.branch-redesign .border-violet-200,
+.branch-redesign .border-purple-200 {
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign .bg-blue-100,
+.branch-redesign .bg-sky-100,
+.branch-redesign .bg-indigo-100,
+.branch-redesign .bg-slate-200,
+.branch-redesign .bg-gray-200,
+.branch-redesign .bg-zinc-200,
+.branch-redesign .hover\:bg-blue-100:hover,
+.branch-redesign .hover\:bg-sky-100:hover,
+.branch-redesign .hover\:bg-slate-100:hover,
+.branch-redesign .hover\:bg-gray-100:hover,
+.branch-redesign .hover\:bg-zinc-100:hover {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .bg-emerald-100,
+.branch-redesign .bg-green-100,
+.branch-redesign .hover\:bg-emerald-100:hover,
+.branch-redesign .hover\:bg-green-100:hover {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign .bg-rose-100,
+.branch-redesign .bg-red-100,
+.branch-redesign .bg-violet-100,
+.branch-redesign .bg-purple-100,
+.branch-redesign .hover\:bg-rose-100:hover,
+.branch-redesign .hover\:bg-red-100:hover,
+.branch-redesign .hover\:bg-violet-100:hover,
+.branch-redesign .hover\:bg-purple-100:hover {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .text-blue-500,
+.branch-redesign .text-sky-500,
+.branch-redesign .text-indigo-500,
+.branch-redesign .text-emerald-500,
+.branch-redesign .text-green-500,
+.branch-redesign .text-rose-500,
+.branch-redesign .text-red-500,
+.branch-redesign .text-violet-500,
+.branch-redesign .text-purple-500,
+.branch-redesign .text-blue-800,
+.branch-redesign .text-sky-800,
+.branch-redesign .text-indigo-800,
+.branch-redesign .text-emerald-800,
+.branch-redesign .text-green-800,
+.branch-redesign .text-rose-800,
+.branch-redesign .text-red-800,
+.branch-redesign .text-violet-800,
+.branch-redesign .text-purple-800 {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-orders > div,
+.branch-redesign #tab-view-liquorInventory > div,
+.branch-redesign #tab-view-roster > div,
+.branch-redesign #tab-view-officeWorkLog > div,
+.branch-redesign #tab-view-overtimeLog > div,
+.branch-redesign #tab-view-annualLeave > div,
+.branch-redesign #tab-view-partTimeLog > div,
+.branch-redesign #labor-contract-tab > div,
+.branch-redesign #purchase-sales-subtab > div,
+.branch-redesign #parttime-salaries-subtab > div,
+.branch-redesign #cash-management-subtab > div,
+.branch-redesign #cash-expenses-subtab > div,
+.branch-redesign #card-expenses-subtab > div {
+  background: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+  box-shadow: 0 14px 34px rgba(33, 33, 33, 0.04) !important;
+}
+
+/* Branch tab cleanup: remove broad rectangular outlines, then reapply only intentional sections. */
+.branch-redesign #tab-view-orders > div,
+.branch-redesign #tab-view-liquorInventory > div,
+.branch-redesign #tab-view-roster > div,
+.branch-redesign #tab-view-officeWorkLog > div,
+.branch-redesign #tab-view-overtimeLog > div,
+.branch-redesign #tab-view-annualLeave > div,
+.branch-redesign #tab-view-partTimeLog > div,
+.branch-redesign #monthly-settle-tab-root > div,
+.branch-redesign #purchase-sales-subtab,
+.branch-redesign #parttime-salaries-subtab,
+.branch-redesign #cash-expenses-subtab,
+.branch-redesign #cash-management-subtab,
+.branch-redesign #card-expenses-subtab,
+.branch-redesign #labor-contract-tab > div {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-orders [class*="rounded-2xl"],
+.branch-redesign #tab-view-liquorInventory [class*="rounded-2xl"],
+.branch-redesign #tab-view-roster [class*="rounded-2xl"],
+.branch-redesign #tab-view-officeWorkLog [class*="rounded-2xl"],
+.branch-redesign #tab-view-overtimeLog [class*="rounded-2xl"],
+.branch-redesign #tab-view-annualLeave [class*="rounded-2xl"],
+.branch-redesign #tab-view-partTimeLog [class*="rounded-2xl"],
+.branch-redesign #monthly-settle-tab-root [class*="rounded-2xl"],
+.branch-redesign #monthly-settle-tab-root [class*="rounded-3xl"],
+.branch-redesign #labor-contract-tab [class*="rounded-2xl"] {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls,
+.branch-redesign #tab-view-settle #settlement-finance-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 18px 42px rgba(33, 33, 33, 0.045) !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  padding: 18px !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section #sales-section,
+.branch-redesign #tab-view-settle #settlement-finance-section #cash-closing-section,
+.branch-redesign #tab-view-settle #settlement-finance-section #expenses-section > div {
+  border-color: rgba(33, 33, 33, 0.12) !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls label,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #staff-attendance-section h3,
+.branch-redesign #tab-view-settle #memo-section h3,
+.branch-redesign #tab-view-orders h3,
+.branch-redesign #tab-view-liquorInventory h3,
+.branch-redesign #tab-view-roster h3,
+.branch-redesign #tab-view-officeWorkLog h3,
+.branch-redesign #tab-view-overtimeLog h3,
+.branch-redesign #tab-view-annualLeave h3,
+.branch-redesign #tab-view-partTimeLog h3,
+.branch-redesign #monthly-settle-tab-root h3,
+.branch-redesign #purchase-sales-subtab h3,
+.branch-redesign #parttime-salaries-subtab h3,
+.branch-redesign #cash-management-subtab h3,
+.branch-redesign #cash-expenses-subtab h3,
+.branch-redesign #card-expenses-subtab h3,
+.branch-redesign #labor-contract-tab h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #staff-attendance-section select.border-amber-200,
+.branch-redesign #staff-attendance-section select[class*="bg-amber-50"] {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section select.border-blue-200,
+.branch-redesign #staff-attendance-section select[class*="bg-blue-50"] {
+  background: var(--branch-alice) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-refresh {
+  background: var(--branch-alice) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-confirm {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit,
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit-cancel {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-cancel {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-refresh svg,
+.branch-redesign #monthly-settle-tab-root .monthly-action-confirm svg,
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit svg,
+.branch-redesign #monthly-settle-tab-root .monthly-action-edit-cancel svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #monthly-settle-tab-root .monthly-action-cancel svg {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign #cash-expenses-subtab > div.flex > div:last-child {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign #card-expenses-subtab > div.flex > div:last-child {
+  background: var(--branch-alice) !important;
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle .border-orange-100,
+.branch-redesign #tab-view-settle .border-orange-200,
+.branch-redesign #tab-view-settle .border-amber-100,
+.branch-redesign #tab-view-settle .border-amber-200,
+.branch-redesign #tab-view-settle .border-yellow-100,
+.branch-redesign .border-orange-100,
+.branch-redesign .border-orange-200,
+.branch-redesign .border-amber-100,
+.branch-redesign .border-amber-200,
+.branch-redesign .border-yellow-100 {
+  border-color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle .bg-blue-500,
+.branch-redesign #tab-view-settle .bg-amber-500,
+.branch-redesign #tab-view-settle .bg-orange-500,
+.branch-redesign #tab-view-settle .bg-red-600,
+.branch-redesign #tab-view-settle .bg-red-700,
+.branch-redesign #tab-view-settle .bg-red-800,
+.branch-redesign #tab-view-settle .bg-red-900,
+.branch-redesign #tab-view-settle .bg-\[\#FEE500\],
+.branch-redesign #tab-view-settle .hover\:bg-\[\#F3DB00\]:hover {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign #tab-view-settle .text-\[\#191919\] {
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .bg-amber-200,
+.branch-redesign .bg-yellow-200,
+.branch-redesign .bg-orange-200,
+.branch-redesign .bg-amber-300,
+.branch-redesign .bg-yellow-300,
+.branch-redesign .bg-orange-300 {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .bg-amber-400,
+.branch-redesign .bg-yellow-400,
+.branch-redesign .bg-orange-400,
+.branch-redesign .bg-amber-500,
+.branch-redesign .bg-yellow-500,
+.branch-redesign .bg-orange-500,
+.branch-redesign .hover\:bg-amber-600:hover,
+.branch-redesign .hover\:bg-orange-600:hover {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+}
+
+.branch-redesign .text-amber-100,
+.branch-redesign .text-amber-200,
+.branch-redesign .text-amber-500,
+.branch-redesign .text-amber-600,
+.branch-redesign .text-orange-500,
+.branch-redesign .text-orange-600,
+.branch-redesign .text-yellow-500,
+.branch-redesign .text-yellow-600 {
+  color: var(--branch-black) !important;
+}
+
+/* Final branch daily-settle pass: newest user direction wins. */
+.branch-redesign #tab-view-settle {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.branch-redesign #tab-view-settle #settle-header-controls {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #settlement-finance-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #sales-section,
+.branch-redesign #tab-view-settle #expenses-section > div,
+.branch-redesign #tab-view-settle #cash-closing-section,
+.branch-redesign #tab-view-settle #staff-attendance-section,
+.branch-redesign #tab-view-settle #memo-section {
+  background: var(--branch-ghost) !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label,
+.branch-redesign #tab-view-settle #memo-section label:first-child {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+
+.branch-redesign #tab-view-settle #memo-section > label svg,
+.branch-redesign #tab-view-settle #memo-section label:first-child svg {
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-emerald-50,
+.branch-redesign #tab-view-overtimeLog span.bg-emerald-50 {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #staff-attendance-section span.bg-rose-50,
+.branch-redesign #tab-view-overtimeLog span.bg-amber-50 {
+  background: var(--branch-honey) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign #tab-view-settle #expenses-section h3,
+.branch-redesign #tab-view-settle #sales-section > h3,
+.branch-redesign #tab-view-settle #cash-closing-section > h3,
+.branch-redesign #tab-view-settle #memo-section > label {
+  font-size: 11px !important;
+  line-height: 1 !important;
+  padding: 6px 12px !important;
+}
+
+.branch-redesign #monthly-settle-tab-root input[type="month"] {
+  background: var(--branch-vanilla) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar {
+  background: var(--branch-ghost) !important;
+  border: 1px solid rgba(33, 33, 33, 0.14) !important;
+  border-radius: 18px !important;
+  padding: 10px !important;
+}
+
+.branch-redesign .monthly-expense-filter-bar select {
+  background: var(--branch-ghost) !important;
+  border-color: var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+
+.branch-redesign .monthly-expense-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 999px !important;
+  color: var(--branch-black) !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  padding: 5px 9px !important;
+}
+
+.branch-redesign .monthly-chip-vanilla {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .monthly-chip-alice {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .monthly-chip-honey {
+  background: var(--branch-honey) !important;
+}
+
