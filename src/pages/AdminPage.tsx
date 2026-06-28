@@ -8,7 +8,6 @@ import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import * as XLSX from "xlsx";
 import { 
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -17,7 +16,6 @@ import {
   Coins
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { loginWithAdminPin } from "../api/firebaseAuth";
 
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
@@ -310,6 +308,7 @@ export default function AdminPage() {
     if (!files.length) return;
     try {
       setUploadingPayroll(true);
+      const XLSX = await import("xlsx");
       const branches = directoryBranches.length ? directoryBranches : await gasClient.getBranchList();
       const updates = new Map<string, any[]>();
       for (const file of files) {
@@ -362,7 +361,7 @@ export default function AdminPage() {
   const unlockSalary = async () => {
     const pin = window.prompt("급여 정보를 열람하려면 관리자 PIN을 다시 입력하세요.");
     if (!pin) return false;
-    try { await loginWithAdminPin(pin); setSalaryUnlocked(true); return true; }
+    try { const { loginWithAdminPin } = await import("../api/firebaseAuth"); await loginWithAdminPin(pin); setSalaryUnlocked(true); return true; }
     catch { triggerToast("관리자 PIN이 일치하지 않습니다.", "error"); return false; }
   };
 
@@ -370,6 +369,7 @@ export default function AdminPage() {
     let includeSalary = window.confirm("급여 정보를 포함해 다운로드할까요?");
     if (includeSalary && !salaryUnlocked) includeSalary = await unlockSalary();
     const rows = directoryEmployees.map((employee) => ({ "직원ID": employee.employeeId || employee.id, "지점": employee.branchName, "이름": employee.name, "생년월일": employee.birthDate || "", "직급": employee.rank || "사원", "입사일": employee.entryDate || "", ...(includeSalary ? { "급여": employee.salary || 0 } : {}), "재직년수": formatTenure(employee.entryDate) }));
+    const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "직원명부"); XLSX.writeFile(workbook, `UGD_직원명부_${getTodayDateString()}.xlsx`);
   };
 
@@ -621,7 +621,7 @@ export default function AdminPage() {
   // ----------------------------------------------------
   // 현재 필터링 상태 기준 데이터 XLSX 양식 출력 (SheetJS)
   // ----------------------------------------------------
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (filteredList.length === 0) {
       triggerToast("다운로드할 데이터가 존재하지 않습니다.", "warning");
       return;
@@ -645,6 +645,7 @@ export default function AdminPage() {
         };
       });
 
+      const XLSX = await import("xlsx");
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "UGD_정산조회");

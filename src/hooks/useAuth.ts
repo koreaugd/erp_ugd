@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { BranchSetting } from "../api/gasClient";
 import { hashPin } from "../utils/hashPin";
-import { LoginBranch, loginWithAdminPin, loginWithBranchPin, logoutFirebase } from "../api/firebaseAuth";
+import type { LoginBranch } from "../api/firebaseAuth";
 
 export interface UserSession extends BranchSetting {
   pinHash: string;
@@ -59,6 +59,7 @@ export function useAuth() {
 
     try {
       const pinHash = await hashPin(pin);
+      const { loginWithAdminPin, loginWithBranchPin } = await import("../api/firebaseAuth");
       const branchSetting = branch ? await loginWithBranchPin(branch, pin) : await loginWithAdminPin(pin);
 
       const session: UserSession = {
@@ -105,7 +106,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
-    void logoutFirebase();
+    void import("../api/firebaseAuth").then(({ logoutFirebase }) => logoutFirebase());
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SELECTED_BRANCH_KEY);
     setUser(null);
