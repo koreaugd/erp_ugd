@@ -33,12 +33,6 @@ const saveLocalStringList = (key: string, value: string[]) => {
   }
 };
 
-const shouldSuppressToast = (message: string, type?: string) => {
-  if (type !== "error") return false;
-  const normalized = String(message || "").toLowerCase();
-  return normalized.includes("missing or insufficient permissions") || normalized.includes("permission-denied") || normalized.includes("permission");
-};
-
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
   const navigate = useNavigate();
@@ -159,7 +153,6 @@ export default function AdminPage() {
   }, [selectedDate, user]);
 
   const triggerToast = (message: string, type: ToastType = "success") => {
-    if (shouldSuppressToast(message, type)) return;
     setToast({ message, type });
   };
 
