@@ -2681,10 +2681,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         }
       } catch (err: any) {
         console.error("Duplicate checking error:", err);
-        const message = String(err?.message || err || "");
-        if (!message.toLowerCase().includes("permission")) {
-          triggerToast("?? ???? ???? ?? ??? ?????.", "error");
-        }
+        triggerToast("이전 데이터를 검사하는 도중 문제가 생겼습니다.", "error");
         // Fresh start on fail
         setHasExistingRecord(false);
         setExistingRecordId(null);

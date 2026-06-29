@@ -17,22 +17,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const readLocalStringList = (key: string) => {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "[]");
-  } catch {
-    return [];
-  }
-};
-
-const saveLocalStringList = (key: string, value: string[]) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Local storage can be unavailable in private contexts; ignore UI-only persistence failures.
-  }
-};
-
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
   const navigate = useNavigate();
@@ -437,9 +421,6 @@ export default function AdminPage() {
         });
       }));
       setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName), "ko")));
-    } catch (error) {
-      console.warn("Closing anomaly load skipped:", error);
-      setAnomalyRecords([]);
     } finally {
       setAnomalyLoading(false);
     }
@@ -469,8 +450,8 @@ export default function AdminPage() {
       const [editLogs, manualOvertimes, checkedEditLogs, checkedManualOvertimes, highCashStores] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
-        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => readLocalStringList("admin_checked_edit_logs")),
-        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => readLocalStringList("admin_checked_manual_overtimes")),
+        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => []),
+        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => []),
         loadHighCashStores().catch(() => [])
       ]);
       const checkedEditSet = new Set(Array.isArray(checkedEditLogs) ? checkedEditLogs.map(String) : []);
@@ -2353,7 +2334,7 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
       setLoading(true);
       const [data, checked] = await Promise.all([
         gasClient.getEditLogs(),
-        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => readLocalStringList("admin_checked_edit_logs"))
+        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => [])
       ]);
       setLogs(data);
       setCheckedLogIds(Array.isArray(checked) ? checked.map(String) : []);
@@ -2396,8 +2377,7 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
     if (!log?.id) return;
     const next = Array.from(new Set([...checkedLogIds, String(log.id)]));
     setCheckedLogIds(next);
-    saveLocalStringList("admin_checked_edit_logs", next);
-    await gasClient.saveSharedData("admin_checked_edit_logs", next).catch(() => ({ success: false }));
+    await gasClient.saveSharedData("admin_checked_edit_logs", next);
   };
 
   const formatShortDate = (isoString: string) => {
@@ -2737,7 +2717,7 @@ function AdminManualOvertimesSection() {
       setLoading(true);
       const [data, checked] = await Promise.all([
         gasClient.getAllManualOvertimes(),
-        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => readLocalStringList("admin_checked_manual_overtimes"))
+        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => [])
       ]);
       setRecords(data || []);
       setCheckedManualIds(Array.isArray(checked) ? checked.map(String) : []);
@@ -2783,8 +2763,7 @@ function AdminManualOvertimesSection() {
     if (!record?.id) return;
     const next = Array.from(new Set([...checkedManualIds, String(record.id)]));
     setCheckedManualIds(next);
-    saveLocalStringList("admin_checked_manual_overtimes", next);
-    await gasClient.saveSharedData("admin_checked_manual_overtimes", next).catch(() => ({ success: false }));
+    await gasClient.saveSharedData("admin_checked_manual_overtimes", next);
   };
 
   const formatShortDate = (isoStr?: string) => {
