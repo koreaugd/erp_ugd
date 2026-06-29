@@ -26,12 +26,6 @@ const cleanNumeric = (val: string) => {
   return val.replace(/[^0-9]/g, "");
 };
 
-const shouldSuppressToast = (message: string, type?: string) => {
-  if (type !== "error") return false;
-  const normalized = String(message || "").toLowerCase();
-  return normalized.includes("missing or insufficient permissions") || normalized.includes("permission-denied") || normalized.includes("permission");
-};
-
 const toDateInputValue = (value: string) => {
   const match = String(value || "").match(/^(\d{4})[.\-/\s]+(\d{1,2})[.\-/\s]+(\d{1,2})/);
   if (!match) return "";
@@ -447,7 +441,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
-    if (shouldSuppressToast(message, type)) return;
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
@@ -2289,7 +2282,6 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
   // Toast trigger helper
   const triggerToast = (message: string, type: "success" | "error" = "success") => {
-    if (shouldSuppressToast(message, type)) return;
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
@@ -2689,6 +2681,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         }
       } catch (err: any) {
         console.error("Duplicate checking error:", err);
+        const message = String(err?.message || err || "");
+        if (!message.toLowerCase().includes("permission")) {
+          triggerToast("?? ???? ???? ?? ??? ?????.", "error");
+        }
         // Fresh start on fail
         setHasExistingRecord(false);
         setExistingRecordId(null);
@@ -6884,7 +6880,6 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
-    if (shouldSuppressToast(message, type)) return;
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
