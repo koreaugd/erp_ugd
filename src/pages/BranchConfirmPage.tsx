@@ -4009,6 +4009,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           </div>
         </div>
 
+        {!isHeadOffice && (
+          <div className="rounded-2xl border border-[#212121] bg-[#EFF0A3] px-4 py-3 text-xs font-black leading-relaxed text-[#212121]">
+            오늘 실제 근무한 직원만 출근/퇴근 시간을 작성하세요. 전체 직원 목록은 삭제하지 않아도 됩니다. 시간은 1만 입력해도 01:00으로 인식되고, 13:30처럼 분 단위 입력도 가능합니다.
+          </div>
+        )}
+
         {/* Inline Employee Field Addition Block */}
         <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
           {staffAddDrafts.map((draft, draftIndex) => (
