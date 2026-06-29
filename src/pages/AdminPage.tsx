@@ -82,7 +82,7 @@ export default function AdminPage() {
   const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
   const [dailyLogsSubTab, setDailyLogsSubTab] = useState<"logs" | "manualOvertimes">("logs");
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
-  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; highCashStores: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, highCashStores: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   const employeeIdSequence = useRef(1);
   // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
@@ -240,14 +240,6 @@ export default function AdminPage() {
     return digits.slice(0, 6);
   };
   const formatDate = (value?: string) => value ? String(value).replace(/-/g, ".") : "-";
-  const parseDailyMeta = (record: any) => {
-    try {
-      const memoText = String(record?.memo || "");
-      return JSON.parse(memoText.split("\n---\nMETADATA:")[1] || "{}");
-    } catch {
-      return {};
-    }
-  };
   const formatBirthDate = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6) || "-";
   const formatResidentNumber = (value?: string) => {
     const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
@@ -425,39 +417,24 @@ export default function AdminPage() {
       setAnomalyLoading(false);
     }
   };
-  useEffect(() => { if (adminSection === "dashboard" || adminSection === "dailySettlement") void loadClosingAnomalies(); }, [adminSection]);
-
-  const loadHighCashStores = useCallback(async () => {
-    const branches = await gasClient.getBranchList();
-    const results = await Promise.all(
-      (branches || [])
-        .filter((branch: any) => branch?.role === "branch" && branch.branchName)
-        .map(async (branch: any) => {
-          const history = await gasClient.getBranchHistory(branch.branchName).catch(() => []);
-          const latest = [...(history || [])].sort((a: any, b: any) => String(b.settleDate || "").localeCompare(String(a.settleDate || "")))[0];
-          if (!latest) return null;
-          const meta = parseDailyMeta(latest);
-          const cashBalance = Number(meta.cashBalance || 0);
-          return cashBalance >= 1800000 ? { branchName: branch.branchName, settleDate: latest.settleDate, cashBalance } : null;
-        })
-    );
-    return results.filter(Boolean);
-  }, []);
+  useEffect(() => { if (adminSection === "dashboard") void loadClosingAnomalies(); }, [adminSection]);
 
   const loadDashboardAlerts = useCallback(async () => {
     try {
       setDashboardAlertsLoading(true);
-      const [editLogs, manualOvertimes, checkedEditLogs, checkedManualOvertimes, highCashStores] = await Promise.all([
+      const editAck = localStorage.getItem("admin_dashboard_ack_edit_logs") || "";
+      const manualAck = localStorage.getItem("admin_dashboard_ack_manual_overtimes") || "";
+      const [editLogs, manualOvertimes] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
-        gasClient.getAllManualOvertimes().catch(() => []),
-        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => []),
-        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => []),
-        loadHighCashStores().catch(() => [])
+        gasClient.getAllManualOvertimes().catch(() => [])
       ]);
-      const checkedEditSet = new Set(Array.isArray(checkedEditLogs) ? checkedEditLogs.map(String) : []);
-      const checkedManualSet = new Set(Array.isArray(checkedManualOvertimes) ? checkedManualOvertimes.map(String) : []);
-      const editNew = (editLogs || []).filter((log: any) => log?.id && !checkedEditSet.has(String(log.id)));
-      const manualNew = (manualOvertimes || []).filter((record: any) => record?.id && !checkedManualSet.has(String(record.id)));
+      const afterAck = (value: string | undefined, ack: string) => {
+        if (!value) return !ack;
+        if (!ack) return true;
+        return String(value) > ack;
+      };
+      const editNew = (editLogs || []).filter((log: any) => afterAck(log.modifiedAt || log.createdAt, editAck));
+      const manualNew = (manualOvertimes || []).filter((record: any) => afterAck(record.createdAt || record.updatedAt || record.settleDate, manualAck));
       const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
         const value = fields.map((field) => item?.[field]).find(Boolean) || "";
         return String(value) > max ? String(value) : max;
@@ -465,7 +442,6 @@ export default function AdminPage() {
       setDashboardAlerts({
         editLogs: editNew.length,
         manualOvertimes: manualNew.length,
-        highCashStores: highCashStores.length,
         latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
         latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
       });
@@ -478,24 +454,22 @@ export default function AdminPage() {
     if (adminSection === "dashboard") void loadDashboardAlerts();
   }, [adminSection, loadDashboardAlerts]);
 
-  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "highCashStores") => {
+  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes") => {
     if (target === "dailyPending") {
       setAdminSection("dailySettlement");
       setDailySettlementTab("status");
       return;
     }
-    if (target === "highCashStores") {
-      setAdminSection("dailySettlement");
-      setDailySettlementTab("status");
-      setClosingView("cash");
-      return;
-    }
     setAdminSection("dailySettlement");
     setDailySettlementTab("logs");
     if (target === "editLogs") {
+      localStorage.setItem("admin_dashboard_ack_edit_logs", dashboardAlerts.latestEditLogAt || new Date().toISOString());
       setDailyLogsSubTab("logs");
+      setDashboardAlerts((current) => ({ ...current, editLogs: 0 }));
     } else {
+      localStorage.setItem("admin_dashboard_ack_manual_overtimes", dashboardAlerts.latestManualOvertimeAt || new Date().toISOString());
       setDailyLogsSubTab("manualOvertimes");
+      setDashboardAlerts((current) => ({ ...current, manualOvertimes: 0 }));
     }
   };
 
@@ -540,12 +514,6 @@ export default function AdminPage() {
       revenue: sumRevenue
     };
   }, [filteredList]);
-
-  const recentAnomalyDates = useMemo(() => {
-    return Array.from(new Set<string>(anomalyRecords.map((item) => String(item.date || "")).filter(Boolean)))
-      .sort((a, b) => b.localeCompare(a))
-      .slice(0, 3);
-  }, [anomalyRecords]);
 
   // ----------------------------------------------------
   // 특정 지점 클릭 시 우측 드로어 상세 오픈 및 서브테이블 로드
@@ -853,18 +821,15 @@ export default function AdminPage() {
                         </tr>
                       ) : (
                         anomalyRecords
-                          .filter((item) => {
-                            if (!recentAnomalyDates.includes(String(item.date || ""))) return false;
-                            return closingView === "remarks"
+                          .filter((item) =>
+                            closingView === "remarks"
                               ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)
                               : closingView === "otherMemo"
                               ? Boolean(item.remarks?.otherMemo)
-                              : closingView === "dashboard"
-                              ? true
-                              : closingView === "cash"
+                              : closingView === "dashboard" || closingView === "cash"
                               ? Boolean(item.cashDifference)
-                              : Boolean(item.overtime);
-                          })
+                              : Boolean(item.overtime)
+                          )
                           .map((item, index) => (
                             <tr
                               key={`${item.branchName}-${item.date}-${index}`}
@@ -1142,7 +1107,6 @@ export default function AdminPage() {
                 <button onClick={() => setDailySettlementTab("logs")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변경이력 & 수기대장</button>
               </div>
               {dailySettlementTab === "status" ? (
-                <>
                 <AdminDailySettlementStatusSection
                   selectedDate={selectedDate}
                   setSelectedDate={setSelectedDate}
@@ -1155,69 +1119,6 @@ export default function AdminPage() {
                   handleDownloadExcel={handleDownloadExcel}
                   handleOpenDetail={handleOpenDetail}
                 />
-                <section className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-black text-[#2C3E50]">마감현황 상세</h2>
-                      <p className="text-xs text-gray-400 mt-1">대시보드의 마감현황 탭들을 일일정산현황에서도 전체 기간 기준으로 확인합니다.</p>
-                    </div>
-                    <button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button>
-                  </div>
-                  <div className="flex gap-2 border-b border-gray-100">
-                    <button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#212121] text-[#212121]" : "border-transparent text-gray-400"}`}>대시보드</button>
-                    <button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#212121] text-[#212121]" : "border-transparent text-gray-400"}`}>초과근무</button>
-                    <button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#212121] text-[#212121]" : "border-transparent text-gray-400"}`}>현금차이</button>
-                    <button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#212121] text-[#212121]" : "border-transparent text-gray-400"}`}>특이사항</button>
-                    <button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#212121] text-[#212121]" : "border-transparent text-gray-400"}`}>기타메모</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-sm">
-                      <thead className="border-b text-left text-gray-500 bg-[#D8DFE9]">
-                        <tr>
-                          <th className="py-3 px-3">마감일</th>
-                          <th className="px-3">지점</th>
-                          <th className="px-3">마감자</th>
-                          <th className="px-3">이상 항목</th>
-                          <th className="px-3">내용</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {anomalyLoading ? (
-                          <tr><td colSpan={5} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
-                        ) : anomalyRecords
-                          .filter((item) =>
-                            closingView === "remarks"
-                              ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)
-                              : closingView === "otherMemo"
-                              ? Boolean(item.remarks?.otherMemo)
-                              : closingView === "dashboard"
-                              ? true
-                              : closingView === "cash"
-                              ? Boolean(item.cashDifference)
-                              : Boolean(item.overtime)
-                          )
-                          .map((item, index) => (
-                            <tr key={`daily-${item.branchName}-${item.date}-${index}`}>
-                              <td className="py-3 px-3 font-mono">{item.date}</td>
-                              <td className="px-3 font-bold">{item.branchName}</td>
-                              <td className="px-3">{item.writer || "-"}</td>
-                              <td className="px-3 font-bold text-[#212121]">{item.issues.join(", ")}</td>
-                              <td className="px-3">
-                                {closingView === "cash"
-                                  ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
-                                  : closingView === "remarks"
-                                  ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p></div>
-                                  : closingView === "otherMemo"
-                                  ? <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{item.remarks?.otherMemo || "-"}</div>
-                                  : item.overtime || "-"}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-                </>
               ) : <AdminModificationLogsSection defaultSubTab={dailyLogsSubTab} />}
             </section>
           )}
@@ -1693,19 +1594,19 @@ function AdminDashboardAlertHub({
   onOpen
 }: {
   pendingDailyCount: number;
-  alerts: { editLogs: number; manualOvertimes: number; highCashStores: number };
+  alerts: { editLogs: number; manualOvertimes: number };
   loading: boolean;
   onRefresh: () => void;
-  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "highCashStores") => void;
+  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes") => void;
 }) {
-  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.highCashStores;
+  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes;
 
   return (
     <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-[#2C3E50]">새로 확인할 항목</h2>
-          <p className="text-xs text-gray-400 mt-1">확인이 필요한 운영 항목을 모아 보여줍니다.</p>
+          <p className="text-xs text-gray-400 mt-1">버튼을 누르면 해당 사이드바 탭으로 이동하고, 신규 변경 항목은 확인 처리됩니다.</p>
         </div>
         <button onClick={onRefresh} className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 text-xs font-black">
           {loading ? "확인 중..." : "새로고침"}
@@ -1713,29 +1614,24 @@ function AdminDashboardAlertHub({
       </div>
 
       {totalAlerts === 0 ? (
-        <div className="rounded-xl bg-[#CFDECA] border border-[#212121]/10 p-4 text-sm font-bold text-[#212121]">
+        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-sm font-bold text-emerald-700">
           새로 확인할 항목이 없습니다.
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {pendingDailyCount > 0 && (
-            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-[#EFF0A3] text-[#212121] border border-[#212121]/20 text-sm font-black hover:bg-[#EFF0A3]/80">
+            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-sm font-black hover:bg-amber-100">
               일일정산 미제출: {pendingDailyCount}건
             </button>
           )}
           {alerts.editLogs > 0 && (
-            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-[#D8DFE9] text-[#212121] border border-[#212121]/20 text-sm font-black hover:bg-[#D8DFE9]/80">
+            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-sm font-black hover:bg-blue-100">
               정산 변경: {alerts.editLogs}건
             </button>
           )}
           {alerts.manualOvertimes > 0 && (
-            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-[#CFDECA] text-[#212121] border border-[#212121]/20 text-sm font-black hover:bg-[#CFDECA]/80">
+            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-sm font-black hover:bg-violet-100">
               초과근무 수기작성: {alerts.manualOvertimes}건
-            </button>
-          )}
-          {alerts.highCashStores > 0 && (
-            <button onClick={() => onOpen("highCashStores")} className="px-4 py-2 rounded-xl bg-[#EFF0A3] text-[#212121] border border-[#212121]/20 text-sm font-black hover:bg-[#EFF0A3]/80">
-              고액 현금 보유: {alerts.highCashStores}건
             </button>
           )}
         </div>
@@ -1743,6 +1639,7 @@ function AdminDashboardAlertHub({
     </section>
   );
 }
+
 function AdminDailySettlementStatusSection({
   selectedDate,
   setSelectedDate,
@@ -2324,7 +2221,6 @@ function AdminAnnualLeaveSection() {
 function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTab?: "logs" | "manualOvertimes" } = {}) {
   const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">(defaultSubTab);
   const [logs, setLogs] = useState<any[]>([]);
-  const [checkedLogIds, setCheckedLogIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchDate, setSearchDate] = useState("");
@@ -2332,12 +2228,8 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
   const loadLogs = async () => {
     try {
       setLoading(true);
-      const [data, checked] = await Promise.all([
-        gasClient.getEditLogs(),
-        gasClient.getSharedData<string[]>("admin_checked_edit_logs").catch(() => [])
-      ]);
+      const data = await gasClient.getEditLogs();
       setLogs(data);
-      setCheckedLogIds(Array.isArray(checked) ? checked.map(String) : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -2371,13 +2263,6 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
       console.error("변경이력 삭제 실패:", error);
       alert("변경이력 삭제에 실패했습니다.");
     }
-  };
-
-  const markLogChecked = async (log: any) => {
-    if (!log?.id) return;
-    const next = Array.from(new Set([...checkedLogIds, String(log.id)]));
-    setCheckedLogIds(next);
-    await gasClient.saveSharedData("admin_checked_edit_logs", next);
   };
 
   const formatShortDate = (isoString: string) => {
@@ -2542,10 +2427,8 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                       </td>
                     </tr>
                   ) : (
-                    filteredLogs.map((log) => {
-                      const isChecked = checkedLogIds.includes(String(log.id));
-                      return (
-                      <tr key={log.id} className={`border-b hover:bg-slate-50/50 transition-colors ${isChecked ? "bg-white" : "bg-[#EFF0A3]/70"}`}>
+                    filteredLogs.map((log) => (
+                      <tr key={log.id} className="border-b hover:bg-slate-50/50 transition-colors">
                         <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
                           {formatShortDate(log.modifiedAt)}
                         </td>
@@ -2564,15 +2447,6 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                           {getChangesSummary(log)}
                         </td>
                         <td className="py-4 px-3 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            disabled={isChecked}
-                            onClick={() => void markLogChecked(log)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black ${isChecked ? "bg-[#CFDECA] text-[#212121]" : "bg-[#212121] text-white hover:bg-black"}`}
-                          >
-                            {isChecked ? "확인됨" : "확인"}
-                          </button>
                           <button
                             type="button"
                             onClick={() => void deleteLog(log)}
@@ -2581,11 +2455,9 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                          </div>
                         </td>
                       </tr>
-                    );
-                    })
+                    ))
                   )}
                 </tbody>
               </table>
@@ -2707,7 +2579,6 @@ function AdminMonthlyClosingStatusSection() {
 
 function AdminManualOvertimesSection() {
   const [records, setRecords] = useState<any[]>([]);
-  const [checkedManualIds, setCheckedManualIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchName, setSearchName] = useState("");
@@ -2715,12 +2586,8 @@ function AdminManualOvertimesSection() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [data, checked] = await Promise.all([
-        gasClient.getAllManualOvertimes(),
-        gasClient.getSharedData<string[]>("admin_checked_manual_overtimes").catch(() => [])
-      ]);
+      const data = await gasClient.getAllManualOvertimes();
       setRecords(data || []);
-      setCheckedManualIds(Array.isArray(checked) ? checked.map(String) : []);
     } catch (err) {
       console.error("Failed to load manual overtimes:", err);
     } finally {
@@ -2757,13 +2624,6 @@ function AdminManualOvertimesSection() {
       console.error("수기 초과근무 삭제 실패:", error);
       alert("수기 초과근무 삭제에 실패했습니다.");
     }
-  };
-
-  const markManualChecked = async (record: any) => {
-    if (!record?.id) return;
-    const next = Array.from(new Set([...checkedManualIds, String(record.id)]));
-    setCheckedManualIds(next);
-    await gasClient.saveSharedData("admin_checked_manual_overtimes", next);
   };
 
   const formatShortDate = (isoStr?: string) => {
@@ -2854,10 +2714,8 @@ function AdminManualOvertimesSection() {
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((r, idx) => {
-                  const isChecked = checkedManualIds.includes(String(r.id));
-                  return (
-                  <tr key={r.id || idx} className={`border-b hover:bg-slate-50/50 transition-colors ${isChecked ? "bg-white" : "bg-[#EFF0A3]/70"}`}>
+                filteredRecords.map((r, idx) => (
+                  <tr key={r.id || idx} className="border-b hover:bg-slate-50/50 transition-colors">
                     <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
                       {formatShortDate(r.createdAt)}
                     </td>
@@ -2879,15 +2737,6 @@ function AdminManualOvertimesSection() {
                       {r.reason || "-"}
                     </td>
                     <td className="py-4 px-3 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        disabled={isChecked}
-                        onClick={() => void markManualChecked(r)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black ${isChecked ? "bg-[#CFDECA] text-[#212121]" : "bg-[#212121] text-white hover:bg-black"}`}
-                      >
-                        {isChecked ? "확인됨" : "확인"}
-                      </button>
                       <button
                         type="button"
                         onClick={() => void deleteManualRecord(r)}
@@ -2896,11 +2745,9 @@ function AdminManualOvertimesSection() {
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                      </div>
                     </td>
                   </tr>
-                );
-                })
+                ))
               )}
             </tbody>
           </table>
