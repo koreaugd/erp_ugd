@@ -1576,7 +1576,7 @@ function AdminNoticeManager() {
           </select>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white" />
         </div>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={4} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold resize-y min-h-[116px] bg-white leading-relaxed" />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold resize-y min-h-[88px] bg-white leading-relaxed" />
         <div className="flex justify-end">
           <button onClick={() => void saveNotice()} disabled={saving} className="min-w-[160px] px-5 py-3 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
         </div>
@@ -1618,7 +1618,7 @@ function AdminDashboardAlertHub({
   const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes;
 
   return (
-    <section className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+    <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-[#2C3E50]">새로 확인할 항목</h2>
@@ -1634,7 +1634,7 @@ function AdminDashboardAlertHub({
           새로 확인할 항목이 없습니다.
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="admin-dashboard-alert-actions flex flex-col gap-2">
           {pendingDailyCount > 0 && (
             <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-sm font-black hover:bg-amber-100">
               일일정산 미제출: {pendingDailyCount}건
