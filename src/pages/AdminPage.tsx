@@ -432,8 +432,11 @@ export default function AdminPage() {
       const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
       const getEditReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
       const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
-      const editNew = (editLogs || []).filter((log: any) => !reviewedEditSet.has(getEditReviewId(log)));
-      const manualNew = (manualOvertimes || []).filter((record: any) => !reviewedManualSet.has(getManualReviewId(record)));
+      const yesterday = getYesterdayDateString();
+      const editDismissed = localStorage.getItem("admin_dashboard_dismissed_edit_logs_date") === yesterday;
+      const manualDismissed = localStorage.getItem("admin_dashboard_dismissed_manual_overtimes_date") === yesterday;
+      const editNew = editDismissed ? [] : (editLogs || []).filter((log: any) => log.settleDate === yesterday && !reviewedEditSet.has(getEditReviewId(log)));
+      const manualNew = manualDismissed ? [] : (manualOvertimes || []).filter((record: any) => record.settleDate === yesterday && !reviewedManualSet.has(getManualReviewId(record)));
       const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
         const value = fields.map((field) => item?.[field]).find(Boolean) || "";
         return String(value) > max ? String(value) : max;
@@ -463,8 +466,12 @@ export default function AdminPage() {
     setDailySettlementTab("logs");
     if (target === "editLogs") {
       setDailyLogsSubTab("logs");
+      localStorage.setItem("admin_dashboard_dismissed_edit_logs_date", getYesterdayDateString());
+      setDashboardAlerts((current) => ({ ...current, editLogs: 0 }));
     } else {
       setDailyLogsSubTab("manualOvertimes");
+      localStorage.setItem("admin_dashboard_dismissed_manual_overtimes_date", getYesterdayDateString());
+      setDashboardAlerts((current) => ({ ...current, manualOvertimes: 0 }));
     }
   };
 
@@ -2344,10 +2351,6 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
     if (before.deliverySales !== after.deliverySales) {
       changes.push(`배달매출: ${formatNumber(before.deliverySales)}원 ➔ ${formatNumber(after.deliverySales)}원`);
     }
-    if (before.memo !== after.memo) {
-      changes.push(`마감 메모 변경됨`);
-    }
-
     const beforeExpLength = before.expenses?.length || 0;
     const afterExpLength = after.expenses?.length || 0;
     if (beforeExpLength !== afterExpLength) {
