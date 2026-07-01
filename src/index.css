@@ -744,9 +744,18 @@ input[type=number] {
 
 .admin-dashboard-compact-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(280px, 0.55fr) minmax(0, 1.45fr);
   gap: 16px;
   align-items: stretch;
+}
+
+.admin-dashboard-alert-hub {
+  max-width: 420px;
+}
+
+.admin-dashboard-alert-actions > button {
+  width: 100%;
+  text-align: left;
 }
 
 .admin-design-preview main > section,
