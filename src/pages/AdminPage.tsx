@@ -813,7 +813,6 @@ export default function AdminPage() {
               <section className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다. 어제 날짜({getYesterdayDateString()}) 마감 내용만 강조 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
                 <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button><button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>기타메모</button></div>
-                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">최근 3일 이상치</p><p className="text-2xl font-black">{recentAnomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{recentAnomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{recentAnomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs text-blue-600 font-bold">기타메모</p><p className="text-2xl font-black text-blue-700">{recentAnomalyRecords.filter((item) => item.remarks?.otherMemo).length}건</p></div></div>}
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead className="border-b text-left text-gray-500">
@@ -1569,14 +1568,18 @@ function AdminNoticeManager() {
         <button onClick={() => setNoticeTab("admin")} className={`admin-notice-tab admin-notice-tab-admin px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "is-active shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
         <button onClick={() => setNoticeTab("branch")} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>공지사항</button>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[180px_180px_1fr_auto] gap-2">
-        <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold disabled:bg-gray-100 disabled:text-gray-400">
-          <option value="전체">전체공지</option>
-          {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-        </select>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold resize-y min-h-[44px]" />
-        <button onClick={() => void saveNotice()} disabled={saving} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
+      <div className="admin-notice-form space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3">
+          <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400">
+            <option value="전체">전체공지</option>
+            {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+          </select>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white" />
+        </div>
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={4} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold resize-y min-h-[116px] bg-white leading-relaxed" />
+        <div className="flex justify-end">
+          <button onClick={() => void saveNotice()} disabled={saving} className="min-w-[160px] px-5 py-3 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
+        </div>
       </div>
       {notices.length > 0 ? (
         <div className="space-y-2">

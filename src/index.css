@@ -868,13 +868,17 @@ input[type=number] {
   font-size: 11px;
 }
 
-.admin-design-preview .admin-notice-manager .grid {
+.admin-design-preview .admin-notice-manager > .grid {
   grid-template-columns: 130px minmax(0, 1fr) !important;
 }
 
-.admin-design-preview .admin-notice-manager .grid input:nth-of-type(2),
-.admin-design-preview .admin-notice-manager .grid button {
+.admin-design-preview .admin-notice-manager > .grid input:nth-of-type(2),
+.admin-design-preview .admin-notice-manager > .grid button {
   grid-column: 1 / -1;
+}
+
+.admin-design-preview .admin-notice-manager .admin-notice-form .grid {
+  grid-template-columns: 180px minmax(0, 1fr) !important;
 }
 
 .admin-registered-notices {

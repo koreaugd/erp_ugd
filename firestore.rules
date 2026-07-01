@@ -45,6 +45,10 @@ service cloud.firestore {
       allow read, write: if signedIn();
     }
 
+    match /shared_data_backups/{backupId} {
+      allow read, write: if signedIn();
+    }
+
     match /edit_logs/{logId} {
       allow read, create: if signedIn();
       allow update, delete: if isAdmin();
