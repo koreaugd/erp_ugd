@@ -4844,6 +4844,13 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   }, [storageKey, vendorKey]);
 
   const normalizeRemoteOrderVendors = useCallback((value: unknown): Record<OrderCategory, string[]> | null => {
+    if (Array.isArray(value)) {
+      const firstCategory = ORDER_CATEGORIES[0];
+      return {
+        ...ORDER_DEFAULT_VENDORS,
+        [firstCategory]: Array.from(new Set([...(ORDER_DEFAULT_VENDORS[firstCategory] || []), ...value.filter((item): item is string => typeof item === "string")]))
+      };
+    }
     if (!value || typeof value !== "object") return null;
     const source = value as Partial<Record<OrderCategory, unknown>>;
     return ORDER_CATEGORIES.reduce((acc, category) => {
@@ -4862,6 +4869,46 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     });
   }, []);
 
+  const parseJsonArray = useCallback(<T,>(json: string | null): T[] => {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const parseVendorJson = useCallback((json: string | null) => {
+    if (!json) return null;
+    try {
+      return normalizeRemoteOrderVendors(JSON.parse(json));
+    } catch {
+      return null;
+    }
+  }, [normalizeRemoteOrderVendors]);
+
+  const mergeOrders = useCallback((remoteItems: OrderItem[], localItems: OrderItem[]) => {
+    const byCell = new Map<string, OrderItem>();
+    [...remoteItems, ...localItems].forEach((item) => {
+      if (!item || !item.vendorName || !item.orderDate) return;
+      byCell.set(`${item.category}|${item.vendorName}|${item.orderDate}`, item);
+    });
+    return Array.from(byCell.values());
+  }, []);
+
+  const mergeVendorMaps = useCallback((remoteMap: Record<OrderCategory, string[]> | null, localMap: Record<OrderCategory, string[]> | null) => {
+    if (!remoteMap && !localMap) return null;
+    return ORDER_CATEGORIES.reduce((acc, category) => {
+      acc[category] = Array.from(new Set([
+        ...(ORDER_DEFAULT_VENDORS[category] || []),
+        ...(remoteMap?.[category] || []),
+        ...(localMap?.[category] || [])
+      ]));
+      return acc;
+    }, {} as Record<OrderCategory, string[]>);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const localOrdersJson = localStorage.getItem(storageKey);
@@ -4872,23 +4919,19 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
       gasClient.getSharedData<Record<OrderCategory, string[]>>(sharedVendorKey)
     ]).then(([remoteOrders, remoteVendors]) => {
       if (cancelled) return;
-      if (Array.isArray(remoteOrders)) {
-        setOrders(remoteOrders);
-        localStorage.setItem(storageKey, JSON.stringify(remoteOrders));
-      } else if (localOrdersJson) {
-        try {
-          void gasClient.saveSharedData(sharedOrderKey, JSON.parse(localOrdersJson));
-        } catch {}
+      const localOrders = parseJsonArray<OrderItem>(localOrdersJson);
+      const mergedOrders = mergeOrders(Array.isArray(remoteOrders) ? remoteOrders : [], localOrders);
+      if (mergedOrders.length > 0) {
+        setOrders(mergedOrders);
+        localStorage.setItem(storageKey, JSON.stringify(mergedOrders));
+        void gasClient.saveSharedData(sharedOrderKey, mergedOrders);
       }
 
-      const normalizedVendors = normalizeRemoteOrderVendors(remoteVendors);
+      const normalizedVendors = mergeVendorMaps(normalizeRemoteOrderVendors(remoteVendors), parseVendorJson(localVendorsJson));
       if (normalizedVendors) {
         setVendorsByCategory(normalizedVendors);
         localStorage.setItem(vendorKey, JSON.stringify(normalizedVendors));
-      } else if (localVendorsJson) {
-        try {
-          void gasClient.saveSharedData(sharedVendorKey, JSON.parse(localVendorsJson));
-        } catch {}
+        void gasClient.saveSharedData(sharedVendorKey, normalizedVendors);
       }
     }).catch((error) => {
       console.error("Failed to load shared order data", error);
@@ -4899,7 +4942,7 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
       if (orderSaveTimerRef.current) clearTimeout(orderSaveTimerRef.current);
       if (vendorSaveTimerRef.current) clearTimeout(vendorSaveTimerRef.current);
     };
-  }, [normalizeRemoteOrderVendors, sharedOrderKey, sharedVendorKey, storageKey, vendorKey]);
+  }, [mergeOrders, mergeVendorMaps, normalizeRemoteOrderVendors, parseJsonArray, parseVendorJson, sharedOrderKey, sharedVendorKey, storageKey, vendorKey]);
 
   const reportVendors = useMemo(() => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
@@ -5163,6 +5206,25 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     });
   }, []);
 
+  const parseLiquorJsonArray = useCallback(<T,>(json: string | null): T[] => {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const mergeById = useCallback(<T extends { id: string }>(remoteItems: T[], localItems: T[]) => {
+    const byId = new Map<string, T>();
+    [...remoteItems, ...localItems].forEach((item) => {
+      if (!item?.id) return;
+      byId.set(item.id, item);
+    });
+    return Array.from(byId.values());
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const localProductsJson = localStorage.getItem(productKey);
@@ -5173,22 +5235,18 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       gasClient.getSharedData<InventoryMovement[]>(sharedMovementKey)
     ]).then(([remoteProducts, remoteMovements]) => {
       if (cancelled) return;
-      if (Array.isArray(remoteProducts)) {
-        setProducts(remoteProducts);
-        localStorage.setItem(productKey, JSON.stringify(remoteProducts));
-      } else if (localProductsJson) {
-        try {
-          void gasClient.saveSharedData(sharedProductKey, JSON.parse(localProductsJson));
-        } catch {}
+      const mergedProducts = mergeById(Array.isArray(remoteProducts) ? remoteProducts : [], parseLiquorJsonArray<InventoryProduct>(localProductsJson));
+      if (mergedProducts.length > 0) {
+        setProducts(mergedProducts);
+        localStorage.setItem(productKey, JSON.stringify(mergedProducts));
+        void gasClient.saveSharedData(sharedProductKey, mergedProducts);
       }
 
-      if (Array.isArray(remoteMovements)) {
-        setMovements(remoteMovements);
-        localStorage.setItem(movementKey, JSON.stringify(remoteMovements));
-      } else if (localMovementsJson) {
-        try {
-          void gasClient.saveSharedData(sharedMovementKey, JSON.parse(localMovementsJson));
-        } catch {}
+      const mergedMovements = mergeById(Array.isArray(remoteMovements) ? remoteMovements : [], parseLiquorJsonArray<InventoryMovement>(localMovementsJson));
+      if (mergedMovements.length > 0) {
+        setMovements(mergedMovements);
+        localStorage.setItem(movementKey, JSON.stringify(mergedMovements));
+        void gasClient.saveSharedData(sharedMovementKey, mergedMovements);
       }
     }).catch((error) => {
       console.error("Failed to load shared liquor inventory", error);
@@ -5199,7 +5257,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       if (productSaveTimerRef.current) clearTimeout(productSaveTimerRef.current);
       if (movementSaveTimerRef.current) clearTimeout(movementSaveTimerRef.current);
     };
-  }, [movementKey, productKey, sharedMovementKey, sharedProductKey]);
+  }, [mergeById, movementKey, parseLiquorJsonArray, productKey, sharedMovementKey, sharedProductKey]);
 
   useEffect(() => {
     (window as any).__ugdLiquorInventoryDirty = false;
