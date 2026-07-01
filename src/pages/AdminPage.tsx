@@ -422,19 +422,18 @@ export default function AdminPage() {
   const loadDashboardAlerts = useCallback(async () => {
     try {
       setDashboardAlertsLoading(true);
-      const editAck = localStorage.getItem("admin_dashboard_ack_edit_logs") || "";
-      const manualAck = localStorage.getItem("admin_dashboard_ack_manual_overtimes") || "";
-      const [editLogs, manualOvertimes] = await Promise.all([
+      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
-        gasClient.getAllManualOvertimes().catch(() => [])
+        gasClient.getAllManualOvertimes().catch(() => []),
+        gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
+        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => [])
       ]);
-      const afterAck = (value: string | undefined, ack: string) => {
-        if (!value) return !ack;
-        if (!ack) return true;
-        return String(value) > ack;
-      };
-      const editNew = (editLogs || []).filter((log: any) => afterAck(log.modifiedAt || log.createdAt, editAck));
-      const manualNew = (manualOvertimes || []).filter((record: any) => afterAck(record.createdAt || record.updatedAt || record.settleDate, manualAck));
+      const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
+      const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
+      const getEditReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
+      const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
+      const editNew = (editLogs || []).filter((log: any) => !reviewedEditSet.has(getEditReviewId(log)));
+      const manualNew = (manualOvertimes || []).filter((record: any) => !reviewedManualSet.has(getManualReviewId(record)));
       const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
         const value = fields.map((field) => item?.[field]).find(Boolean) || "";
         return String(value) > max ? String(value) : max;
@@ -463,13 +462,9 @@ export default function AdminPage() {
     setAdminSection("dailySettlement");
     setDailySettlementTab("logs");
     if (target === "editLogs") {
-      localStorage.setItem("admin_dashboard_ack_edit_logs", dashboardAlerts.latestEditLogAt || new Date().toISOString());
       setDailyLogsSubTab("logs");
-      setDashboardAlerts((current) => ({ ...current, editLogs: 0 }));
     } else {
-      localStorage.setItem("admin_dashboard_ack_manual_overtimes", dashboardAlerts.latestManualOvertimeAt || new Date().toISOString());
       setDailyLogsSubTab("manualOvertimes");
-      setDashboardAlerts((current) => ({ ...current, manualOvertimes: 0 }));
     }
   };
 
@@ -1520,6 +1515,7 @@ function AdminNoticeManager() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   const noticeStorageKey = noticeTab === "admin" ? "admin_dashboard_notices" : "admin_notices";
 
   const load = useCallback(async () => {
@@ -1533,21 +1529,42 @@ function AdminNoticeManager() {
 
   useEffect(() => {
     void load();
+    setEditingNoticeId(null);
+    setTitle("");
+    setBody("");
   }, [load]);
 
   const saveNotice = async () => {
     if (!title.trim() && !body.trim()) return;
     try {
       setSaving(true);
-      const next = [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: new Date().toISOString() }, ...notices].slice(0, 20);
+      const now = new Date().toISOString();
+      const next = editingNoticeId
+        ? notices.map((notice) => notice.id === editingNoticeId ? { ...notice, targetBranch, title: title.trim() || "공지사항", body: body.trim(), updatedAt: now } : notice)
+        : [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: now }, ...notices].slice(0, 20);
       await gasClient.saveSharedData(noticeStorageKey, next);
       setNotices(next);
       if (noticeTab === "admin") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
+      setEditingNoticeId(null);
       setTitle("");
       setBody("");
     } finally {
       setSaving(false);
     }
+  };
+
+  const startEditNotice = (notice: any) => {
+    setEditingNoticeId(notice.id);
+    setTargetBranch(notice.targetBranch || "전체");
+    setTitle(notice.title || "");
+    setBody(notice.body || notice.content || "");
+  };
+
+  const cancelEditNotice = () => {
+    setEditingNoticeId(null);
+    setTitle("");
+    setBody("");
+    setTargetBranch("전체");
   };
 
   const deleteNotice = async (id: string) => {
@@ -1578,7 +1595,12 @@ function AdminNoticeManager() {
         </div>
         <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold resize-y min-h-[88px] bg-white leading-relaxed" />
         <div className="flex justify-end">
-          <button onClick={() => void saveNotice()} disabled={saving} className="min-w-[160px] px-5 py-3 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
+          {editingNoticeId && (
+            <button onClick={cancelEditNotice} disabled={saving} className="px-5 py-3 bg-white text-gray-600 border border-gray-200 rounded-xl text-xs font-black disabled:opacity-50">
+              수정 취소
+            </button>
+          )}
+          <button onClick={() => void saveNotice()} disabled={saving} className="min-w-[160px] px-5 py-3 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : editingNoticeId ? "공지 수정" : "공지 등록"}</button>
         </div>
       </div>
       {notices.length > 0 ? (
@@ -1589,7 +1611,10 @@ function AdminNoticeManager() {
                 <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
                 <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{notice.body}</p>
               </div>
-              <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button onClick={() => startEditNotice(notice)} className="text-xs font-black text-[#2E6DB4]">수정</button>
+                <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
+              </div>
             </div>
           ))}
         </div>
@@ -2237,6 +2262,7 @@ function AdminAnnualLeaveSection() {
 function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTab?: "logs" | "manualOvertimes" } = {}) {
   const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">(defaultSubTab);
   const [logs, setLogs] = useState<any[]>([]);
+  const [reviewedLogIds, setReviewedLogIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchDate, setSearchDate] = useState("");
@@ -2244,8 +2270,12 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
   const loadLogs = async () => {
     try {
       setLoading(true);
-      const data = await gasClient.getEditLogs();
+      const [data, reviewed] = await Promise.all([
+        gasClient.getEditLogs(),
+        gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => [])
+      ]);
       setLogs(data);
+      setReviewedLogIds(Array.isArray(reviewed) ? reviewed : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -2279,6 +2309,15 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
       console.error("변경이력 삭제 실패:", error);
       alert("변경이력 삭제에 실패했습니다.");
     }
+  };
+
+  const getLogReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
+
+  const markLogReviewed = async (log: any) => {
+    const reviewId = getLogReviewId(log);
+    const next = Array.from(new Set([...reviewedLogIds, reviewId]));
+    setReviewedLogIds(next);
+    await gasClient.saveSharedData("admin_reviewed_edit_logs", next);
   };
 
   const formatShortDate = (isoString: string) => {
@@ -2426,25 +2465,28 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                     <th className="py-4 px-3 w-32">마감 대상일</th>
                     <th className="py-4 px-3 w-28">작업자</th>
                     <th className="py-4 px-3">수정 전 ➔ 수정 후 세부 내역</th>
+                    <th className="py-4 px-3 w-24 text-center">확인</th>
                     <th className="py-4 px-3 w-20 text-center">관리</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="p-12 text-center text-gray-400 font-semibold">
+                      <td colSpan={7} className="p-12 text-center text-gray-400 font-semibold">
                         <LoadingSpinner size="sm" />
                       </td>
                     </tr>
                   ) : filteredLogs.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-12 text-center text-gray-400 font-bold">
+                      <td colSpan={7} className="p-12 text-center text-gray-400 font-bold">
                         기록된 마감 수정 이력이 없습니다.
                       </td>
                     </tr>
                   ) : (
-                    filteredLogs.map((log) => (
-                      <tr key={log.id} className="border-b hover:bg-slate-50/50 transition-colors">
+                    filteredLogs.map((log) => {
+                      const reviewed = reviewedLogIds.includes(getLogReviewId(log));
+                      return (
+                      <tr key={log.id} className={`border-b transition-colors ${reviewed ? "bg-white hover:bg-slate-50/50" : "bg-[#F4F2A8]/70 hover:bg-[#F4F2A8]"}`}>
                         <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
                           {formatShortDate(log.modifiedAt)}
                         </td>
@@ -2463,6 +2505,21 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                           {getChangesSummary(log)}
                         </td>
                         <td className="py-4 px-3 text-center">
+                          {reviewed ? (
+                            <span className="inline-flex items-center justify-center rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs font-black text-slate-500">
+                              확인됨
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => void markLogReviewed(log)}
+                              className="inline-flex items-center justify-center rounded-lg bg-[#2E6DB4] px-3 py-2 text-xs font-black text-white hover:bg-[#20528B]"
+                            >
+                              확인
+                            </button>
+                          )}
+                        </td>
+                        <td className="py-4 px-3 text-center">
                           <button
                             type="button"
                             onClick={() => void deleteLog(log)}
@@ -2473,7 +2530,8 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
                           </button>
                         </td>
                       </tr>
-                    ))
+                    );
+                    })
                   )}
                 </tbody>
               </table>
@@ -2595,6 +2653,7 @@ function AdminMonthlyClosingStatusSection() {
 
 function AdminManualOvertimesSection() {
   const [records, setRecords] = useState<any[]>([]);
+  const [reviewedRecordIds, setReviewedRecordIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchName, setSearchName] = useState("");
@@ -2602,8 +2661,12 @@ function AdminManualOvertimesSection() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await gasClient.getAllManualOvertimes();
+      const [data, reviewed] = await Promise.all([
+        gasClient.getAllManualOvertimes(),
+        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => [])
+      ]);
       setRecords(data || []);
+      setReviewedRecordIds(Array.isArray(reviewed) ? reviewed : []);
     } catch (err) {
       console.error("Failed to load manual overtimes:", err);
     } finally {
@@ -2640,6 +2703,15 @@ function AdminManualOvertimesSection() {
       console.error("수기 초과근무 삭제 실패:", error);
       alert("수기 초과근무 삭제에 실패했습니다.");
     }
+  };
+
+  const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
+
+  const markManualReviewed = async (record: any) => {
+    const reviewId = getManualReviewId(record);
+    const next = Array.from(new Set([...reviewedRecordIds, reviewId]));
+    setReviewedRecordIds(next);
+    await gasClient.saveSharedData("admin_reviewed_manual_overtimes", next);
   };
 
   const formatShortDate = (isoStr?: string) => {
@@ -2713,25 +2785,28 @@ function AdminManualOvertimesSection() {
                 <th className="py-4 px-3 w-32">직원명</th>
                 <th className="py-4 px-3 w-28 text-center">초과시간</th>
                 <th className="py-4 px-3">수기 입력 사유</th>
+                <th className="py-4 px-3 w-24 text-center">확인</th>
                 <th className="py-4 px-3 w-20 text-center">관리</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-gray-400 font-semibold">
+                  <td colSpan={8} className="p-12 text-center text-gray-400 font-semibold">
                     <LoadingSpinner size="sm" />
                   </td>
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-gray-400 font-bold">
+                  <td colSpan={8} className="p-12 text-center text-gray-400 font-bold">
                     수기로 등록된 초과근무 내역이 없습니다.
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((r, idx) => (
-                  <tr key={r.id || idx} className="border-b hover:bg-slate-50/50 transition-colors">
+                filteredRecords.map((r, idx) => {
+                  const reviewed = reviewedRecordIds.includes(getManualReviewId(r));
+                  return (
+                  <tr key={r.id || idx} className={`border-b transition-colors ${reviewed ? "bg-white hover:bg-slate-50/50" : "bg-[#F4F2A8]/70 hover:bg-[#F4F2A8]"}`}>
                     <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
                       {formatShortDate(r.createdAt)}
                     </td>
@@ -2753,6 +2828,21 @@ function AdminManualOvertimesSection() {
                       {r.reason || "-"}
                     </td>
                     <td className="py-4 px-3 text-center">
+                      {reviewed ? (
+                        <span className="inline-flex items-center justify-center rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs font-black text-slate-500">
+                          확인됨
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void markManualReviewed(r)}
+                          className="inline-flex items-center justify-center rounded-lg bg-[#2E6DB4] px-3 py-2 text-xs font-black text-white hover:bg-[#20528B]"
+                        >
+                          확인
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-4 px-3 text-center">
                       <button
                         type="button"
                         onClick={() => void deleteManualRecord(r)}
@@ -2763,7 +2853,8 @@ function AdminManualOvertimesSection() {
                       </button>
                     </td>
                   </tr>
-                ))
+                );
+                })
               )}
             </tbody>
           </table>

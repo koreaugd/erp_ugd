@@ -2058,7 +2058,7 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
               return (
               <div key={noticeId} className={`branch-notice-card rounded-2xl border p-4 shadow-xs ${checked ? "branch-notice-checked" : "branch-notice-unchecked"}`}>
                 <p className="text-sm font-black text-gray-900">{notice.title || "공지사항"}</p>
-                <p className="text-xs text-gray-700 mt-2 whitespace-pre-wrap leading-relaxed font-black">{notice.body || notice.content || ""}</p>
+                <p className="branch-notice-body text-sm mt-2 whitespace-pre-wrap leading-relaxed font-black">{notice.body || notice.content || ""}</p>
                 <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
                 <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
                   {checked ? (
