@@ -515,6 +515,19 @@ export default function AdminPage() {
     };
   }, [filteredList]);
 
+  const yesterdayAnomalyRecords = useMemo(() => {
+    const yesterday = getYesterdayDateString();
+    return anomalyRecords.filter((item) => item.date === yesterday);
+  }, [anomalyRecords]);
+
+  const recentAnomalyRecords = useMemo(() => {
+    const recentDates = Array.from(new Set<string>(anomalyRecords.map((item) => String(item.date || "")).filter(Boolean)))
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 3);
+    const dateSet = new Set(recentDates);
+    return anomalyRecords.filter((item) => dateSet.has(String(item.date || "")));
+  }, [anomalyRecords]);
+
   // ----------------------------------------------------
   // 특정 지점 클릭 시 우측 드로어 상세 오픈 및 서브테이블 로드
   // ----------------------------------------------------
@@ -782,8 +795,8 @@ export default function AdminPage() {
                 </button>
                 <button type="button" onClick={() => setClosingView("cash")} className="admin-kpi-card admin-kpi-blue">
                   <span>현금차이</span>
-                  <strong>{anomalyRecords.filter((item) => item.cashDifference).length}</strong>
-                  <small>마감현황의 현금 차이 확인</small>
+                  <strong>{yesterdayAnomalyRecords.filter((item) => item.cashDifference).length}</strong>
+                  <small>어제 마감의 현금 차이 확인</small>
                 </button>
                 <button type="button" onClick={() => setClosingView("otherMemo")} className="admin-kpi-card admin-kpi-honey">
                   <span>ERP 기타메모</span>
@@ -800,7 +813,7 @@ export default function AdminPage() {
               <section className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다. 어제 날짜({getYesterdayDateString()}) 마감 내용만 강조 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
                 <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button><button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>기타메모</button></div>
-                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">누적 이상치</p><p className="text-2xl font-black">{anomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{anomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{anomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs text-blue-600 font-bold">기타메모</p><p className="text-2xl font-black text-blue-700">{anomalyRecords.filter((item) => item.remarks?.otherMemo).length}건</p></div></div>}
+                {closingView === "dashboard" && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3"><div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500 font-bold">최근 3일 이상치</p><p className="text-2xl font-black">{recentAnomalyRecords.length}건</p></div><div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">현금 차이</p><p className="text-2xl font-black text-rose-700">{recentAnomalyRecords.filter((item) => item.cashDifference).length}건</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600 font-bold">초과근무</p><p className="text-2xl font-black text-amber-700">{recentAnomalyRecords.filter((item) => item.overtime).length}건</p></div><div className="rounded-xl bg-blue-50 p-4"><p className="text-xs text-blue-600 font-bold">기타메모</p><p className="text-2xl font-black text-blue-700">{recentAnomalyRecords.filter((item) => item.remarks?.otherMemo).length}건</p></div></div>}
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead className="border-b text-left text-gray-500">
@@ -820,7 +833,7 @@ export default function AdminPage() {
                           </td>
                         </tr>
                       ) : (
-                        anomalyRecords
+                        recentAnomalyRecords
                           .filter((item) =>
                             closingView === "remarks"
                               ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)

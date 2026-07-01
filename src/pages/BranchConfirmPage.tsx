@@ -4035,6 +4035,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           </div>
         </div>
 
+        <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-relaxed text-sky-800">
+          전체 직원 목록이 보여도 실제로 일한 직원만 출근/퇴근 시간을 작성하면 됩니다. 근무하지 않은 직원은 비워두거나 삭제하지 않아도 되며, 시간은 숫자만 입력해도 자동 변환됩니다. 예: 13 입력 시 13:00으로 인식
+        </div>
+
         {/* Inline Employee Field Addition Block */}
         <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
           {staffAddDrafts.map((draft, draftIndex) => (

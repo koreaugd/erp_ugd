@@ -6,6 +6,10 @@
 
 This contains everything you need to run your app locally.
 
+## ERP Data Sync Rule
+
+All branch-entered ERP business data must be visible from every computer for the same branch. New code must save business data to the shared backend through Firestore/GAS/Sheets helpers such as `gasClient.saveSharedData`; `localStorage` may be used only as a temporary cache, draft, or fallback and must be merged with shared data instead of replacing it.
+
 View your app in AI Studio: https://ai.studio/apps/83ebb8c7-69ed-4ffa-a5a9-dc0fd4db5d76
 
 ## Run Locally
