@@ -7182,6 +7182,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monthlyCloseStatus, setMonthlyCloseStatus] = useState<any | null>(null);
+  const [monthlyCloseRecords, setMonthlyCloseRecords] = useState<any[]>([]);
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
@@ -7204,6 +7205,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
   const fetchMonthlyCloseStatus = useCallback(async () => {
     try {
       const records = await gasClient.getSharedData<any[]>("monthly_closings");
+      setMonthlyCloseRecords(Array.isArray(records) ? records : []);
       const current = Array.isArray(records)
         ? records
             .filter((record) => record.branchName === branchName && record.month === selectedMonth)
@@ -7231,9 +7233,18 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     };
     const next = [nextRecord, ...list.filter((record) => !(record.branchName === branchName && record.month === selectedMonth))];
     await gasClient.saveSharedData("monthly_closings", next);
+    setMonthlyCloseRecords(next);
     setMonthlyCloseStatus(nextRecord);
     return nextRecord;
   }, [branchName, selectedMonth]);
+
+  const confirmedCloseMonths = useMemo(() => {
+    return Array.from(new Set<string>(
+      monthlyCloseRecords
+        .filter((record) => record.branchName === branchName && record.status === "confirmed" && record.month)
+        .map((record) => String(record.month))
+    )).sort((a, b) => b.localeCompare(a));
+  }, [branchName, monthlyCloseRecords]);
 
   const handleDownloadExcel = useCallback(async () => {
     try {
@@ -7773,30 +7784,31 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
         </div>
 
         {activeSubTab === "purchaseSales" && (
-          <div className="flex items-center gap-3 w-full md:w-auto self-end md:self-auto justify-end">
-            <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              style={{ color: adminSettings.monthlyAccentColor }}
-              className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
-            />
-            <button
-              onClick={fetchHistory}
-              className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-              이력 갱신
-            </button>
-            <button
-              onClick={handleConfirmMonthlyClose}
-              className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-              월말마감 확정
-            </button>
-            {monthlyCloseStatus?.status === "editing" ? (
+          <div className="flex flex-col items-end gap-2 w-full md:w-auto self-end md:self-auto">
+            <div className="flex flex-wrap items-center gap-3 justify-end">
+              <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                style={{ color: adminSettings.monthlyAccentColor }}
+                className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
+              />
+              <button
+                onClick={fetchHistory}
+                className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
+                이력 갱신
+              </button>
+              <button
+                onClick={handleConfirmMonthlyClose}
+                className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                월말마감 확정
+              </button>
+              {monthlyCloseStatus?.status === "editing" ? (
               <button
                 onClick={handleCancelMonthlyEdit}
                 className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
@@ -7813,13 +7825,33 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
                 월말마감 수정
               </button>
             )}
-            <button
-              onClick={handleCancelMonthlyClose}
-              className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
-            >
-              <Trash2 className="w-4 h-4 text-rose-200" />
-              월말마감 취소
-            </button>
+              <button
+                onClick={handleCancelMonthlyClose}
+                className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              >
+                <Trash2 className="w-4 h-4 text-rose-200" />
+                월말마감 취소
+              </button>
+            </div>
+            {confirmedCloseMonths.length > 0 && (
+              <div className="flex flex-wrap justify-end gap-1.5 max-w-xl">
+                <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-2 py-1">마감 완료 월</span>
+                {confirmedCloseMonths.slice(0, 12).map((month) => (
+                  <button
+                    key={month}
+                    type="button"
+                    onClick={() => setSelectedMonth(month)}
+                    className={`rounded-lg border px-2 py-1 text-[10px] font-black transition-colors ${
+                      selectedMonth === month
+                        ? "border-emerald-500 bg-emerald-600 text-white"
+                        : "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    }`}
+                  >
+                    {month}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -7945,32 +7977,36 @@ function MonthlyPurchaseSalesSubTab({
     let cancelled = false;
     const loadPurchases = async () => {
       let nextRows: PurchaseSalesRow[] = [];
+      let remoteLoaded = false;
       try {
         const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(sharedKey);
-        if (Array.isArray(remote) && remote.length > 0) nextRows = normalizePurchaseRows(remote);
+        if (Array.isArray(remote)) {
+          nextRows = normalizePurchaseRows(remote);
+          remoteLoaded = true;
+        }
       } catch (error) {
         console.warn("월 매입 공통 데이터를 불러오지 못했습니다.", error);
       }
-      if (nextRows.length === 0) {
+      if (!remoteLoaded && nextRows.length === 0) {
         try {
           const saved = localStorage.getItem(storageKey);
           if (saved) nextRows = normalizePurchaseRows(JSON.parse(saved));
         } catch {}
       }
-      if (nextRows.length === 0) {
+      if (!remoteLoaded && nextRows.length === 0) {
         const previousMonth = addMonthsToMonthInputValue(selectedMonth, -1);
         try {
           const previous = await gasClient.getSharedData<PurchaseSalesRow[]>(`monthly_purchases:${branchName}:${previousMonth}`);
           if (Array.isArray(previous) && previous.length > 0) nextRows = emptyAmounts(previous);
         } catch {}
       }
-      if (nextRows.length === 0) {
+      if (!remoteLoaded && nextRows.length === 0) {
         try {
           const previousLocal = localStorage.getItem(`erp_monthly_purchases_${branchName}_${addMonthsToMonthInputValue(selectedMonth, -1)}`);
           if (previousLocal) nextRows = emptyAmounts(JSON.parse(previousLocal));
         } catch {}
       }
-      if (nextRows.length === 0) nextRows = defaultRows();
+      if (!remoteLoaded && nextRows.length === 0) nextRows = defaultRows();
       if (!cancelled) {
         setRows(nextRows);
         localStorage.setItem(storageKey, JSON.stringify(nextRows));
@@ -7979,7 +8015,6 @@ function MonthlyPurchaseSalesSubTab({
     loadPurchases();
     return () => {
       cancelled = true;
-      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     };
   }, [branchName, defaultRows, emptyAmounts, normalizePurchaseRows, selectedMonth, sharedKey, storageKey]);
 
