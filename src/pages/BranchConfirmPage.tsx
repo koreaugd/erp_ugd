@@ -2058,7 +2058,7 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
               return (
               <div key={noticeId} className={`branch-notice-card rounded-2xl border p-4 shadow-xs ${checked ? "branch-notice-checked" : "branch-notice-unchecked"}`}>
                 <p className="text-sm font-black text-gray-900">{notice.title || "공지사항"}</p>
-                <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap leading-relaxed">{notice.body || notice.content || ""}</p>
+                <p className="text-xs text-gray-700 mt-2 whitespace-pre-wrap leading-relaxed font-black">{notice.body || notice.content || ""}</p>
                 <p className="text-[10px] text-gray-400 mt-3 font-mono">{notice.createdAt ? new Date(notice.createdAt).toLocaleString("ko-KR") : ""}</p>
                 <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
                   {checked ? (
@@ -4027,16 +4027,22 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
               근무자
             </h3>
-            <p className="text-[11px] text-gray-400 mt-1 leading-normal">
-              {isHeadOffice
-                ? "본사 직원별 오늘 업무시간과 업무내용을 기록하고, 쉬는 날은 휴무로 체크합니다."
-                : <>이 Roster 목록은 <strong>'직원현황'</strong> 메뉴에서 관리되며, 매 마무리기록 시 마다 자동배치됩니다. (30분 간격 입출 근무 자동연산)</>}
-            </p>
+            {isHeadOffice && (
+              <p className="text-[11px] text-gray-400 mt-1 leading-normal">
+                본사 직원별 오늘 업무시간과 업무내용을 기록하고, 쉬는 날은 휴무로 체크합니다.
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-relaxed text-sky-800">
-          전체 직원 목록이 보여도 실제로 일한 직원만 출근/퇴근 시간을 작성하면 됩니다. 근무하지 않은 직원은 비워두거나 삭제하지 않아도 되며, 시간은 숫자만 입력해도 자동 변환됩니다. 예: 13 입력 시 13:00으로 인식
+        <div className="rounded-2xl border border-amber-200 bg-[#F8F6A8] px-5 py-4 text-sm leading-relaxed text-zinc-900 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 text-lg" aria-hidden="true">⚠️</span>
+            <div className="space-y-1">
+              <p className="font-black">전체 직원 목록이 보여도 실제로 일한 직원만 출근/퇴근 시간을 작성하면 됩니다.</p>
+              <p className="text-xs font-bold text-zinc-700">근무하지 않은 직원은 비워두거나 삭제하지 않아도 됩니다. <span className="font-black text-zinc-950">시간은 숫자만 입력해도 자동 변환됩니다.</span> 예: <span className="font-black text-zinc-950">13</span> 입력 시 <span className="font-black text-zinc-950">13:00</span>으로 인식</p>
+            </div>
+          </div>
         </div>
 
         {/* Inline Employee Field Addition Block */}

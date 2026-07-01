@@ -240,7 +240,30 @@ export async function firebaseGetDailyList(settleDate: string): Promise<DailyLis
 }
 
 export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
-  await setDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)), { value, updatedAt: new Date().toISOString() });
+  const db = getDirectDb();
+  const encodedKey = encodeURIComponent(dataKey);
+  const recordRef = doc(db, "shared_data", encodedKey);
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  const currentSnapshot = await getDoc(recordRef);
+  if (currentSnapshot.exists()) {
+    const current = currentSnapshot.data();
+    await setDoc(doc(db, "shared_data_backups", `${encodedKey}--${now.getTime()}`), {
+      dataKey,
+      value: current.value ?? null,
+      sourceUpdatedAt: current.updatedAt || current._updatedAt || null,
+      backedUpAt: nowIso
+    });
+
+    const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const backupSnapshot = await getDocs(collection(db, "shared_data_backups"));
+    await Promise.all(backupSnapshot.docs
+      .filter((item) => item.data().dataKey === dataKey && String(item.data().backedUpAt || "") < cutoff)
+      .map((item) => deleteDoc(item.ref)));
+  }
+
+  await setDoc(recordRef, { value, updatedAt: nowIso });
   return { success: true };
 }
 
