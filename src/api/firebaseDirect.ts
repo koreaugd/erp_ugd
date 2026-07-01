@@ -1,6 +1,6 @@
 // src/api/firebaseDirect.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 import {
   getFirestore,
   collection,
@@ -16,6 +16,29 @@ import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, MasterDaily, ExpenseDetail, StaffRecord, DailyListRow } from "./gasClient";
 
 const firebaseRecordId = (branchName: string, settleDate: string) => `${encodeURIComponent(branchName)}--${settleDate}`;
+
+async function waitForFirebaseUser(timeoutMs = 7000) {
+  const auth = getAuth(getApps().length ? getApp() : initializeApp(firebaseConfig));
+  if (auth.currentUser) return auth.currentUser;
+
+  return await new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      unsubscribe();
+      reject(new Error("Firebase 로그인 세션 복원이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."));
+    }, timeoutMs);
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+      if (user) resolve(user);
+      else reject(new Error("Firebase 로그인 세션을 확인하지 못했습니다. 다시 로그인해 주세요."));
+    }, (error) => {
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+      reject(error);
+    });
+  });
+}
 
 function toMaster(data: any): MasterDaily {
   // Firebase 전환 전의 백업은 snake_case, 전환 후 저장본은 camelCase입니다.
@@ -39,6 +62,7 @@ function toMaster(data: any): MasterDaily {
 }
 
 async function findDailyDocs(branchName?: string) {
+  await waitForFirebaseUser();
   let snapshot;
   try {
     snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
@@ -85,6 +109,7 @@ export async function firebaseSubmitDaily(master: MasterDaily, expenses: Expense
 }
 
 export async function firebaseGetDailyDetail(recordId: string) {
+  await waitForFirebaseUser();
   const recordRef = doc(getDirectDb(), "daily_settles", recordId);
   let snapshot;
   try {

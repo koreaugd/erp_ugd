@@ -1,5 +1,5 @@
 // src/pages/BranchConfirmPage.tsx
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
@@ -24,6 +24,31 @@ const formatWithCommas = (val: string | number | undefined | null) => {
 
 const cleanNumeric = (val: string) => {
   return val.replace(/[^0-9]/g, "");
+};
+
+const toLocalDateInputValue = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toLocalMonthInputValue = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+};
+
+const addDaysToDateInputValue = (dateValue: string, days: number) => {
+  const date = new Date(`${dateValue}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return toLocalDateInputValue(date);
+};
+
+const addMonthsToMonthInputValue = (monthValue: string, months: number) => {
+  const [year, month] = monthValue.split("-").map(Number);
+  const date = new Date(year, month - 1 + months, 1);
+  return toLocalMonthInputValue(date);
 };
 
 const toDateInputValue = (value: string) => {
@@ -206,6 +231,7 @@ interface ExpenseRow {
 }
 
 type OrderCategory = "식자재" | "부식비" | "주류" | "식음료외 기타";
+type OrderReportCategory = OrderCategory | "전체";
 type BranchDailyTab = "dashboard" | "settle" | "orders" | "liquorInventory" | "roster" | "overtimeLog" | "annualLeave" | "partTimeLog" | "officeWorkLog";
 
 interface OrderItem {
@@ -4440,7 +4466,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 }
 
 function OfficeWorkLogTab({ branchName }: { branchName: string }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => toLocalMonthInputValue());
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -4689,7 +4715,7 @@ function OrderManagementTab({ branchName }: { branchName: string }) {
       vendorName: vendorName.trim(),
       amount: cleanNumeric(amount),
       memo: memo.trim(),
-      orderDate: new Date().toISOString().slice(0, 10)
+      orderDate: toLocalDateInputValue()
     };
     saveOrders([newOrder, ...orders]);
     setAmount("");
@@ -4732,7 +4758,7 @@ function LiquorInventoryTab({ branchName }: { branchName: string }) {
   const storageKey = "erp_liquor_inventory_" + branchName;
   useEffect(() => { try { const saved = localStorage.getItem(storageKey); if (saved) setRows(JSON.parse(saved)); } catch (err) { console.error("Failed to load liquor inventory", err); } }, [storageKey]);
   const saveRows = (next: any[]) => { setRows(next); localStorage.setItem(storageKey, JSON.stringify(next)); };
-  const addRow = (event: React.FormEvent) => { event.preventDefault(); if (!itemName.trim()) return; saveRows([{ id: "liq-" + Date.now(), itemName: itemName.trim(), stockQty: stockQty.trim(), memo: memo.trim(), checkedAt: new Date().toISOString().slice(0, 10) }, ...rows]); setItemName(""); setStockQty(""); setMemo(""); };
+  const addRow = (event: React.FormEvent) => { event.preventDefault(); if (!itemName.trim()) return; saveRows([{ id: "liq-" + Date.now(), itemName: itemName.trim(), stockQty: stockQty.trim(), memo: memo.trim(), checkedAt: toLocalDateInputValue() }, ...rows]); setItemName(""); setStockQty(""); setMemo(""); };
   return <div className="space-y-5" id="liquor-inventory-tab"><section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm"><h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고</h3><form onSubmit={addRow} className="grid grid-cols-1 md:grid-cols-[1fr_140px_1fr_auto] gap-3 mt-4 items-end"><input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="주류명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="재고수량" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" /><button className="px-5 py-2.5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">등록</button></form></section><section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">확인일</th><th className="p-3">주류명</th><th className="p-3">재고수량</th><th className="p-3">비고</th></tr></thead><tbody className="divide-y divide-gray-100">{rows.length === 0 ? <tr><td colSpan={4} className="p-10 text-center text-gray-400 font-bold">등록된 주류 재고가 없습니다.</td></tr> : rows.map((row) => <tr key={row.id}><td className="p-3 font-mono text-xs text-gray-500">{row.checkedAt}</td><td className="p-3 font-black">{row.itemName}</td><td className="p-3">{row.stockQty || "-"}</td><td className="p-3 text-gray-600">{row.memo || "-"}</td></tr>)}</tbody></table></section></div>;
 }
 
@@ -4743,8 +4769,34 @@ const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
   주류: [],
   "식음료외 기타": []
 };
-const LIQUOR_CATEGORIES = ["샴페인", "화이트", "레드", "소주", "맥주", "대표님술", "기타"];
+const LIQUOR_CATEGORIES = ["샴페인", "스파클링", "화이트", "레드", "위스키", "소주", "맥주", "대표님술", "기타"];
 const VENDOR_HINT = "줄바꿈 또는 쉼표로 여러 개를 한꺼번에 추가할 수 있습니다.";
+const ALL_ORDER_CATEGORIES = "전체";
+
+const getLiquorCategoryClass = (category: string) => {
+  const classes: Record<string, string> = {
+    샴페인: "bg-amber-50 text-amber-800 border-amber-200",
+    스파클링: "bg-cyan-50 text-cyan-800 border-cyan-200",
+    화이트: "bg-lime-50 text-lime-800 border-lime-200",
+    레드: "bg-rose-50 text-rose-800 border-rose-200",
+    위스키: "bg-orange-50 text-orange-800 border-orange-200",
+    소주: "bg-blue-50 text-blue-800 border-blue-200",
+    맥주: "bg-yellow-50 text-yellow-800 border-yellow-200",
+    대표님술: "bg-violet-50 text-violet-800 border-violet-200",
+    기타: "bg-slate-100 text-slate-700 border-slate-200"
+  };
+  return classes[category] || classes.기타;
+};
+
+const getOrderCategoryHeaderClass = (category: string) => {
+  const classes: Record<string, string> = {
+    식자재: "bg-amber-100 text-amber-900 border-amber-300",
+    부식비: "bg-teal-100 text-teal-900 border-teal-300",
+    주류: "bg-indigo-100 text-indigo-900 border-indigo-300",
+    "식음료외 기타": "bg-slate-200 text-slate-800 border-slate-300"
+  };
+  return classes[category] || "bg-gray-100 text-gray-700 border-gray-300";
+};
 
 const monthDays = (monthValue: string) => {
   const [year, month] = monthValue.split("-").map(Number);
@@ -4759,8 +4811,8 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const [vendorsByCategory, setVendorsByCategory] = useState<Record<OrderCategory, string[]>>(ORDER_DEFAULT_VENDORS);
   const [vendorCategory, setVendorCategory] = useState<OrderCategory>("식자재");
   const [vendorText, setVendorText] = useState("");
-  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [reportCategory, setReportCategory] = useState<OrderCategory>("식자재");
+  const [reportMonth, setReportMonth] = useState(() => toLocalMonthInputValue());
+  const [reportCategory, setReportCategory] = useState<OrderReportCategory>(ALL_ORDER_CATEGORIES);
   const [reportVendor, setReportVendor] = useState("전체");
   const [orderDraftCells, setOrderDraftCells] = useState<Record<string, string>>({});
 
@@ -4788,9 +4840,10 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   }, [storageKey, vendorKey]);
 
   const reportVendors = useMemo(() => {
+    const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     const names = [
-      ...(vendorsByCategory[reportCategory] || []),
-      ...orders.filter((order) => order.category === reportCategory).map((order) => order.vendorName)
+      ...targetCategories.flatMap((category) => vendorsByCategory[category] || []),
+      ...orders.filter((order) => targetCategories.includes(order.category)).map((order) => order.vendorName)
     ];
     return Array.from(new Set(names));
   }, [orders, reportCategory, vendorsByCategory]);
@@ -4807,6 +4860,13 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const saveOrders = (next: OrderItem[]) => {
     setOrders(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
+  };
+
+  const resolveOrderCategory = (vendor: string): OrderCategory => {
+    if (reportCategory !== ALL_ORDER_CATEGORIES) return reportCategory;
+    const registeredCategory = ORDER_CATEGORIES.find((category) => (vendorsByCategory[category] || []).includes(vendor));
+    const existingCategory = orders.find((order) => order.vendorName === vendor)?.category;
+    return registeredCategory || existingCategory || "식자재";
   };
 
   const addVendors = () => {
@@ -4830,50 +4890,61 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   };
 
   const cellAmount = (dateKey: string, vendor: string) => {
+    const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     return orders
-      .filter((order) => order.category === reportCategory && order.orderDate === dateKey && order.vendorName === vendor)
+      .filter((order) => targetCategories.includes(order.category) && order.orderDate === dateKey && order.vendorName === vendor)
       .reduce((sum, order) => sum + Number(order.amount || 0), 0);
   };
 
   const updateOrderDraft = (dateKey: string, vendor: string, value: string) => {
-    setOrderDraftCells((prev) => ({ ...prev, [dateKey + "|" + vendor]: cleanNumeric(value) }));
-  };
-
-  const saveOrderDrafts = () => {
-    const entries = Object.entries(orderDraftCells).filter(([, value]) => value !== "");
-    if (entries.length === 0) return;
-    const touched = new Set(entries.map(([key]) => key));
-    const kept = orders.filter((order) => {
-      if (order.category !== reportCategory) return true;
-      return !touched.has(order.orderDate + "|" + order.vendorName);
-    });
-    const nextOrders = entries
-      .filter(([, value]) => Number(value) > 0)
-      .map(([key, value], index) => {
-        const [orderDate, vendorName] = key.split("|");
-        return {
-          id: "ord-cell-" + Date.now() + "-" + index,
-          category: reportCategory,
-          vendorName,
-          amount: value,
+    const nextValue = cleanNumeric(value).slice(0, 7);
+    const draftKey = dateKey + "|" + vendor;
+    setOrderDraftCells((prev) => ({ ...prev, [draftKey]: nextValue }));
+    const categoryForCell = resolveOrderCategory(vendor);
+    setOrders((currentOrders) => {
+      const replaceCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [categoryForCell];
+      const kept = currentOrders.filter((order) => !(replaceCategories.includes(order.category) && order.orderDate === dateKey && order.vendorName === vendor));
+      const nextOrders = Number(nextValue) > 0
+        ? [{
+          id: "ord-cell-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+          category: categoryForCell,
+          vendorName: vendor,
+          amount: nextValue,
           memo: "",
-          orderDate
-        };
-      });
-    saveOrders([...nextOrders, ...kept]);
-    setOrderDraftCells({});
+          orderDate: dateKey
+        }, ...kept]
+        : kept;
+      localStorage.setItem(storageKey, JSON.stringify(nextOrders));
+      return nextOrders;
+    });
   };
 
   const filteredOrders = useMemo(() => {
+    const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     return orders.filter((order) => {
       const sameMonth = String(order.orderDate || "").startsWith(reportMonth);
-      const sameCategory = order.category === reportCategory;
+      const sameCategory = targetCategories.includes(order.category);
       const sameVendor = reportVendor === "전체" || order.vendorName === reportVendor;
       return sameMonth && sameCategory && sameVendor;
     });
   }, [orders, reportCategory, reportMonth, reportVendor]);
 
   const matrixVendors = reportVendor === "전체" ? reportVendors : [reportVendor];
+  const vendorCategoryOf = (vendor: string): OrderCategory => {
+    return ORDER_CATEGORIES.find((category) => (vendorsByCategory[category] || []).includes(vendor))
+      || orders.find((order) => order.vendorName === vendor)?.category
+      || "식자재";
+  };
+  const categoryHeaderGroups = matrixVendors.reduce<Array<{ category: OrderCategory; span: number }>>((groups, vendor) => {
+    const category = vendorCategoryOf(vendor);
+    const last = groups[groups.length - 1];
+    if (last && last.category === category) {
+      last.span += 1;
+    } else {
+      groups.push({ category, span: 1 });
+    }
+    return groups;
+  }, []);
   const totals = matrixVendors.map((vendor) => filteredOrders.filter((order) => order.vendorName === vendor).reduce((sum, order) => sum + Number(order.amount || 0), 0));
   const monthTotal = totals.reduce((sum, item) => sum + item, 0);
 
@@ -4914,16 +4985,17 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3>
-              <p className="text-xs text-gray-400 mt-1">대분류를 선택한 뒤 날짜별 칸에 금액을 직접 입력하고 저장하세요.</p>
+              <p className="text-xs text-gray-400 mt-1">날짜별 칸에 금액을 입력하면 자동 저장됩니다.</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="px-3 py-2 rounded-xl bg-[#2E6DB4]/10 text-[#1A3C6E] text-xs font-black">월 합계 {formatNumber(monthTotal)}원</div>
-              <button type="button" onClick={saveOrderDrafts} disabled={Object.values(orderDraftCells).every((value) => value === "")} className="h-[38px] px-4 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:bg-gray-300">저장하기</button>
+              <div className="h-[38px] px-4 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장</div>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" />
-            <select value={reportCategory} onChange={(e) => { setReportCategory(e.target.value as OrderCategory); setOrderDraftCells({}); }} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+            <select value={reportCategory} onChange={(e) => { setReportCategory(e.target.value as OrderReportCategory); setOrderDraftCells({}); }} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+              <option value={ALL_ORDER_CATEGORIES}>전체보기</option>
               {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
             <select value={reportVendor} onChange={(e) => setReportVendor(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
@@ -4932,13 +5004,27 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
             </select>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-xs">
-            <thead className="bg-gray-50 text-gray-600 font-black border-b">
+        <div className="max-h-[70vh] overflow-auto">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead className="sticky top-0 z-20 bg-gray-50 text-gray-600 font-black border-b shadow-sm">
               <tr>
-                <th className="sticky left-0 z-10 bg-gray-50 p-3 w-20 border-r">일</th>
-                {matrixVendors.map((vendor) => <th key={vendor} className="p-3 min-w-[140px] text-right border-r">{vendor}</th>)}
-                <th className="p-3 min-w-[130px] text-right bg-slate-100">일 합계</th>
+                <th rowSpan={2} className="sticky left-0 z-30 bg-gray-50 p-3 w-20 border-r align-middle">일</th>
+                {categoryHeaderGroups.map((group, index) => (
+                  <th key={`${group.category}-${index}`} colSpan={group.span} className={`p-2 text-center border-r border-b ${getOrderCategoryHeaderClass(group.category)}`}>
+                    {group.category}
+                  </th>
+                ))}
+                <th rowSpan={2} className="p-3 min-w-[130px] text-right bg-slate-100 align-middle">일 합계</th>
+              </tr>
+              <tr>
+                {matrixVendors.map((vendor) => {
+                  const category = vendorCategoryOf(vendor);
+                  return (
+                    <th key={vendor} className={`p-2 min-w-[92px] text-center border-r border-b ${getOrderCategoryHeaderClass(category)}`}>
+                      {vendor}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -4957,8 +5043,8 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
                       const draftKey = dateKey + "|" + vendor;
                       const draftValue = orderDraftCells[draftKey];
                       return (
-                        <td key={vendor} className="p-2 text-right font-mono border-r">
-                          <input value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")} onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)} inputMode="numeric" className="w-full min-w-[92px] rounded-lg border border-gray-200 px-2 py-1.5 text-right font-mono font-black focus:border-[#2E6DB4] focus:outline-none" />
+                        <td key={vendor} className="p-1.5 text-right font-mono border-r">
+                          <input value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")} onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)} inputMode="numeric" maxLength={9} className="w-[74px] rounded-lg border border-gray-200 px-1.5 py-1.5 text-right font-mono font-black focus:border-[#2E6DB4] focus:outline-none" />
                         </td>
                       );
                     })}
@@ -4986,7 +5072,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [classification, setClassification] = useState("샴페인");
   const [itemName, setItemName] = useState("");
-  const [draftDate, setDraftDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [draftDate, setDraftDate] = useState(() => toLocalDateInputValue());
   const [draftCells, setDraftCells] = useState<Record<string, { inbound: string; sold: string }>>({});
 
   useEffect(() => {
@@ -5001,10 +5087,9 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   }, [productKey, movementKey]);
 
   useEffect(() => {
-    const isDirty = (Object.values(draftCells) as Array<{ inbound: string; sold: string }>).some((cell) => cell.inbound || cell.sold);
-    (window as any).__ugdLiquorInventoryDirty = isDirty;
+    (window as any).__ugdLiquorInventoryDirty = false;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty) return;
+      if (!(window as any).__ugdLiquorInventoryDirty) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -5012,7 +5097,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [draftCells]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -5061,14 +5146,34 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 
   const updateDraft = (productId: string, date: string, field: "inbound" | "sold", value: string) => {
     const key = productId + "|" + date;
+    const nextValue = cleanNumeric(value);
+    const currentDraft = draftCells[key];
+    const nextInbound = field === "inbound" ? nextValue : (currentDraft?.inbound ?? String(savedAmount(productId, date, "inbound") || ""));
+    const nextSold = field === "sold" ? nextValue : (currentDraft?.sold ?? String(savedAmount(productId, date, "sold") || ""));
+
     setDraftCells((prev) => ({
       ...prev,
       [key]: {
         inbound: prev[key]?.inbound || "",
         sold: prev[key]?.sold || "",
-        [field]: value.replace(/[^0-9-]/g, "")
+        [field]: nextValue
       }
     }));
+    setMovements((currentMovements) => {
+      const kept = currentMovements.filter((movement) => !(movement.productId === productId && movement.movementDate === date));
+      const nextMovements = Number(nextInbound || 0) > 0 || Number(nextSold || 0) > 0
+        ? [{
+          id: "liq-move-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+          productId,
+          movementDate: date,
+          inbound: nextInbound,
+          sold: nextSold,
+          memo: ""
+        }, ...kept]
+        : kept;
+      localStorage.setItem(movementKey, JSON.stringify(nextMovements));
+      return nextMovements;
+    });
   };
 
   const saveDrafts = () => {
@@ -5107,7 +5212,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     return Array.from({ length: 7 }, (_, index) => {
       const date = new Date(base);
       date.setDate(base.getDate() - 6 + index);
-      return date.toISOString().slice(0, 10);
+      return toLocalDateInputValue(date);
     });
   }, [draftDate]);
 
@@ -5132,11 +5237,14 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, -7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">이전 7일</button>
+            <button type="button" onClick={() => setDraftDate(toLocalDateInputValue())} className="h-[38px] px-3 rounded-xl border border-[#2E6DB4]/20 bg-[#2E6DB4]/10 text-xs font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/15">이번 7일</button>
+            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, 7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">다음 7일</button>
             <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
             <span className="text-xs text-gray-400 font-bold">선택한 날짜 기준 최근 7일이 표시됩니다.</span>
           </div>
-          <button type="button" onClick={saveDrafts} className="h-[42px] px-5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:bg-gray-300" disabled={!(Object.values(draftCells) as Array<{ inbound: string; sold: string }>).some((cell) => cell.inbound || cell.sold)}>저장하기</button>
+          <div className="h-[42px] px-5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장</div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-xs">
@@ -5163,7 +5271,11 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
               ) : products.map((product) => {
                 return (
                   <tr key={product.id} className="hover:bg-slate-50/70">
-                    <td className="p-2 font-bold whitespace-nowrap">{product.classification}</td>
+                    <td className="p-2 whitespace-nowrap">
+                      <span className={`inline-flex min-w-[58px] justify-center rounded-lg border px-2 py-1 text-[11px] font-black ${getLiquorCategoryClass(product.classification)}`}>
+                        {product.classification}
+                      </span>
+                    </td>
                     <td className="p-2 font-black text-gray-900">
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate" title={product.itemName}>{product.itemName}</span>
@@ -6065,7 +6177,7 @@ function RosterTab({ branchName }: { branchName: string }) {
 function AnnualLeaveTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
-  const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10)); const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10)); const [reason, setReason] = useState("");
+  const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(toLocalDateInputValue()); const [endDate, setEndDate] = useState(toLocalDateInputValue()); const [reason, setReason] = useState("");
   const load = useCallback(async () => { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees((roster as Employee[]).map((employee) => ({ ...employee, entryDate: employee.entryDate ? employee.entryDate.slice(2).replace(/-/g, ".") : "" }))); setEntries(saved || []); }, [branchName]);
   useEffect(() => { void load(); }, [load]);
   if (!isAdmin) return (
@@ -6119,27 +6231,35 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   const [manualName, setManualName] = useState("");
   const [manualHours, setManualHours] = useState("");
   const [manualReason, setManualReason] = useState("");
-  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [manualDate, setManualDate] = useState(toLocalDateInputValue());
+  const [selectedMonth, setSelectedMonth] = useState(() => toLocalMonthInputValue());
   const [editOvertime, setEditOvertime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
-      const [log, manual] = await Promise.all([gasClient.getAttendanceLog(branchName, "overtime"), gasClient.getSharedData<any[]>(`manual_overtime:${branchName}`)]);
+      const [log, manual] = await Promise.all([gasClient.getAttendanceLog(branchName, "overtime", selectedMonth, forceRefresh), gasClient.getSharedData<any[]>(`manual_overtime:${branchName}`)]);
       const manualRows = (manual || []).map((item) => ({ ...item, clockIn: "수기", clockOut: "수기", workHours: "-", standardHours: "-", overtimeReason: item.reason, manual: true }));
       const all = [...(log.records || []), ...manualRows].sort((a, b) => String(b.settleDate).localeCompare(String(a.settleDate)));
-      setRecords(all);
-      const month = new Date().toISOString().slice(0, 7);
+      const selectedRecords = all.filter((item) => String(item.settleDate || "").slice(0, 7) === selectedMonth);
+      setRecords(selectedRecords);
       const totals = new Map<string, { previous: number; current: number }>();
-      all.forEach((item) => { const current = totals.get(item.staffName) || { previous: 0, current: 0 }; if (String(item.settleDate).slice(0, 7) < month) current.previous += Number(item.overtime) || 0; else if (String(item.settleDate).slice(0, 7) === month) current.current += Number(item.overtime) || 0; totals.set(item.staffName, current); });
-      setSummaryList(Array.from(totals, ([name, value]) => ({ name, ...value, totalOvertime: value.previous + value.current })));
+      all.forEach((item) => {
+        const settleMonth = String(item.settleDate || "").slice(0, 7);
+        if (!item.staffName || settleMonth > selectedMonth) return;
+        const current = totals.get(item.staffName) || { previous: 0, current: 0 };
+        if (settleMonth < selectedMonth) current.previous += Number(item.overtime) || 0;
+        else if (settleMonth === selectedMonth) current.current += Number(item.overtime) || 0;
+        totals.set(item.staffName, current);
+      });
+      setSummaryList(Array.from(totals, ([name, value]) => ({ name, ...value, totalOvertime: value.previous + value.current })).filter((item) => item.current !== 0 || item.previous !== 0));
 
     } catch (e) {
       console.error("Overtime database read error:", e);
     } finally {
       setLoading(false);
     }
-  }, [branchName]);
+  }, [branchName, selectedMonth]);
 
   useEffect(() => {
     loadData();
@@ -6260,12 +6380,15 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
-          <button
-            onClick={loadData}
-            className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
-          >
-            <RefreshCw className="w-3 h-3" /> 새로고침
-          </button>
+          <div className="flex items-center gap-2">
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
+            <button
+              onClick={() => void loadData(true)}
+              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" /> 새로고침
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2 rounded-xl bg-gray-50 p-3 border border-gray-100">
           <span className="w-full text-xs font-black text-gray-600">초과근무 수기 입력</span>
@@ -6400,12 +6523,13 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   // States for manual part-timer entry
   const [manualName, setManualName] = useState("");
   const [manualHours, setManualHours] = useState("9");
-  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [manualDate, setManualDate] = useState(toLocalDateInputValue());
   const [manualReason, setManualReason] = useState("");
   const [manualClockIn, setManualClockIn] = useState("09:00");
   const [manualClockOut, setManualClockOut] = useState("18:00");
   const [manualClockInError, setManualClockInError] = useState("");
   const [manualClockOutError, setManualClockOutError] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState(() => toLocalMonthInputValue());
 
   const recalculateHours = (clockIn: string, clockOut: string) => {
     const trimmedIn = clockIn.trim();
@@ -6471,11 +6595,11 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
     }
   };
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
       const [log, manual] = await Promise.all([
-        gasClient.getAttendanceLog(branchName, "partTime"),
+        gasClient.getAttendanceLog(branchName, "partTime", selectedMonth, forceRefresh),
         gasClient.getSharedData<any[]>(`manual_parttime:${branchName}`)
       ]);
 
@@ -6486,11 +6610,12 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       }));
 
       const all = [...(log.records || []), ...manualRows].sort((a, b) => String(b.settleDate).localeCompare(String(a.settleDate)));
-      setRecords(all);
+      const selectedRecords = all.filter((item) => String(item.settleDate || "").slice(0, 7) === selectedMonth);
+      setRecords(selectedRecords);
 
       // Re-calculate the part-time summary aggregate including manual records
       const totals = new Map<string, { daysCount: number; workedDates: string[]; totalHours: number }>();
-      all.forEach((item) => {
+      selectedRecords.forEach((item) => {
         const name = item.staffName;
         if (!name) return;
         const current = totals.get(name) || { daysCount: 0, workedDates: [], totalHours: 0 };
@@ -6526,7 +6651,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
     } finally {
       setLoading(false);
     }
-  }, [branchName]);
+  }, [branchName, selectedMonth]);
 
   useEffect(() => {
     loadData();
@@ -6660,12 +6785,15 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5 font-bold">지점에 출근하여 실근무한 아르바이트 직원 출퇴근 로그입니다.</p>
           </div>
-          <button
-            onClick={loadData}
-            className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
-          >
-            <RefreshCw className="w-3 h-3" /> 새로고침
-          </button>
+          <div className="flex items-center gap-2">
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
+            <button
+              onClick={() => void loadData(true)}
+              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" /> 새로고침
+            </button>
+          </div>
         </div>
 
         {/* Manual Part-Timer Registration Form */}
@@ -7079,9 +7207,10 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
 
         const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
         const accumulatedHours = saved.accumulatedHours !== undefined ? saved.accumulatedHours : String(tel.hours);
+        const tipsEtcAmount = saved.tipsEtcAmount || "0";
         const calcSalary = saved.calculatedSalary !== undefined && saved.calculatedSalary !== ""
           ? saved.calculatedSalary
-          : String(Number(hourlyRate) * Number(accumulatedHours));
+          : String((Number(hourlyRate) * Number(accumulatedHours)) + (Number(tipsEtcAmount) || 0));
         const calcActualPaid = saved.actualPaidAmount || "";
         const attendanceDates = saved.attendanceDates !== undefined
           ? saved.attendanceDates
@@ -7096,6 +7225,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           "입금 계좌번호": saved.accountNumber || profile.accountNumber || "",
           "시급 (원)": Number(hourlyRate) || 0,
           "누적시간": Number(accumulatedHours) || 0,
+          "팁/기타": Number(tipsEtcAmount) || 0,
           "기본급여": Number(calcSalary) || 0,
           "근무일정 (출근일)": attendanceDates,
           "실수령액 (송금)": calcActualPaid ? (Number(calcActualPaid) || "") : "",
@@ -7270,9 +7400,9 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       const purchaseRows = psData.map((row) => [row["분류항목"], row["송금/사용 대상업체명"], row["이체필요 금액 (원)"], row["은행"], row["계좌번호"], row["거래 비고 고지"], row["_선입금여부"] ? row["실제 이달사용액 (원)"] : "", ""]);
       const psWS = makeSheet(purchaseHeaders, purchaseRows, [17.17, 14, 12.17, 13.33, 40.83, 60.17, 14.83, 10.33], true, [2, 6], [4]);
 
-      const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
-      const partTimeRows = ptData.map((row) => [row["성명 (사원)"], row["주민등록번호"], row["입사일자"], row["근로계약"], row["은행"], row["입금 계좌번호"], row["시급 (원)"], row["누적시간"], row["기본급여"], row["근무일정 (출근일)"], row["실수령액 (송금)"], row["실제 송금지점"], row["기타 비고 내용 (퇴사일 등)"]]);
-      const ptWS = makeSheet(partTimeHeaders, partTimeRows, [11.57, 15.86, 10.21, 8.21, 5.14, 19.64, 10.71, 8.64, 9.29, 24.14, 10.21, 10.21, 41.43], true, [6, 7, 8, 10], [1, 5]);
+      const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "팁/기타", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
+      const partTimeRows = ptData.map((row) => [row["성명 (사원)"], row["주민등록번호"], row["입사일자"], row["근로계약"], row["은행"], row["입금 계좌번호"], row["시급 (원)"], row["누적시간"], row["팁/기타"], row["기본급여"], row["근무일정 (출근일)"], row["실수령액 (송금)"], row["실제 송금지점"], row["기타 비고 내용 (퇴사일 등)"]]);
+      const ptWS = makeSheet(partTimeHeaders, partTimeRows, [11.57, 15.86, 9.2, 8.21, 5.14, 19.64, 10.71, 7.2, 9.29, 9.29, 24.14, 10.21, 10.21, 41.43], true, [6, 7, 8, 9, 11], [1, 5]);
 
       const expenseHeaders = ["마감일자", "결제수단", "금액", "사용처(거래처)", "항목", "지출내용(세부)", "비고", "작성자", "입력시각", "마감키"];
       const cashRows = cashList.map((row) => {
@@ -7313,8 +7443,46 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
     }
   }, [branchName, selectedMonth, history, triggerToast, adminSettings]);
 
+  const carryMonthlyPurchasesToNextMonth = useCallback(async () => {
+    const nextMonth = addMonthsToMonthInputValue(selectedMonth, 1);
+    const nextKey = `monthly_purchases:${branchName}:${nextMonth}`;
+    const nextLocalKey = `erp_monthly_purchases_${branchName}_${nextMonth}`;
+    try {
+      const existingRemote = await gasClient.getSharedData<any[]>(nextKey);
+      if (Array.isArray(existingRemote) && existingRemote.length > 0) return;
+    } catch {}
+    try {
+      const existingLocal = localStorage.getItem(nextLocalKey);
+      if (existingLocal && JSON.parse(existingLocal).length > 0) return;
+    } catch {}
+
+    let currentRows: any[] = [];
+    try {
+      const currentLocal = localStorage.getItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`);
+      if (currentLocal) currentRows = JSON.parse(currentLocal);
+    } catch {}
+    if (currentRows.length === 0) {
+      try {
+        const remote = await gasClient.getSharedData<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
+        if (Array.isArray(remote)) currentRows = remote;
+      } catch {}
+    }
+    if (currentRows.length === 0) return;
+
+    const carriedRows = currentRows.map((row) => ({
+      ...row,
+      id: `p_${nextMonth}_${row.id || Date.now()}`,
+      transferAmount: "",
+      prepaidChargeAmount: "",
+      monthlyUsageAmount: ""
+    }));
+    localStorage.setItem(nextLocalKey, JSON.stringify(carriedRows));
+    await gasClient.saveSharedData(nextKey, carriedRows);
+  }, [branchName, selectedMonth]);
+
   const handleConfirmMonthlyClose = useCallback(async () => {
     try {
+      await carryMonthlyPurchasesToNextMonth();
       await saveMonthlyCloseStatus("confirmed");
       triggerToast(`${selectedMonth} 월말마감이 확정되었습니다.`, "success");
       if (window.confirm("월말마감이 확정되었습니다. 결산자료 엑셀을 다운로드할까요?")) {
@@ -7324,7 +7492,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       console.error(error);
       triggerToast(error?.message || "월말마감 확정 저장에 실패했습니다.", "error");
     }
-  }, [handleDownloadExcel, saveMonthlyCloseStatus, selectedMonth, triggerToast]);
+  }, [carryMonthlyPurchasesToNextMonth, handleDownloadExcel, saveMonthlyCloseStatus, selectedMonth, triggerToast]);
 
   const handleEditMonthlyClose = useCallback(async () => {
     try {
@@ -7418,54 +7586,56 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto self-end md:self-auto justify-end">
-          <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            style={{ color: adminSettings.monthlyAccentColor }}
-            className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
-          />
-          <button
-            onClick={fetchHistory}
-            className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-            이력 갱신
-          </button>
-          <button
-            onClick={handleConfirmMonthlyClose}
-            className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
-          >
-            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-            월말마감 확정
-          </button>
-          {monthlyCloseStatus?.status === "editing" ? (
+        {activeSubTab === "purchaseSales" && (
+          <div className="flex items-center gap-3 w-full md:w-auto self-end md:self-auto justify-end">
+            <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              style={{ color: adminSettings.monthlyAccentColor }}
+              className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
+            />
             <button
-              onClick={handleCancelMonthlyEdit}
-              className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              onClick={fetchHistory}
+              className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
             >
-              <X className="w-4 h-4 text-slate-200" />
-              월말마감 수정 취소
+              <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
+              이력 갱신
             </button>
-          ) : (
             <button
-              onClick={handleEditMonthlyClose}
-              className="monthly-action-edit p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              onClick={handleConfirmMonthlyClose}
+              className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
             >
-              <Pencil className="w-4 h-4 text-amber-100" />
-              월말마감 수정
+              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+              월말마감 확정
             </button>
-          )}
-          <button
-            onClick={handleCancelMonthlyClose}
-            className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
-          >
-            <Trash2 className="w-4 h-4 text-rose-200" />
-            월말마감 취소
-          </button>
-        </div>
+            {monthlyCloseStatus?.status === "editing" ? (
+              <button
+                onClick={handleCancelMonthlyEdit}
+                className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              >
+                <X className="w-4 h-4 text-slate-200" />
+                월말마감 수정 취소
+              </button>
+            ) : (
+              <button
+                onClick={handleEditMonthlyClose}
+                className="monthly-action-edit p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+              >
+                <Pencil className="w-4 h-4 text-amber-100" />
+                월말마감 수정
+              </button>
+            )}
+            <button
+              onClick={handleCancelMonthlyClose}
+              className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-subtle"
+            >
+              <Trash2 className="w-4 h-4 text-rose-200" />
+              월말마감 취소
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-slate-100 bg-white px-5 py-3 text-xs font-bold text-slate-600 flex flex-wrap items-center gap-2">
@@ -7490,7 +7660,7 @@ function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: Monthly
       ) : (
         <div className="space-y-6">
           {activeSubTab === "purchaseSales" && (
-            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} />
+            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} isLocked={monthlyCloseStatus?.status === "confirmed"} />
           )}
           {activeSubTab === "partTimeSalary" && (
             <MonthlyPartTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} history={history} triggerToast={triggerToast} />
@@ -7530,71 +7700,118 @@ function MonthlyPurchaseSalesSubTab({
   branchName,
   selectedMonth,
   triggerToast,
-  resetToken = 0
+  resetToken = 0,
+  isLocked = false
 }: {
   branchName: string;
   selectedMonth: string;
   triggerToast: (msg: string, type?: "success" | "error") => void;
   resetToken?: number;
+  isLocked?: boolean;
 }) {
   const [rows, setRows] = useState<PurchaseSalesRow[]>([]);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
+  const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
 
-  // Load local saved purchases
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`);
-      if (saved) {
-        setRows(JSON.parse(saved).map((row: PurchaseSalesRow) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" })));
-      } else {
-        // Defaults to help user start
-        setRows([
-          {
-            id: "p1",
-            category: "식재료비",
-            vendorName: "주식회사 식자재창고",
-            transferAmount: "1250000",
-            bank: "국민은행",
-            accountNumber: "123-456-789012",
-            isPrepaid: false,
-            prepaidChargeAmount: "",
-            monthlyUsageAmount: "1250000",
-            memo: "일반 후불 외상 결제"
-          },
-          {
-            id: "p2",
-            category: "식음료외 기타",
-            vendorName: "드림 물류 (선입금 업체)",
-            transferAmount: "0",
-            bank: "신한은행",
-            accountNumber: "987-654-321098",
-            isPrepaid: true,
-            prepaidChargeAmount: "0",
-            monthlyUsageAmount: "450000",
-            memo: "매월 선충전 후 발주금액 차감 방식"
-          }
-        ]);
-      }
-    } catch {
-      setRows([]);
+  const normalizePurchaseRows = useCallback((sourceRows: PurchaseSalesRow[]) => {
+    return sourceRows.map((row) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" }));
+  }, []);
+
+  const emptyAmounts = useCallback((sourceRows: PurchaseSalesRow[]) => {
+    return normalizePurchaseRows(sourceRows).map((row) => ({
+      ...row,
+      id: `p_${selectedMonth}_${row.id || Date.now()}`,
+      transferAmount: "",
+      prepaidChargeAmount: "",
+      monthlyUsageAmount: ""
+    }));
+  }, [normalizePurchaseRows, selectedMonth]);
+
+  const defaultRows = useCallback((): PurchaseSalesRow[] => ([
+    {
+      id: "p1",
+      category: "식재료비",
+      vendorName: "주식회사 식자재창고",
+      transferAmount: "1250000",
+      bank: "국민은행",
+      accountNumber: "123-456-789012",
+      isPrepaid: false,
+      prepaidChargeAmount: "",
+      monthlyUsageAmount: "1250000",
+      memo: "일반 후불 외상 결제"
+    },
+    {
+      id: "p2",
+      category: "식음료외 기타",
+      vendorName: "드림 물류 (선입금 업체)",
+      transferAmount: "0",
+      bank: "신한은행",
+      accountNumber: "987-654-321098",
+      isPrepaid: true,
+      prepaidChargeAmount: "0",
+      monthlyUsageAmount: "450000",
+      memo: "매월 선충전 후 발주금액 차감 방식"
     }
-  }, [branchName, selectedMonth]);
+  ]), []);
 
   useEffect(() => {
-    const loadSharedPurchases = async () => {
+    let cancelled = false;
+    const loadPurchases = async () => {
+      let nextRows: PurchaseSalesRow[] = [];
       try {
-        const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
-        if (Array.isArray(remote)) setRows(remote.map((row) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" })));
+        const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(sharedKey);
+        if (Array.isArray(remote) && remote.length > 0) nextRows = normalizePurchaseRows(remote);
       } catch (error) {
         console.warn("월 매입 공통 데이터를 불러오지 못했습니다.", error);
       }
+      if (nextRows.length === 0) {
+        try {
+          const saved = localStorage.getItem(storageKey);
+          if (saved) nextRows = normalizePurchaseRows(JSON.parse(saved));
+        } catch {}
+      }
+      if (nextRows.length === 0) {
+        const previousMonth = addMonthsToMonthInputValue(selectedMonth, -1);
+        try {
+          const previous = await gasClient.getSharedData<PurchaseSalesRow[]>(`monthly_purchases:${branchName}:${previousMonth}`);
+          if (Array.isArray(previous) && previous.length > 0) nextRows = emptyAmounts(previous);
+        } catch {}
+      }
+      if (nextRows.length === 0) {
+        try {
+          const previousLocal = localStorage.getItem(`erp_monthly_purchases_${branchName}_${addMonthsToMonthInputValue(selectedMonth, -1)}`);
+          if (previousLocal) nextRows = emptyAmounts(JSON.parse(previousLocal));
+        } catch {}
+      }
+      if (nextRows.length === 0) nextRows = defaultRows();
+      if (!cancelled) {
+        setRows(nextRows);
+        localStorage.setItem(storageKey, JSON.stringify(nextRows));
+      }
     };
-    loadSharedPurchases();
-  }, [branchName, selectedMonth]);
+    loadPurchases();
+    return () => {
+      cancelled = true;
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [branchName, defaultRows, emptyAmounts, normalizePurchaseRows, selectedMonth, sharedKey, storageKey]);
+
+  const persistRows = useCallback((nextRows: PurchaseSalesRow[], showToast = false) => {
+    setRows(nextRows);
+    localStorage.setItem(storageKey, JSON.stringify(nextRows));
+    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      gasClient.saveSharedData(sharedKey, nextRows)
+        .then(() => { if (showToast) triggerToast("매입매출 내용이 저장되었습니다!", "success"); })
+        .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
+    }, 450);
+  }, [sharedKey, storageKey, triggerToast]);
 
   const handleSave = async () => {
     try {
-      localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(rows));
-      await gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, rows);
+      localStorage.setItem(storageKey, JSON.stringify(rows));
+      await gasClient.saveSharedData(sharedKey, rows);
       triggerToast("매입매출 내용이 저장되었습니다!", "success");
     } catch {
       triggerToast("저장 중 부득이한 에러발생", "error");
@@ -7602,11 +7819,12 @@ function MonthlyPurchaseSalesSubTab({
   };
 
   const handleUpdateRow = (id: string, field: keyof PurchaseSalesRow, val: any) => {
+    if (isLocked) return;
     const nextValue = ["transferAmount", "prepaidChargeAmount", "monthlyUsageAmount"].includes(String(field))
       ? cleanNumeric(String(val || ""))
       : val;
-    setRows(prev =>
-      prev.map(r => {
+    setRows(prev => {
+      const nextRows = prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: nextValue };
         // If it's regular vendor and transferAmount changes, sync usageAmount
@@ -7621,11 +7839,18 @@ function MonthlyPurchaseSalesSubTab({
           updated.monthlyUsageAmount = updated.transferAmount || "";
         }
         return updated;
-      })
-    );
+      });
+      localStorage.setItem(storageKey, JSON.stringify(nextRows));
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = window.setTimeout(() => {
+        gasClient.saveSharedData(sharedKey, nextRows).catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
+      }, 450);
+      return nextRows;
+    });
   };
 
   const handleAddRow = () => {
+    if (isLocked) return;
     const nextRow: PurchaseSalesRow = {
       id: `p_${Date.now()}`,
       category: "식재료비",
@@ -7638,27 +7863,30 @@ function MonthlyPurchaseSalesSubTab({
       monthlyUsageAmount: "",
       memo: ""
     };
-    setRows(prev => [...prev, nextRow]);
+    persistRows([...rows, nextRow]);
   };
 
   const handleDeleteRow = (id: string) => {
-    setRows(prev => prev.filter(r => r.id !== id));
+    if (isLocked) return;
+    persistRows(rows.filter(r => r.id !== id));
   };
 
   useEffect(() => {
     if (!resetToken) return;
-    const resetRows = rows.map((row) => ({
-      ...row,
-      transferAmount: "",
-      prepaidChargeAmount: "",
-      monthlyUsageAmount: ""
-    }));
-    setRows(resetRows);
-    localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(resetRows));
-    gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, resetRows).catch((error) => {
-      console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
+    setRows((currentRows) => {
+      const resetRows = currentRows.map((row) => ({
+        ...row,
+        transferAmount: "",
+        prepaidChargeAmount: "",
+        monthlyUsageAmount: ""
+      }));
+      localStorage.setItem(storageKey, JSON.stringify(resetRows));
+      gasClient.saveSharedData(sharedKey, resetRows).catch((error) => {
+        console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
+      });
+      return resetRows;
     });
-  }, [resetToken]);
+  }, [resetToken, sharedKey, storageKey]);
 
   // Calculations
   const totalTransfer = rows.reduce((acc, r) => acc + (Number(r.transferAmount) || 0), 0);
@@ -7681,18 +7909,21 @@ function MonthlyPurchaseSalesSubTab({
         <div className="flex gap-2">
           <button
             onClick={handleAddRow}
-            className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none"
+            disabled={isLocked}
+            className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
           >
             <Plus className="w-3.5 h-3.5" /> 매입 업체 추가
           </button>
-          <button
-            onClick={handleSave}
-            className="p-1 px-3.5 bg-[#2E6DB4] hover:bg-[#255D9D] text-white rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-subtle"
-          >
-            <Check className="w-3.5 h-3.5" /> 대장 실시간저장
-          </button>
+          <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 shadow-subtle ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+            <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
+          </div>
         </div>
       </div>
+      {isLocked && (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+          월말마감이 확정되어 입력값이 잠겨 있습니다. 수정하려면 상단의 월말마감 수정 버튼을 눌러주세요.
+        </div>
+      )}
 
       {/* Aggregate Banner cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -7755,8 +7986,9 @@ function MonthlyPurchaseSalesSubTab({
                   <td className="py-2 px-2.5">
                     <select
                       value={row.category}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "category", e.target.value)}
-                      className="w-full p-1.5 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-800 focus:outline-none"
+                      className="w-full p-1.5 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-800 focus:outline-none disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     >
                       <option value="식재료비">식재료비</option>
                       <option value="주류비">주류비</option>
@@ -7767,9 +7999,10 @@ function MonthlyPurchaseSalesSubTab({
                     <input
                       type="text"
                       value={row.vendorName}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "vendorName", e.target.value)}
                       placeholder="자재상호 혹은 업체명"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4]"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="py-2 px-2.5 text-center">
@@ -7777,8 +8010,9 @@ function MonthlyPurchaseSalesSubTab({
                       <input
                         type="checkbox"
                         checked={row.isPrepaid}
+                        disabled={isLocked}
                         onChange={(e) => handleUpdateRow(row.id, "isPrepaid", e.target.checked)}
-                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4]"
+                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
                       <span className="text-[9px] font-black text-gray-600">선입금</span>
                     </label>
@@ -7788,7 +8022,7 @@ function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.prepaidChargeAmount || "")}
-                      disabled={!row.isPrepaid}
+                      disabled={isLocked || !row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "충전 금액" : "-"}
                       className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
@@ -7801,9 +8035,10 @@ function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.transferAmount)}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
                       placeholder="송금 필요 금액"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right focus:outline-none focus:border-[#2E6DB4] text-red-650"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right focus:outline-none focus:border-[#2E6DB4] text-red-650 disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="py-2 px-2.5">
@@ -7811,7 +8046,7 @@ function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
-                      disabled={!row.isPrepaid}
+                      disabled={isLocked || !row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "발주액 합계" : "-"}
                       className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
@@ -7823,33 +8058,37 @@ function MonthlyPurchaseSalesSubTab({
                     <input
                       type="text"
                       value={row.bank}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "bank", e.target.value)}
                       placeholder="은행"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4]"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="py-2 px-2.5">
                     <input
                       type="text"
                       value={row.accountNumber}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "accountNumber", e.target.value)}
                       placeholder="계좌 번호 입력"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-medium placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4]"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-medium placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="py-2 px-2.5">
                     <input
                       type="text"
                       value={row.memo}
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "memo", e.target.value)}
                       placeholder="예시: 매월 자동 이체"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-semibold placeholder-gray-350 focus:outline-none focus:border-[#2E6DB4]"
+                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-semibold placeholder-gray-350 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
                     />
                   </td>
                   <td className="py-2 px-2.5 text-center">
                     <button
                       onClick={() => handleDeleteRow(row.id)}
-                      className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer"
+                      disabled={isLocked}
+                      className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer disabled:text-gray-200 disabled:cursor-not-allowed"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -7877,6 +8116,7 @@ interface PartTimeSalaryRow {
   accountNumber: string;
   hourlyRate: string;
   accumulatedHours: string;
+  tipsEtcAmount: string;
   calculatedSalary: string;
   attendanceDates: string;
   actualPaidAmount: string;
@@ -7897,9 +8137,56 @@ function MonthlyPartTimeSalarySubTab({
 }) {
   const [salaries, setSalaries] = useState<PartTimeSalaryRow[]>([]);
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
+  const salaryAutoSaveTimerRef = useRef<number | null>(null);
 
   const exclusionStorageKey = `erp_monthly_part_time_exclusions_${branchName}_${selectedMonth}`;
   const exclusionDataKey = `part_time_salary_exclusions:${branchName}:${selectedMonth}`;
+
+  const buildPartTimeProfiles = useCallback((sourceSalaries: PartTimeSalaryRow[]) => {
+    return sourceSalaries.reduce((result: Record<string, any>, sal) => {
+      result[sal.employeeId] = {
+        residentNumber: sal.residentNumber,
+        entryDate: sal.entryDate,
+        contractStatus: sal.contractStatus,
+        bank: sal.bank,
+        accountNumber: sal.accountNumber,
+        hourlyRate: sal.hourlyRate
+      };
+      return result;
+    }, {});
+  }, []);
+
+  const persistPartTimeSalaries = useCallback((nextSalaries: PartTimeSalaryRow[], nextExcluded = excludedEmployeeIds, showToast = false) => {
+    setSalaries(nextSalaries);
+    nextSalaries.forEach((sal) => {
+      localStorage.setItem(`erp_pt_profile_${branchName}_${sal.employeeId}`, JSON.stringify({
+        residentNumber: sal.residentNumber,
+        entryDate: sal.entryDate,
+        contractStatus: sal.contractStatus,
+        bank: sal.bank,
+        accountNumber: sal.accountNumber,
+        hourlyRate: sal.hourlyRate
+      }));
+    });
+    localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(nextSalaries));
+    localStorage.setItem(exclusionStorageKey, JSON.stringify(nextExcluded));
+    if (salaryAutoSaveTimerRef.current) window.clearTimeout(salaryAutoSaveTimerRef.current);
+    salaryAutoSaveTimerRef.current = window.setTimeout(() => {
+      Promise.all([
+        gasClient.saveSharedData(`part_time_salaries:${branchName}:${selectedMonth}`, nextSalaries),
+        gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(nextSalaries)),
+        gasClient.saveSharedData(exclusionDataKey, nextExcluded)
+      ])
+        .then(() => { if (showToast) triggerToast("파트타이머 급여대장이 저장되었습니다.", "success"); })
+        .catch(() => triggerToast("급여지급 대장 자동저장 실패", "error"));
+    }, 500);
+  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionStorageKey, selectedMonth, triggerToast]);
+
+  useEffect(() => {
+    return () => {
+      if (salaryAutoSaveTimerRef.current) window.clearTimeout(salaryAutoSaveTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -8001,12 +8288,13 @@ function MonthlyPartTimeSalarySubTab({
 
       // Default values
       const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
+      const tipsEtcAmount = saved.tipsEtcAmount || "0";
       // Cumulative hours synced dynamically unless edited
       const accumulatedHours = saved.accumulatedHours !== undefined
         ? saved.accumulatedHours
         : String(tel.hours);
 
-      const calcSalary = String(Number(hourlyRate) * Number(accumulatedHours));
+      const calcSalary = String((Number(hourlyRate) * Number(accumulatedHours)) + (Number(tipsEtcAmount) || 0));
       // Forced empty string per "본사에서 입력해야 하는 칸이라 일단 공란으로 해두고"
       const calcActualPaid = saved.actualPaidAmount || "";
 
@@ -8025,6 +8313,7 @@ function MonthlyPartTimeSalarySubTab({
         accountNumber: saved.accountNumber || profile.accountNumber || "",
         hourlyRate,
         accumulatedHours,
+        tipsEtcAmount,
         calculatedSalary: calcSalary,
         attendanceDates,
         actualPaidAmount: calcActualPaid,
@@ -8043,7 +8332,10 @@ function MonthlyPartTimeSalarySubTab({
         // 빈 배열은 아직 저장된 급여대장이 없다는 뜻이므로, 일일마감에서 계산한 행을 유지합니다.
         if (Array.isArray(remote) && remote.length > 0) {
           const excluded = new Set(excludedEmployeeIds);
-          setSalaries(remote.filter((salary) => !excluded.has(salary.employeeId)));
+          setSalaries(remote.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
+            ...salary,
+            tipsEtcAmount: salary.tipsEtcAmount || "0"
+          })));
         }
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
@@ -8130,13 +8422,14 @@ function MonthlyPartTimeSalarySubTab({
                 : String(work.hours);
               const calculatedSalary = existing.calculatedSalary !== undefined && existing.calculatedSalary !== ""
                 ? existing.calculatedSalary
-                : String((Number(existing.hourlyRate) || 0) * Number(accumulatedHours || 0));
+                : String(((Number(existing.hourlyRate) || 0) * Number(accumulatedHours || 0)) + (Number(existing.tipsEtcAmount) || 0));
               return {
                 ...existing,
                 residentNumber: existing.residentNumber || employee.residentNumber || "",
                 entryDate: existing.entryDate || employee.entryDate || "",
                 contractStatus: existing.contractStatus || (employee as any).contractStatus || existing.contractStatus,
                 accumulatedHours,
+                tipsEtcAmount: existing.tipsEtcAmount || "0",
                 attendanceDates: existing.attendanceDates || attendanceDates,
                 calculatedSalary
               };
@@ -8152,6 +8445,7 @@ function MonthlyPartTimeSalarySubTab({
               accountNumber: "",
               hourlyRate,
               accumulatedHours: String(work.hours),
+              tipsEtcAmount: "0",
               calculatedSalary: String(Number(hourlyRate) * work.hours),
               attendanceDates,
               actualPaidAmount: "",
@@ -8168,30 +8462,33 @@ function MonthlyPartTimeSalarySubTab({
   }, [branchName, selectedMonth, history, excludedEmployeeIds]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
-    setSalaries(prev =>
-      prev.map(item => {
-        if (item.employeeId !== empId) return item;
-        const updated = { ...item, [field]: value };
-        // Recalculate salary if wage or code changes
-        if (field === "hourlyRate" || field === "accumulatedHours") {
-          const wage = Number(updated.hourlyRate) || 0;
-          const hrs = Number(updated.accumulatedHours) || 0;
-          updated.calculatedSalary = String(wage * hrs);
-          updated.actualPaidAmount = String(wage * hrs); // Pre-fill with normal calculation
-        }
-        return updated;
-      })
-    );
+    const nextSalaries = salaries.map(item => {
+      if (item.employeeId !== empId) return item;
+      const nextValue = field === "tipsEtcAmount" ? cleanNumeric(String(value || "")) : value;
+      const updated = { ...item, [field]: nextValue };
+      // Recalculate salary if wage or code changes
+      if (field === "hourlyRate" || field === "accumulatedHours" || field === "tipsEtcAmount") {
+        const wage = Number(updated.hourlyRate) || 0;
+        const hrs = Number(updated.accumulatedHours) || 0;
+        const tips = Number(updated.tipsEtcAmount) || 0;
+        updated.calculatedSalary = String((wage * hrs) + tips);
+        updated.actualPaidAmount = String((wage * hrs) + tips); // Pre-fill with normal calculation
+      }
+      return updated;
+    });
+    persistPartTimeSalaries(nextSalaries);
   };
 
   const handleExcludeEmployee = (employee: PartTimeSalaryRow) => {
     if (!window.confirm(`${employee.name} 님을 이번 달 파트타이머 급여대장에서 제외할까요?\n직원현황과 일일마감 근무기록은 삭제되지 않습니다.`)) return;
 
-    setSalaries((current) => current.filter((salary) => salary.employeeId !== employee.employeeId));
-    setExcludedEmployeeIds((current) => current.includes(employee.employeeId)
-      ? current
-      : [...current, employee.employeeId]);
-    triggerToast(`${employee.name} 님을 이번 달 급여대장에서 제외했습니다. 저장하기를 누르면 모든 기기에 반영됩니다.`);
+    const nextSalaries = salaries.filter((salary) => salary.employeeId !== employee.employeeId);
+    const nextExcluded = excludedEmployeeIds.includes(employee.employeeId)
+      ? excludedEmployeeIds
+      : [...excludedEmployeeIds, employee.employeeId];
+    setExcludedEmployeeIds(nextExcluded);
+    persistPartTimeSalaries(nextSalaries, nextExcluded, true);
+    triggerToast(`${employee.name} 님을 이번 달 급여대장에서 제외했습니다.`);
   };
 
   const handleSave = async () => {
@@ -8254,13 +8551,10 @@ function MonthlyPartTimeSalarySubTab({
           </p>
         </div>
 
-        <button
-          onClick={handleSave}
-          className="w-full sm:w-auto px-5 py-3 bg-[#2E6DB4] hover:bg-[#255D9D] text-white rounded-xl text-sm font-black flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
-        >
+        <div className="w-full sm:w-auto px-5 py-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-black flex items-center justify-center gap-2 shadow-sm">
           <Check className="w-4 h-4" />
-          저장하기
-        </button>
+          자동저장
+        </div>
       </div>
 
       {/* Stats cards block */}
@@ -8285,16 +8579,17 @@ function MonthlyPartTimeSalarySubTab({
 
       {/* Ledger Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1320px]">
+        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1330px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
               <th className="py-3 px-3 w-20 whitespace-nowrap">성명 (사원)</th>
               <th className="py-3 px-3 w-32 whitespace-nowrap">주민등록번호</th>
-              <th className="py-3 px-3 w-36 whitespace-nowrap">입사일자</th>
+              <th className="py-3 px-2 w-28 whitespace-nowrap">입사일자</th>
               <th className="py-3 px-3 w-20 whitespace-nowrap">은행</th>
               <th className="py-3 px-3 w-32 whitespace-nowrap">입금 계좌번호</th>
               <th className="py-3 px-3 w-20 text-right whitespace-nowrap">시급 (원)</th>
-              <th className="py-3 px-3 w-20 text-right whitespace-nowrap">누적시간</th>
+              <th className="py-3 px-2 w-16 text-right whitespace-nowrap">누적시간</th>
+              <th className="py-3 px-2 w-20 text-right whitespace-nowrap">팁/기타</th>
               <th className="py-3 px-3 w-24 text-right whitespace-nowrap">기본급여</th>
               <th className="py-3 px-3 w-28 whitespace-nowrap">근무일정 (출근일)</th>
               <th className="py-3 px-3 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
@@ -8304,7 +8599,7 @@ function MonthlyPartTimeSalarySubTab({
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
             {visibleSalaries.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-16 text-center text-gray-400 font-bold">
+                <td colSpan={12} className="py-16 text-center text-gray-400 font-bold">
                   이번 달 근무시간이 기록된 파트타이머가 없습니다.
                 </td>
               </tr>
@@ -8322,12 +8617,12 @@ function MonthlyPartTimeSalarySubTab({
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-bold text-gray-800 tracking-tighter text-center"
                     />
                   </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className="py-2.5 px-1">
                     <input
                       type="date"
                       value={toDateInputValue(sal.entryDate)}
                       onChange={(e) => handleUpdate(sal.employeeId, "entryDate", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs text-gray-800 text-center"
+                      className="w-[108px] p-1 bg-white border border-gray-200 rounded text-xs text-gray-800 text-center"
                     />
                   </td>
                   <td className="py-2.5 px-1.5">
@@ -8354,12 +8649,22 @@ function MonthlyPartTimeSalarySubTab({
                       className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-gray-800"
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 text-right">
+                  <td className="py-2.5 px-1 text-right">
                     <input
                       type="number"
                       value={sal.accumulatedHours}
                       onChange={(e) => handleUpdate(sal.employeeId, "accumulatedHours", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-blue-600"
+                      className="w-[58px] p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-blue-600"
+                    />
+                  </td>
+                  <td className="py-2.5 px-1 text-right">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={formatWithCommas(sal.tipsEtcAmount || "")}
+                      onChange={(e) => handleUpdate(sal.employeeId, "tipsEtcAmount", e.target.value)}
+                      placeholder="0"
+                      className="w-[74px] p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-emerald-700"
                     />
                   </td>
                   <td className="py-2.5 px-1.5 text-right font-mono font-black text-gray-700">

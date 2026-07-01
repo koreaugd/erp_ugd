@@ -146,6 +146,9 @@ export interface DailyFormBootstrap {
 const READ_CACHE_TTL_MS = 15000;
 const readCache = new Map<string, { expiresAt: number; value: unknown }>();
 const pendingReadRequests = new Map<string, Promise<unknown>>();
+const ATTENDANCE_CACHE_TTL_MS = 45000;
+const attendanceLogCache = new Map<string, { expiresAt: number; value: { records: any[]; summaryList: any[] } }>();
+const pendingAttendanceRequests = new Map<string, Promise<{ records: any[]; summaryList: any[] }>>();
 
 async function callCachedReadApi<T>(action: string, params: Record<string, any> = {}): Promise<T> {
   const cacheKey = `${action}:${JSON.stringify(params)}`;
@@ -168,6 +171,7 @@ async function callCachedReadApi<T>(action: string, params: Record<string, any> 
 
 function clearReadCache() {
   readCache.clear();
+  attendanceLogCache.clear();
 }
 
 // Helper to safely write to direct Firebase in the background (used for Netlify / local offline static modes)
@@ -333,13 +337,37 @@ export const gasClient = {
     return await callApi("getBranchListAll");
   },
 
-  async getAttendanceLog(branchName: string, logType: "overtime" | "partTime"): Promise<{ records: any[]; summaryList: any[] }> {
+  async getAttendanceLog(branchName: string, logType: "overtime" | "partTime", month?: string, forceRefresh = false): Promise<{ records: any[]; summaryList: any[] }> {
+    const cacheKey = `${branchName}:${logType}:${month || "all"}`;
+    const cached = attendanceLogCache.get(cacheKey);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+    const pending = pendingAttendanceRequests.get(cacheKey);
+    if (!forceRefresh && pending) return pending;
+
     const { firebaseGetBranchHistory, firebaseGetDailyDetail } = await import("./firebaseDirect");
-    const history = await firebaseGetBranchHistory(branchName);
-    const records: any[] = [];
-    const summary = new Map<string, { hours: number; overtime: number; dates: Set<string> }>();
-    for (const item of history) {
-      const detail = await firebaseGetDailyDetail(item.recordId!);
+    const request = (async () => {
+      const allHistory = await firebaseGetBranchHistory(branchName);
+      const history = allHistory.filter((item) => {
+        const settleMonth = String(item.settleDate || "").slice(0, 7);
+        if (!month) return true;
+        return logType === "overtime" ? settleMonth <= month : settleMonth === month;
+      });
+      const records: any[] = [];
+      const summary = new Map<string, { hours: number; overtime: number; dates: Set<string> }>();
+
+      const fallbackDetails = await Promise.all(history.map(async (item) => {
+        const metadataText = String(item.memo || "").split("\n---\nMETADATA:")[1];
+        if (metadataText) return null;
+        if (!item.recordId) return null;
+        try {
+          return await firebaseGetDailyDetail(item.recordId);
+        } catch (error) {
+          console.warn("근무 일지 상세 데이터를 읽지 못했습니다.", error);
+          return null;
+        }
+      }));
+
+      history.forEach((item, index) => {
       // 일일마감 화면의 출·퇴근 시각과 초과시간은 상세 METADATA에 보존됩니다.
       // 요약 staff 배열에는 근무시간만 있으므로, 수정 후에도 일지에 정확히
       // 표시되도록 METADATA를 우선 사용하고 구형 데이터만 요약 배열로 보완합니다.
@@ -354,7 +382,8 @@ export const gasClient = {
       } catch (error) {
         console.warn("근무 일지 메타데이터를 읽지 못해 요약 데이터로 대체합니다.", error);
       }
-      const sourceStaff = detailedStaff.length > 0 ? detailedStaff : (detail.staff as any[]);
+      const detail = fallbackDetails[index];
+      const sourceStaff = detailedStaff.length > 0 ? detailedStaff : ((detail?.staff || []) as any[]);
       for (const staff of sourceStaff) {
         const workplace = staff.officeWorkplace || branchName;
         const isDispatchedFromHeadOffice = branchName === "본사" && workplace !== "본사" && Number(staff.workHours || 0) > 0;
@@ -366,10 +395,16 @@ export const gasClient = {
         const aggregate = summary.get(staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
         aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staffName, aggregate);
       }
-    }
-    records.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
-    const summaryList = Array.from(summary.entries()).map(([name, value]) => logType === "partTime" ? ({ name, totalHours: value.hours, daysCount: value.dates.size, workedDaysList: Array.from(value.dates).sort().map((date) => `${Number(date.split("-")[2])}일`).join(", ") }) : ({ name, totalOvertime: value.overtime }));
-    return { records, summaryList };
+      });
+      records.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
+      const summaryList = Array.from(summary.entries()).map(([name, value]) => logType === "partTime" ? ({ name, totalHours: value.hours, daysCount: value.dates.size, workedDaysList: Array.from(value.dates).sort().map((date) => `${Number(date.split("-")[2])}일`).join(", ") }) : ({ name, totalOvertime: value.overtime }));
+      const result = { records, summaryList };
+      attendanceLogCache.set(cacheKey, { value: result, expiresAt: Date.now() + ATTENDANCE_CACHE_TTL_MS });
+      return result;
+    })().finally(() => pendingAttendanceRequests.delete(cacheKey));
+
+    pendingAttendanceRequests.set(cacheKey, request);
+    return request;
   },
 
   async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
