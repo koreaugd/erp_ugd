@@ -468,6 +468,31 @@ function getOrCreateSharedDataSheet() {
   return sheet;
 }
 
+function getOrCreateSharedDataBackupSheet() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName("shared_data_backups");
+  if (!sheet) {
+    sheet = ss.insertSheet("shared_data_backups");
+    sheet.appendRow(["data_key", "json_value", "source_updated_at", "backed_up_at"]);
+  }
+  return sheet;
+}
+
+function backupSharedDataBeforeOverwrite(key, previousJson, previousUpdatedAt) {
+  if (previousJson === undefined || previousJson === null || previousJson === "") return;
+  const sheet = getOrCreateSharedDataBackupSheet();
+  const now = new Date();
+  sheet.appendRow([key, previousJson, previousUpdatedAt || "", now]);
+
+  const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) === key && data[i][3] instanceof Date && data[i][3].getTime() < cutoff.getTime()) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
 function getSharedData(dataKey) {
   const key = String(dataKey || "").trim();
   if (!key) throw new Error("데이터 키가 필요합니다.");
@@ -491,6 +516,7 @@ function saveSharedData(dataKey, value) {
     const data = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][0]) === key) {
+        backupSharedDataBeforeOverwrite(key, data[i][1], data[i][2]);
         sheet.getRange(i + 1, 2, 1, 2).setValues([[json, new Date()]]);
         return { success: true };
       }

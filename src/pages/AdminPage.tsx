@@ -800,8 +800,8 @@ export default function AdminPage() {
                 </button>
                 <button type="button" onClick={() => setClosingView("otherMemo")} className="admin-kpi-card admin-kpi-honey">
                   <span>ERP 기타메모</span>
-                  <strong>{anomalyRecords.filter((item) => item.remarks?.otherMemo).length}</strong>
-                  <small>오류·개선 제안 확인</small>
+                  <strong>{yesterdayAnomalyRecords.filter((item) => item.remarks?.otherMemo).length}</strong>
+                  <small>어제 마감의 기타메모 확인</small>
                 </button>
                 <button type="button" onClick={() => setAdminSection("monthlyClosing")} className="admin-kpi-card admin-kpi-white">
                   <span>월말마감</span>
@@ -1575,7 +1575,7 @@ function AdminNoticeManager() {
           {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
         </select>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-        <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold resize-y min-h-[44px]" />
         <button onClick={() => void saveNotice()} disabled={saving} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-black disabled:opacity-50">{saving ? "저장 중…" : "공지 등록"}</button>
       </div>
       {notices.length > 0 ? (
@@ -1584,7 +1584,7 @@ function AdminNoticeManager() {
             <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
               <div>
                 <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
-                <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
+                <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{notice.body}</p>
               </div>
               <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
             </div>
