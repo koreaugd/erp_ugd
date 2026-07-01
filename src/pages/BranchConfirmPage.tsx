@@ -4807,6 +4807,10 @@ const monthDays = (monthValue: string) => {
 function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const storageKey = "erp_orders_" + branchName;
   const vendorKey = "erp_order_vendors_" + branchName;
+  const sharedOrderKey = "orders:" + branchName;
+  const sharedVendorKey = "order_vendors:" + branchName;
+  const orderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const vendorSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [vendorsByCategory, setVendorsByCategory] = useState<Record<OrderCategory, string[]>>(ORDER_DEFAULT_VENDORS);
   const [vendorCategory, setVendorCategory] = useState<OrderCategory>("식자재");
@@ -4839,6 +4843,64 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     }
   }, [storageKey, vendorKey]);
 
+  const normalizeRemoteOrderVendors = useCallback((value: unknown): Record<OrderCategory, string[]> | null => {
+    if (!value || typeof value !== "object") return null;
+    const source = value as Partial<Record<OrderCategory, unknown>>;
+    return ORDER_CATEGORIES.reduce((acc, category) => {
+      acc[category] = Array.isArray(source[category])
+        ? (source[category] as string[]).filter((item) => typeof item === "string")
+        : (ORDER_DEFAULT_VENDORS[category] || []);
+      return acc;
+    }, {} as Record<OrderCategory, string[]>);
+  }, []);
+
+  const saveSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    void gasClient.saveSharedData(key, value).catch((error) => {
+      console.error("Failed to save shared order data", error);
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const localOrdersJson = localStorage.getItem(storageKey);
+    const localVendorsJson = localStorage.getItem(vendorKey);
+
+    void Promise.all([
+      gasClient.getSharedData<OrderItem[]>(sharedOrderKey),
+      gasClient.getSharedData<Record<OrderCategory, string[]>>(sharedVendorKey)
+    ]).then(([remoteOrders, remoteVendors]) => {
+      if (cancelled) return;
+      if (Array.isArray(remoteOrders)) {
+        setOrders(remoteOrders);
+        localStorage.setItem(storageKey, JSON.stringify(remoteOrders));
+      } else if (localOrdersJson) {
+        try {
+          void gasClient.saveSharedData(sharedOrderKey, JSON.parse(localOrdersJson));
+        } catch {}
+      }
+
+      const normalizedVendors = normalizeRemoteOrderVendors(remoteVendors);
+      if (normalizedVendors) {
+        setVendorsByCategory(normalizedVendors);
+        localStorage.setItem(vendorKey, JSON.stringify(normalizedVendors));
+      } else if (localVendorsJson) {
+        try {
+          void gasClient.saveSharedData(sharedVendorKey, JSON.parse(localVendorsJson));
+        } catch {}
+      }
+    }).catch((error) => {
+      console.error("Failed to load shared order data", error);
+    });
+
+    return () => {
+      cancelled = true;
+      if (orderSaveTimerRef.current) clearTimeout(orderSaveTimerRef.current);
+      if (vendorSaveTimerRef.current) clearTimeout(vendorSaveTimerRef.current);
+    };
+  }, [normalizeRemoteOrderVendors, sharedOrderKey, sharedVendorKey, storageKey, vendorKey]);
+
   const reportVendors = useMemo(() => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     const names = [
@@ -4855,11 +4917,13 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const saveVendors = (next: Record<OrderCategory, string[]>) => {
     setVendorsByCategory(next);
     localStorage.setItem(vendorKey, JSON.stringify(next));
+    saveSharedDebounced(sharedVendorKey, next, vendorSaveTimerRef);
   };
 
   const saveOrders = (next: OrderItem[]) => {
     setOrders(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
+    saveSharedDebounced(sharedOrderKey, next, orderSaveTimerRef);
   };
 
   const resolveOrderCategory = (vendor: string): OrderCategory => {
@@ -4915,6 +4979,7 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
         }, ...kept]
         : kept;
       localStorage.setItem(storageKey, JSON.stringify(nextOrders));
+      saveSharedDebounced(sharedOrderKey, nextOrders, orderSaveTimerRef);
       return nextOrders;
     });
   };
@@ -5068,6 +5133,10 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
 function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const productKey = "erp_liquor_products_" + branchName;
   const movementKey = "erp_liquor_movements_" + branchName;
+  const sharedProductKey = "liquor_products:" + branchName;
+  const sharedMovementKey = "liquor_movements:" + branchName;
+  const productSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movementSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [products, setProducts] = useState<InventoryProduct[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [classification, setClassification] = useState("샴페인");
@@ -5085,6 +5154,52 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       console.error("Failed to load liquor inventory", err);
     }
   }, [productKey, movementKey]);
+
+  const saveLiquorSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    void gasClient.saveSharedData(key, value).catch((error) => {
+      console.error("Failed to save shared liquor inventory", error);
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const localProductsJson = localStorage.getItem(productKey);
+    const localMovementsJson = localStorage.getItem(movementKey);
+
+    void Promise.all([
+      gasClient.getSharedData<InventoryProduct[]>(sharedProductKey),
+      gasClient.getSharedData<InventoryMovement[]>(sharedMovementKey)
+    ]).then(([remoteProducts, remoteMovements]) => {
+      if (cancelled) return;
+      if (Array.isArray(remoteProducts)) {
+        setProducts(remoteProducts);
+        localStorage.setItem(productKey, JSON.stringify(remoteProducts));
+      } else if (localProductsJson) {
+        try {
+          void gasClient.saveSharedData(sharedProductKey, JSON.parse(localProductsJson));
+        } catch {}
+      }
+
+      if (Array.isArray(remoteMovements)) {
+        setMovements(remoteMovements);
+        localStorage.setItem(movementKey, JSON.stringify(remoteMovements));
+      } else if (localMovementsJson) {
+        try {
+          void gasClient.saveSharedData(sharedMovementKey, JSON.parse(localMovementsJson));
+        } catch {}
+      }
+    }).catch((error) => {
+      console.error("Failed to load shared liquor inventory", error);
+    });
+
+    return () => {
+      cancelled = true;
+      if (productSaveTimerRef.current) clearTimeout(productSaveTimerRef.current);
+      if (movementSaveTimerRef.current) clearTimeout(movementSaveTimerRef.current);
+    };
+  }, [movementKey, productKey, sharedMovementKey, sharedProductKey]);
 
   useEffect(() => {
     (window as any).__ugdLiquorInventoryDirty = false;
@@ -5108,11 +5223,13 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const saveProducts = (next: InventoryProduct[]) => {
     setProducts(next);
     localStorage.setItem(productKey, JSON.stringify(next));
+    saveLiquorSharedDebounced(sharedProductKey, next, productSaveTimerRef);
   };
 
   const saveMovements = (next: InventoryMovement[]) => {
     setMovements(next);
     localStorage.setItem(movementKey, JSON.stringify(next));
+    saveLiquorSharedDebounced(sharedMovementKey, next, movementSaveTimerRef);
   };
 
   const addProduct = (event: React.FormEvent) => {
@@ -5172,6 +5289,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         }, ...kept]
         : kept;
       localStorage.setItem(movementKey, JSON.stringify(nextMovements));
+      saveLiquorSharedDebounced(sharedMovementKey, nextMovements, movementSaveTimerRef);
       return nextMovements;
     });
   };
