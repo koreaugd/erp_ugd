@@ -2343,6 +2343,10 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box button:l
   background: var(--branch-honey) !important;
 }
 
+.branch-redesign .branch-dashboard-tab .branch-notice-card .branch-notice-body {
+  color: #212121 !important;
+}
+
 .branch-redesign #staff-attendance-section .branch-division-select.branch-division-idle {
   background: var(--branch-ghost) !important;
   color: var(--branch-black) !important;
