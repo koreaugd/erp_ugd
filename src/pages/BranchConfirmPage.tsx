@@ -3821,8 +3821,6 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       </div>
 
       {/* EXPENSE TABLES SECTION */}
-      <table className="w-full border-collapse" style={{ display: "none" }} /> {/* Hidden spacer constraint */}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="expenses-section">
         {/* Cash Expense table */}
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
@@ -4843,91 +4841,6 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
 // ----------------------------------------------------
 // TAB 2: Order Management (발주관리)
 // ----------------------------------------------------
-function OrderManagementTab({ branchName }: { branchName: string }) {
-  const storageKey = "erp_orders_" + branchName;
-  const vendorKey = "erp_order_vendors_" + branchName;
-  const defaultVendors = ["비알(식자재)", "쿠팡(식자재)", "네이버(식자재)"];
-  const [orders, setOrders] = useState<OrderItem[]>([]);
-  const [category, setCategory] = useState<OrderCategory>("식자재");
-  const [vendorName, setVendorName] = useState(defaultVendors[0]);
-  const [customVendor, setCustomVendor] = useState("");
-  const [vendors, setVendors] = useState<string[]>(defaultVendors);
-  const [amount, setAmount] = useState("");
-  const [memo, setMemo] = useState("");
-
-  useEffect(() => {
-    try {
-      const savedOrders = localStorage.getItem(storageKey);
-      const savedVendors = localStorage.getItem(vendorKey);
-      if (savedOrders) setOrders(JSON.parse(savedOrders));
-      if (savedVendors) {
-        const parsed = JSON.parse(savedVendors);
-        if (Array.isArray(parsed)) setVendors(Array.from(new Set([...defaultVendors, ...parsed])));
-      }
-    } catch (err) {
-      console.error("Failed to load order data", err);
-    }
-  }, [storageKey, vendorKey]);
-
-  const saveOrders = (next: OrderItem[]) => {
-    setOrders(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
-  };
-
-  const addVendor = () => {
-    const nextVendor = customVendor.trim();
-    if (!nextVendor) return;
-    const next = Array.from(new Set([...vendors, nextVendor]));
-    setVendors(next);
-    setVendorName(nextVendor);
-    setCustomVendor("");
-    localStorage.setItem(vendorKey, JSON.stringify(next.filter((item) => !defaultVendors.includes(item))));
-  };
-
-  const handlePlaceOrder = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!vendorName.trim() || !amount.trim()) return;
-    const newOrder: OrderItem = {
-      id: "ord-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
-      category,
-      vendorName: vendorName.trim(),
-      amount: cleanNumeric(amount),
-      memo: memo.trim(),
-      orderDate: toLocalDateInputValue()
-    };
-    saveOrders([newOrder, ...orders]);
-    setAmount("");
-    setMemo("");
-  };
-
-  const totals = useMemo(() => {
-    return orders.reduce<Record<OrderCategory, number>>((acc, item) => {
-      acc[item.category] += Number(item.amount || 0);
-      return acc;
-    }, { "식자재": 0, "부식비": 0, "주류": 0, "식음료외 기타": 0 });
-  }, [orders]);
-
-  return (
-    <div className="space-y-5" id="orders-tab-view">
-      <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <div>
-          <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-[#2E6DB4]" /> 발주관리</h3>
-          <p className="text-xs text-gray-400 mt-1">대분류, 거래처, 금액, 기타내용을 입력해 발주 내역을 정리합니다.</p>
-        </div>
-        <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-[160px_220px_180px_1fr_auto] gap-3 items-end">
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>대분류</span><select value={category} onChange={(e) => setCategory(e.target.value as OrderCategory)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-gray-50 font-extrabold text-gray-800"><option value="식자재">식자재</option><option value="부식비">부식비</option><option value="주류">주류</option><option value="식음료외 기타">식음료외 기타</option></select></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>거래처</span><select value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl bg-white font-bold text-gray-800">{vendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}</select></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>금액</span><input value={formatWithCommas(amount)} onChange={(e) => setAmount(cleanNumeric(e.target.value))} inputMode="numeric" placeholder="0" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-right font-mono font-black" /></label>
-          <label className="space-y-1 text-xs font-bold text-gray-500"><span>기타내용</span><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="품목, 요청사항, 비고" className="w-full px-3 py-2.5 border border-gray-200 rounded-xl" /></label>
-          <button type="submit" className="h-[42px] px-5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 등록</button>
-        </form>
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center rounded-xl bg-slate-50 p-3 border border-slate-100"><span className="text-xs font-black text-slate-600">거래처 추가</span><input value={customVendor} onChange={(e) => setCustomVendor(e.target.value)} placeholder="지점 사용 업체명" className="grow px-3 py-2 border border-slate-200 rounded-lg text-xs font-bold bg-white" /><button type="button" onClick={addVendor} className="px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-black">업체 추가</button></div>
-      </section>
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"><div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3><p className="text-xs text-gray-400 mt-1">최근 등록순으로 표시됩니다.</p></div><div className="flex flex-wrap gap-2 text-[11px] font-black"><span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">식자재 {formatNumber(totals["식자재"])}원</span><span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700">주류 {formatNumber(totals["주류"])}원</span><span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">기타 {formatNumber(totals["식음료외 기타"])}원</span></div></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b"><tr><th className="p-3 w-32">일자</th><th className="p-3 w-36">대분류</th><th className="p-3 w-48">거래처</th><th className="p-3 w-36 text-right">금액</th><th className="p-3">기타내용</th></tr></thead><tbody className="divide-y divide-gray-100">{orders.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-gray-400 font-bold">등록된 발주내역이 없습니다.</td></tr> : orders.map((order) => <tr key={order.id} className="hover:bg-slate-50/60"><td className="p-3 font-mono text-xs text-gray-500">{order.orderDate}</td><td className="p-3"><span className="px-2 py-1 rounded-lg bg-gray-100 text-gray-700 text-xs font-black">{order.category}</span></td><td className="p-3 font-extrabold text-gray-800">{order.vendorName}</td><td className="p-3 text-right font-mono font-black text-[#2E6DB4]">{formatNumber(Number(order.amount || 0))}원</td><td className="p-3 text-gray-600">{order.memo || "-"}</td></tr>)}</tbody></table></div></section>
-    </div>
-  );
-}
-
 const ORDER_CATEGORIES: OrderCategory[] = ["식자재", "부식비", "주류", "식음료외 기타"];
 const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
   식자재: ["비알(식자재)", "쿠팡(식자재)", "네이버(식자재)"],
