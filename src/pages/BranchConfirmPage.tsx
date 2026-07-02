@@ -483,7 +483,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const activeBranchBrand = branch?.brand || "";
 
   useEffect(() => {
-    if (isHeadOfficeBranch && ["orders", "liquorInventory", "overtimeLog"].includes(activeTab)) {
+    if (isHeadOfficeBranch && ["orders", "liquorInventory"].includes(activeTab)) {
       setActiveTab("settle");
     }
     if (!isHeadOfficeBranch && activeTab === "officeWorkLog") {
@@ -515,7 +515,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       { id: "liquorInventory", label: "주류 재고", icon: Database }
     ] : []),
     { id: "roster", label: "직원현황", icon: User },
-    ...(isHeadOfficeBranch ? [{ id: "officeWorkLog", label: "근무내역", icon: ClipboardList }] : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
+    ...(isHeadOfficeBranch
+      ? [
+          { id: "officeWorkLog", label: "근무내역", icon: ClipboardList },
+          { id: "overtimeLog", label: "초과근무일지", icon: Clock }
+        ]
+      : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
     { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
   ] as Array<{ id: BranchDailyTab; label: string; icon: typeof CircleDollarSign }>;
 
@@ -885,7 +890,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                         key={tab.id}
                         type="button"
                         onClick={() => openDailySubTab(tab.id)}
-                        className={`branch-sidebar-subtab flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
+                        className={`branch-sidebar-subtab ${subActive ? "branch-sidebar-subtab-active" : "branch-sidebar-subtab-idle"} flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
                           subActive ? "bg-white/95 text-[#1A3C6E] shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
                         }`}
                       >
@@ -909,7 +914,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                           setMainCategory("monthly");
                           setMonthlyTab(tab.id);
                         }}
-                        className={`branch-sidebar-subtab flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
+                        className={`branch-sidebar-subtab ${subActive ? "branch-sidebar-subtab-active" : "branch-sidebar-subtab-idle"} flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
                           subActive ? "bg-white/95 text-indigo-900 shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
                         }`}
                       >
@@ -2831,7 +2836,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const distributeHeadOfficeOvertime = (rows: StaffRow[]) => {
     const groups = new Map<string, number[]>();
     rows.forEach((row, index) => {
-      const key = row.name || `row-${index}`;
+      const key = row.residentNumber || row.name || `row-${index}`;
       groups.set(key, [...(groups.get(key) || []), index]);
     });
 
@@ -2839,6 +2844,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     groups.forEach((indexes) => {
       const activeIndexes = indexes.filter((index) => next[index].officeWorkType !== "휴무");
       const standard = activeIndexes.reduce((value, index) => value || Number(next[index].standardHours || 0), 0) || defaultStandardHours;
+      const totalWorkHours = activeIndexes.reduce((sum, index) => sum + Number(next[index].workHours || 0), 0);
+      const totalDelta = parseFloat((totalWorkHours - standard).toFixed(1));
+      if (totalDelta <= 0) {
+        const lastIndex = activeIndexes[activeIndexes.length - 1];
+        if (lastIndex !== undefined) next[lastIndex].overtime = totalDelta;
+        return;
+      }
       let cumulativeHours = 0;
       let allocatedOvertime = 0;
       activeIndexes.forEach((index) => {
@@ -2959,7 +2971,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         ...source,
         segmentId: `segment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         officeWorkType: "근무",
-        officeWorkplace: branchName,
+        officeWorkplace: source.officeWorkplace || branchName,
+        standardHours: 0,
         clockIn: "",
         clockOut: "",
         workHours: 0,
@@ -2970,6 +2983,21 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return [...prev.slice(0, index + 1), nextRow, ...prev.slice(index + 1)];
     });
   };
+
+  const headOfficeDailyOvertimeRows = useMemo(() => {
+    if (!isHeadOffice) return [];
+    const byName = new Map<string, { name: string; workHours: number; standardHours: number; overtime: number }>();
+    staffRows.forEach((row, index) => {
+      if (row.officeWorkType === "휴무") return;
+      const key = row.residentNumber || row.name || `row-${index}`;
+      const current = byName.get(key) || { name: row.name || "-", workHours: 0, standardHours: 0, overtime: 0 };
+      current.workHours += Number(row.workHours || 0);
+      current.standardHours = current.standardHours || Number(row.standardHours || 0) || defaultStandardHours;
+      current.overtime += Number(row.overtime || 0);
+      byName.set(key, current);
+    });
+    return Array.from(byName.values()).filter((row) => row.workHours > 0 || row.overtime !== 0);
+  }, [defaultStandardHours, isHeadOffice, staffRows]);
 
   // Submit flow
   const handleSettleSubmit = async () => {
@@ -3351,21 +3379,30 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       const cardExpensesSum = cardExpenses.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
       const cashExpensesSum = cashExpenses.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
 
-      const cardText = cardExpensesSum > 0
-        ? `${formatNumber(cardExpensesSum)}(${cardExpenses.filter(e => e.amount).map(e => {
-            const detailStr = e.detail ? ` ${e.detail}` : "";
-            return `${e.classification}/${e.usage}${detailStr}`;
-          }).join(', ')})`
-        : "";
+      const summarizeExpenses = (rows: ExpenseRow[], total: number) => {
+        if (total <= 0) return "없음";
+        const categoryTotals = rows.reduce((acc, row) => {
+          const amount = Number(row.amount) || 0;
+          if (amount <= 0) return acc;
+          const category = row.classification || "기타";
+          acc.set(category, (acc.get(category) || 0) + amount);
+          return acc;
+        }, new Map<string, number>());
+        const categoryText = Array.from(categoryTotals.entries())
+          .map(([category, amount]) => `${category} ${formatNumber(amount)}원`)
+          .join(", ");
+        return categoryText ? `${formatNumber(total)}원 (${categoryText})` : `${formatNumber(total)}원`;
+      };
 
-      const cashText = cashExpensesSum > 0
-        ? `${formatNumber(cashExpensesSum)}(${cashExpenses.filter(e => e.amount).map(e => {
-            const detailStr = e.detail ? ` ${e.detail}` : "";
-            return `${e.classification}/${e.usage}${detailStr}`;
-          }).join(', ')})`
-        : "";
+      const cardText = summarizeExpenses(cardExpenses, cardExpensesSum);
+      const cashText = summarizeExpenses(cashExpenses, cashExpensesSum);
 
-      const workersText = staffRows.map(s => s.name).join(", ");
+      const workersText = Array.from(new Set(
+        staffRows
+          .filter((s) => s.officeWorkType !== "휴무" && Number(s.workHours || 0) > 0)
+          .map((s) => s.name)
+          .filter(Boolean)
+      )).join(", ") || "없음";
 
       const prevDayCashNum = Number(prevDayCash) || 0;
       const cashSalesNum = Number(cashSales) || 0;
@@ -3379,7 +3416,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 1. 현금 마감
 - 전일현금: ${formatNumber(prevDayCashNum)}원
 - 오늘현금매출: ${formatNumber(cashSalesNum)}원
-- 오늘현금지출: ${formatNumber(cashExpensesSum)}
+- 오늘현금지출: ${formatNumber(cashExpensesSum)}원
 - 오늘계좌이체: ${formatNumber(transferSalesNum)}원
 - 이론상잔액: ${formatNumber(theoreticalBalance)}원
 - 금고실사현금: ${formatNumber(actualCashInVault)}원
@@ -3647,7 +3684,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
-                className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                id="daily-settle-reset-button"
+                className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-black border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
               >
                 ↺ 정산 리셋
               </button>}
@@ -4086,6 +4124,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         </div>
 
         {isHeadOffice && (
+          <>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs min-w-[1160px]">
               <thead>
@@ -4100,24 +4139,41 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                   <th className="py-3 px-1 w-14 text-right">초과</th>
                   <th className="py-3 px-2 min-w-[280px]">업무내용</th>
                   <th className="py-3 px-2 w-44">초과 사유</th>
-                  <th className="py-3 px-1 w-14 text-center">분리</th>
                   <th className="py-3 px-2 w-10 text-center">삭제</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
                 {staffRows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-10 text-center text-gray-400">
+                    <td colSpan={11} className="py-10 text-center text-gray-400">
                       등록된 본사 직원이 없습니다. 추가 입력을 통해 인원을 생성해주세요.
                     </td>
                   </tr>
                 ) : (
                   staffRows.map((s, idx) => {
                     const isDayOff = s.officeWorkType === "휴무";
+                    const segmentKey = s.residentNumber || s.name;
+                    const firstSegmentIndex = staffRows.findIndex((row) => (row.residentNumber || row.name) === segmentKey);
+                    const isExtraSegment = firstSegmentIndex !== -1 && firstSegmentIndex !== idx;
                     const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !s.clockIn || !s.clockOut || !String(s.officeTaskMemo || "").trim() || !String(s.officeWorkplace || "").trim());
                     return (
                       <tr key={idx} className="hover:bg-gray-50/50">
-                        <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">{s.name}</td>
+                        {isExtraSegment ? (
+                          <td colSpan={4} className="py-3.5 px-2 bg-slate-50/60 border-r border-slate-100" aria-label={`${s.name} 추가 근무구간`} />
+                        ) : (
+                        <>
+                        <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span>{s.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => addOfficeWorkSegment(idx)}
+                              className="whitespace-nowrap rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 hover:bg-blue-100"
+                            >
+                              행 추가
+                            </button>
+                          </div>
+                        </td>
                         <td className="py-3.5 px-2">
                           <select
                             disabled={isDayOff}
@@ -4156,6 +4212,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             <option value="10.5">10.5h</option>
                           </select>
                         </td>
+                        </>
+                        )}
                         <td className="py-3.5 px-2">
                           <input
                             type="text"
@@ -4211,15 +4269,6 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             }`}
                           />
                         </td>
-                        <td className="py-3.5 px-1 text-center">
-                          <button
-                            type="button"
-                            onClick={() => addOfficeWorkSegment(idx)}
-                            className="whitespace-nowrap px-1.5 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black hover:bg-blue-100"
-                          >
-                            행 추가
-                          </button>
-                        </td>
                         <td className="py-3.5 px-2 text-center">
                           <button
                             type="button"
@@ -4236,6 +4285,30 @@ function DailySettleTab({ branchName }: { branchName: string }) {
               </tbody>
             </table>
           </div>
+          <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h4 className="text-xs font-black text-slate-800">하루 합산 초과/조기퇴근 내역</h4>
+              <span className="text-[10px] font-bold text-slate-400">동일 직원의 추가 근무구간을 합산합니다.</span>
+            </div>
+            {headOfficeDailyOvertimeRows.length === 0 ? (
+              <p className="text-xs font-bold text-slate-400">근무시간 입력 후 합산 내역이 표시됩니다.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {headOfficeDailyOvertimeRows.map((row) => (
+                  <span key={row.name} className={`rounded-xl border px-3 py-2 text-xs font-black ${
+                    row.overtime > 0
+                      ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                      : row.overtime < 0
+                        ? "border-rose-100 bg-rose-50 text-rose-700"
+                        : "border-slate-200 bg-white text-slate-500"
+                  }`}>
+                    {row.name} 근무 {Number(row.workHours.toFixed(1))}h / 기준 {row.standardHours}h / {row.overtime > 0 ? "+" : ""}{Number(row.overtime.toFixed(1))}h{row.overtime < 0 ? " 조기퇴근" : row.overtime > 0 ? " 초과" : ""}
+              </span>
+            ))}
+            </div>
+          )}
+        </div>
+          </>
         )}
 
         {!isHeadOffice && (
@@ -4492,6 +4565,17 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
   const [loading, setLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
 
+  const compactTimeRange = (clockIn: string, clockOut: string) => {
+    const compact = (value: string) => {
+      const text = String(value || "").trim();
+      if (!text || text === "00:00") return "";
+      return text.endsWith(":00") ? text.slice(0, 2).replace(/^0/, "") : text.replace(/^0/, "");
+    };
+    const start = compact(clockIn);
+    const end = compact(clockOut);
+    return start && end ? `${start}-${end}` : "";
+  };
+
   const load = useCallback(async () => {
     try {
       setLoading(true);
@@ -4502,7 +4586,36 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
         if (!metadataText) return;
         try {
           const metadata = JSON.parse(metadataText.trim());
-          (metadata.staffRows || []).forEach((staff: any) => {
+          const sourceStaff = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+          const calculatedOvertimeByIndex = new Map<number, number>();
+          const staffGroups = new Map<string, number[]>();
+          sourceStaff.forEach((staff: any, staffIndex: number) => {
+            const staffKey = staff.residentNumber || staff.name || `row-${staffIndex}`;
+            staffGroups.set(staffKey, [...(staffGroups.get(staffKey) || []), staffIndex]);
+          });
+          staffGroups.forEach((indexes) => {
+            const activeIndexes = indexes.filter((staffIndex) => sourceStaff[staffIndex]?.officeWorkType !== "휴무" && Number(sourceStaff[staffIndex]?.workHours || 0) > 0);
+            if (activeIndexes.length === 0) return;
+            const standardHours = activeIndexes.reduce((value, staffIndex) => value || Number(sourceStaff[staffIndex]?.standardHours || 0), 0) || 10;
+            const totalWorkHours = activeIndexes.reduce((sum, staffIndex) => sum + Number(sourceStaff[staffIndex]?.workHours || 0), 0);
+            const totalDelta = Number((totalWorkHours - standardHours).toFixed(1));
+            if (totalDelta <= 0) {
+              calculatedOvertimeByIndex.set(activeIndexes[activeIndexes.length - 1], totalDelta);
+              return;
+            }
+            let cumulativeHours = 0;
+            let allocatedOvertime = 0;
+            activeIndexes.forEach((staffIndex) => {
+              cumulativeHours += Number(sourceStaff[staffIndex]?.workHours || 0);
+              const totalOvertime = Math.max(0, cumulativeHours - standardHours);
+              const rowOvertime = Number((totalOvertime - allocatedOvertime).toFixed(1));
+              allocatedOvertime = totalOvertime;
+              calculatedOvertimeByIndex.set(staffIndex, rowOvertime);
+            });
+          });
+          sourceStaff.forEach((staff: any, staffIndex: number) => {
+            const storedOvertime = Number(staff.overtime || 0);
+            const effectiveOvertime = storedOvertime !== 0 ? storedOvertime : (calculatedOvertimeByIndex.get(staffIndex) || 0);
             nextRows.push({
               id: `${record.recordId || record.settleDate}-${staff.segmentId || staff.name}-${nextRows.length}`,
               date: record.settleDate,
@@ -4514,7 +4627,7 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
               clockOut: staff.clockOut || "",
               workHours: Number(staff.workHours || 0),
               standardHours: Number(staff.standardHours || 0),
-              overtime: Number(staff.overtime || 0),
+              overtime: effectiveOvertime,
               overtimeReason: staff.overtimeReason || "",
               taskMemo: staff.officeTaskMemo || ""
             });
@@ -4605,7 +4718,7 @@ function OfficeWorkLogTab({ branchName }: { branchName: string }) {
                   <div className="mt-2 space-y-1">
                     {items.slice(0, 3).map((item, itemIndex) => (
                       <div key={`${date}-${item.name}-${itemIndex}`} className="truncate text-[10px] font-bold text-gray-600">
-                        {item.name} {item.workType === "휴무" ? "휴무" : item.workplace}
+                        {item.name} {item.workType === "휴무" ? "휴무" : `${item.workplace} ${compactTimeRange(item.clockIn, item.clockOut)}`}
                       </div>
                     ))}
                     {items.length > 3 && <div className="text-[10px] font-black text-gray-400">+{items.length - 3}</div>}
