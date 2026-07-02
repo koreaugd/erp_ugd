@@ -5,7 +5,6 @@ import { AuthProvider } from "./contexts/AuthContext";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const BranchConfirmPage = lazy(() => import("./pages/BranchConfirmPage"));
-const InputPage = lazy(() => import("./pages/InputPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 
 function PageFallback() {
@@ -29,10 +28,7 @@ export default function App() {
           
           {/* 지점 확인 포털 */}
           <Route path="/branch-confirm" element={<BranchConfirmPage />} />
-          
-          {/* 일일 마감 상세 입력 */}
-          <Route path="/input" element={<InputPage />} />
-          
+
           {/* 본사 관리자 대시보드 */}
           <Route path="/admin" element={<AdminPage />} />
           
