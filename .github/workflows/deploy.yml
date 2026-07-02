@@ -9,7 +9,7 @@ on:
 # Allow this job to run in parallel or queue up
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -40,3 +40,4 @@ jobs:
           folder: dist # Folder to publish
           branch: gh-pages # Build output branch
           clean: true
+          single-commit: true
