@@ -2263,6 +2263,36 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box button:l
   color: #F6F5FA !important;
 }
 
+html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-settle-reset-button,
+html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-settle-reset-button * {
+  color: #111111 !important;
+}
+
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active {
+  background: var(--branch-vanilla) !important;
+  background-color: var(--branch-vanilla) !important;
+  border: 1px solid rgba(46, 109, 180, 0.22) !important;
+  color: #1A3C6E !important;
+  box-shadow: 0 4px 12px rgba(46, 109, 180, 0.14) !important;
+}
+
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active span,
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active svg {
+  color: #1A3C6E !important;
+}
+
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: rgba(33, 33, 33, 0.58) !important;
+  box-shadow: none !important;
+}
+
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle span,
+html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle svg {
+  color: rgba(33, 33, 33, 0.58) !important;
+}
+
 /* Latest branch corrections: keep only the intended rounded section borders. */
 .branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle,
 .branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] {
@@ -3268,4 +3298,3 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box button:l
 .branch-redesign .monthly-chip-honey {
   background: var(--branch-honey) !important;
 }
-

@@ -384,16 +384,49 @@ export const gasClient = {
       }
       const detail = fallbackDetails[index];
       const sourceStaff = detailedStaff.length > 0 ? detailedStaff : ((detail?.staff || []) as any[]);
-      for (const staff of sourceStaff) {
+      const calculatedOvertimeByIndex = new Map<number, number>();
+      const staffGroups = new Map<string, number[]>();
+      sourceStaff.forEach((staff, staffIndex) => {
+        const staffKey = staff.residentNumber || staff.staffName || staff.name || `row-${staffIndex}`;
+        staffGroups.set(staffKey, [...(staffGroups.get(staffKey) || []), staffIndex]);
+      });
+      staffGroups.forEach((indexes) => {
+        const activeIndexes = indexes.filter((staffIndex) => sourceStaff[staffIndex]?.officeWorkType !== "휴무" && Number(sourceStaff[staffIndex]?.workHours || 0) > 0);
+        if (activeIndexes.length === 0) return;
+        const standardHours = activeIndexes.reduce((value, staffIndex) => value || Number(sourceStaff[staffIndex]?.standardHours || 0), 0)
+          || (branchName === "본사" ? 10 : 0);
+        if (!standardHours) return;
+        const totalWorkHours = activeIndexes.reduce((sum, staffIndex) => sum + Number(sourceStaff[staffIndex]?.workHours || 0), 0);
+        const totalDelta = Number((totalWorkHours - standardHours).toFixed(1));
+        if (totalDelta <= 0) {
+          calculatedOvertimeByIndex.set(activeIndexes[activeIndexes.length - 1], totalDelta);
+          return;
+        }
+        let cumulativeHours = 0;
+        let allocatedOvertime = 0;
+        activeIndexes.forEach((staffIndex) => {
+          cumulativeHours += Number(sourceStaff[staffIndex]?.workHours || 0);
+          const totalOvertime = Math.max(0, cumulativeHours - standardHours);
+          const rowOvertime = Number((totalOvertime - allocatedOvertime).toFixed(1));
+          allocatedOvertime = totalOvertime;
+          calculatedOvertimeByIndex.set(staffIndex, rowOvertime);
+        });
+      });
+      for (const [staffIndex, staff] of sourceStaff.entries()) {
         const workplace = staff.officeWorkplace || branchName;
+        const workHours = Number(staff.workHours || 0);
+        const rawStandardHours = Number(staff.standardHours || 0);
+        const standardHours = rawStandardHours || (branchName === "본사" && staff.division === "정직원" && workHours > 0 ? 10 : 0);
+        const storedOvertime = Number(staff.overtime || 0);
+        const effectiveOvertime = storedOvertime !== 0 ? storedOvertime : (calculatedOvertimeByIndex.get(staffIndex) || 0);
         const isDispatchedFromHeadOffice = branchName === "본사" && workplace !== "본사" && Number(staff.workHours || 0) > 0;
-        const isPartTime = (staff.division === "파트타이머" || isDispatchedFromHeadOffice) && Number(staff.workHours || 0) > 0;
-        const isOvertime = staff.division === "정직원" && Number(staff.overtime || 0) !== 0;
+        const isPartTime = (staff.division === "파트타이머" || isDispatchedFromHeadOffice) && workHours > 0;
+        const isOvertime = staff.division === "정직원" && effectiveOvertime !== 0;
         if ((logType === "partTime" && !isPartTime) || (logType === "overtime" && !isOvertime)) continue;
         const staffName = staff.staffName || staff.name;
-        records.push({ recordId: item.recordId, settleDate: item.settleDate, segmentId: staff.segmentId || "", staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours: Number(staff.workHours || 0), standardHours: Number(staff.standardHours || 0), overtime: Number(staff.overtime || 0), overtimeReason: staff.overtimeReason || "-", officeWorkplace: workplace, officeTaskMemo: staff.officeTaskMemo || "", writer: item.submittedBy || "점장" });
+        records.push({ recordId: item.recordId, settleDate: item.settleDate, segmentId: staff.segmentId || "", staffName, clockIn: staff.clockIn || "00:00", clockOut: staff.clockOut || "00:00", workHours, standardHours, overtime: effectiveOvertime, overtimeReason: staff.overtimeReason || "-", officeWorkplace: workplace, officeTaskMemo: staff.officeTaskMemo || "", writer: item.submittedBy || "점장" });
         const aggregate = summary.get(staffName) || { hours: 0, overtime: 0, dates: new Set<string>() };
-        aggregate.hours += Number(staff.workHours || 0); aggregate.overtime += Number(staff.overtime || 0); aggregate.dates.add(item.settleDate); summary.set(staffName, aggregate);
+        aggregate.hours += workHours; aggregate.overtime += effectiveOvertime; aggregate.dates.add(item.settleDate); summary.set(staffName, aggregate);
       }
       });
       records.sort((a, b) => b.settleDate.localeCompare(a.settleDate));
