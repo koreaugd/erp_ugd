@@ -79,11 +79,11 @@ const formatMobilePhone = (tail8: string) => {
 
 const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
 
-const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string }>) => {
+const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string; division?: string }>, division?: string) => {
   const cleanName = name.trim();
   if (!cleanName) return "";
   const incomingBirth = residentBirthKey(residentNumber);
-  const sameName = employees.filter((employee) => employee.name?.trim() === cleanName);
+  const sameName = employees.filter((employee) => employee.name?.trim() === cleanName && (!division || employee.division === division));
   if (sameName.length === 0) return "";
   const hasMissingResident = sameName.some((employee) => !residentBirthKey(employee.residentNumber));
   if (hasMissingResident || !incomingBirth) {
@@ -482,6 +482,34 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     { id: "laborContract", label: "근로계약서", icon: Briefcase }
   ];
 
+  const dailySubTabs = [
+    { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
+    ...(!isHeadOfficeBranch ? [
+      { id: "orders", label: "발주관리", icon: ShoppingCart },
+      { id: "liquorInventory", label: "주류 재고", icon: Database }
+    ] : []),
+    { id: "roster", label: "직원현황", icon: User },
+    ...(isHeadOfficeBranch ? [{ id: "officeWorkLog", label: "근무내역", icon: ClipboardList }] : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
+    { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
+  ] as Array<{ id: BranchDailyTab; label: string; icon: typeof CircleDollarSign }>;
+
+  const monthlySubTabs = [
+    { id: "purchaseSales", label: "매입매출", icon: FileText },
+    { id: "partTimeSalary", label: "파트타이머 급여대장", icon: Users },
+    { id: "cashManagement", label: "현금관리", icon: CircleDollarSign },
+    { id: "cashExpenses", label: "현금지출", icon: Coins },
+    { id: "cardExpenses", label: "카드지출", icon: ShoppingCart }
+  ] as Array<{ id: typeof monthlyTab; label: string; icon: typeof FileText }>;
+
+  const openDailySubTab = (tabId: BranchDailyTab) => {
+    if (activeTab === "liquorInventory" && tabId !== "liquorInventory" && (window as any).__ugdLiquorInventoryDirty) {
+      if (!window.confirm("저장하지 않은 주류 재고 입력값이 있습니다. 저장하지 않고 이동할까요?")) return;
+      (window as any).__ugdLiquorInventoryDirty = false;
+    }
+    setMainCategory("daily");
+    setActiveTab(tabId);
+  };
+
   // 1. Admin Settings State and Sync listening
   const [adminSettings, setAdminSettings] = useState(() => {
     const saved = localStorage.getItem("erp_admin_settings");
@@ -794,8 +822,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             const IconComp = mt.icon;
             const active = mainCategory === mt.id;
             return (
+              <div key={mt.id} className="w-full">
               <button
-                key={mt.id}
                 onClick={() => {
                   setMainCategory(mt.id as any);
                   if (mt.id === "dashboard") {
@@ -821,6 +849,52 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 <IconComp className="w-4 h-4" />
                 <span>{mt.label}</span>
               </button>
+              {active && mt.id === "daily" && (
+                <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
+                  {dailySubTabs.map((tab) => {
+                    const IconSub = tab.icon;
+                    const subActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => openDailySubTab(tab.id)}
+                        className={`branch-sidebar-subtab flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
+                          subActive ? "bg-white/95 text-[#1A3C6E] shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
+                        }`}
+                      >
+                        <IconSub className="w-3.5 h-3.5" />
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {active && mt.id === "monthly" && (
+                <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
+                  {monthlySubTabs.map((tab) => {
+                    const IconSub = tab.icon;
+                    const subActive = monthlyTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => {
+                          setMainCategory("monthly");
+                          setMonthlyTab(tab.id);
+                        }}
+                        className={`branch-sidebar-subtab flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
+                          subActive ? "bg-white/95 text-indigo-900 shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
+                        }`}
+                      >
+                        <IconSub className="w-3.5 h-3.5" />
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              </div>
             );
           })}
         </nav>
@@ -891,97 +965,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
       {/* Main Page Area Right */}
       <div className="grow flex flex-col min-h-screen overflow-x-hidden">
-        {/* Sub Navigation Bar according to selected Main Category */}
-        {mainCategory === "daily" && (
-          <div className="bg-white border-b border-gray-100 sticky top-0 md:top-0 z-30 shadow-xs">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <div className="flex space-x-6 overflow-x-auto no-scrollbar scroll-smooth">
-                {[
-                  { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
-                  ...(!isHeadOfficeBranch ? [
-                    { id: "orders", label: "발주관리", icon: ShoppingCart },
-                    { id: "liquorInventory", label: "주류 재고", icon: Database }
-                  ] : []),
-                  { id: "roster", label: "직원현황", icon: User },
-                  ...(isHeadOfficeBranch ? [{ id: "officeWorkLog", label: "근무내역", icon: ClipboardList }] : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
-                  { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
-                ].map((t) => {
-                  const IconComp = t.icon;
-                  const active = activeTab === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        if (activeTab === "liquorInventory" && t.id !== "liquorInventory" && (window as any).__ugdLiquorInventoryDirty) {
-                          if (!window.confirm("저장하지 않은 주류 재고 입력값이 있습니다. 저장하지 않고 이동할까요?")) return;
-                          (window as any).__ugdLiquorInventoryDirty = false;
-                        }
-                        setActiveTab(t.id as any);
-                      }}
-                      className={`flex items-center gap-1.5 py-4 px-1 border-b-2 font-black text-xs sm:text-sm transition-all relative cursor-pointer whitespace-nowrap ${
-                        active
-                          ? "border-[#2E6DB4] text-[#2E6DB4]"
-                          : "border-transparent text-gray-400 hover:text-gray-650"
-                      }`}
-                      id={`tab-btn-${t.id}`}
-                    >
-                      <IconComp className={`w-4 h-4 ${active ? "text-[#2E6DB4]" : "text-gray-400"}`} />
-                      {t.label}
-                      {active && (
-                        <motion.div
-                          layoutId="tabUnderlineDaily"
-                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#2E6DB4]"
-                          transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {mainCategory === "monthly" && (
-          <div className="bg-white border-b border-gray-100 sticky top-0 md:top-0 z-30 shadow-xs">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <div className="flex space-x-6 overflow-x-auto no-scrollbar scroll-smooth">
-                {[
-                  { id: "purchaseSales", label: "매입매출", icon: FileText },
-                  { id: "partTimeSalary", label: "파트타이머 급여대장", icon: Users },
-                  { id: "cashManagement", label: "현금관리", icon: CircleDollarSign },
-                  { id: "cashExpenses", label: "현금지출", icon: Coins },
-                  { id: "cardExpenses", label: "카드지출", icon: ShoppingCart }
-                ].map((t) => {
-                  const IconComp = t.icon;
-                  const active = monthlyTab === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setMonthlyTab(t.id as any)}
-                      className={`flex items-center gap-1.5 py-4 px-1 border-b-2 font-black text-xs sm:text-sm transition-all relative cursor-pointer whitespace-nowrap ${
-                        active
-                          ? "border-[#2E6DB4] text-[#2E6DB4]"
-                          : "border-transparent text-gray-400 hover:text-gray-650"
-                      }`}
-                    >
-                      <IconComp className={`w-4 h-4 ${active ? "text-[#2E6DB4]" : "text-gray-400"}`} />
-                      {t.label}
-                      {active && (
-                        <motion.div
-                          layoutId="tabUnderlineMonthly"
-                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#2E6DB4]"
-                          transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Content Panel Frame */}
         <main className="grow p-4 sm:p-6 pb-20 max-w-7xl w-full mx-auto">
           {mainCategory === "dashboard" && <BranchDashboardTab branchName={activeBranchName} />}
@@ -2480,13 +2463,15 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
-    const existingNames = new Set(staffRows.map((staff) => staff.name));
     const nextRows: StaffRow[] = [];
 
     for (const draft of filledDrafts) {
       const name = draft.name.trim();
-      if (existingNames.has(name) || nextRows.some((row) => row.name === name)) {
-        triggerToast(`${name} 님은 이미 정산 표에 등록된 이름입니다.`, "error");
+      if (
+        staffRows.some((staff) => staff.name === name && staff.division === draft.division) ||
+        nextRows.some((row) => row.name === name && row.division === draft.division)
+      ) {
+        triggerToast(`${name} 님은 이미 ${draft.division} 정산 표에 등록된 이름입니다.`, "error");
         return;
       }
 
@@ -4760,18 +4745,6 @@ function OrderManagementTab({ branchName }: { branchName: string }) {
   );
 }
 
-function LiquorInventoryTab({ branchName }: { branchName: string }) {
-  const [rows, setRows] = useState<any[]>([]);
-  const [itemName, setItemName] = useState("");
-  const [stockQty, setStockQty] = useState("");
-  const [memo, setMemo] = useState("");
-  const storageKey = "erp_liquor_inventory_" + branchName;
-  useEffect(() => { try { const saved = localStorage.getItem(storageKey); if (saved) setRows(JSON.parse(saved)); } catch (err) { console.error("Failed to load liquor inventory", err); } }, [storageKey]);
-  const saveRows = (next: any[]) => { setRows(next); localStorage.setItem(storageKey, JSON.stringify(next)); };
-  const addRow = (event: React.FormEvent) => { event.preventDefault(); if (!itemName.trim()) return; saveRows([{ id: "liq-" + Date.now(), itemName: itemName.trim(), stockQty: stockQty.trim(), memo: memo.trim(), checkedAt: toLocalDateInputValue() }, ...rows]); setItemName(""); setStockQty(""); setMemo(""); };
-  return <div className="space-y-5" id="liquor-inventory-tab"><section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm"><h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고</h3><form onSubmit={addRow} className="grid grid-cols-1 md:grid-cols-[1fr_140px_1fr_auto] gap-3 mt-4 items-end"><input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="주류명" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="재고수량" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold" /><input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="비고" className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm" /><button className="px-5 py-2.5 bg-[#2E6DB4] text-white rounded-xl text-xs font-black">등록</button></form></section><section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">확인일</th><th className="p-3">주류명</th><th className="p-3">재고수량</th><th className="p-3">비고</th></tr></thead><tbody className="divide-y divide-gray-100">{rows.length === 0 ? <tr><td colSpan={4} className="p-10 text-center text-gray-400 font-bold">등록된 주류 재고가 없습니다.</td></tr> : rows.map((row) => <tr key={row.id}><td className="p-3 font-mono text-xs text-gray-500">{row.checkedAt}</td><td className="p-3 font-black">{row.itemName}</td><td className="p-3">{row.stockQty || "-"}</td><td className="p-3 text-gray-600">{row.memo || "-"}</td></tr>)}</tbody></table></section></div>;
-}
-
 const ORDER_CATEGORIES: OrderCategory[] = ["식자재", "부식비", "주류", "식음료외 기타"];
 const ORDER_DEFAULT_VENDORS: Record<OrderCategory, string[]> = {
   식자재: ["비알(식자재)", "쿠팡(식자재)", "네이버(식자재)"],
@@ -5365,25 +5338,6 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     });
   };
 
-  const saveDrafts = () => {
-    const entries = (Object.entries(draftCells) as Array<[string, { inbound: string; sold: string }]>).filter(([, cell]) => cell.inbound || cell.sold);
-    if (entries.length === 0) return;
-    const nextMovements = entries.map(([key, cell], index) => {
-      const [productId, movementDate] = key.split("|");
-      return {
-        id: "liq-move-" + Date.now() + "-" + index,
-        productId,
-        movementDate,
-        inbound: cleanNumeric(cell.inbound),
-        sold: cleanNumeric(cell.sold),
-        memo: ""
-      };
-    });
-    saveMovements([...nextMovements, ...movements]);
-    setDraftCells({});
-    (window as any).__ugdLiquorInventoryDirty = false;
-  };
-
   const stockOf = (productId: string, untilDate?: string) => {
     return movements
       .filter((movement) => movement.productId === productId && (!untilDate || movement.movementDate <= untilDate))
@@ -5642,7 +5596,7 @@ function RosterTab({ branchName }: { branchName: string }) {
         if (cancelled) return;
         const ownFiltered = ownRoster.filter((employee: any) => !isSampleEmployee(employee));
         const merged: any[] = [...ownFiltered];
-        const mergedNames = new Set(merged.map((employee: any) => String(employee.name || "").trim()).filter(Boolean));
+        const mergedNames = new Set(merged.map((employee: any) => `${String(employee.name || "").trim()}|${employee.division || ""}`).filter(Boolean));
 
         const recentCutoff = new Date();
         recentCutoff.setDate(recentCutoff.getDate() - 7);
@@ -5655,11 +5609,13 @@ function RosterTab({ branchName }: { branchName: string }) {
             const metadata = JSON.parse(metadataText);
             (metadata.staffRows || []).forEach((staff: any) => {
               const name = String(staff.name || staff.staffName || "").trim();
-              if (!name || mergedNames.has(name) || isSampleEmployee(staff)) return;
+              const staffDivision = staff.division === "정직원" ? "정직원" : "파트타이머";
+              const staffKey = `${name}|${staffDivision}`;
+              if (!name || mergedNames.has(staffKey) || isSampleEmployee(staff)) return;
               merged.push({
                 id: `daily-${record.settleDate}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 name,
-                division: staff.division === "정직원" ? "정직원" : "파트타이머",
+                division: staffDivision,
                 residentNumber: formatResidentNumber(staff.residentNumber || ""),
                 contractType: staff.division === "정직원" ? "4대보험" : "3.3%",
                 entryDate: staff.entryDate || staff.hireDate || "",
@@ -5671,7 +5627,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                 addReasonMemo: staff.addReasonMemo || "",
                 ...(staff.division === "정직원" ? { rank: staff.rank || "" } : {})
               });
-              mergedNames.add(name);
+              mergedNames.add(staffKey);
             });
           } catch {}
         });
@@ -5823,7 +5779,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       alert("기타 추가 사유를 입력해 주세요.");
       return;
     }
-    const matchedDup = getSameNameWarning(newName, formattedResident, employees);
+    const matchedDup = getSameNameWarning(newName, formattedResident, employees, division);
     if (matchedDup) {
       alert(matchedDup);
       return;
@@ -5907,7 +5863,7 @@ function RosterTab({ branchName }: { branchName: string }) {
         alert(`${name} 님의 기타 추가 사유를 입력해 주세요.`);
         return;
       }
-      const matchedDup = getSameNameWarning(name, formattedResident, [...employees, ...nextEmployees]);
+      const matchedDup = getSameNameWarning(name, formattedResident, [...employees, ...nextEmployees], draft.division);
       if (matchedDup) {
         alert(matchedDup);
         return;
