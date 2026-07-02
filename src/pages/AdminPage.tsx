@@ -737,10 +737,6 @@ export default function AdminPage() {
             <Users className="w-5 h-5" />
             직원명부
           </button>}
-          <div className="hidden">
-            <TrendingUp className="w-5 h-5" />
-            실시간 매출 현황
-          </div>
           <button
             onClick={logout}
             className="admin-logout-link w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-white/80 hover:text-white font-semibold text-sm cursor-pointer transition-all"
