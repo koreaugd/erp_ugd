@@ -5195,6 +5195,9 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const [classification, setClassification] = useState("샴페인");
   const [itemName, setItemName] = useState("");
   const [draftDate, setDraftDate] = useState(() => toLocalDateInputValue());
+  const [inventoryView, setInventoryView] = useState<"daily" | "weekly">("daily");
+  const [categoryFilter, setCategoryFilter] = useState("전체");
+  const [weeklyViewDate, setWeeklyViewDate] = useState(() => toLocalDateInputValue());
   const [draftCells, setDraftCells] = useState<Record<string, { inbound: string; sold: string }>>({});
 
   useEffect(() => {
@@ -5393,96 +5396,120 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       .reduce((sum, movement) => sum + Number(movement[field] || 0), 0);
   };
 
-  const visibleDates: string[] = useMemo(() => {
-    const base = new Date(draftDate + "T00:00:00");
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => categoryFilter === "전체" || product.classification === categoryFilter);
+  }, [categoryFilter, products]);
+
+  const weekDates = useMemo(() => {
+    const base = new Date(`${weeklyViewDate}T00:00:00`);
     return Array.from({ length: 7 }, (_, index) => {
       const date = new Date(base);
       date.setDate(base.getDate() - 6 + index);
       return toLocalDateInputValue(date);
     });
-  }, [draftDate]);
+  }, [weeklyViewDate]);
+
+  const getDraftOrSavedAmount = (productId: string, date: string, field: "inbound" | "sold") => {
+    const draft = draftCells[productId + "|" + date]?.[field];
+    return draft !== undefined && draft !== "" ? Number(draft || 0) : savedAmount(productId, date, field);
+  };
+
+  const stockBeforeDate = (productId: string, date: string) => {
+    return movements
+      .filter((movement) => movement.productId === productId && movement.movementDate < date)
+      .reduce((sum, movement) => sum + Number(movement.inbound || 0) - Number(movement.sold || 0), 0);
+  };
+
+  const stockOnDate = (productId: string, date: string) => {
+    return stockBeforeDate(productId, date) + getDraftOrSavedAmount(productId, date, "inbound") - getDraftOrSavedAmount(productId, date, "sold");
+  };
 
   return (
     <div className="space-y-5" id="liquor-inventory-tab">
       <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
         <div>
           <h3 className="text-base font-black text-gray-900 flex items-center gap-2"><Database className="w-5 h-5 text-[#2E6DB4]" /> 주류 재고 관리표</h3>
-          <p className="text-xs text-gray-400 mt-1">상품 기본정보를 등록하고 날짜별 입고, 판매, 재고 흐름을 관리합니다.</p>
+          <p className="text-xs text-gray-400 mt-1">지점 입력은 당일 입고/판매만 빠르게 작성하고, 7일 보기에서 최근 흐름을 확인합니다.</p>
         </div>
-        <form onSubmit={addProduct} className="grid grid-cols-1 xl:grid-cols-[170px_1fr_auto] gap-3 items-end">
-          <select value={classification} onChange={(e) => setClassification(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
-            {LIQUOR_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <label className="relative group">
-            <textarea value={itemName} onChange={(e) => setItemName(e.target.value)} title={VENDOR_HINT} rows={1} placeholder="상품명 예: 크룩 그랑뀌베, 돔페리뇽" className="w-full h-[42px] px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none overflow-y-auto" />
-            <span className="pointer-events-none absolute left-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
-          </label>
-          <button className="h-[42px] px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
-        </form>
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setInventoryView("daily")} className={`px-4 py-2 rounded-xl text-xs font-black ${inventoryView === "daily" ? "bg-[#2E6DB4] text-white" : "bg-white text-slate-500 border border-slate-200"}`}>당일 입력</button>
+              <button type="button" onClick={() => setInventoryView("weekly")} className={`px-4 py-2 rounded-xl text-xs font-black ${inventoryView === "weekly" ? "bg-[#2E6DB4] text-white" : "bg-white text-slate-500 border border-slate-200"}`}>7일 보기</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {["전체", ...LIQUOR_CATEGORIES].map((item) => (
+                <button key={item} type="button" onClick={() => setCategoryFilter(item)} className={`rounded-full border px-3 py-1.5 text-xs font-black ${categoryFilter === item ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200"}`}>
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+          <form onSubmit={addProduct} className="rounded-2xl border border-slate-100 bg-white p-4 space-y-3">
+            <div className="grid grid-cols-[120px_1fr] gap-2">
+              <select value={classification} onChange={(e) => setClassification(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold bg-white">
+                {LIQUOR_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <label className="relative group">
+                <textarea value={itemName} onChange={(e) => setItemName(e.target.value)} title={VENDOR_HINT} rows={1} placeholder="상품명 대량등록" className="w-full h-[42px] px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-bold resize-none overflow-y-auto" />
+                <span className="pointer-events-none absolute right-0 top-full mt-2 z-20 hidden rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white shadow-lg group-focus-within:block">{VENDOR_HINT}</span>
+              </label>
+            </div>
+            <button className="h-[40px] w-full px-5 bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5"><Plus className="w-4 h-4" /> 상품 추가</button>
+          </form>
+        </div>
       </section>
 
+      {inventoryView === "daily" ? (
       <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, -7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">이전 7일</button>
-            <button type="button" onClick={() => setDraftDate(toLocalDateInputValue())} className="h-[38px] px-3 rounded-xl border border-[#2E6DB4]/20 bg-[#2E6DB4]/10 text-xs font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/15">이번 7일</button>
-            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, 7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">다음 7일</button>
+            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, -1))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">이전날</button>
+            <button type="button" onClick={() => setDraftDate(toLocalDateInputValue())} className="h-[38px] px-3 rounded-xl border border-[#2E6DB4]/20 bg-[#2E6DB4]/10 text-xs font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/15">오늘</button>
+            <button type="button" onClick={() => setDraftDate((current) => addDaysToDateInputValue(current, 1))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">다음날</button>
             <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
-            <span className="text-xs text-gray-400 font-bold">선택한 날짜 기준 최근 7일이 표시됩니다.</span>
+            <span className="text-xs text-gray-400 font-bold">선택한 하루의 입고/판매만 입력합니다.</span>
           </div>
           <div className="h-[42px] px-5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장</div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-xs">
-            <thead className="bg-[#202A5A] text-white font-black">
+        <div className="max-h-[68vh] overflow-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="sticky top-0 z-20 bg-[#202A5A] text-white font-black">
               <tr>
-                <th rowSpan={2} className="p-2 text-left w-20">분류</th>
-                <th rowSpan={2} className="p-2 text-left w-36">상품명</th>
-                <th rowSpan={2} className="p-2 text-center bg-slate-700 w-16">현재</th>
-                {visibleDates.map((date) => <th key={date} colSpan={3} className="p-1.5 text-center border-l border-white/20">{date.slice(5)}</th>)}
-              </tr>
-              <tr>
-                {visibleDates.map((date) => (
-                  <React.Fragment key={date}>
-                    <th className="p-1 bg-blue-100 text-blue-900 w-11">입</th>
-                    <th className="p-1 bg-rose-100 text-rose-900 w-11">판</th>
-                    <th className="p-1 bg-green-100 text-green-900 w-11">재</th>
-                  </React.Fragment>
-                ))}
+                <th className="p-3 text-left w-24">분류</th>
+                <th className="p-3 text-left w-48">상품명</th>
+                <th className="p-3 text-center bg-slate-700 w-20">전일재고</th>
+                <th className="p-3 text-center bg-blue-100 text-blue-900 w-28">오늘 입고</th>
+                <th className="p-3 text-center bg-rose-100 text-rose-900 w-28">오늘 판매</th>
+                <th className="p-3 text-center bg-green-100 text-green-900 w-20">오늘 재고</th>
+                <th className="p-3 text-center w-12">관리</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {products.length === 0 ? (
-                <tr><td colSpan={3 + visibleDates.length * 3} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
-              ) : products.map((product) => {
+              {filteredProducts.length === 0 ? (
+                <tr><td colSpan={7} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
+              ) : filteredProducts.map((product) => {
+                const key = product.id + "|" + draftDate;
+                const inSum = savedAmount(product.id, draftDate, "inbound");
+                const soldSum = savedAmount(product.id, draftDate, "sold");
+                const draft = draftCells[key] || { inbound: "", sold: "" };
                 return (
                   <tr key={product.id} className="hover:bg-slate-50/70">
-                    <td className="p-2 whitespace-nowrap">
+                    <td className="p-3 whitespace-nowrap">
                       <span className={`inline-flex min-w-[58px] justify-center rounded-lg border px-2 py-1 text-[11px] font-black ${getLiquorCategoryClass(product.classification)}`}>
                         {product.classification}
                       </span>
                     </td>
-                    <td className="p-2 font-black text-gray-900">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate" title={product.itemName}>{product.itemName}</span>
-                        <button type="button" onClick={() => deleteProduct(product)} className="shrink-0 text-gray-300 hover:text-rose-600" aria-label={product.itemName + " 삭제"}><X className="w-3.5 h-3.5" /></button>
-                      </div>
+                    <td className="p-3 font-black text-gray-900">
+                      <span className="truncate" title={product.itemName}>{product.itemName}</span>
                     </td>
-                    <td className="p-2 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
-                    {visibleDates.map((date) => {
-                      const key = product.id + "|" + date;
-                      const inSum = savedAmount(product.id, date, "inbound");
-                      const soldSum = savedAmount(product.id, date, "sold");
-                      const draft = draftCells[key] || { inbound: "", sold: "" };
-                      const previewStock = stockOf(product.id, date) + Number(draft.inbound || 0) - Number(draft.sold || 0);
-                      return (
-                        <React.Fragment key={date}>
-                          <td className="p-1 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, date, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : ""} className="w-10 rounded-md border border-blue-100 bg-white px-1 py-1 text-center font-mono font-black text-blue-800" /></td>
-                          <td className="p-1 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, date, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : ""} className="w-10 rounded-md border border-rose-100 bg-white px-1 py-1 text-center font-mono font-black text-rose-800" /></td>
-                          <td className="p-1 text-center font-mono bg-green-50 font-black">{previewStock}</td>
-                        </React.Fragment>
-                      );
-                    })}
+                    <td className="p-3 text-center font-mono font-black bg-slate-50">{stockBeforeDate(product.id, draftDate)}</td>
+                    <td className="p-2 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, draftDate, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : "0"} className="w-full rounded-xl border border-blue-100 bg-white px-2 py-2 text-center font-mono font-black text-blue-800" /></td>
+                    <td className="p-2 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, draftDate, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : "0"} className="w-full rounded-xl border border-rose-100 bg-white px-2 py-2 text-center font-mono font-black text-rose-800" /></td>
+                    <td className={`p-3 text-center font-mono font-black ${stockOnDate(product.id, draftDate) < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-50 text-slate-800"}`}>{stockOnDate(product.id, draftDate)}</td>
+                    <td className="p-3 text-center">
+                      <button type="button" onClick={() => deleteProduct(product)} className="text-gray-300 hover:text-rose-600" aria-label={product.itemName + " 삭제"}><X className="w-4 h-4" /></button>
+                    </td>
                   </tr>
                 );
               })}
@@ -5490,6 +5517,67 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
           </table>
         </div>
       </section>
+      ) : (
+      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setWeeklyViewDate((current) => addDaysToDateInputValue(current, -7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">이전 7일</button>
+            <button type="button" onClick={() => setWeeklyViewDate(toLocalDateInputValue())} className="h-[38px] px-3 rounded-xl border border-[#2E6DB4]/20 bg-[#2E6DB4]/10 text-xs font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/15">이번 7일</button>
+            <button type="button" onClick={() => setWeeklyViewDate((current) => addDaysToDateInputValue(current, 7))} className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50">다음 7일</button>
+            <input type="date" value={weeklyViewDate} onChange={(e) => setWeeklyViewDate(e.target.value)} className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm font-mono font-bold" />
+            <span className="text-xs text-gray-400 font-bold">선택한 날짜 기준 최근 7일 흐름을 확인합니다.</span>
+          </div>
+        </div>
+        <div className="max-h-[68vh] overflow-auto">
+          <table className="w-full min-w-[980px] text-xs">
+            <thead className="bg-[#202A5A] text-white font-black">
+              <tr>
+                <th rowSpan={2} className="sticky left-0 top-0 z-30 bg-[#202A5A] p-2 text-left w-20">분류</th>
+                <th rowSpan={2} className="sticky left-20 top-0 z-30 bg-[#202A5A] p-2 text-left w-44">상품명</th>
+                <th rowSpan={2} className="sticky top-0 z-20 p-2 text-center bg-slate-700 w-16">현재</th>
+                {weekDates.map((date) => <th key={date} colSpan={3} className="sticky top-0 z-20 bg-[#202A5A] p-1.5 text-center border-l border-white/20">{date.slice(5)}</th>)}
+              </tr>
+              <tr>
+                {weekDates.map((date) => (
+                  <React.Fragment key={date}>
+                    <th className="sticky top-[29px] z-20 p-1 bg-blue-100 text-blue-900 w-10">입</th>
+                    <th className="sticky top-[29px] z-20 p-1 bg-rose-100 text-rose-900 w-10">판</th>
+                    <th className="sticky top-[29px] z-20 p-1 bg-green-100 text-green-900 w-10">재</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredProducts.length === 0 ? (
+                <tr><td colSpan={3 + weekDates.length * 3} className="p-10 text-center text-gray-400 font-bold">등록된 주류 상품이 없습니다.</td></tr>
+              ) : filteredProducts.map((product) => (
+                <tr key={product.id} className="hover:bg-slate-50/70">
+                  <td className="sticky left-0 z-10 bg-white p-2 whitespace-nowrap">
+                    <span className={`inline-flex min-w-[58px] justify-center rounded-lg border px-2 py-1 text-[11px] font-black ${getLiquorCategoryClass(product.classification)}`}>{product.classification}</span>
+                  </td>
+                  <td className="sticky left-20 z-10 bg-white p-2 font-black text-gray-900">
+                    <span className="truncate" title={product.itemName}>{product.itemName}</span>
+                  </td>
+                  <td className="p-2 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
+                  {weekDates.map((date) => {
+                    const inbound = getDraftOrSavedAmount(product.id, date, "inbound");
+                    const sold = getDraftOrSavedAmount(product.id, date, "sold");
+                    const stock = stockOnDate(product.id, date);
+                    return (
+                      <React.Fragment key={date}>
+                        <td className="p-1 text-center font-mono bg-blue-50 text-blue-800">{inbound || ""}</td>
+                        <td className="p-1 text-center font-mono bg-rose-50 text-rose-800">{sold || ""}</td>
+                        <td className={`p-1 text-center font-mono font-black ${stock < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-50 text-slate-800"}`}>{stock}</td>
+                      </React.Fragment>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      )}
     </div>
   );
 }
