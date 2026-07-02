@@ -1,12 +1,40 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const appVersion = process.env.GITHUB_SHA || (() => {
+    try {
+      return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    } catch {
+      return `local-${Date.now()}`;
+    }
+  })();
+
   return {
     base: './',
-    plugins: [react(), tailwindcss()],
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
+    plugins: [
+      {
+        name: 'ugd-app-version',
+        buildStart() {
+          const publicDir = path.resolve(__dirname, 'public');
+          fs.mkdirSync(publicDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(publicDir, 'app-version.json'),
+            JSON.stringify({ version: appVersion, builtAt: new Date().toISOString() }, null, 2),
+            'utf8'
+          );
+        },
+      },
+      react(),
+      tailwindcss()
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

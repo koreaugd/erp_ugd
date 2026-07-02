@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useAuthContext } from "../contexts/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
 import type { LoginBranch } from "../api/firebaseAuth";
+import { ensureLatestAppVersion } from "../utils/appVersion";
 
 export default function LoginPage() {
   const { user, login, loading, error, failedAttempts, setError } = useAuthContext();
@@ -14,6 +15,7 @@ export default function LoginPage() {
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
   const [showBranchSelect, setShowBranchSelect] = useState(false);
+  const [checkingVersion, setCheckingVersion] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,6 +42,11 @@ export default function LoginPage() {
       setShowBranchSelect(true);
       return;
     }
+
+    setCheckingVersion(true);
+    const latest = await ensureLatestAppVersion();
+    setCheckingVersion(false);
+    if (!latest) return;
 
     const success = await login(adminMode ? null : selectedBranch, pin);
     if (success) setPin("");
@@ -92,7 +99,7 @@ export default function LoginPage() {
               required
               value={pin}
               onChange={handlePinChange}
-              disabled={loading}
+              disabled={loading || checkingVersion}
               placeholder="PIN"
               aria-label="PIN"
               className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
@@ -139,11 +146,11 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
+            disabled={loading || checkingVersion || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             id="btn-login-submit"
           >
-            {loading ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
+            {loading || checkingVersion ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
           </button>
           <button
             type="button"

@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { formatNumber } from "../utils/formatNumber";
 import { hashPin } from "../utils/hashPin";
+import { ensureLatestAppVersion } from "../utils/appVersion";
 
 const formatWithCommas = (val: string | number | undefined | null) => {
   if (val === undefined || val === null || val === "") return "";
@@ -328,6 +329,7 @@ export default function BranchConfirmPage() {
   // ----------------------------------------------------
   const [branches, setBranches] = useState<any[]>([]);
   const [loadingBranches, setLoadingBranches] = useState<boolean>(false);
+  const [checkingAppVersion, setCheckingAppVersion] = useState(false);
 
   // GAS 연결 불가 또는 시트 데이터 오류 시 사용할 로컬 지점 목록
   const LOCAL_BRANCH_FALLBACK = [
@@ -385,10 +387,14 @@ export default function BranchConfirmPage() {
   }, [user, selectedBranch]);
 
   // Handle branch select action
-  const handleSelectBranch = (branch: any) => {
+  const handleSelectBranch = async (branch: any) => {
     if (!branch || !branch.branchName) {
       return;
     }
+    setCheckingAppVersion(true);
+    const latest = await ensureLatestAppVersion();
+    setCheckingAppVersion(false);
+    if (!latest) return;
     selectBranch(branch);
     setActiveTab("dashboard");
   };
@@ -419,10 +425,10 @@ export default function BranchConfirmPage() {
             </button>
           </div>
 
-          {loadingBranches ? (
+          {loadingBranches || checkingAppVersion ? (
             <div className="py-20 flex flex-col items-center justify-center space-y-4 bg-white rounded-3xl border border-gray-100 shadow-md">
               <LoadingSpinner size="lg" />
-              <p className="text-xs text-gray-400 font-semibold font-mono">스프레드시트 원격 지점 목록 호출 중...</p>
+              <p className="text-xs text-gray-400 font-semibold font-mono">{checkingAppVersion ? "최신 버전 확인 중..." : "스프레드시트 원격 지점 목록 호출 중..."}</p>
             </div>
           ) : (
             <div className="flex flex-col gap-2.5" id="branch-card-grid">
@@ -431,7 +437,7 @@ export default function BranchConfirmPage() {
                   key={b.branchName}
                   whileHover={{ y: -1 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => handleSelectBranch(b)}
+                  onClick={() => void handleSelectBranch(b)}
                   className="bg-white px-5 py-4 rounded-xl border border-black cursor-pointer hover:bg-black hover:text-white transition-colors flex items-center justify-between min-h-16 group relative overflow-hidden"
                 >
                   <div className="hidden" />
@@ -5705,6 +5711,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 // ----------------------------------------------------
 function RosterTab({ branchName }: { branchName: string }) {
   const [employees, setEmployees] = useState<Employee[]>(() => readLocalStaffList(branchName));
+  const rosterSaveTimerRef = useRef<number | null>(null);
 
   const [newName, setNewName] = useState("");
   const [division, setDivision] = useState<"정직원" | "파트타이머" >("정직원");
@@ -5748,6 +5755,12 @@ function RosterTab({ branchName }: { branchName: string }) {
     localStorage.setItem(staffAddDraftStorageKey(branchName), JSON.stringify(rosterAddDrafts));
   }, [branchName, rosterAddDrafts]);
 
+  useEffect(() => {
+    return () => {
+      if (rosterSaveTimerRef.current) window.clearTimeout(rosterSaveTimerRef.current);
+    };
+  }, []);
+
   // 지점 직원현황은 지점 전용 branch_own_rosters만 기준으로 사용합니다.
   // 관리자 직원명부(staff_rosters)는 재설계 전까지 지점 직원현황에 병합하지 않습니다.
   useEffect(() => {
@@ -5761,46 +5774,11 @@ function RosterTab({ branchName }: { branchName: string }) {
         const hasPendingLocalSave = localStorage.getItem(staffListPendingStorageKey(branchName)) === "1";
         const shouldPreserveLocal = hasPendingLocalSave && localRoster.length > 0;
         const merged: any[] = [...(shouldPreserveLocal ? localRoster : ownFiltered)];
-        const mergedNames = new Set(merged.map((employee: any) => `${String(employee.name || "").trim()}|${employee.division || ""}`).filter(Boolean));
-
-        const recentCutoff = new Date();
-        recentCutoff.setDate(recentCutoff.getDate() - 7);
-        const history = await gasClient.getBranchHistory(branchName).catch(() => []);
-        history.forEach((record: any) => {
-          const recordDate = new Date(`${record.settleDate}T00:00:00`);
-          if (!record.settleDate || Number.isNaN(recordDate.getTime()) || recordDate < recentCutoff) return;
-          try {
-            const metadataText = String(record.memo || "").split("\n---\nMETADATA:")[1] || "{}";
-            const metadata = JSON.parse(metadataText);
-            (metadata.staffRows || []).forEach((staff: any) => {
-              const name = String(staff.name || staff.staffName || "").trim();
-              const staffDivision = staff.division === "정직원" ? "정직원" : "파트타이머";
-              const staffKey = `${name}|${staffDivision}`;
-              if (!name || mergedNames.has(staffKey) || isSampleEmployee(staff)) return;
-              merged.push({
-                id: `daily-${record.settleDate}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                name,
-                division: staffDivision,
-                residentNumber: formatResidentNumber(staff.residentNumber || ""),
-                contractType: staff.division === "정직원" ? "4대보험" : "3.3%",
-                entryDate: staff.entryDate || staff.hireDate || "",
-                phone: staff.phone || "",
-                addReason: staff.addReason,
-                fromBranch: staff.fromBranch || "",
-                transferDate: staff.transferDate || "",
-                hireDate: staff.hireDate || "",
-                addReasonMemo: staff.addReasonMemo || "",
-                ...(staff.division === "정직원" ? { rank: staff.rank || "" } : {})
-              });
-              mergedNames.add(staffKey);
-            });
-          } catch {}
-        });
 
         setEmployees(merged as Employee[]);
         localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(merged));
 
-        // 샘플 제거 또는 최근 일일마감 근무자 복구가 필요한 경우 branch_own_rosters 정리
+        // 샘플 제거 또는 로컬 미반영 저장분이 있는 경우 branch_own_rosters 정리
         const needsUpdate = shouldPreserveLocal || ownRoster.some((e: any) => isSampleEmployee(e)) || ownRoster.length !== merged.length;
         if (needsUpdate) {
           await gasClient.saveBranchOwnRoster(branchName, merged);
@@ -5880,33 +5858,43 @@ function RosterTab({ branchName }: { branchName: string }) {
     loadList();
   }, [branchName]);
 
-  const saveEmployees = (updated: Employee[]) => {
+  const persistEmployees = (updated: Employee[], delayMs = 0) => {
     const normalized = updated.map((employee) => ({
       ...employee,
       residentNumber: formatResidentNumber(employee.residentNumber || ""),
       contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%")
     }));
-    setEmployees(normalized);
     localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(normalized));
     localStorage.setItem(staffListPendingStorageKey(branchName), "1");
-    gasClient.saveBranchOwnRoster(branchName, normalized)
-      .then(() => localStorage.removeItem(staffListPendingStorageKey(branchName)))
-      .catch((error) => {
-        console.error("직원 명단 저장에 실패했습니다.", error);
-      });
+    if (rosterSaveTimerRef.current) window.clearTimeout(rosterSaveTimerRef.current);
+    rosterSaveTimerRef.current = window.setTimeout(() => {
+      gasClient.saveBranchOwnRoster(branchName, normalized)
+        .then(() => localStorage.removeItem(staffListPendingStorageKey(branchName)))
+        .catch((error) => {
+          console.error("직원 명단 저장에 실패했습니다.", error);
+        });
+    }, delayMs);
+    return normalized;
+  };
+
+  const saveEmployees = (updated: Employee[]) => {
+    setEmployees(persistEmployees(updated, 0));
   };
 
   const updateEmployeeField = (id: string, field: "name" | "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
-    setEmployees((current) => current.map((employee) => {
-      if (employee.id !== id) return employee;
-      const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
-      if (field === "division" && value === "파트타이머") {
-        updated.rank = "";
-        updated.contractType = "3.3%";
-      }
-      if (field === "division" && value === "정직원") updated.contractType = "4대보험";
-      return updated;
-    }));
+    setEmployees((current) => {
+      const next = current.map((employee) => {
+        if (employee.id !== id) return employee;
+        const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
+        if (field === "division" && value === "파트타이머") {
+          updated.rank = "";
+          updated.contractType = "3.3%";
+        }
+        if (field === "division" && value === "정직원") updated.contractType = "4대보험";
+        return updated;
+      });
+      return persistEmployees(next, 500);
+    });
   };
 
   const recordStaffMovement = async (employee: Employee, reason: "퇴사" | "지점이동", date: string, destination?: string) => {
