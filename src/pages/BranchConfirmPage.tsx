@@ -2,7 +2,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
-import { gasClient, DailySettleDetail, AdminBranchSetting } from "../api/gasClient";
+import { gasClient } from "../api/gasClient";
+import type { AdminBranchSetting, DailySettleDetail, RosterEmployee } from "../api/gasClient";
 import {
   Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
   CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
@@ -304,6 +305,41 @@ interface Employee {
   hireDate?: string;
   addReasonMemo?: string;
 }
+
+const employeeNameKey = (value?: string) => String(value || "").trim();
+
+const normalizeRosterEmployee = (employee: Employee | RosterEmployee): Employee | null => {
+  const name = employeeNameKey(employee.name);
+  if (!name || (employee.division !== "정직원" && employee.division !== "파트타이머")) return null;
+  return {
+    ...employee,
+    name,
+    division: employee.division
+  };
+};
+
+const shouldSkipDailyRosterRegistration = (staff: StaffRow) =>
+  SAMPLE_EMPLOYEE_NAMES.has(employeeNameKey(staff.name)) &&
+  !staff.residentNumber &&
+  !staff.entryDate &&
+  !staff.phone &&
+  !staff.rank;
+
+const createEmployeeFromStaffRow = (staff: StaffRow): Employee => ({
+  id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+  name: employeeNameKey(staff.name),
+  division: staff.division,
+  residentNumber: formatResidentNumber(staff.residentNumber || ""),
+  contractType: staff.division === "정직원" ? "4대보험" : "3.3%",
+  entryDate: staff.entryDate || "",
+  phone: staff.phone || "",
+  addReason: staff.addReason,
+  fromBranch: staff.fromBranch || "",
+  transferDate: staff.transferDate || "",
+  hireDate: staff.hireDate || "",
+  addReasonMemo: staff.addReasonMemo || "",
+  ...(staff.division === "정직원" ? { rank: staff.rank || "" } : {})
+});
 
 export default function BranchConfirmPage() {
   const { user, selectedBranch, selectBranch, logout } = useAuthContext();
@@ -3098,38 +3134,40 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
       // Automatically register any newly added staff in the roster checklist to Roster master list
       try {
-        const currentRoster = getRoster();
-        const currentRosterNames = new Set(currentRoster.map(r => r.name));
-        const newlyAddedRosterNames = new Set<string>();
-        let rosterUpdated = false;
-        const updatedRoster = [...currentRoster];
+        const [localRoster, remoteRoster] = await Promise.all([
+          Promise.resolve(getRoster()),
+          gasClient.getBranchOwnRoster(branchName).catch(() => [])
+        ]);
+        const mergedRoster: Employee[] = [];
+        const rosterNames = new Set<string>();
 
-        staffRows.forEach((s) => {
-          if (!currentRosterNames.has(s.name) && !newlyAddedRosterNames.has(s.name)) {
-            const newEmp = {
-              id: `e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              name: s.name,
-              division: s.division,
-              residentNumber: formatResidentNumber(s.residentNumber || ""),
-              contractType: s.division === "정직원" ? "4대보험" as const : "3.3%" as const,
-              entryDate: s.entryDate || "",
-              phone: s.phone || "",
-              addReason: s.addReason,
-              fromBranch: s.fromBranch || "",
-              transferDate: s.transferDate || "",
-              hireDate: s.hireDate || "",
-              addReasonMemo: s.addReasonMemo || "",
-              ...(s.division === "정직원" ? { rank: s.rank || "" } : {})
-            };
-            updatedRoster.push(newEmp);
-            newlyAddedRosterNames.add(s.name);
-            rosterUpdated = true;
-          }
+        [...remoteRoster, ...localRoster].forEach((employee) => {
+          if (isSampleEmployee(employee)) return;
+          const normalized = normalizeRosterEmployee(employee);
+          if (!normalized) return;
+          const name = normalized.name;
+          if (!name || rosterNames.has(name)) return;
+          mergedRoster.push(normalized);
+          rosterNames.add(name);
         });
 
-        if (rosterUpdated) {
-          localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(updatedRoster));
-          await gasClient.saveBranchOwnRoster(branchName, updatedRoster);
+        staffRows.forEach((s) => {
+          const name = employeeNameKey(s.name);
+          if (!name || rosterNames.has(name) || shouldSkipDailyRosterRegistration(s)) return;
+          const newEmp = createEmployeeFromStaffRow({ ...s, name });
+          mergedRoster.push(newEmp);
+          rosterNames.add(name);
+        });
+
+        const remoteNames = new Set(remoteRoster.filter((employee) => !isSampleEmployee(employee)).map((employee) => employeeNameKey(employee.name)).filter(Boolean));
+        const needsRemoteSave =
+          remoteRoster.some((employee) => isSampleEmployee(employee)) ||
+          mergedRoster.length !== remoteNames.size ||
+          mergedRoster.some((employee) => !remoteNames.has(employee.name));
+
+        localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(mergedRoster));
+        if (needsRemoteSave) {
+          await gasClient.saveBranchOwnRoster(branchName, mergedRoster);
         }
       } catch (e) {
         console.error("Local roster automatic registration failed:", e);
