@@ -84,6 +84,9 @@ export default function AdminPage() {
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
+  // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
+  const dailyListRequestRef = useRef(0);
+  const detailRequestRef = useRef(0);
   const employeeIdSequence = useRef(1);
   // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
   const employeeDirectoryEnabled = false;
@@ -102,12 +105,15 @@ export default function AdminPage() {
   // 전 지점 정산 총람 불러오기
   const fetchDailyList = async () => {
     if (!user) return;
+    const requestId = ++dailyListRequestRef.current;
     try {
       setLoading(true);
       const [list, branches] = await Promise.all([
         gasClient.getDailyList(selectedDate, user.pinHash),
         gasClient.getBranchList().catch(() => [])
       ]);
+      // 이 응답을 기다리는 사이 더 최신 요청(예: 다른 날짜 선택)이 시작됐다면 무시합니다.
+      if (dailyListRequestRef.current !== requestId) return;
       const byBranch = new Map<string, DailyListRow>();
       list.forEach((item) => byBranch.set(item.branchName, item));
       branches
@@ -125,10 +131,11 @@ export default function AdminPage() {
         });
       setDailyList(Array.from(byBranch.values()));
     } catch (e: any) {
+      if (dailyListRequestRef.current !== requestId) return;
       console.error(e);
       triggerToast(e.message || "정산 리스트를 불러오지 못했습니다.", "error");
     } finally {
-      setLoading(false);
+      if (dailyListRequestRef.current === requestId) setLoading(false);
     }
   };
 
@@ -539,6 +546,7 @@ export default function AdminPage() {
       return;
     }
     
+    const requestId = ++detailRequestRef.current;
     setSelectedRow(row);
     setIsDrawerOpen(true);
     setIsEditing(false);
@@ -546,6 +554,8 @@ export default function AdminPage() {
     try {
       setDetailLoading(true);
       const res = await gasClient.getDailyDetail(row.record.recordId);
+      // 응답을 기다리는 사이 다른 지점을 클릭했다면, 이전 응답으로 화면을 덮어쓰지 않습니다.
+      if (detailRequestRef.current !== requestId) return;
       setDetailData(res);
 
       // 인라인 수정용 원본 임시 바인딩
@@ -556,14 +566,17 @@ export default function AdminPage() {
       setEditMemo(res.master.memo || "");
 
     } catch (e: any) {
+      if (detailRequestRef.current !== requestId) return;
       console.error(e);
       triggerToast("지점 상세 데이터를 불러오지 못했습니다.", "error");
     } finally {
-      setDetailLoading(false);
+      if (detailRequestRef.current === requestId) setDetailLoading(false);
     }
   };
 
   const handleCloseDrawer = () => {
+    // 진행 중인 상세 요청을 무효화해, 닫은 뒤 늦게 온 응답이 드로어를 다시 채우지 않게 합니다.
+    detailRequestRef.current++;
     setIsDrawerOpen(false);
     setSelectedRow(null);
     setDetailData(null);
