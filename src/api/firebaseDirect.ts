@@ -504,7 +504,6 @@ export async function backupSettingDirect(branchName: string, data: any) {
     };
     await setDoc(docRef, payload);
     await upsertPublicBranchDirect(branchName, data);
-    console.log(`[Firebase Direct] setting backed up: ${branchName}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `settings/${branchName}`);
   }
@@ -521,7 +520,6 @@ export async function deleteSettingDirect(branchName: string) {
     await deleteDoc(docRef);
     const publicBranchId = await findPublicBranchDocId(branchName);
     await deleteDoc(doc(db, "public_branches", publicBranchId));
-    console.log(`[Firebase Direct] setting deleted: ${branchName}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `settings/${branchName}`);
   }
@@ -580,7 +578,6 @@ export async function backupSettleDirect(recordId: string, payload: { master: an
     };
 
     await setDoc(docRef, finalBackup);
-    console.log(`[Firebase Direct] daily_settles backed up: ${recordId}`);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `daily_settles/${recordId}`);
   }
