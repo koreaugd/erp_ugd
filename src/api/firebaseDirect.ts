@@ -197,6 +197,8 @@ export async function firebaseDeleteDaily(recordId: string) {
 }
 
 export async function firebaseGetStaffRoster(branchName: string) {
+  const directDoc = await getDocFromServer(doc(getDirectDb(), "staff_rosters", encodeURIComponent(branchName)));
+  if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocs(collection(getDirectDb(), "staff_rosters"));
   const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
   return entry?.employees || [];
@@ -209,6 +211,8 @@ export async function firebaseSaveStaffRoster(branchName: string, employees: any
 
 // 지점이 직접 등록·관리하는 직원 명단 (관리자 직원명부와 분리된 컬렉션)
 export async function firebaseGetBranchOwnRoster(branchName: string) {
+  const directDoc = await getDocFromServer(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)));
+  if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocs(collection(getDirectDb(), "branch_own_rosters"));
   const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
   return entry?.employees || [];
