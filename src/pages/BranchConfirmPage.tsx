@@ -191,6 +191,32 @@ const createStaffAddDraft = (): StaffAddDraft => ({
   addReasonMemo: ""
 });
 
+const staffListStorageKey = (branchName: string) => `erp_staff_list_${branchName}`;
+const staffListPendingStorageKey = (branchName: string) => `erp_staff_list_pending_${branchName}`;
+const staffAddDraftStorageKey = (branchName: string) => `erp_staff_add_drafts_${branchName}`;
+const pendingLocalSaveStorageKey = (storageKey: string) => `erp_pending_local_save_${storageKey}`;
+
+const readLocalStaffList = (branchName: string): Employee[] => {
+  try {
+    const saved = localStorage.getItem(staffListStorageKey(branchName));
+    if (!saved) return [];
+    return JSON.parse(saved).filter((employee: any) => !isSampleEmployee(employee));
+  } catch {
+    return [];
+  }
+};
+
+const readLocalStaffAddDrafts = (branchName: string): StaffAddDraft[] => {
+  try {
+    const saved = localStorage.getItem(staffAddDraftStorageKey(branchName));
+    if (!saved) return [createStaffAddDraft()];
+    const drafts = JSON.parse(saved);
+    return Array.isArray(drafts) && drafts.length > 0 ? drafts : [createStaffAddDraft()];
+  } catch {
+    return [createStaffAddDraft()];
+  }
+};
+
 const SAMPLE_EMPLOYEE_IDS = new Set(["e1", "e2", "e3", "e4"]);
 const SAMPLE_EMPLOYEE_NAMES = new Set(["김철수", "이영희", "박민수", "최정우"]);
 const isSampleEmployee = (employee: any) =>
@@ -4792,6 +4818,8 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const vendorKey = "erp_order_vendors_" + branchName;
   const sharedOrderKey = "orders:" + branchName;
   const sharedVendorKey = "order_vendors:" + branchName;
+  const orderPendingKey = pendingLocalSaveStorageKey(storageKey);
+  const vendorPendingKey = pendingLocalSaveStorageKey(vendorKey);
   const orderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vendorSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -4844,12 +4872,15 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     }, {} as Record<OrderCategory, string[]>);
   }, []);
 
-  const saveSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+  const saveSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>, pendingKey: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
-    void gasClient.saveSharedData(key, value).catch((error) => {
-      console.error("Failed to save shared order data", error);
-    });
+    localStorage.setItem(pendingKey, "1");
+    void gasClient.saveSharedData(key, value)
+      .then(() => localStorage.removeItem(pendingKey))
+      .catch((error) => {
+        console.error("Failed to save shared order data", error);
+      });
   }, []);
 
   const parseJsonArray = useCallback(<T,>(json: string | null): T[] => {
@@ -4903,18 +4934,25 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
     ]).then(([remoteOrders, remoteVendors]) => {
       if (cancelled) return;
       const localOrders = parseJsonArray<OrderItem>(localOrdersJson);
-      const mergedOrders = mergeOrders(Array.isArray(remoteOrders) ? remoteOrders : [], localOrders);
-      if (mergedOrders.length > 0) {
+      const hasPendingOrders = localStorage.getItem(orderPendingKey) === "1" && localOrdersJson !== null;
+      const mergedOrders = hasPendingOrders ? localOrders : mergeOrders(Array.isArray(remoteOrders) ? remoteOrders : [], localOrders);
+      if (mergedOrders.length > 0 || hasPendingOrders) {
         setOrders(mergedOrders);
         localStorage.setItem(storageKey, JSON.stringify(mergedOrders));
-        void gasClient.saveSharedData(sharedOrderKey, mergedOrders);
+        void gasClient.saveSharedData(sharedOrderKey, mergedOrders)
+          .then(() => localStorage.removeItem(orderPendingKey))
+          .catch((error) => console.error("Failed to resave pending order data", error));
       }
 
-      const normalizedVendors = mergeVendorMaps(normalizeRemoteOrderVendors(remoteVendors), parseVendorJson(localVendorsJson));
+      const localVendors = parseVendorJson(localVendorsJson);
+      const hasPendingVendors = localStorage.getItem(vendorPendingKey) === "1" && localVendors !== null;
+      const normalizedVendors = hasPendingVendors ? localVendors : mergeVendorMaps(normalizeRemoteOrderVendors(remoteVendors), localVendors);
       if (normalizedVendors) {
         setVendorsByCategory(normalizedVendors);
         localStorage.setItem(vendorKey, JSON.stringify(normalizedVendors));
-        void gasClient.saveSharedData(sharedVendorKey, normalizedVendors);
+        void gasClient.saveSharedData(sharedVendorKey, normalizedVendors)
+          .then(() => localStorage.removeItem(vendorPendingKey))
+          .catch((error) => console.error("Failed to resave pending order vendors", error));
       }
     }).catch((error) => {
       console.error("Failed to load shared order data", error);
@@ -4925,7 +4963,7 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
       if (orderSaveTimerRef.current) clearTimeout(orderSaveTimerRef.current);
       if (vendorSaveTimerRef.current) clearTimeout(vendorSaveTimerRef.current);
     };
-  }, [mergeOrders, mergeVendorMaps, normalizeRemoteOrderVendors, parseJsonArray, parseVendorJson, sharedOrderKey, sharedVendorKey, storageKey, vendorKey]);
+  }, [mergeOrders, mergeVendorMaps, normalizeRemoteOrderVendors, orderPendingKey, parseJsonArray, parseVendorJson, sharedOrderKey, sharedVendorKey, storageKey, vendorKey, vendorPendingKey]);
 
   const reportVendors = useMemo(() => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
@@ -4943,13 +4981,13 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const saveVendors = (next: Record<OrderCategory, string[]>) => {
     setVendorsByCategory(next);
     localStorage.setItem(vendorKey, JSON.stringify(next));
-    saveSharedDebounced(sharedVendorKey, next, vendorSaveTimerRef);
+    saveSharedDebounced(sharedVendorKey, next, vendorSaveTimerRef, vendorPendingKey);
   };
 
   const saveOrders = (next: OrderItem[]) => {
     setOrders(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
-    saveSharedDebounced(sharedOrderKey, next, orderSaveTimerRef);
+    saveSharedDebounced(sharedOrderKey, next, orderSaveTimerRef, orderPendingKey);
   };
 
   const resolveOrderCategory = (vendor: string): OrderCategory => {
@@ -5005,7 +5043,7 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
         }, ...kept]
         : kept;
       localStorage.setItem(storageKey, JSON.stringify(nextOrders));
-      saveSharedDebounced(sharedOrderKey, nextOrders, orderSaveTimerRef);
+      saveSharedDebounced(sharedOrderKey, nextOrders, orderSaveTimerRef, orderPendingKey);
       return nextOrders;
     });
   };
@@ -5161,6 +5199,8 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const movementKey = "erp_liquor_movements_" + branchName;
   const sharedProductKey = "liquor_products:" + branchName;
   const sharedMovementKey = "liquor_movements:" + branchName;
+  const productPendingKey = pendingLocalSaveStorageKey(productKey);
+  const movementPendingKey = pendingLocalSaveStorageKey(movementKey);
   const productSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movementSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [products, setProducts] = useState<InventoryProduct[]>([]);
@@ -5184,12 +5224,15 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     }
   }, [productKey, movementKey]);
 
-  const saveLiquorSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+  const saveLiquorSharedDebounced = useCallback((key: string, value: unknown, timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>, pendingKey: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
-    void gasClient.saveSharedData(key, value).catch((error) => {
-      console.error("Failed to save shared liquor inventory", error);
-    });
+    localStorage.setItem(pendingKey, "1");
+    void gasClient.saveSharedData(key, value)
+      .then(() => localStorage.removeItem(pendingKey))
+      .catch((error) => {
+        console.error("Failed to save shared liquor inventory", error);
+      });
   }, []);
 
   const parseLiquorJsonArray = useCallback(<T,>(json: string | null): T[] => {
@@ -5221,18 +5264,26 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       gasClient.getSharedData<InventoryMovement[]>(sharedMovementKey)
     ]).then(([remoteProducts, remoteMovements]) => {
       if (cancelled) return;
-      const mergedProducts = mergeById(Array.isArray(remoteProducts) ? remoteProducts : [], parseLiquorJsonArray<InventoryProduct>(localProductsJson));
-      if (mergedProducts.length > 0) {
+      const localProducts = parseLiquorJsonArray<InventoryProduct>(localProductsJson);
+      const hasPendingProducts = localStorage.getItem(productPendingKey) === "1" && localProductsJson !== null;
+      const mergedProducts = hasPendingProducts ? localProducts : mergeById(Array.isArray(remoteProducts) ? remoteProducts : [], localProducts);
+      if (mergedProducts.length > 0 || hasPendingProducts) {
         setProducts(mergedProducts);
         localStorage.setItem(productKey, JSON.stringify(mergedProducts));
-        void gasClient.saveSharedData(sharedProductKey, mergedProducts);
+        void gasClient.saveSharedData(sharedProductKey, mergedProducts)
+          .then(() => localStorage.removeItem(productPendingKey))
+          .catch((error) => console.error("Failed to resave pending liquor products", error));
       }
 
-      const mergedMovements = mergeById(Array.isArray(remoteMovements) ? remoteMovements : [], parseLiquorJsonArray<InventoryMovement>(localMovementsJson));
-      if (mergedMovements.length > 0) {
+      const localMovements = parseLiquorJsonArray<InventoryMovement>(localMovementsJson);
+      const hasPendingMovements = localStorage.getItem(movementPendingKey) === "1" && localMovementsJson !== null;
+      const mergedMovements = hasPendingMovements ? localMovements : mergeById(Array.isArray(remoteMovements) ? remoteMovements : [], localMovements);
+      if (mergedMovements.length > 0 || hasPendingMovements) {
         setMovements(mergedMovements);
         localStorage.setItem(movementKey, JSON.stringify(mergedMovements));
-        void gasClient.saveSharedData(sharedMovementKey, mergedMovements);
+        void gasClient.saveSharedData(sharedMovementKey, mergedMovements)
+          .then(() => localStorage.removeItem(movementPendingKey))
+          .catch((error) => console.error("Failed to resave pending liquor movements", error));
       }
     }).catch((error) => {
       console.error("Failed to load shared liquor inventory", error);
@@ -5243,7 +5294,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       if (productSaveTimerRef.current) clearTimeout(productSaveTimerRef.current);
       if (movementSaveTimerRef.current) clearTimeout(movementSaveTimerRef.current);
     };
-  }, [mergeById, movementKey, parseLiquorJsonArray, productKey, sharedMovementKey, sharedProductKey]);
+  }, [mergeById, movementKey, movementPendingKey, parseLiquorJsonArray, productKey, productPendingKey, sharedMovementKey, sharedProductKey]);
 
   useEffect(() => {
     (window as any).__ugdLiquorInventoryDirty = false;
@@ -5267,13 +5318,13 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   const saveProducts = (next: InventoryProduct[]) => {
     setProducts(next);
     localStorage.setItem(productKey, JSON.stringify(next));
-    saveLiquorSharedDebounced(sharedProductKey, next, productSaveTimerRef);
+    saveLiquorSharedDebounced(sharedProductKey, next, productSaveTimerRef, productPendingKey);
   };
 
   const saveMovements = (next: InventoryMovement[]) => {
     setMovements(next);
     localStorage.setItem(movementKey, JSON.stringify(next));
-    saveLiquorSharedDebounced(sharedMovementKey, next, movementSaveTimerRef);
+    saveLiquorSharedDebounced(sharedMovementKey, next, movementSaveTimerRef, movementPendingKey);
   };
 
   const addProduct = (event: React.FormEvent) => {
@@ -5333,7 +5384,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         }, ...kept]
         : kept;
       localStorage.setItem(movementKey, JSON.stringify(nextMovements));
-      saveLiquorSharedDebounced(sharedMovementKey, nextMovements, movementSaveTimerRef);
+      saveLiquorSharedDebounced(sharedMovementKey, nextMovements, movementSaveTimerRef, movementPendingKey);
       return nextMovements;
     });
   };
@@ -5540,13 +5591,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 // TAB 3: Roster Tab (직원현황)
 // ----------------------------------------------------
 function RosterTab({ branchName }: { branchName: string }) {
-  const [employees, setEmployees] = useState<Employee[]>(() => {
-    try {
-      const saved = localStorage.getItem(`erp_staff_list_${branchName}`);
-      if (saved) return JSON.parse(saved).filter((employee: any) => !isSampleEmployee(employee));
-    } catch {}
-    return [];
-  });
+  const [employees, setEmployees] = useState<Employee[]>(() => readLocalStaffList(branchName));
 
   const [newName, setNewName] = useState("");
   const [division, setDivision] = useState<"정직원" | "파트타이머" >("정직원");
@@ -5560,7 +5605,7 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [newFromBranch, setNewFromBranch] = useState("");
   const [newTransferDate, setNewTransferDate] = useState("");
   const [newAddReasonMemo, setNewAddReasonMemo] = useState("");
-  const [rosterAddDrafts, setRosterAddDrafts] = useState<StaffAddDraft[]>(() => [createStaffAddDraft()]);
+  const [rosterAddDrafts, setRosterAddDrafts] = useState<StaffAddDraft[]>(() => readLocalStaffAddDrafts(branchName));
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
   // Deletion Modal States
@@ -5586,6 +5631,10 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [editContractType, setEditContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [editEntryDate, setEditEntryDate] = useState("");
 
+  useEffect(() => {
+    localStorage.setItem(staffAddDraftStorageKey(branchName), JSON.stringify(rosterAddDrafts));
+  }, [branchName, rosterAddDrafts]);
+
   // 지점 직원현황은 지점 전용 branch_own_rosters만 기준으로 사용합니다.
   // 관리자 직원명부(staff_rosters)는 재설계 전까지 지점 직원현황에 병합하지 않습니다.
   useEffect(() => {
@@ -5595,7 +5644,10 @@ function RosterTab({ branchName }: { branchName: string }) {
         const ownRoster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
         const ownFiltered = ownRoster.filter((employee: any) => !isSampleEmployee(employee));
-        const merged: any[] = [...ownFiltered];
+        const localRoster = readLocalStaffList(branchName);
+        const hasPendingLocalSave = localStorage.getItem(staffListPendingStorageKey(branchName)) === "1";
+        const shouldPreserveLocal = hasPendingLocalSave && localRoster.length > 0;
+        const merged: any[] = [...(shouldPreserveLocal ? localRoster : ownFiltered)];
         const mergedNames = new Set(merged.map((employee: any) => `${String(employee.name || "").trim()}|${employee.division || ""}`).filter(Boolean));
 
         const recentCutoff = new Date();
@@ -5633,12 +5685,13 @@ function RosterTab({ branchName }: { branchName: string }) {
         });
 
         setEmployees(merged as Employee[]);
-        localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(merged));
+        localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(merged));
 
         // 샘플 제거 또는 최근 일일마감 근무자 복구가 필요한 경우 branch_own_rosters 정리
-        const needsUpdate = ownRoster.some((e: any) => isSampleEmployee(e)) || ownRoster.length !== merged.length;
+        const needsUpdate = shouldPreserveLocal || ownRoster.some((e: any) => isSampleEmployee(e)) || ownRoster.length !== merged.length;
         if (needsUpdate) {
           await gasClient.saveBranchOwnRoster(branchName, merged);
+          localStorage.removeItem(staffListPendingStorageKey(branchName));
         }
       } catch (error) {
         console.warn("직원 명단 원격 동기화에 실패했습니다.", error);
@@ -5721,10 +5774,13 @@ function RosterTab({ branchName }: { branchName: string }) {
       contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%")
     }));
     setEmployees(normalized);
-    localStorage.setItem(`erp_staff_list_${branchName}`, JSON.stringify(normalized));
-    gasClient.saveBranchOwnRoster(branchName, normalized).catch((error) => {
-      console.error("직원 명단 저장에 실패했습니다.", error);
-    });
+    localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(normalized));
+    localStorage.setItem(staffListPendingStorageKey(branchName), "1");
+    gasClient.saveBranchOwnRoster(branchName, normalized)
+      .then(() => localStorage.removeItem(staffListPendingStorageKey(branchName)))
+      .catch((error) => {
+        console.error("직원 명단 저장에 실패했습니다.", error);
+      });
   };
 
   const updateEmployeeField = (id: string, field: "name" | "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
@@ -5888,6 +5944,7 @@ function RosterTab({ branchName }: { branchName: string }) {
 
     saveEmployees([...employees, ...nextEmployees]);
     setRosterAddDrafts([createStaffAddDraft()]);
+    localStorage.removeItem(staffAddDraftStorageKey(branchName));
   };
 
   // Staff category counters
@@ -7975,6 +8032,7 @@ function MonthlyPurchaseSalesSubTab({
   const autoSaveTimerRef = useRef<number | null>(null);
   const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
   const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
+  const pendingKey = pendingLocalSaveStorageKey(storageKey);
 
   const normalizePurchaseRows = useCallback((sourceRows: PurchaseSalesRow[]) => {
     return sourceRows.map((row) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" }));
@@ -8022,9 +8080,19 @@ function MonthlyPurchaseSalesSubTab({
     const loadPurchases = async () => {
       let nextRows: PurchaseSalesRow[] = [];
       let remoteLoaded = false;
+      const hasPendingLocal = localStorage.getItem(pendingKey) === "1";
+      if (hasPendingLocal) {
+        try {
+          const saved = localStorage.getItem(storageKey);
+          if (saved) {
+            nextRows = normalizePurchaseRows(JSON.parse(saved));
+            remoteLoaded = true;
+          }
+        } catch {}
+      }
       try {
         const remote = await gasClient.getSharedData<PurchaseSalesRow[]>(sharedKey);
-        if (Array.isArray(remote)) {
+        if (!hasPendingLocal && Array.isArray(remote)) {
           nextRows = normalizePurchaseRows(remote);
           remoteLoaded = true;
         }
@@ -8054,29 +8122,40 @@ function MonthlyPurchaseSalesSubTab({
       if (!cancelled) {
         setRows(nextRows);
         localStorage.setItem(storageKey, JSON.stringify(nextRows));
+        if (hasPendingLocal && remoteLoaded) {
+          gasClient.saveSharedData(sharedKey, nextRows)
+            .then(() => localStorage.removeItem(pendingKey))
+            .catch((error) => console.warn("월 매입 공통 데이터 재저장 실패", error));
+        }
       }
     };
     loadPurchases();
     return () => {
       cancelled = true;
     };
-  }, [branchName, defaultRows, emptyAmounts, normalizePurchaseRows, selectedMonth, sharedKey, storageKey]);
+  }, [branchName, defaultRows, emptyAmounts, normalizePurchaseRows, pendingKey, selectedMonth, sharedKey, storageKey]);
 
   const persistRows = useCallback((nextRows: PurchaseSalesRow[], showToast = false) => {
     setRows(nextRows);
     localStorage.setItem(storageKey, JSON.stringify(nextRows));
+    localStorage.setItem(pendingKey, "1");
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
       gasClient.saveSharedData(sharedKey, nextRows)
-        .then(() => { if (showToast) triggerToast("매입매출 내용이 저장되었습니다!", "success"); })
+        .then(() => {
+          localStorage.removeItem(pendingKey);
+          if (showToast) triggerToast("매입매출 내용이 저장되었습니다!", "success");
+        })
         .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
     }, 450);
-  }, [sharedKey, storageKey, triggerToast]);
+  }, [pendingKey, sharedKey, storageKey, triggerToast]);
 
   const handleSave = async () => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(rows));
+      localStorage.setItem(pendingKey, "1");
       await gasClient.saveSharedData(sharedKey, rows);
+      localStorage.removeItem(pendingKey);
       triggerToast("매입매출 내용이 저장되었습니다!", "success");
     } catch {
       triggerToast("저장 중 부득이한 에러발생", "error");
@@ -8106,9 +8185,12 @@ function MonthlyPurchaseSalesSubTab({
         return updated;
       });
       localStorage.setItem(storageKey, JSON.stringify(nextRows));
+      localStorage.setItem(pendingKey, "1");
       if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = window.setTimeout(() => {
-        gasClient.saveSharedData(sharedKey, nextRows).catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
+        gasClient.saveSharedData(sharedKey, nextRows)
+          .then(() => localStorage.removeItem(pendingKey))
+          .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
       }, 450);
       return nextRows;
     });
@@ -8146,12 +8228,15 @@ function MonthlyPurchaseSalesSubTab({
         monthlyUsageAmount: ""
       }));
       localStorage.setItem(storageKey, JSON.stringify(resetRows));
-      gasClient.saveSharedData(sharedKey, resetRows).catch((error) => {
-        console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
-      });
+      localStorage.setItem(pendingKey, "1");
+      gasClient.saveSharedData(sharedKey, resetRows)
+        .then(() => localStorage.removeItem(pendingKey))
+        .catch((error) => {
+          console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
+        });
       return resetRows;
     });
-  }, [resetToken, sharedKey, storageKey]);
+  }, [pendingKey, resetToken, sharedKey, storageKey]);
 
   // Calculations
   const totalTransfer = rows.reduce((acc, r) => acc + (Number(r.transferAmount) || 0), 0);
@@ -8404,8 +8489,12 @@ function MonthlyPartTimeSalarySubTab({
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
   const salaryAutoSaveTimerRef = useRef<number | null>(null);
 
+  const salaryStorageKey = `erp_monthly_part_time_salary_${branchName}_${selectedMonth}`;
+  const salaryDataKey = `part_time_salaries:${branchName}:${selectedMonth}`;
   const exclusionStorageKey = `erp_monthly_part_time_exclusions_${branchName}_${selectedMonth}`;
   const exclusionDataKey = `part_time_salary_exclusions:${branchName}:${selectedMonth}`;
+  const salaryPendingKey = pendingLocalSaveStorageKey(salaryStorageKey);
+  const exclusionPendingKey = pendingLocalSaveStorageKey(exclusionStorageKey);
 
   const buildPartTimeProfiles = useCallback((sourceSalaries: PartTimeSalaryRow[]) => {
     return sourceSalaries.reduce((result: Record<string, any>, sal) => {
@@ -8433,23 +8522,29 @@ function MonthlyPartTimeSalarySubTab({
         hourlyRate: sal.hourlyRate
       }));
     });
-    localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(nextSalaries));
+    localStorage.setItem(salaryStorageKey, JSON.stringify(nextSalaries));
     localStorage.setItem(exclusionStorageKey, JSON.stringify(nextExcluded));
+    localStorage.setItem(salaryPendingKey, "1");
+    localStorage.setItem(exclusionPendingKey, "1");
     if (salaryAutoSaveTimerRef.current) window.clearTimeout(salaryAutoSaveTimerRef.current);
     salaryAutoSaveTimerRef.current = window.setTimeout(() => {
       Promise.all([
-        gasClient.saveSharedData(`part_time_salaries:${branchName}:${selectedMonth}`, nextSalaries),
+        gasClient.saveSharedData(salaryDataKey, nextSalaries),
         gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(nextSalaries)),
         gasClient.saveSharedData(exclusionDataKey, nextExcluded)
       ])
-        .then(() => { if (showToast) triggerToast("파트타이머 급여대장이 저장되었습니다.", "success"); })
+        .then(() => {
+          localStorage.removeItem(salaryPendingKey);
+          localStorage.removeItem(exclusionPendingKey);
+          if (showToast) triggerToast("파트타이머 급여대장이 저장되었습니다.", "success");
+        })
         .catch(() => triggerToast("급여지급 대장 자동저장 실패", "error"));
     }, 500);
-  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionStorageKey, selectedMonth, triggerToast]);
+  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, salaryDataKey, salaryPendingKey, salaryStorageKey, triggerToast]);
 
   useEffect(() => {
     return () => {
-      if (salaryAutoSaveTimerRef.current) window.clearTimeout(salaryAutoSaveTimerRef.current);
+      salaryAutoSaveTimerRef.current = null;
     };
   }, []);
 
@@ -8458,9 +8553,15 @@ function MonthlyPartTimeSalarySubTab({
     const loadExclusions = async () => {
       try {
         const local = localStorage.getItem(exclusionStorageKey);
+        const hasPendingExclusions = localStorage.getItem(exclusionPendingKey) === "1";
         if (local && active) {
           const parsed = JSON.parse(local);
           if (Array.isArray(parsed)) setExcludedEmployeeIds(parsed);
+          if (hasPendingExclusions) {
+            await gasClient.saveSharedData(exclusionDataKey, parsed);
+            localStorage.removeItem(exclusionPendingKey);
+            return;
+          }
         }
 
         const remote = await gasClient.getSharedData<string[]>(exclusionDataKey);
@@ -8474,7 +8575,7 @@ function MonthlyPartTimeSalarySubTab({
     };
     loadExclusions();
     return () => { active = false; };
-  }, [exclusionDataKey, exclusionStorageKey]);
+  }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey]);
 
   // 1. Fetch current live Roster for PTs and merge with previously saved info + auto computed work logs from history!
   useEffect(() => {
@@ -8524,7 +8625,7 @@ function MonthlyPartTimeSalarySubTab({
     // C. Combine with stored monthly salary configurations for the selected branch/month
     let savedSalaryMap: { [empId: string]: Partial<PartTimeSalaryRow> } = {};
     try {
-      const savedConfig = localStorage.getItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`);
+        const savedConfig = localStorage.getItem(salaryStorageKey);
       if (savedConfig) {
         const list: PartTimeSalaryRow[] = JSON.parse(savedConfig);
         list.forEach((item) => {
@@ -8588,12 +8689,27 @@ function MonthlyPartTimeSalarySubTab({
       });
 
     setSalaries(assembledRows);
-  }, [branchName, selectedMonth, history, excludedEmployeeIds]);
+  }, [branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey]);
 
   useEffect(() => {
     const loadSharedSalaries = async () => {
       try {
-        const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(`part_time_salaries:${branchName}:${selectedMonth}`);
+        const local = localStorage.getItem(salaryStorageKey);
+        if (localStorage.getItem(salaryPendingKey) === "1" && local) {
+          const localRows = JSON.parse(local);
+          if (Array.isArray(localRows)) {
+            const excluded = new Set(excludedEmployeeIds);
+            const restoredRows = localRows.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
+              ...salary,
+              tipsEtcAmount: salary.tipsEtcAmount || "0"
+            }));
+            setSalaries(restoredRows);
+            await gasClient.saveSharedData(salaryDataKey, localRows);
+            localStorage.removeItem(salaryPendingKey);
+            return;
+          }
+        }
+        const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(salaryDataKey);
         // 빈 배열은 아직 저장된 급여대장이 없다는 뜻이므로, 일일마감에서 계산한 행을 유지합니다.
         if (Array.isArray(remote) && remote.length > 0) {
           const excluded = new Set(excludedEmployeeIds);
@@ -8607,13 +8723,13 @@ function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedSalaries();
-  }, [branchName, selectedMonth, excludedEmployeeIds]);
+  }, [excludedEmployeeIds, salaryDataKey, salaryPendingKey, salaryStorageKey]);
 
   useEffect(() => {
     const loadSharedProfiles = async () => {
       try {
         const profiles = await gasClient.getSharedData<Record<string, any>>(`part_time_profiles:${branchName}`);
-        if (!profiles) return;
+      if (!profiles || localStorage.getItem(salaryPendingKey) === "1") return;
         Object.entries(profiles).forEach(([employeeId, profile]) => {
           localStorage.setItem(`erp_pt_profile_${branchName}_${employeeId}`, JSON.stringify(profile));
         });
@@ -8634,7 +8750,7 @@ function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedProfiles();
-  }, [branchName, selectedMonth]);
+  }, [branchName, salaryPendingKey]);
 
   // 다른 기기에서도 공통 직원현황을 기준으로 파트타이머 행을 생성합니다.
   useEffect(() => {
@@ -8784,13 +8900,17 @@ function MonthlyPartTimeSalarySubTab({
       }, {});
 
       // 2. Save current month's specific transactions
-      localStorage.setItem(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`, JSON.stringify(salaries));
+      localStorage.setItem(salaryStorageKey, JSON.stringify(salaries));
       localStorage.setItem(exclusionStorageKey, JSON.stringify(excludedEmployeeIds));
+      localStorage.setItem(salaryPendingKey, "1");
+      localStorage.setItem(exclusionPendingKey, "1");
       await Promise.all([
-        gasClient.saveSharedData(`part_time_salaries:${branchName}:${selectedMonth}`, salaries),
+        gasClient.saveSharedData(salaryDataKey, salaries),
         gasClient.saveSharedData(`part_time_profiles:${branchName}`, profiles),
         gasClient.saveSharedData(exclusionDataKey, excludedEmployeeIds)
       ]);
+      localStorage.removeItem(salaryPendingKey);
+      localStorage.removeItem(exclusionPendingKey);
       triggerToast("파트타이머 급여대장이 직원현황 연동 및 시각화 저장 성공하였습니다!", "success");
     } catch {
       triggerToast("급여지급 대장 등록 안됨", "error");
