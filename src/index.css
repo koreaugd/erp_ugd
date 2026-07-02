@@ -1545,7 +1545,7 @@ input[type=number] {
 
 .branch-redesign aside > div:first-child span {
   color: var(--branch-black) !important;
-  font-size: 11px !important;
+  font-size: 15px !important;
   font-weight: 900 !important;
   letter-spacing: 0 !important;
   opacity: 0.78;
@@ -1606,7 +1606,7 @@ input[type=number] {
 .branch-redesign aside .md\:hidden button {
   min-height: 48px;
   border-radius: 22px !important;
-  font-size: 13px !important;
+  font-size: 15px !important;
   font-weight: 900 !important;
 }
 
@@ -2071,7 +2071,7 @@ input[type=number] {
   background: var(--branch-vanilla) !important;
   color: var(--branch-black) !important;
   padding: 6px 12px !important;
-  font-size: 11px !important;
+  font-size: 13px !important;
   line-height: 1 !important;
   font-weight: 900 !important;
   letter-spacing: 0 !important;
@@ -2176,6 +2176,27 @@ input[type=number] {
 
 .branch-redesign .monthly-chip-honey {
   background: var(--branch-honey) !important;
+}
+
+/* Final sidebar subtab sizing override. Keep after global sidebar button rules. */
+.branch-redesign aside nav button.branch-sidebar-subtab,
+.branch-redesign aside nav button.branch-sidebar-subtab[style] {
+  gap: 6px !important;
+  padding: 5px 9px !important;
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+}
+
+.branch-redesign aside nav button.branch-sidebar-subtab span,
+.branch-redesign aside nav button.branch-sidebar-subtab[style] span {
+  font-size: 13px !important;
+  line-height: 1.15 !important;
+}
+
+.branch-redesign aside nav button.branch-sidebar-subtab svg,
+.branch-redesign aside nav button.branch-sidebar-subtab[style] svg {
+  width: 14px !important;
+  height: 14px !important;
 }
 
 /* Consolidated branch surface, notice-state, and edit-warning lock. */
