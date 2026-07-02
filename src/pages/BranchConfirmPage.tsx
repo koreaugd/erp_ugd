@@ -5710,8 +5710,11 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
 // TAB 3: Roster Tab (직원현황)
 // ----------------------------------------------------
 function RosterTab({ branchName }: { branchName: string }) {
-  const [employees, setEmployees] = useState<Employee[]>(() => readLocalStaffList(branchName));
+  const initialEmployees = useMemo(() => readLocalStaffList(branchName), [branchName]);
+  const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
+  const employeesRef = useRef<Employee[]>(initialEmployees);
   const rosterSaveTimerRef = useRef<number | null>(null);
+  const rosterSaveSeqRef = useRef(0);
 
   const [newName, setNewName] = useState("");
   const [division, setDivision] = useState<"정직원" | "파트타이머" >("정직원");
@@ -5758,8 +5761,19 @@ function RosterTab({ branchName }: { branchName: string }) {
   useEffect(() => {
     return () => {
       if (rosterSaveTimerRef.current) window.clearTimeout(rosterSaveTimerRef.current);
+      if (localStorage.getItem(staffListPendingStorageKey(branchName)) === "1") {
+        const pendingEmployees = readLocalStaffList(branchName);
+        const saveSeq = ++rosterSaveSeqRef.current;
+        gasClient.saveBranchOwnRoster(branchName, pendingEmployees)
+          .then(() => {
+            if (rosterSaveSeqRef.current === saveSeq) localStorage.removeItem(staffListPendingStorageKey(branchName));
+          })
+          .catch((error) => {
+            console.error("직원 명단 탭 이동 전 저장에 실패했습니다.", error);
+          });
+      }
     };
-  }, []);
+  }, [branchName]);
 
   // 지점 직원현황은 지점 전용 branch_own_rosters만 기준으로 사용합니다.
   // 관리자 직원명부(staff_rosters)는 재설계 전까지 지점 직원현황에 병합하지 않습니다.
@@ -5772,9 +5786,10 @@ function RosterTab({ branchName }: { branchName: string }) {
         const ownFiltered = ownRoster.filter((employee: any) => !isSampleEmployee(employee));
         const localRoster = readLocalStaffList(branchName);
         const hasPendingLocalSave = localStorage.getItem(staffListPendingStorageKey(branchName)) === "1";
-        const shouldPreserveLocal = hasPendingLocalSave && localRoster.length > 0;
+        const shouldPreserveLocal = hasPendingLocalSave;
         const merged: any[] = [...(shouldPreserveLocal ? localRoster : ownFiltered)];
 
+        employeesRef.current = merged as Employee[];
         setEmployees(merged as Employee[]);
         localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(merged));
 
@@ -5864,12 +5879,16 @@ function RosterTab({ branchName }: { branchName: string }) {
       residentNumber: formatResidentNumber(employee.residentNumber || ""),
       contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%")
     }));
+    employeesRef.current = normalized;
     localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(normalized));
     localStorage.setItem(staffListPendingStorageKey(branchName), "1");
+    const saveSeq = ++rosterSaveSeqRef.current;
     if (rosterSaveTimerRef.current) window.clearTimeout(rosterSaveTimerRef.current);
     rosterSaveTimerRef.current = window.setTimeout(() => {
       gasClient.saveBranchOwnRoster(branchName, normalized)
-        .then(() => localStorage.removeItem(staffListPendingStorageKey(branchName)))
+        .then(() => {
+          if (rosterSaveSeqRef.current === saveSeq) localStorage.removeItem(staffListPendingStorageKey(branchName));
+        })
         .catch((error) => {
           console.error("직원 명단 저장에 실패했습니다.", error);
         });
@@ -6522,7 +6541,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                       <div className="flex items-center justify-end gap-1.5">
                         {isEditing ? (
                           <button
-                            onClick={() => { saveEmployees(employees); setEditingEmployeeId(null); }}
+                            onClick={() => { saveEmployees(employeesRef.current); setEditingEmployeeId(null); }}
                             className="px-2 py-1 rounded-lg bg-[#2E6DB4] text-white text-[10px] font-black"
                             title="저장"
                           >
