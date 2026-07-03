@@ -1,6 +1,6 @@
 // src/hooks/useAuth.ts
 import { useState, useEffect, useCallback } from "react";
-import { BranchSetting } from "../api/gasClient";
+import { BranchSetting, gasClient } from "../api/gasClient";
 import { hashPin } from "../utils/hashPin";
 import type { LoginBranch } from "../api/firebaseAuth";
 
@@ -60,7 +60,18 @@ export function useAuth() {
     try {
       const pinHash = await hashPin(pin);
       const { loginWithAdminPin, loginWithBranchPin } = await import("../api/firebaseAuth");
-      const branchSetting = branch ? await loginWithBranchPin(branch, pin) : await loginWithAdminPin(pin);
+      let branchSetting: BranchSetting;
+      try {
+        branchSetting = branch ? await loginWithBranchPin(branch, pin) : await loginWithAdminPin(pin);
+      } catch (firebaseError) {
+        branchSetting = await gasClient.verifyPin(pinHash);
+        if (branch && branchSetting.branchName !== branch.branchName) {
+          throw firebaseError;
+        }
+        if (!branch && branchSetting.role !== "admin") {
+          throw firebaseError;
+        }
+      }
 
       const session: UserSession = {
         pinHash,

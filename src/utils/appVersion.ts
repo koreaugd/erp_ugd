@@ -25,6 +25,10 @@ export async function ensureLatestAppVersion() {
     const latestVersion = String(latest?.version || "").trim();
     if (!latestVersion || latestVersion === currentAppVersion) return true;
 
+    const alreadyReloadedForVersion = sessionStorage.getItem("ugd_app_update_detected") === latestVersion;
+    const urlVersion = new URL(window.location.href).searchParams.get("appVersion");
+    if (alreadyReloadedForVersion || urlVersion === latestVersion) return true;
+
     sessionStorage.setItem("ugd_app_update_detected", latestVersion);
     const reloadUrl = new URL(window.location.href);
     reloadUrl.searchParams.set("appVersion", latestVersion);
