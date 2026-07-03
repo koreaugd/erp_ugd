@@ -9,7 +9,7 @@ import {
   CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
   ShoppingCart, Landmark, Info, CheckCircle2, AlertTriangle, ShieldAlert, Lock,
   Users, ClipboardList, Coins, Briefcase, Pencil, Check, TrendingUp, Settings, X,
-  Cloud, Database, UploadCloud, AlertCircle
+  Cloud, Database, UploadCloud, AlertCircle, Search
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -72,10 +72,17 @@ const maskResidentNumber = (value?: string) => {
   return `${digits.slice(0, 6)}-${"*".repeat(Math.min(7, digits.length - 6))}`;
 };
 
-const toPhoneTail8 = (value: string) => String(value || "").replace(/\D/g, "").slice(0, 8);
+const toPhoneTail8 = (value: string) => {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("010-") || (digits.length >= 11 && digits.startsWith("010"))) {
+    return digits.slice(3, 11);
+  }
+  return digits.slice(0, 8);
+};
 const formatMobilePhone = (tail8: string) => {
   const digits = toPhoneTail8(tail8);
-  if (digits.length !== 8) return digits ? `010-${digits}` : "";
+  if (digits.length !== 8) return digits;
   return `010-${digits.slice(0, 4)}-${digits.slice(4)}`;
 };
 
@@ -162,6 +169,9 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 });
 
 type StaffAddReason = "신규입사" | "지점이동" | "기존직원" | "기타";
+type StaffAddReasonChoice = StaffAddReason | "";
+type SalaryChangeStatus = "있음" | "없음";
+type SalaryChangeChoice = SalaryChangeStatus | "";
 
 interface StaffAddDraft {
   id: string;
@@ -172,9 +182,10 @@ interface StaffAddDraft {
   contractType: "4대보험" | "3.3%";
   entryDate: string;
   phoneDigits: string;
-  addReason: StaffAddReason;
+  addReason: StaffAddReasonChoice;
   fromBranch: string;
   transferDate: string;
+  salaryChanged: SalaryChangeChoice;
   addReasonMemo: string;
 }
 
@@ -187,9 +198,10 @@ const createStaffAddDraft = (): StaffAddDraft => ({
   contractType: "4대보험",
   entryDate: "",
   phoneDigits: "",
-  addReason: "신규입사",
+  addReason: "",
   fromBranch: "",
   transferDate: "",
+  salaryChanged: "",
   addReasonMemo: ""
 });
 
@@ -213,7 +225,20 @@ const readLocalStaffAddDrafts = (branchName: string): StaffAddDraft[] => {
     const saved = localStorage.getItem(staffAddDraftStorageKey(branchName));
     if (!saved) return [createStaffAddDraft()];
     const drafts = JSON.parse(saved);
-    return Array.isArray(drafts) && drafts.length > 0 ? drafts : [createStaffAddDraft()];
+    return Array.isArray(drafts) && drafts.length > 0
+      ? drafts.map((draft: Partial<StaffAddDraft>) => ({
+        ...createStaffAddDraft(),
+        ...draft,
+        addReason:
+          draft.addReason === "신규입사" ||
+          draft.addReason === "지점이동" ||
+          draft.addReason === "기존직원" ||
+          draft.addReason === "기타"
+            ? draft.addReason
+            : "",
+        salaryChanged: draft.salaryChanged === "있음" || draft.salaryChanged === "없음" ? draft.salaryChanged : ""
+      }))
+      : [createStaffAddDraft()];
   } catch {
     return [createStaffAddDraft()];
   }
@@ -237,6 +262,7 @@ interface StaffRow {
   addReason?: StaffAddReason;
   fromBranch?: string;
   transferDate?: string;
+  salaryChanged?: SalaryChangeStatus;
   hireDate?: string;
   addReasonMemo?: string;
   standardHours: number; // 0, 9, 10, 10.5
@@ -250,6 +276,31 @@ interface StaffRow {
   officeWorkplace?: string;
   segmentId?: string;
 }
+
+type DailySettleValidationField =
+  | "writer"
+  | "cashSales"
+  | "cardSales"
+  | "cashBalance"
+  | "cashDiffReason";
+
+interface DailySettleValidationTargets {
+  fields: Partial<Record<DailySettleValidationField, boolean>>;
+  overtimeReasonRows: Record<string, boolean>;
+  officeWorkRows: Record<string, boolean>;
+}
+
+const createDailySettleValidationTargets = (): DailySettleValidationTargets => ({
+  fields: {},
+  overtimeReasonRows: {},
+  officeWorkRows: {}
+});
+
+const getDailyStaffValidationKey = (staff: StaffRow, index: number) =>
+  `${staff.segmentId || ""}|${staff.residentNumber || ""}|${staff.name || ""}|${index}`;
+
+const needsOvertimeReason = (staff: StaffRow) =>
+  staff.division !== "파트타이머" && Number(staff.overtime || 0) !== 0;
 
 interface ExpenseRow {
   classification: "식재료" | "소모품등 기타" | "부식비" | "음료" | "현금입금";
@@ -302,19 +353,138 @@ interface Employee {
   addReason?: StaffAddReason;
   fromBranch?: string;
   transferDate?: string;
+  salaryChanged?: SalaryChangeStatus;
   hireDate?: string;
   addReasonMemo?: string;
 }
+
+type EmployeeEditableField =
+  | "name"
+  | "residentNumber"
+  | "contractType"
+  | "entryDate"
+  | "rank"
+  | "division"
+  | "addReason"
+  | "phone"
+  | "hireDate"
+  | "transferDate"
+  | "salaryChanged"
+  | "addReasonMemo";
+
+const applyEmployeeEditableField = (employee: Employee, field: EmployeeEditableField, value: string): Employee => {
+  const updated: Employee = { ...employee };
+
+  if (field === "name") updated.name = value;
+  if (field === "residentNumber") updated.residentNumber = formatResidentNumber(value);
+  if (field === "contractType" && (value === "4대보험" || value === "3.3%")) updated.contractType = value;
+  if (field === "rank") updated.rank = value;
+  if (field === "entryDate") {
+    updated.entryDate = value;
+    if (updated.addReason === "지점이동") updated.transferDate = value;
+    if (updated.addReason === "신규입사") updated.hireDate = value;
+  }
+  if (field === "division" && value === "파트타이머") {
+    updated.division = value;
+    updated.rank = "";
+    updated.contractType = "3.3%";
+  }
+  if (field === "division" && value === "정직원") {
+    updated.division = value;
+    updated.contractType = "4대보험";
+  }
+  if (field === "addReason") {
+    const nextReason = parseStaffAddReason(value);
+    updated.addReason = nextReason || undefined;
+    if (!nextReason) {
+      updated.hireDate = "";
+      updated.transferDate = "";
+      updated.phone = "";
+      updated.salaryChanged = undefined;
+      updated.addReasonMemo = "";
+    } else if (nextReason === "신규입사") {
+      updated.hireDate = updated.hireDate || updated.entryDate || "";
+      updated.transferDate = "";
+      updated.salaryChanged = undefined;
+      updated.addReasonMemo = "";
+    } else if (nextReason === "지점이동") {
+      updated.transferDate = updated.transferDate || updated.entryDate || "";
+      updated.hireDate = "";
+      updated.phone = "";
+      updated.addReasonMemo = "";
+    } else if (nextReason === "기타") {
+      updated.hireDate = "";
+      updated.transferDate = "";
+      updated.phone = "";
+      updated.salaryChanged = undefined;
+    } else {
+      updated.hireDate = "";
+      updated.transferDate = "";
+      updated.phone = "";
+      updated.salaryChanged = undefined;
+      updated.addReasonMemo = "";
+    }
+  }
+  if (field === "phone") updated.phone = toPhoneTail8(value);
+  if (field === "hireDate") {
+    updated.hireDate = value;
+    updated.entryDate = value;
+  }
+  if (field === "transferDate") {
+    updated.transferDate = value;
+    updated.entryDate = value;
+  }
+  if (field === "salaryChanged") {
+    const status = parseSalaryChangeStatus(value);
+    updated.salaryChanged = status || undefined;
+  }
+  if (field === "addReasonMemo") updated.addReasonMemo = value;
+
+  return updated;
+};
+
+const parseStaffAddReason = (value: string): StaffAddReason | null => {
+  if (value === "신규입사" || value === "지점이동" || value === "기존직원" || value === "기타") return value;
+  return null;
+};
+
+const parseStaffAddReasonChoice = (value: string): StaffAddReasonChoice => parseStaffAddReason(value) || "";
+
+const parseSalaryChangeStatus = (value: string): SalaryChangeStatus | null => {
+  if (value === "있음" || value === "없음") return value;
+  return null;
+};
+
+const parseSalaryChangeChoice = (value: string): SalaryChangeChoice => parseSalaryChangeStatus(value) || "";
+
+const getAddReasonChoiceClass = (reason?: StaffAddReasonChoice) => {
+  const base = "branch-choice-select";
+  if (!reason) return `${base} branch-choice-placeholder`;
+  if (reason === "신규입사") return `${base} branch-choice-hire`;
+  if (reason === "지점이동") return `${base} branch-choice-transfer`;
+  if (reason === "기존직원") return `${base} branch-choice-existing`;
+  return `${base} branch-choice-other`;
+};
+
+const getSalaryChoiceClass = (status?: SalaryChangeChoice) => {
+  const base = "branch-choice-select";
+  if (!status) return `${base} branch-choice-placeholder`;
+  return status === "있음" ? `${base} branch-choice-salary-yes` : `${base} branch-choice-salary-no`;
+};
 
 const employeeNameKey = (value?: string) => String(value || "").trim();
 
 const normalizeRosterEmployee = (employee: Employee | RosterEmployee): Employee | null => {
   const name = employeeNameKey(employee.name);
   if (!name || (employee.division !== "정직원" && employee.division !== "파트타이머")) return null;
+  const addReason = parseStaffAddReason(String(employee.addReason || ""));
+  const salaryChanged = parseSalaryChangeStatus(String(employee.salaryChanged || ""));
   return {
     ...employee,
     name,
-    division: employee.division
+    division: employee.division,
+    addReason: addReason || undefined,
+    salaryChanged: salaryChanged || undefined
   };
 };
 
@@ -336,6 +506,7 @@ const createEmployeeFromStaffRow = (staff: StaffRow): Employee => ({
   addReason: staff.addReason,
   fromBranch: staff.fromBranch || "",
   transferDate: staff.transferDate || "",
+  salaryChanged: staff.salaryChanged,
   hireDate: staff.hireDate || "",
   addReasonMemo: staff.addReasonMemo || "",
   ...(staff.division === "정직원" ? { rank: staff.rank || "" } : {})
@@ -522,7 +693,6 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
   const isHeadOfficeBranch = activeBranchName === "본사";
-  const activeBranchBrand = branch?.brand || "";
 
   useEffect(() => {
     if (isHeadOfficeBranch && ["orders", "liquorInventory"].includes(activeTab)) {
@@ -849,12 +1019,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     <div className="branch-redesign min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
       {/* Sidebar Layout */}
       <aside
-        className={`w-full md:w-64 shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40 text-zinc-150 border-zinc-850`}
+        className={`w-full md:w-[220px] shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40 text-zinc-150 border-zinc-850`}
         style={{
           backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily
         }}
       >
-        {/* Brand/Branch Info Top */}
+        {/* Branch Info Top */}
         <div
           className={`p-5 border-b flex md:flex-col items-center md:items-start justify-between md:justify-start gap-4 transition-colors duration-300`}
           style={{
@@ -862,27 +1032,10 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             borderBottomColor: "#ffffff11"
           }}
         >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden bg-white/10 shrink-0 shadow-inner col-span-3">
-              {adminSettings.logoUrl ? (
-                <img src={adminSettings.logoUrl} alt="Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-              ) : (
-                <Store className={`w-5 h-5 ${mainCategory === "monthly" ? "text-indigo-200" : "text-gray-300"}`} />
-              )}
-            </div>
-            <div>
-              <span className={`text-[9px] font-extrabold uppercase tracking-widest font-mono block transition-colors ${
-                mainCategory === "monthly" ? "text-indigo-400" : "text-[#2E6DB4]"
-              }`}>
-                {activeBranchBrand}
-              </span>
-              <h1 className="text-base font-black tracking-tight text-white flex items-center gap-1.5 mt-0.5">
+          <div className="min-w-0 w-full">
+            <div className="min-w-0">
+              <h1 className="branch-sidebar-branch-name text-base font-black tracking-tight text-white">
                 {activeBranchName}
-                <span className={`text-[9px] font-black font-mono tracking-tight transition-colors ${
-                  mainCategory === "monthly" ? "text-indigo-400" : "text-[#2E6DB4]"
-                }`}>
-                  {mainCategory === "monthly" ? "● 월말결산" : "● LIVE"}
-                </span>
               </h1>
             </div>
           </div>
@@ -2013,15 +2166,11 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
 
       const missingResident = (roster || []).filter((employee: any) => !residentBirthKey(employee.residentNumber)).map((employee: any) => employee.name).filter(Boolean);
       const missingEntryDate = (roster || []).filter((employee: any) => !employee.entryDate).map((employee: any) => employee.name).filter(Boolean);
-      const missingRank = (roster || []).filter((employee: any) => employee.division === "정직원" && !employee.rank).map((employee: any) => employee.name).filter(Boolean);
       if (missingResident.length > 0) {
-        nextIssues.push({ type: "직원현황", message: "주민등록번호 입력 필요", names: missingResident, level: "warn" });
+        nextIssues.push({ type: "직원현황", message: "주민등록번호 앞6자리 입력 필요", names: missingResident, level: "warn" });
       }
       if (missingEntryDate.length > 0) {
         nextIssues.push({ type: "직원현황", message: "입사일 입력 필요", names: missingEntryDate, level: "warn" });
-      }
-      if (missingRank.length > 0) {
-        nextIssues.push({ type: "직원현황", message: "직급 선택 필요", names: missingRank, level: "warn" });
       }
 
       const byName = new Map<string, any[]>();
@@ -2384,6 +2533,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const [submittedResult, setSubmittedResult] = useState<any | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [validationErrors, setValidationErrors] = useState<boolean>(false);
+  const [validationTargets, setValidationTargets] = useState<DailySettleValidationTargets>(() => createDailySettleValidationTargets());
   const [draftReady, setDraftReady] = useState<boolean>(false);
 
   const draftKey = `erp_daily_draft_${branchName}_${settleDate}`;
@@ -2393,6 +2543,33 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  const clearValidationField = (field: DailySettleValidationField) => {
+    setValidationTargets((current) => {
+      if (!current.fields[field]) return current;
+      return { ...current, fields: { ...current.fields, [field]: false } };
+    });
+  };
+
+  const clearStaffValidationTarget = (
+    bucket: "overtimeReasonRows" | "officeWorkRows",
+    staff: StaffRow,
+    index: number
+  ) => {
+    const key = getDailyStaffValidationKey(staff, index);
+    setValidationTargets((current) => {
+      if (!current[bucket][key]) return current;
+      const nextBucket = { ...current[bucket] };
+      delete nextBucket[key];
+      return { ...current, [bucket]: nextBucket };
+    });
+  };
+
+  const hasValidationField = (field: DailySettleValidationField) => Boolean(validationTargets.fields[field]);
+  const hasOvertimeReasonTarget = (staff: StaffRow, index: number) =>
+    Boolean(validationTargets.overtimeReasonRows[getDailyStaffValidationKey(staff, index)]);
+  const hasOfficeWorkTarget = (staff: StaffRow, index: number) =>
+    Boolean(validationTargets.officeWorkRows[getDailyStaffValidationKey(staff, index)]);
 
   const restoreDraftIfAvailable = useCallback((options?: { preservePrevDayCash?: string }) => {
     try {
@@ -2480,6 +2657,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     addReason: emp.addReason,
     fromBranch: emp.fromBranch || "",
     transferDate: emp.transferDate || "",
+    salaryChanged: emp.salaryChanged,
     hireDate: emp.hireDate || "",
     addReasonMemo: emp.addReasonMemo || "",
     standardHours: emp.division === "정직원" ? defaultStandardHours : 0,
@@ -2539,6 +2717,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           addReason: emp.addReason,
           fromBranch: emp.fromBranch || "",
           transferDate: emp.transferDate || "",
+          salaryChanged: emp.salaryChanged,
           hireDate: emp.hireDate || "",
           addReasonMemo: emp.addReasonMemo || "",
           standardHours: emp.division === "정직원" ? defaultStandardHours : 0
@@ -2576,6 +2755,40 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         next.contractType = "3.3%";
         next.rank = "";
       }
+      if (patch.addReason === "") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "신규입사") {
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "지점이동") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.addReasonMemo = "";
+        next.salaryChanged = next.salaryChanged || "";
+      }
+      if (patch.addReason === "기존직원") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "기타") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
+      }
       return next;
     }));
   };
@@ -2591,6 +2804,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
     for (const draft of filledDrafts) {
       const name = draft.name.trim();
+      if (!draft.addReason) {
+        triggerToast(`${name} 님의 추가사유를 선택해 주세요.`, "error");
+        return;
+      }
+
       if (
         staffRows.some((staff) => staff.name === name && staff.division === draft.division) ||
         nextRows.some((row) => row.name === name && row.division === draft.division)
@@ -2599,18 +2817,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         return;
       }
 
-      if (draft.division === "정직원" && !draft.rank) {
-        triggerToast(`${name} 님의 직급을 선택해 주세요.`, "error");
-        return;
-      }
-
       nextRows.push({
         division: draft.division,
         name,
         residentNumber: "",
-        rank: draft.division === "정직원" ? draft.rank : undefined,
+        rank: "",
         entryDate: "",
         phone: "",
+        addReason: draft.addReason,
         standardHours: draft.division === "정직원" ? defaultStandardHours : 0,
         clockIn: "",
         clockOut: "",
@@ -2754,6 +2968,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                  addReason: emp.addReason,
                  fromBranch: emp.fromBranch || "",
                  transferDate: emp.transferDate || "",
+                 salaryChanged: emp.salaryChanged,
                  hireDate: emp.hireDate || "",
                  addReasonMemo: emp.addReasonMemo || "",
                  standardHours: emp.division === "정직원" ? defaultStandardHours : 0,
@@ -3098,6 +3313,102 @@ function DailySettleTab({ branchName }: { branchName: string }) {
   const handleSettleSubmit = async () => {
     if (submitting) return;
     const writerName = String(writer ?? "").trim();
+    const nextValidationTargets = createDailySettleValidationTargets();
+    const validationMessages: string[] = [];
+    let firstInvalidElementId = "";
+    const rememberFirstInvalid = (elementId: string) => {
+      if (!firstInvalidElementId) firstInvalidElementId = elementId;
+    };
+
+    if (!writerName && !hasExistingRecord) {
+      nextValidationTargets.fields.writer = true;
+      validationMessages.push("마감 작성자 이름을 입력해 주세요.");
+      rememberFirstInvalid("settle-writer-input");
+    }
+
+    let hasSalesRequiredError = false;
+    if (!isHeadOffice) {
+      if (!cardSales) {
+        nextValidationTargets.fields.cardSales = true;
+        hasSalesRequiredError = true;
+        rememberFirstInvalid("settle-cardSales-input");
+      }
+      if (!cashSales) {
+        nextValidationTargets.fields.cashSales = true;
+        hasSalesRequiredError = true;
+        rememberFirstInvalid("settle-cashSales-input");
+      }
+      if (!hasExistingRecord && !cashBalance) {
+        nextValidationTargets.fields.cashBalance = true;
+        hasSalesRequiredError = true;
+        rememberFirstInvalid("settle-cashBalance-input");
+      }
+      if (hasSalesRequiredError) {
+        validationMessages.push("필수 매출 항목을 모두 작성해 주세요.");
+      }
+    }
+
+    const settlePrevDayCashNum = Number(prevDayCash) || 0;
+    const settleCashSalesNum = Number(cashSales) || 0;
+    const settleCashExpensesSumValue = cashExpenses.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
+    const settleTheoreticalBalance = settlePrevDayCashNum + settleCashSalesNum - settleCashExpensesSumValue;
+    const settleActualCashInVault = Number(cashBalance) || 0;
+    const settleDiff = settleActualCashInVault - settleTheoreticalBalance;
+
+    if (!isHeadOffice && cashBalance !== "" && settleDiff !== 0 && !cashDiffReason.trim()) {
+      nextValidationTargets.fields.cashDiffReason = true;
+      validationMessages.push("금고 현금 불일치 사유를 작성해 주세요.");
+      rememberFirstInvalid("settle-cash-diff-reason");
+    }
+
+    const firstTimeErrorKey = Object.keys(timeErrors)[0];
+    if (firstTimeErrorKey) {
+      validationMessages.push("출퇴근 시간 입력 오류를 수정해 주세요.");
+      rememberFirstInvalid(`staff-time-${firstTimeErrorKey}`);
+    }
+
+    const missingOfficeWorkRows = isHeadOffice
+      ? staffRows
+        .map((staff, index) => ({ staff, index }))
+        .filter(({ staff }) => staff.officeWorkType !== "휴무" && (!(Number(staff.workHours) > 0) || !staff.clockIn || !staff.clockOut || !String(staff.officeTaskMemo || "").trim() || !String(staff.officeWorkplace || "").trim()))
+      : [];
+    if (missingOfficeWorkRows.length > 0) {
+      missingOfficeWorkRows.forEach(({ staff, index }) => {
+        nextValidationTargets.officeWorkRows[getDailyStaffValidationKey(staff, index)] = true;
+      });
+      validationMessages.push(`${missingOfficeWorkRows.map(({ staff }) => staff.name).join(", ")} 님의 근무 시간과 업무 내용을 작성하거나 휴무로 체크해 주세요.`);
+      rememberFirstInvalid(`office-work-row-${missingOfficeWorkRows[0].index}`);
+    }
+
+    const missingOvertimeReasonRows = staffRows
+      .map((staff, index) => ({ staff, index }))
+      .filter(({ staff }) => needsOvertimeReason(staff) && !staff.overtimeReason.trim());
+    if (missingOvertimeReasonRows.length > 0) {
+      missingOvertimeReasonRows.forEach(({ staff, index }) => {
+        nextValidationTargets.overtimeReasonRows[getDailyStaffValidationKey(staff, index)] = true;
+      });
+      validationMessages.push(`${missingOvertimeReasonRows.map(({ staff }) => staff.name).join(", ")} 님의 초과근무 또는 조기출근/조기퇴근 사유를 입력해 주세요.`);
+      rememberFirstInvalid(`staff-overtime-reason-${missingOvertimeReasonRows[0].index}`);
+    }
+
+    const hasTargetedValidationError =
+      Object.values(nextValidationTargets.fields).some(Boolean) ||
+      Object.keys(nextValidationTargets.officeWorkRows).length > 0 ||
+      Object.keys(nextValidationTargets.overtimeReasonRows).length > 0 ||
+      Object.keys(timeErrors).length > 0;
+    if (hasTargetedValidationError) {
+      setValidationTargets(nextValidationTargets);
+      setValidationErrors(true);
+      triggerToast(validationMessages.slice(0, 3).join(" / "), "error");
+      if (firstInvalidElementId) {
+        window.requestAnimationFrame(() => {
+          const target = document.getElementById(firstInvalidElementId);
+          target?.scrollIntoView({ behavior: "smooth", block: "center" });
+          if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+        });
+      }
+      return;
+    }
 
     if (!writerName && !hasExistingRecord) {
       setValidationErrors(true);
@@ -3142,10 +3453,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
-    const missingOvertimeReason = staffRows.filter((staff) => staff.overtime > 0 && !staff.overtimeReason.trim());
+    const missingOvertimeReason = staffRows.filter((staff) => needsOvertimeReason(staff) && !staff.overtimeReason.trim());
     if (missingOvertimeReason.length > 0) {
       setValidationErrors(true);
-      triggerToast(`${missingOvertimeReason.map((staff) => staff.name).join(", ")} 님의 초과근무 또는 조기퇴근 사유를 입력해 주세요.`, "error");
+      triggerToast(`${missingOvertimeReason.map((staff) => staff.name).join(", ")} 님의 초과근무 또는 조기출근/조기퇴근 사유를 입력해 주세요.`, "error");
       return;
     }
 
@@ -3154,6 +3465,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
     setSubmitting(true);
     setValidationErrors(false);
+    setValidationTargets(createDailySettleValidationTargets());
 
     try {
       // 1. Pack full high-fidelity JSON metadata for complete state restorability
@@ -3298,6 +3610,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     setIsEditApproved(true);
     setWriter("");
     setTimeErrors({});
+    setValidationErrors(false);
+    setValidationTargets(createDailySettleValidationTargets());
     setSubmittedResult(null);
     setCashSales("");
     setCardSales("");
@@ -3704,10 +4018,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
             <input
               type="text"
               value={writer}
-              onChange={(e) => setWriter(e.target.value)}
+              onChange={(e) => {
+                setWriter(e.target.value);
+                clearValidationField("writer");
+              }}
               placeholder="작성자 성명 기입"
               className={`px-4 py-2.5 border rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
-                validationErrors && !writer ? "border-rose-400 ring-1 ring-rose-400" : "border-gray-200"
+                validationErrors && hasValidationField("writer") ? "branch-validation-error" : "border-gray-200"
               }`}
               id="settle-writer-input"
             />
@@ -3777,7 +4094,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                     triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
                     return;
                   }
-                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setWriter("");
+                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
@@ -3837,11 +4154,11 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="compact-sales-grid">
           {[
-            { label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "" },
-            { label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "" },
-            { label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "" },
-            { label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
-            { label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
+            { key: "cardSales" as const, label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "" },
+            { key: "cashSales" as const, label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "" },
+            { key: undefined, label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "" },
+            { key: undefined, label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
+            { key: "cashBalance" as const, label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
           ].map((field, idx) => (
             <div key={idx} className="flex flex-col space-y-1.5">
               <span className="text-xs font-semibold text-gray-500">{field.label}</span>
@@ -3850,10 +4167,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 value={formatWithCommas(field.value)}
                 onChange={(e) => {
                   field.setter(cleanNumeric(e.target.value));
+                  if (field.key) clearValidationField(field.key);
                 }}
+                id={field.key ? `settle-${field.key}-input` : undefined}
                 placeholder={field.placeholder}
                 className={`w-full px-3 py-2 border text-sm text-right font-mono font-bold rounded-xl bg-gray-50/30 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
-                  validationErrors && field.req && !field.value ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                  validationErrors && field.key && hasValidationField(field.key) ? "branch-validation-error" : "border-gray-200"
                 }`}
               />
             </div>
@@ -4147,10 +4466,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 <textarea
                   placeholder="예: 카드 단말기 오취소 후 현금 재결제 처리, 혹은 거스름돈 착오로 인한 시재 부족 발생 등 사유 기록"
                   value={cashDiffReason}
-                  onChange={(e) => setCashDiffReason(e.target.value)}
+                  onChange={(e) => {
+                    setCashDiffReason(e.target.value);
+                    clearValidationField("cashDiffReason");
+                  }}
+                  id="settle-cash-diff-reason"
                   className={`w-full p-2.5 bg-white border rounded-xl text-xs font-semibold focus:outline-hidden leading-relaxed resize-none h-16 transition-all ${
-                    validationErrors && !cashDiffReason.trim()
-                      ? "border-rose-400 ring-4 ring-rose-200 bg-rose-50/20"
+                    validationErrors && hasValidationField("cashDiffReason")
+                      ? "branch-validation-error"
                       : "border-gray-200 focus:border-amber-400"
                   }`}
                 />
@@ -4199,12 +4522,13 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 <option value="정직원">정직원</option>
                 <option value="파트타이머">파트타이머</option>
               </select>
-              {draft.division === "정직원" && (
-                <select value={draft.rank} onChange={(e) => updateStaffAddDraft(draft.id, { rank: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
-                  <option value="">직급 선택</option>
-                  {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => <option key={rank} value={rank}>{rank}</option>)}
-                </select>
-              )}
+              <select value={draft.addReason} onChange={(e) => updateStaffAddDraft(draft.id, { addReason: parseStaffAddReasonChoice(e.target.value) })} className={`w-32 px-2 py-1.5 text-xs ${getAddReasonChoiceClass(draft.addReason)}`}>
+                <option value="">선택</option>
+                <option value="신규입사">신규입사</option>
+                <option value="지점이동">지점이동</option>
+                <option value="기존직원">기존직원</option>
+                <option value="기타">기타</option>
+              </select>
               {staffAddDrafts.length > 1 && (
                 <button type="button" onClick={() => setStaffAddDrafts((current) => current.filter((item) => item.id !== draft.id))} className="px-2 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-rose-600 font-black">삭제</button>
               )}
@@ -4250,9 +4574,9 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                     const segmentKey = s.residentNumber || s.name;
                     const firstSegmentIndex = staffRows.findIndex((row) => (row.residentNumber || row.name) === segmentKey);
                     const isExtraSegment = firstSegmentIndex !== -1 && firstSegmentIndex !== idx;
-                    const needsWork = validationErrors && !isDayOff && (!(Number(s.workHours) > 0) || !s.clockIn || !s.clockOut || !String(s.officeTaskMemo || "").trim() || !String(s.officeWorkplace || "").trim());
+                    const needsWork = hasOfficeWorkTarget(s, idx) && !isDayOff && (!(Number(s.workHours) > 0) || !s.clockIn || !s.clockOut || !String(s.officeTaskMemo || "").trim() || !String(s.officeWorkplace || "").trim());
                     return (
-                      <tr key={idx} className="hover:bg-gray-50/50">
+                      <tr key={idx} id={`office-work-row-${idx}`} className="hover:bg-gray-50/50">
                         {isExtraSegment ? (
                           <td colSpan={4} className="py-3.5 px-2 bg-slate-50/60 border-r border-slate-100" aria-label={`${s.name} 추가 근무구간`} />
                         ) : (
@@ -4273,9 +4597,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           <select
                             disabled={isDayOff}
                             value={s.officeWorkplace || branchName}
-                            onChange={(e) => executeStaffCalculation(idx, { officeWorkplace: e.target.value, officeWorkType: "근무" })}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("officeWorkRows", s, idx);
+                              executeStaffCalculation(idx, { officeWorkplace: e.target.value, officeWorkType: "근무" });
+                            }}
                             className={`w-32 px-2 py-1.5 border rounded-lg bg-white text-xs font-bold disabled:bg-gray-100 ${
-                              needsWork && !String(s.officeWorkplace || "").trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                              needsWork && !String(s.officeWorkplace || "").trim() ? "branch-validation-error" : "border-gray-200"
                             }`}
                           >
                             <option value="본사">본사</option>
@@ -4287,7 +4614,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             <input
                               type="checkbox"
                               checked={isDayOff}
-                              onChange={(e) => executeStaffCalculation(idx, { officeWorkType: e.target.checked ? "휴무" : "근무" })}
+                              onChange={(e) => {
+                                clearStaffValidationTarget("officeWorkRows", s, idx);
+                                executeStaffCalculation(idx, { officeWorkType: e.target.checked ? "휴무" : "근무" });
+                              }}
                               className="h-3.5 w-3.5 accent-[#2E6DB4]"
                             />
                             휴무
@@ -4297,7 +4627,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           <select
                             disabled={isDayOff}
                             value={String(s.standardHours)}
-                            onChange={(e) => executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" })}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("officeWorkRows", s, idx);
+                              executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" });
+                            }}
                             className="w-14 px-1 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
                           >
                             <option value="0">0h</option>
@@ -4314,10 +4647,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             type="text"
                             disabled={isDayOff}
                             value={s.clockIn}
-                            onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value, officeWorkType: "근무" })}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("officeWorkRows", s, idx);
+                              executeStaffCalculation(idx, { clockIn: e.target.value, officeWorkType: "근무" });
+                            }}
                             onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
                             placeholder="09:00"
-                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                            id={`staff-time-${idx}-clockIn`}
+                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockIn`] ? "branch-validation-error" : "border-gray-200"}`}
                           />
                         </td>
                         <td className="py-3.5 px-2">
@@ -4325,10 +4662,14 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             type="text"
                             disabled={isDayOff}
                             value={s.clockOut}
-                            onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value, officeWorkType: "근무" })}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("officeWorkRows", s, idx);
+                              executeStaffCalculation(idx, { clockOut: e.target.value, officeWorkType: "근무" });
+                            }}
                             onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
                             placeholder="18:00"
-                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                            id={`staff-time-${idx}-clockOut`}
+                            className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "branch-validation-error" : "border-gray-200"}`}
                           />
                         </td>
                         <td className="py-3.5 px-1 text-right font-mono font-black text-sky-700 relative">
@@ -4345,22 +4686,29 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                             type="text"
                             disabled={isDayOff}
                             value={s.officeTaskMemo || ""}
-                            onChange={(e) => executeStaffCalculation(idx, { officeTaskMemo: e.target.value, officeWorkType: "근무" })}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("officeWorkRows", s, idx);
+                              executeStaffCalculation(idx, { officeTaskMemo: e.target.value, officeWorkType: "근무" });
+                            }}
                             placeholder={isDayOff ? "휴무" : "오늘 진행한 업무내용"}
                             className={`w-full px-3 py-1.5 border rounded-lg text-xs disabled:bg-gray-100 disabled:text-gray-400 ${
-                              needsWork && !String(s.officeTaskMemo || "").trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                              needsWork && !String(s.officeTaskMemo || "").trim() ? "branch-validation-error" : "border-gray-200"
                             }`}
                           />
                         </td>
                         <td className="py-3.5 px-2">
                           <input
                             type="text"
-                            disabled={isDayOff || s.overtime <= 0}
+                            disabled={isDayOff || !needsOvertimeReason(s)}
                             value={s.overtimeReason}
-                            onChange={(e) => executeStaffCalculation(idx, { overtimeReason: e.target.value })}
-                            placeholder={s.overtime > 0 ? "초과 사유" : "사유 불필요"}
+                            onChange={(e) => {
+                              clearStaffValidationTarget("overtimeReasonRows", s, idx);
+                              executeStaffCalculation(idx, { overtimeReason: e.target.value });
+                            }}
+                            placeholder={needsOvertimeReason(s) ? "초과/조기 사유" : "사유 불필요"}
+                            id={`staff-overtime-reason-${idx}`}
                             className={`w-full px-2 py-1.5 border rounded-lg text-xs disabled:bg-gray-100 disabled:text-gray-400 ${
-                              validationErrors && s.overtime > 0 && !s.overtimeReason.trim() ? "border-rose-400 ring-1 ring-rose-300" : "border-gray-200"
+                              hasOvertimeReasonTarget(s, idx) ? "branch-validation-error" : "border-gray-200"
                             }`}
                           />
                         </td>
@@ -4431,7 +4779,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                 </tr>
               ) : (
                 staffRows.map((s, idx) => {
-                  const hasOvertimeDelta = s.division !== "파트타이머" && s.overtime !== 0;
+                  const hasOvertimeDelta = needsOvertimeReason(s);
                   const hasWorkTime = Boolean(s.clockIn && s.clockOut && (s.clockIn !== "00:00" || s.clockOut !== "00:00"));
 
                   return (
@@ -4486,7 +4834,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockIn", e.target.value)}
                           placeholder="00:00"
-                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockIn`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                          id={`staff-time-${idx}-clockIn`}
+                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockIn`] ? "branch-validation-error" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockIn`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockIn`]}</span>}
                       </td>
@@ -4499,7 +4848,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
                           onBlur={(e) => normalizeTimeInput(idx, "clockOut", e.target.value)}
                           placeholder="00:00"
-                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockOut`] ? "border-rose-500 ring-1 ring-rose-300" : "border-gray-200"}`}
+                          id={`staff-time-${idx}-clockOut`}
+                          className={`branch-time-input w-16 px-1.5 py-1.5 border rounded-lg font-mono bg-white text-[11px] ${hasWorkTime ? "branch-time-filled" : ""} ${timeErrors[`${idx}-clockOut`] ? "branch-validation-error" : "border-gray-200"}`}
                         />
                         {timeErrors[`${idx}-clockOut`] && <span className="absolute z-10 left-2 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">{timeErrors[`${idx}-clockOut`]}</span>}
                       </td>
@@ -4534,12 +4884,16 @@ function DailySettleTab({ branchName }: { branchName: string }) {
                         <input
                           type="text"
                           value={s.overtimeReason}
-                          onChange={(e) => executeStaffCalculation(idx, { overtimeReason: e.target.value })}
+                          onChange={(e) => {
+                            clearStaffValidationTarget("overtimeReasonRows", s, idx);
+                            executeStaffCalculation(idx, { overtimeReason: e.target.value });
+                          }}
                           disabled={!hasOvertimeDelta}
                           placeholder={hasOvertimeDelta ? "상세 사유 필수 입력" : "사유 불필요"}
+                          id={`staff-overtime-reason-${idx}`}
                           className={`w-full px-2 py-1.5 border rounded-lg text-xs transition-all ${
                             hasOvertimeDelta
-                              ? validationErrors && !s.overtimeReason.trim() ? "bg-rose-50 border-rose-500 ring-1 ring-rose-300 focus:border-rose-500" : "bg-white border-amber-300 focus:border-amber-500"
+                              ? hasOvertimeReasonTarget(s, idx) ? "branch-validation-error" : "bg-white border-amber-300 focus:border-amber-500"
                               : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
                           }`}
                         />
@@ -5058,24 +5412,30 @@ function OrderManagementTabV2({ branchName }: { branchName: string }) {
       if (cancelled) return;
       const localOrders = parseJsonArray<OrderItem>(localOrdersJson);
       const hasPendingOrders = localStorage.getItem(orderPendingKey) === "1" && localOrdersJson !== null;
-      const mergedOrders = hasPendingOrders ? localOrders : mergeOrders(Array.isArray(remoteOrders) ? remoteOrders : [], localOrders);
-      if (mergedOrders.length > 0 || hasPendingOrders) {
-        setOrders(mergedOrders);
-        localStorage.setItem(storageKey, JSON.stringify(mergedOrders));
-        void gasClient.saveSharedData(sharedOrderKey, mergedOrders)
-          .then(() => localStorage.removeItem(orderPendingKey))
-          .catch((error) => console.error("Failed to resave pending order data", error));
+      const remoteOrderItems = Array.isArray(remoteOrders) ? remoteOrders : null;
+      const nextOrders = hasPendingOrders ? localOrders : remoteOrderItems ?? localOrders;
+      if (hasPendingOrders || remoteOrderItems !== null || localOrdersJson !== null) {
+        setOrders(nextOrders);
+        localStorage.setItem(storageKey, JSON.stringify(nextOrders));
+        if (hasPendingOrders) {
+          void gasClient.saveSharedData(sharedOrderKey, nextOrders)
+            .then(() => localStorage.removeItem(orderPendingKey))
+            .catch((error) => console.error("Failed to resave pending order data", error));
+        }
       }
 
       const localVendors = parseVendorJson(localVendorsJson);
       const hasPendingVendors = localStorage.getItem(vendorPendingKey) === "1" && localVendors !== null;
-      const normalizedVendors = hasPendingVendors ? localVendors : mergeVendorMaps(normalizeRemoteOrderVendors(remoteVendors), localVendors);
+      const remoteVendorMap = normalizeRemoteOrderVendors(remoteVendors);
+      const normalizedVendors = hasPendingVendors ? localVendors : remoteVendorMap ?? localVendors;
       if (normalizedVendors) {
         setVendorsByCategory(normalizedVendors);
         localStorage.setItem(vendorKey, JSON.stringify(normalizedVendors));
-        void gasClient.saveSharedData(sharedVendorKey, normalizedVendors)
-          .then(() => localStorage.removeItem(vendorPendingKey))
-          .catch((error) => console.error("Failed to resave pending order vendors", error));
+        if (hasPendingVendors || (remoteVendorMap === null && localVendors !== null)) {
+          void gasClient.saveSharedData(sharedVendorKey, normalizedVendors)
+            .then(() => localStorage.removeItem(vendorPendingKey))
+            .catch((error) => console.error("Failed to resave pending order vendors", error));
+        }
       }
     }).catch((error) => {
       console.error("Failed to load shared order data", error);
@@ -5389,24 +5749,30 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       if (cancelled) return;
       const localProducts = parseLiquorJsonArray<InventoryProduct>(localProductsJson);
       const hasPendingProducts = localStorage.getItem(productPendingKey) === "1" && localProductsJson !== null;
-      const mergedProducts = hasPendingProducts ? localProducts : mergeById(Array.isArray(remoteProducts) ? remoteProducts : [], localProducts);
-      if (mergedProducts.length > 0 || hasPendingProducts) {
-        setProducts(mergedProducts);
-        localStorage.setItem(productKey, JSON.stringify(mergedProducts));
-        void gasClient.saveSharedData(sharedProductKey, mergedProducts)
-          .then(() => localStorage.removeItem(productPendingKey))
-          .catch((error) => console.error("Failed to resave pending liquor products", error));
+      const remoteProductItems = Array.isArray(remoteProducts) ? remoteProducts : null;
+      const nextProducts = hasPendingProducts ? localProducts : remoteProductItems ?? localProducts;
+      if (hasPendingProducts || remoteProductItems !== null || localProductsJson !== null) {
+        setProducts(nextProducts);
+        localStorage.setItem(productKey, JSON.stringify(nextProducts));
+        if (hasPendingProducts) {
+          void gasClient.saveSharedData(sharedProductKey, nextProducts)
+            .then(() => localStorage.removeItem(productPendingKey))
+            .catch((error) => console.error("Failed to resave pending liquor products", error));
+        }
       }
 
       const localMovements = parseLiquorJsonArray<InventoryMovement>(localMovementsJson);
       const hasPendingMovements = localStorage.getItem(movementPendingKey) === "1" && localMovementsJson !== null;
-      const mergedMovements = hasPendingMovements ? localMovements : mergeById(Array.isArray(remoteMovements) ? remoteMovements : [], localMovements);
-      if (mergedMovements.length > 0 || hasPendingMovements) {
-        setMovements(mergedMovements);
-        localStorage.setItem(movementKey, JSON.stringify(mergedMovements));
-        void gasClient.saveSharedData(sharedMovementKey, mergedMovements)
-          .then(() => localStorage.removeItem(movementPendingKey))
-          .catch((error) => console.error("Failed to resave pending liquor movements", error));
+      const remoteMovementItems = Array.isArray(remoteMovements) ? remoteMovements : null;
+      const nextMovements = hasPendingMovements ? localMovements : remoteMovementItems ?? localMovements;
+      if (hasPendingMovements || remoteMovementItems !== null || localMovementsJson !== null) {
+        setMovements(nextMovements);
+        localStorage.setItem(movementKey, JSON.stringify(nextMovements));
+        if (hasPendingMovements) {
+          void gasClient.saveSharedData(sharedMovementKey, nextMovements)
+            .then(() => localStorage.removeItem(movementPendingKey))
+            .catch((error) => console.error("Failed to resave pending liquor movements", error));
+        }
       }
     }).catch((error) => {
       console.error("Failed to load shared liquor inventory", error);
@@ -5609,7 +5975,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                 <th className="p-3 text-center bg-slate-700 w-20">전일재고</th>
                 <th className="p-3 text-center bg-blue-100 text-blue-900 w-28">오늘 입고</th>
                 <th className="p-3 text-center bg-rose-100 text-rose-900 w-28">오늘 판매</th>
-                <th className="p-3 text-center bg-green-100 text-green-900 w-20">오늘 재고</th>
+                <th className="liquor-stock-alice-green p-3 text-center text-green-900 w-20">오늘 재고</th>
                 <th className="p-3 text-center w-12">관리</th>
               </tr>
             </thead>
@@ -5634,7 +6000,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                     <td className="p-3 text-center font-mono font-black bg-slate-50">{stockBeforeDate(product.id, draftDate)}</td>
                     <td className="p-2 bg-blue-50"><input value={draft.inbound} onChange={(e) => updateDraft(product.id, draftDate, "inbound", e.target.value)} inputMode="numeric" placeholder={inSum ? String(inSum) : "0"} className="w-full rounded-xl border border-blue-100 bg-white px-2 py-2 text-center font-mono font-black text-blue-800" /></td>
                     <td className="p-2 bg-rose-50"><input value={draft.sold} onChange={(e) => updateDraft(product.id, draftDate, "sold", e.target.value)} inputMode="numeric" placeholder={soldSum ? String(soldSum) : "0"} className="w-full rounded-xl border border-rose-100 bg-white px-2 py-2 text-center font-mono font-black text-rose-800" /></td>
-                    <td className={`p-3 text-center font-mono font-black ${stockOnDate(product.id, draftDate) < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-50 text-slate-800"}`}>{stockOnDate(product.id, draftDate)}</td>
+                    <td className={`p-3 text-center font-mono font-black ${stockOnDate(product.id, draftDate) < 0 ? "bg-rose-100 text-rose-700" : "liquor-stock-alice-green text-slate-800"}`}>{stockOnDate(product.id, draftDate)}</td>
                     <td className="p-3 text-center">
                       <button type="button" onClick={() => deleteProduct(product)} className="text-gray-300 hover:text-rose-600" aria-label={product.itemName + " 삭제"}><X className="w-4 h-4" /></button>
                     </td>
@@ -5662,7 +6028,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
               <tr>
                 <th rowSpan={2} className="sticky left-0 top-0 z-30 bg-[#202A5A] p-2 text-left w-20">분류</th>
                 <th rowSpan={2} className="sticky left-20 top-0 z-30 bg-[#202A5A] p-2 text-left w-44">상품명</th>
-                <th rowSpan={2} className="sticky top-0 z-20 p-2 text-center bg-slate-700 w-16">현재</th>
+                <th rowSpan={2} className="liquor-stock-alice-green sticky top-0 z-20 p-2 text-center w-16">현재</th>
                 {weekDates.map((date) => <th key={date} colSpan={3} className="sticky top-0 z-20 bg-[#202A5A] p-1.5 text-center border-l border-white/20">{date.slice(5)}</th>)}
               </tr>
               <tr>
@@ -5670,7 +6036,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   <React.Fragment key={date}>
                     <th className="sticky top-[29px] z-20 p-1 bg-blue-100 text-blue-900 w-10">입</th>
                     <th className="sticky top-[29px] z-20 p-1 bg-rose-100 text-rose-900 w-10">판</th>
-                    <th className="sticky top-[29px] z-20 p-1 bg-green-100 text-green-900 w-10">재</th>
+                    <th className="liquor-stock-alice-green sticky top-[29px] z-20 p-1 text-green-900 w-10">재</th>
                   </React.Fragment>
                 ))}
               </tr>
@@ -5686,7 +6052,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   <td className="sticky left-20 z-10 bg-white p-2 font-black text-gray-900">
                     <span className="truncate" title={product.itemName}>{product.itemName}</span>
                   </td>
-                  <td className="p-2 text-center font-mono font-black bg-slate-50">{stockOf(product.id)}</td>
+                  <td className="liquor-stock-alice-green p-2 text-center font-mono font-black">{stockOf(product.id)}</td>
                   {weekDates.map((date) => {
                     const inbound = getDraftOrSavedAmount(product.id, date, "inbound");
                     const sold = getDraftOrSavedAmount(product.id, date, "sold");
@@ -5695,7 +6061,7 @@ function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                       <React.Fragment key={date}>
                         <td className="p-1 text-center font-mono bg-blue-50 text-blue-800">{inbound || ""}</td>
                         <td className="p-1 text-center font-mono bg-rose-50 text-rose-800">{sold || ""}</td>
-                        <td className={`p-1 text-center font-mono font-black ${stock < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-50 text-slate-800"}`}>{stock}</td>
+                        <td className={`p-1 text-center font-mono font-black ${stock < 0 ? "bg-rose-100 text-rose-700" : "liquor-stock-alice-green text-slate-800"}`}>{stock}</td>
                       </React.Fragment>
                     );
                   })}
@@ -5728,12 +6094,15 @@ function RosterTab({ branchName }: { branchName: string }) {
   const [newContractType, setNewContractType] = useState<"4대보험" | "3.3%">("4대보험");
   const [newEntryDate, setNewEntryDate] = useState("");
   const [newPhoneDigits, setNewPhoneDigits] = useState("");
-  const [newAddReason, setNewAddReason] = useState<StaffAddReason>("신규입사");
+  const [newAddReason, setNewAddReason] = useState<StaffAddReasonChoice>("");
   const [newFromBranch, setNewFromBranch] = useState("");
   const [newTransferDate, setNewTransferDate] = useState("");
+  const [newSalaryChanged, setNewSalaryChanged] = useState<SalaryChangeChoice>("");
   const [newAddReasonMemo, setNewAddReasonMemo] = useState("");
   const [rosterAddDrafts, setRosterAddDrafts] = useState<StaffAddDraft[]>(() => readLocalStaffAddDrafts(branchName));
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [editingEmployeeDraft, setEditingEmployeeDraft] = useState<Employee | null>(null);
+  const [editingSensitiveFields, setEditingSensitiveFields] = useState({ phone: false, salaryChanged: false });
 
   // Deletion Modal States
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -5881,14 +6250,18 @@ function RosterTab({ branchName }: { branchName: string }) {
     const normalized = updated.map((employee) => ({
       ...employee,
       residentNumber: formatResidentNumber(employee.residentNumber || ""),
-      contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%")
+      contractType: employee.contractType || (employee.division === "정직원" ? "4대보험" : "3.3%"),
+      phone: employee.addReason === "신규입사" && toPhoneTail8(employee.phone || "").length === 8
+        ? formatMobilePhone(employee.phone || "")
+        : employee.phone || ""
     }));
     employeesRef.current = normalized;
     localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(normalized));
     localStorage.setItem(staffListPendingStorageKey(branchName), "1");
     const saveSeq = ++rosterSaveSeqRef.current;
     if (rosterSaveTimerRef.current) window.clearTimeout(rosterSaveTimerRef.current);
-    rosterSaveTimerRef.current = window.setTimeout(() => {
+    rosterSaveTimerRef.current = null;
+    const saveNow = () => {
       gasClient.saveBranchOwnRoster(branchName, normalized)
         .then(() => {
           if (rosterSaveSeqRef.current === saveSeq) localStorage.removeItem(staffListPendingStorageKey(branchName));
@@ -5896,7 +6269,12 @@ function RosterTab({ branchName }: { branchName: string }) {
         .catch((error) => {
           console.error("직원 명단 저장에 실패했습니다.", error);
         });
-    }, delayMs);
+    };
+    if (delayMs > 0) {
+      rosterSaveTimerRef.current = window.setTimeout(saveNow, delayMs);
+    } else {
+      saveNow();
+    }
     return normalized;
   };
 
@@ -5904,20 +6282,56 @@ function RosterTab({ branchName }: { branchName: string }) {
     setEmployees(persistEmployees(updated, 0));
   };
 
-  const updateEmployeeField = (id: string, field: "name" | "residentNumber" | "contractType" | "entryDate" | "rank" | "division", value: string) => {
-    setEmployees((current) => {
-      const next = current.map((employee) => {
-        if (employee.id !== id) return employee;
-        const updated = { ...employee, [field]: field === "residentNumber" ? formatResidentNumber(value) : value };
-        if (field === "division" && value === "파트타이머") {
-          updated.rank = "";
-          updated.contractType = "3.3%";
-        }
-        if (field === "division" && value === "정직원") updated.contractType = "4대보험";
-        return updated;
-      });
-      return persistEmployees(next, 500);
-    });
+  const startEmployeeEdit = (employee: Employee) => {
+    if (editingEmployeeDraft && editingEmployeeId !== employee.id) {
+      const canDiscard = window.confirm("저장하지 않은 수정 내용이 있습니다. 취소하고 다른 직원을 수정할까요?");
+      if (!canDiscard) return;
+    }
+    setEditingEmployeeId(employee.id);
+    setEditingEmployeeDraft({ ...employee, phone: "", salaryChanged: undefined });
+    setEditingSensitiveFields({ phone: false, salaryChanged: false });
+  };
+
+  const cancelEmployeeEdit = () => {
+    setEditingEmployeeId(null);
+    setEditingEmployeeDraft(null);
+    setEditingSensitiveFields({ phone: false, salaryChanged: false });
+  };
+
+  const updateEmployeeEditDraft = (field: EmployeeEditableField, value: string) => {
+    if (field === "phone") setEditingSensitiveFields((current) => ({ ...current, phone: true }));
+    if (field === "salaryChanged") setEditingSensitiveFields((current) => ({ ...current, salaryChanged: true }));
+    setEditingEmployeeDraft((current) => current ? applyEmployeeEditableField(current, field, value) : current);
+  };
+
+  const saveEmployeeEdit = () => {
+    if (!editingEmployeeDraft) return;
+    const originalEmployee = employees.find((employee) => employee.id === editingEmployeeDraft.id);
+    const normalizedDraft: Employee = {
+      ...editingEmployeeDraft,
+      name: editingEmployeeDraft.name.trim(),
+      residentNumber: formatResidentNumber(editingEmployeeDraft.residentNumber || "")
+    };
+    if (originalEmployee?.addReason === normalizedDraft.addReason && normalizedDraft.addReason === "신규입사" && !editingSensitiveFields.phone) {
+      normalizedDraft.phone = originalEmployee.phone || "";
+    }
+    if (originalEmployee?.addReason === normalizedDraft.addReason && normalizedDraft.addReason === "지점이동" && !editingSensitiveFields.salaryChanged) {
+      normalizedDraft.salaryChanged = originalEmployee.salaryChanged;
+    }
+    if (normalizedDraft.addReason === "신규입사") {
+      const phoneTail = toPhoneTail8(normalizedDraft.phone || "");
+      if (phoneTail.length !== 8) {
+        alert("핸드폰번호 뒤 8자리를 입력해 주세요. 010은 제외합니다.");
+        return;
+      }
+      normalizedDraft.phone = formatMobilePhone(phoneTail);
+    }
+    if (!normalizedDraft.name) {
+      alert("이름을 꼭 기입해 주세요.");
+      return;
+    }
+    saveEmployees(employees.map((employee) => employee.id === normalizedDraft.id ? normalizedDraft : employee));
+    cancelEmployeeEdit();
   };
 
   const recordStaffMovement = async (employee: Employee, reason: "퇴사" | "지점이동", date: string, destination?: string) => {
@@ -5941,6 +6355,10 @@ function RosterTab({ branchName }: { branchName: string }) {
     const formattedResident = formatResidentNumber(newResidentNumber);
     if (formattedResident.replace(/\D/g, "").length !== 13) {
       alert("주민등록번호 13자리를 모두 입력해 주세요.");
+      return;
+    }
+    if (!newAddReason) {
+      alert("추가사유를 선택해 주세요.");
       return;
     }
     if (newAddReason === "신규입사" && !newEntryDate) {
@@ -5976,6 +6394,7 @@ function RosterTab({ branchName }: { branchName: string }) {
       addReason: newAddReason,
       fromBranch: newAddReason === "지점이동" ? newFromBranch.trim() : "",
       transferDate: newAddReason === "지점이동" ? newTransferDate : "",
+      salaryChanged: newAddReason === "지점이동" ? parseSalaryChangeStatus(newSalaryChanged) || undefined : undefined,
       hireDate: newAddReason === "신규입사" ? newEntryDate : "",
       addReasonMemo: newAddReason === "기타" ? newAddReasonMemo.trim() : "",
       ...(division === "정직원" ? {
@@ -5993,9 +6412,10 @@ function RosterTab({ branchName }: { branchName: string }) {
     setNewContractType("4대보험");
     setNewEntryDate("");
     setNewPhoneDigits("");
-    setNewAddReason("신규입사");
+    setNewAddReason("");
     setNewFromBranch("");
     setNewTransferDate("");
+    setNewSalaryChanged("");
     setNewAddReasonMemo("");
   };
 
@@ -6007,6 +6427,41 @@ function RosterTab({ branchName }: { branchName: string }) {
       if (patch.division === "파트타이머") {
         next.contractType = "3.3%";
         next.rank = "";
+      }
+      if (patch.addReason === "") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "신규입사") {
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "지점이동") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.addReasonMemo = "";
+        next.salaryChanged = next.salaryChanged || "";
+      }
+      if (patch.addReason === "기존직원") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
+        next.addReasonMemo = "";
+      }
+      if (patch.addReason === "기타") {
+        next.entryDate = "";
+        next.phoneDigits = "";
+        next.fromBranch = "";
+        next.transferDate = "";
+        next.salaryChanged = "";
       }
       return next;
     }));
@@ -6022,28 +6477,16 @@ function RosterTab({ branchName }: { branchName: string }) {
     const nextEmployees: Employee[] = [];
     for (const draft of filledDrafts) {
       const name = draft.name.trim();
-      const formattedResident = formatResidentNumber(draft.residentNumber);
-      if (formattedResident.replace(/\D/g, "").length !== 13) {
-        alert(`${name} 님의 주민등록번호 13자리를 모두 입력해 주세요.`);
+      const residentBirth = residentBirthKey(draft.residentNumber);
+      if (residentBirth.length !== 6) {
+        alert(`${name} 님의 주민등록번호 앞 6자리를 입력해 주세요.`);
         return;
       }
-      if (draft.addReason === "신규입사" && !draft.entryDate) {
-        alert(`${name} 님의 신규입사일을 선택해 주세요.`);
+      if (!draft.addReason) {
+        alert(`${name} 님의 추가사유를 선택해 주세요.`);
         return;
       }
-      if (draft.addReason === "신규입사" && toPhoneTail8(draft.phoneDigits).length !== 8) {
-        alert(`${name} 님의 핸드폰번호 8자리를 입력해 주세요. 010은 제외합니다.`);
-        return;
-      }
-      if (draft.addReason === "지점이동" && (!draft.fromBranch.trim() || !draft.transferDate)) {
-        alert(`${name} 님의 이동 전 지점과 이동일을 입력해 주세요.`);
-        return;
-      }
-      if (draft.addReason === "기타" && !draft.addReasonMemo.trim()) {
-        alert(`${name} 님의 기타 추가 사유를 입력해 주세요.`);
-        return;
-      }
-      const matchedDup = getSameNameWarning(name, formattedResident, [...employees, ...nextEmployees], draft.division);
+      const matchedDup = getSameNameWarning(name, residentBirth, [...employees, ...nextEmployees], draft.division);
       if (matchedDup) {
         alert(matchedDup);
         return;
@@ -6053,16 +6496,16 @@ function RosterTab({ branchName }: { branchName: string }) {
         id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name,
         division: draft.division,
-        residentNumber: formattedResident,
+        residentNumber: residentBirth,
         contractType: draft.contractType,
         entryDate: draft.addReason === "지점이동" ? draft.transferDate : draft.entryDate,
         phone: draft.addReason === "신규입사" ? formatMobilePhone(draft.phoneDigits) : "",
         addReason: draft.addReason,
-        fromBranch: draft.addReason === "지점이동" ? draft.fromBranch.trim() : "",
+        fromBranch: "",
         transferDate: draft.addReason === "지점이동" ? draft.transferDate : "",
+        salaryChanged: draft.addReason === "지점이동" ? parseSalaryChangeStatus(draft.salaryChanged) || undefined : undefined,
         hireDate: draft.addReason === "신규입사" ? draft.entryDate : "",
-        addReasonMemo: draft.addReason === "기타" ? draft.addReasonMemo.trim() : "",
-        ...(draft.division === "정직원" ? { rank: draft.rank } : {})
+        addReasonMemo: draft.addReason === "기타" ? draft.addReasonMemo.trim() : ""
       });
     }
 
@@ -6363,18 +6806,9 @@ function RosterTab({ branchName }: { branchName: string }) {
                 <option value="정직원">정직원</option>
                 <option value="파트타이머">파트타이머</option>
               </select>
-              <input type="text" placeholder="주민등록번호" value={draft.residentNumber} onChange={(e) => updateRosterAddDraft(draft.id, { residentNumber: formatResidentNumber(e.target.value) })} className="w-36 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono" />
-              {draft.division === "정직원" && (
-                <select value={draft.rank} onChange={(e) => updateRosterAddDraft(draft.id, { rank: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
-                  <option value="">직급 선택</option>
-                  {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rank) => <option key={rank} value={rank}>{rank}</option>)}
-                </select>
-              )}
-              <select value={draft.contractType} onChange={(e) => updateRosterAddDraft(draft.id, { contractType: e.target.value as "4대보험" | "3.3%" })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
-                <option value="4대보험">4대보험</option>
-                <option value="3.3%">3.3%</option>
-              </select>
-              <select value={draft.addReason} onChange={(e) => updateRosterAddDraft(draft.id, { addReason: e.target.value as StaffAddReason })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
+              <input type="text" inputMode="numeric" maxLength={6} placeholder="주민 앞6" value={residentBirthKey(draft.residentNumber)} onChange={(e) => updateRosterAddDraft(draft.id, { residentNumber: e.target.value.replace(/\D/g, "").slice(0, 6) })} className="w-24 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-mono" />
+              <select value={draft.addReason} onChange={(e) => updateRosterAddDraft(draft.id, { addReason: parseStaffAddReasonChoice(e.target.value) })} className={`w-32 px-2 py-1.5 text-xs ${getAddReasonChoiceClass(draft.addReason)}`}>
+                <option value="">선택</option>
                 <option value="신규입사">신규입사</option>
                 <option value="지점이동">지점이동</option>
                 <option value="기존직원">기존직원</option>
@@ -6394,14 +6828,15 @@ function RosterTab({ branchName }: { branchName: string }) {
               )}
               {draft.addReason === "지점이동" && (
                 <>
-                  <select value={draft.fromBranch} onChange={(e) => updateRosterAddDraft(draft.id, { fromBranch: e.target.value })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer min-w-32">
-                    <option value="">{loadingBranches ? "지점 불러오는 중" : "이동 전 지점"}</option>
-                    {branchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-                  </select>
                   <label className="flex items-center gap-2 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold text-gray-600 bg-white cursor-pointer">
                     <span>이동일</span>
                     <input type="date" value={draft.transferDate} onChange={(e) => updateRosterAddDraft(draft.id, { transferDate: e.target.value })} onClick={(e) => e.currentTarget.showPicker?.()} aria-label="이동일" className="w-28 bg-transparent focus:outline-hidden font-mono cursor-pointer" />
                   </label>
+                  <select value={draft.salaryChanged} onChange={(e) => updateRosterAddDraft(draft.id, { salaryChanged: parseSalaryChangeChoice(e.target.value) })} className={`w-32 px-2 py-1.5 text-xs ${getSalaryChoiceClass(draft.salaryChanged)}`}>
+                    <option value="">선택</option>
+                    <option value="없음">급여변동 없음</option>
+                    <option value="있음">급여변동 있음</option>
+                  </select>
                 </>
               )}
               {draft.addReason === "기타" && <input type="text" placeholder="추가 사유" value={draft.addReasonMemo} onChange={(e) => updateRosterAddDraft(draft.id, { addReasonMemo: e.target.value })} className="w-40 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden" />}
@@ -6431,89 +6866,86 @@ function RosterTab({ branchName }: { branchName: string }) {
 
         <div className="overflow-hidden">
           <table className="w-full table-fixed text-left text-xs border-collapse">
+            <colgroup>
+              <col className="w-[8%]" />
+              <col className="w-[13%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
+              <col className="w-[14%]" />
+              <col className="w-[17%]" />
+              <col className="w-[15%]" />
+              <col className="w-[9%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                <th className="py-2.5 px-3 w-16 whitespace-nowrap">근무자 번호</th>
-                <th className="py-2.5 px-3 w-24 whitespace-nowrap">성명 (이름)</th>
-                <th className="py-2.5 px-3 w-40 whitespace-nowrap">주민등록번호</th>
-                <th className="py-2.5 px-3 w-28 whitespace-nowrap">계약형태</th>
-                <th className="py-2.5 px-3 w-40 whitespace-nowrap">입사/이동일</th>
-                <th className="py-2.5 px-3 w-32 whitespace-nowrap">추가 사유</th>
-                <th className="py-2.5 px-3 w-24 whitespace-nowrap">계약종류 구분</th>
-                <th className="py-2.5 px-3 w-24 whitespace-nowrap">직급</th>
-                <th className="py-2.5 px-3 w-20 text-right whitespace-nowrap">활동</th>
+                <th className="py-2.5 px-2 leading-tight">근무자번호</th>
+                <th className="py-2.5 px-2 leading-tight">성명</th>
+                <th className="py-2.5 px-2 leading-tight">
+                  <span className="block">주민등록번호</span>
+                  <span className="block">앞6자리</span>
+                </th>
+                <th className="py-2.5 px-2 leading-tight">분류</th>
+                <th className="py-2.5 px-2 leading-tight">추가 사유</th>
+                <th className="py-2.5 px-2 leading-tight">
+                  <span className="block">입사일자</span>
+                  <span className="block">지점이동 날짜</span>
+                </th>
+                <th className="py-2.5 px-2 leading-tight">
+                  <span className="block">핸드폰번호</span>
+                  <span className="block">급여변동</span>
+                </th>
+                <th className="py-2.5 px-2 text-right leading-tight">활동</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-medium">
               {sortedEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-400">
+                  <td colSpan={8} className="py-12 text-center text-gray-400">
                     등록된 조원이 아무도 없습니다. 새로운 근무 인원을 명부에 먼저 기입해 보십시오.
                   </td>
                 </tr>
               ) : (
                 sortedEmployees.map((emp, idx) => {
                   const isEditing = editingEmployeeId === emp.id;
-                  const addReasonText = emp.addReason === "지점이동"
-                    ? `지점이동${emp.fromBranch ? ` (${emp.fromBranch})` : ""}`
-                    : emp.addReason === "기타"
-                      ? `기타${emp.addReasonMemo ? `: ${emp.addReasonMemo}` : ""}`
-                      : emp.addReason || "-";
+                  const row = isEditing && editingEmployeeDraft?.id === emp.id ? editingEmployeeDraft : emp;
+                  const staffReason = row.addReason || "";
+                  const hireDate = row.hireDate || (staffReason === "신규입사" ? row.entryDate : "");
+                  const transferDate = row.transferDate || (staffReason === "지점이동" ? row.entryDate : "");
+                  const phoneTail = toPhoneTail8(row.phone || "");
+                  const savedPhoneTail = toPhoneTail8(emp.phone || "");
                   return (
-                  <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold">
-                    <td className="py-3 px-3 text-gray-400 font-mono whitespace-nowrap">#{idx + 1}</td>
-                    <td className="py-3 px-3 text-gray-800 font-extrabold text-sm whitespace-nowrap">
+                  <tr key={emp.id} className="hover:bg-gray-50/50 font-semibold text-[11px] sm:text-xs">
+                    <td className="py-3 px-2 text-gray-400 font-mono whitespace-nowrap">#{idx + 1}</td>
+                    <td className="py-3 px-2 text-gray-800 font-extrabold">
                       {isEditing ? (
                         <input
                           type="text"
-                          value={emp.name}
-                          onChange={(e) => updateEmployeeField(emp.id, "name", e.target.value)}
-                          className="w-24 px-2 py-1 border border-gray-200 rounded-md text-xs font-bold focus:border-[#2E6DB4] focus:outline-hidden"
+                          value={row.name}
+                          onChange={(e) => updateEmployeeEditDraft("name", e.target.value)}
+                          className="w-full min-w-0 px-2 py-1 border border-gray-200 rounded-md text-xs font-bold focus:border-[#2E6DB4] focus:outline-hidden"
                         />
-                      ) : emp.name}
+                      ) : <span className="block truncate" title={emp.name}>{emp.name}</span>}
                     </td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 px-2">
                       {isEditing ? (
                         <input
                           type="text"
-                          value={emp.residentNumber || ""}
-                          onChange={(e) => updateEmployeeField(emp.id, "residentNumber", e.target.value)}
-                          placeholder=""
-                          className="w-36 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={residentBirthKey(row.residentNumber)}
+                          onChange={(e) => updateEmployeeEditDraft("residentNumber", e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          placeholder="앞6자리"
+                          className="w-full min-w-0 px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
                         />
-                      ) : <span className="font-mono text-xs text-gray-600">{maskResidentNumber(emp.residentNumber)}</span>}
+                      ) : <span className="font-mono text-xs text-gray-600">{residentBirthKey(emp.residentNumber) || "-"}</span>}
                     </td>
-                    <td className="py-3 px-3">
+                    <td className="py-3 px-2">
                       {isEditing ? (
                         <select
-                          value={emp.contractType || (emp.division === "정직원" ? "4대보험" : "3.3%")}
-                          onChange={(e) => updateEmployeeField(emp.id, "contractType", e.target.value)}
-                          className="px-2 py-1 border border-violet-100 rounded-md text-[10px] font-black bg-violet-50 text-violet-700 focus:outline-hidden focus:border-violet-400"
-                        >
-                          <option value="4대보험">4대보험</option>
-                          <option value="3.3%">3.3%</option>
-                        </select>
-                      ) : <span className="px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-[10px] font-black">{emp.contractType || (emp.division === "정직원" ? "4대보험" : "3.3%")}</span>}
-                    </td>
-                    <td className="py-3 px-3">
-                      {isEditing ? (
-                        <input
-                          type="date"
-                          value={emp.entryDate || ""}
-                          onChange={(e) => updateEmployeeField(emp.id, "entryDate", e.target.value)}
-                          onClick={(e) => e.currentTarget.showPicker?.()}
-                          className="px-2 py-1 border border-gray-200 rounded-md font-mono text-xs text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
-                        />
-                      ) : <span className="font-mono text-xs text-gray-600">{emp.entryDate || "-"}</span>}
-                    </td>
-                    <td className="py-3 px-3 text-xs text-gray-600 truncate" title={addReasonText}>{addReasonText}</td>
-                    <td className="py-3 px-3">
-                      {isEditing ? (
-                        <select
-                          value={emp.division}
-                          onChange={(e) => updateEmployeeField(emp.id, "division", e.target.value)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
-                            emp.division === "정직원"
+                          value={row.division}
+                          onChange={(e) => updateEmployeeEditDraft("division", e.target.value)}
+                          className={`w-full max-w-full px-1.5 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
+                            row.division === "정직원"
                               ? "bg-amber-50 text-amber-700 border-amber-200 focus:border-amber-400"
                               : "bg-blue-50 text-[#2E6DB4] border-blue-200 focus:border-blue-400"
                           }`}
@@ -6521,41 +6953,125 @@ function RosterTab({ branchName }: { branchName: string }) {
                           <option value="정직원">정직원</option>
                           <option value="파트타이머">파트타이머</option>
                         </select>
-                      ) : <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${emp.division === "정직원" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-[#2E6DB4]"}`}>{emp.division}</span>}
+                      ) : <span className={`inline-flex max-w-full px-1.5 py-1 rounded-lg text-[10px] font-black ${emp.division === "정직원" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-[#2E6DB4]"}`} title={emp.division}><span className="truncate">{emp.division}</span></span>}
                     </td>
-                    <td className="py-3 px-3 font-bold text-gray-750">
-                      {emp.division === "정직원" ? (
-                        isEditing ? (
+                    <td className="py-3 px-2">
+                      {isEditing ? (
                         <select
-                          value={emp.rank || ""}
-                          onChange={(e) => updateEmployeeField(emp.id, "rank", e.target.value)}
-                          className="px-2 py-1 border border-gray-200 rounded-md bg-white text-xs font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                          value={staffReason}
+                          onChange={(e) => updateEmployeeEditDraft("addReason", e.target.value)}
+                          className={`w-full min-w-0 px-1.5 py-1 text-[11px] ${getAddReasonChoiceClass(staffReason)} ${!staffReason ? "branch-choice-required" : ""}`}
                         >
-                          <option value="">직급 선택</option>
-                          {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표"].map((rank) => (
-                            <option key={rank} value={rank}>{rank}</option>
-                          ))}
+                          <option value="">선택</option>
+                          <option value="신규입사">신규입사</option>
+                          <option value="지점이동">지점이동</option>
+                          <option value="기존직원">기존직원</option>
+                          <option value="기타">기타</option>
                         </select>
-                        ) : <span>{emp.rank || "-"}</span>
                       ) : (
-                        <span className="text-gray-300 font-normal">-</span>
+                        <span className={`inline-flex w-full min-w-0 justify-center rounded-lg px-1.5 py-1 text-[11px] font-black ${getAddReasonChoiceClass(staffReason)} ${!staffReason ? "branch-choice-required" : ""} branch-choice-badge`}>
+                          {staffReason || "선택"}
+                        </span>
                       )}
                     </td>
-                    <td className="py-3 px-3 text-right">
+                    <td className="py-3 px-2">
+                      {isEditing && staffReason === "신규입사" && (
+                        <input
+                          type="date"
+                          value={hireDate || ""}
+                          onChange={(e) => updateEmployeeEditDraft("hireDate", e.target.value)}
+                          onClick={(e) => e.currentTarget.showPicker?.()}
+                          className="w-full min-w-0 px-1.5 py-1 border border-gray-200 rounded-md font-mono text-[11px] text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
+                          aria-label={`${emp.name} 입사일자`}
+                        />
+                      )}
+                      {isEditing && staffReason === "지점이동" && (
+                        <input
+                          type="date"
+                          value={transferDate || ""}
+                          onChange={(e) => updateEmployeeEditDraft("transferDate", e.target.value)}
+                          onClick={(e) => e.currentTarget.showPicker?.()}
+                          className="w-full min-w-0 px-1.5 py-1 border border-gray-200 rounded-md font-mono text-[11px] text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden cursor-pointer"
+                          aria-label={`${emp.name} 지점이동 날짜`}
+                        />
+                      )}
+                      {isEditing && staffReason === "기타" && (
+                        <input
+                          type="text"
+                          value={row.addReasonMemo || ""}
+                          onChange={(e) => updateEmployeeEditDraft("addReasonMemo", e.target.value)}
+                          placeholder="사유"
+                          className="w-full min-w-0 px-1.5 py-1 border border-gray-200 rounded-md text-[11px] font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden"
+                        />
+                      )}
+                      {!isEditing && staffReason === "신규입사" && <span className="font-mono text-[11px] text-gray-600">{hireDate || "-"}</span>}
+                      {!isEditing && staffReason === "지점이동" && <span className="font-mono text-[11px] text-gray-600">{transferDate || "-"}</span>}
+                      {!isEditing && staffReason === "기타" && <span className="block truncate text-[11px] text-gray-600" title={row.addReasonMemo || ""}>{row.addReasonMemo || "-"}</span>}
+                      {!staffReason && <span className="inline-flex rounded-md border border-dashed border-gray-200 bg-white px-2 py-1 text-[11px] font-black text-gray-400">선택</span>}
+                      {staffReason === "기존직원" && <span className="text-xs text-gray-400">-</span>}
+                    </td>
+                    <td className="py-3 px-2">
+                      {isEditing && staffReason === "신규입사" && (
+                        <label className="flex w-full min-w-0 items-center overflow-hidden rounded-md border border-gray-200 bg-white focus-within:border-[#2E6DB4]">
+                          <span className="shrink-0 border-r border-gray-200 bg-gray-50 px-1.5 py-1 text-[10px] font-black text-gray-400">010</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={8}
+                            value={phoneTail}
+                            onChange={(e) => updateEmployeeEditDraft("phone", e.target.value.replace(/\D/g, "").slice(0, 8))}
+                            placeholder="새 번호 입력"
+                            className="min-w-0 flex-1 bg-transparent px-1.5 py-1 font-mono text-[11px] font-bold text-gray-700 focus:outline-hidden"
+                            aria-label={`${emp.name} 핸드폰번호 뒤 8자리`}
+                          />
+                        </label>
+                      )}
+                      {isEditing && staffReason === "지점이동" && (
+                        <select
+                          value={row.salaryChanged || ""}
+                          onChange={(e) => updateEmployeeEditDraft("salaryChanged", e.target.value)}
+                          className={`w-full min-w-0 px-1.5 py-1 text-[11px] ${getSalaryChoiceClass(row.salaryChanged || "")}`}
+                        >
+                          <option value="">선택</option>
+                          <option value="없음">급여변동 없음</option>
+                          <option value="있음">급여변동 있음</option>
+                        </select>
+                      )}
+                      {!isEditing && staffReason === "신규입사" && <span className={`branch-sensitive-hidden ${savedPhoneTail ? "" : "branch-sensitive-missing"}`}>{savedPhoneTail ? "본사 전송" : "미입력"}</span>}
+                      {!isEditing && staffReason === "지점이동" && <span className={`branch-sensitive-hidden ${emp.salaryChanged ? "" : "branch-sensitive-missing"}`}>{emp.salaryChanged ? "본사 전송" : "미입력"}</span>}
+                      {!staffReason && <span className="inline-flex rounded-md border border-dashed border-gray-200 bg-white px-2 py-1 text-[11px] font-black text-gray-400">선택</span>}
+                      {(staffReason === "기존직원" || staffReason === "기타") && <span className="text-xs text-gray-400">-</span>}
+                    </td>
+                    <td className="py-3 px-2 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {isEditing ? (
-                          <button
-                            onClick={() => { saveEmployees(employeesRef.current); setEditingEmployeeId(null); }}
-                            className="px-2 py-1 rounded-lg bg-[#2E6DB4] text-white text-[10px] font-black"
-                            title="저장"
-                          >
-                            저장
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={saveEmployeeEdit}
+                              className="p-1.5 rounded-lg bg-[#2E6DB4] text-white"
+                              title="저장"
+                              aria-label="저장"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEmployeeEdit}
+                              className="p-1.5 rounded-lg bg-gray-100 text-gray-500 hover:text-gray-800"
+                              title="취소"
+                              aria-label="취소"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         ) : (
                           <button
-                            onClick={() => setEditingEmployeeId(emp.id)}
+                            type="button"
+                            onClick={() => startEmployeeEdit(emp)}
                             className="text-gray-400 hover:text-[#2E6DB4] p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                             title="정보 수정"
+                            aria-label="정보 수정"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -6568,6 +7084,7 @@ function RosterTab({ branchName }: { branchName: string }) {
                           }}
                           className="text-gray-400 hover:text-rose-600 p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                           title="명부 삭제"
+                          aria-label="명부 삭제"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -6644,26 +7161,55 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   const [manualReason, setManualReason] = useState("");
   const [manualDate, setManualDate] = useState(toLocalDateInputValue());
   const [selectedMonth, setSelectedMonth] = useState(() => toLocalMonthInputValue());
+  const [nameFilter, setNameFilter] = useState("");
   const [editOvertime, setEditOvertime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
   const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
       const [log, manual] = await Promise.all([gasClient.getAttendanceLog(branchName, "overtime", selectedMonth, forceRefresh), gasClient.getSharedData<any[]>(`manual_overtime:${branchName}`)]);
-      const manualRows = (manual || []).map((item) => ({ ...item, clockIn: "수기", clockOut: "수기", workHours: "-", standardHours: "-", overtimeReason: item.reason, manual: true }));
+      const manualRows = (manual || []).map((item) => ({
+        ...item,
+        clockIn: "수기",
+        clockOut: "수기",
+        workHours: "-",
+        standardHours: "-",
+        overtime: Number(item.overtime ?? item.overtimeHours ?? item.hours ?? item.totalOvertime ?? 0),
+        overtimeReason: item.reason,
+        manual: true
+      }));
       const all = [...(log.records || []), ...manualRows].sort((a, b) => String(b.settleDate).localeCompare(String(a.settleDate)));
       const selectedRecords = all.filter((item) => String(item.settleDate || "").slice(0, 7) === selectedMonth);
       setRecords(selectedRecords);
-      const totals = new Map<string, { previous: number; current: number }>();
+      const totals = new Map<string, { previous: number; current: number; previousManual: number; currentManual: number; previousAuto: number; currentAuto: number }>();
       all.forEach((item) => {
         const settleMonth = String(item.settleDate || "").slice(0, 7);
         if (!item.staffName || settleMonth > selectedMonth) return;
-        const current = totals.get(item.staffName) || { previous: 0, current: 0 };
-        if (settleMonth < selectedMonth) current.previous += Number(item.overtime) || 0;
-        else if (settleMonth === selectedMonth) current.current += Number(item.overtime) || 0;
+        const current = totals.get(item.staffName) || { previous: 0, current: 0, previousManual: 0, currentManual: 0, previousAuto: 0, currentAuto: 0 };
+        const overtimeHours = Number(item.overtime ?? item.overtimeHours ?? item.hours ?? item.totalOvertime ?? 0) || 0;
+        if (settleMonth < selectedMonth) {
+          current.previous += overtimeHours;
+          if (item.manual) current.previousManual += overtimeHours;
+          else current.previousAuto += overtimeHours;
+        } else if (settleMonth === selectedMonth) {
+          current.current += overtimeHours;
+          if (item.manual) current.currentManual += overtimeHours;
+          else current.currentAuto += overtimeHours;
+        }
         totals.set(item.staffName, current);
       });
-      setSummaryList(Array.from(totals, ([name, value]) => ({ name, ...value, totalOvertime: value.previous + value.current })).filter((item) => item.current !== 0 || item.previous !== 0));
+      setSummaryList(Array.from(totals, ([name, value]) => ({
+        name,
+        ...value,
+        totalOvertime: value.previous + value.current,
+        manualOvertime: value.previousManual + value.currentManual,
+        autoOvertime: value.previousAuto + value.currentAuto
+      })).filter((item) =>
+        item.current !== 0 ||
+        item.previous !== 0 ||
+        item.manualOvertime !== 0 ||
+        item.autoOvertime !== 0
+      ));
 
     } catch (e) {
       console.error("Overtime database read error:", e);
@@ -6675,6 +7221,16 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const normalizedNameFilter = nameFilter.trim().toLowerCase();
+  const filteredRecords = useMemo(() => {
+    if (!normalizedNameFilter) return records;
+    return records.filter((record) => String(record.staffName || "").toLowerCase().includes(normalizedNameFilter));
+  }, [normalizedNameFilter, records]);
+  const filteredSummaryList = useMemo(() => {
+    if (!normalizedNameFilter) return summaryList;
+    return summaryList.filter((item) => String(item.name || "").toLowerCase().includes(normalizedNameFilter));
+  }, [normalizedNameFilter, summaryList]);
 
   const saveManualOvertime = async () => {
     if (!manualName.trim() || !manualHours.trim() || !manualReason.trim()) {
@@ -6783,7 +7339,7 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
       )}
       {/* List Table Left */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-        <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+        <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
@@ -6791,11 +7347,33 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-40">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+                placeholder="이름 검색"
+                aria-label="초과근무 직원명 검색"
+                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-7 text-xs font-bold text-gray-700 outline-none transition focus:border-[#2E6DB4]"
+              />
+              {nameFilter && (
+                <button
+                  type="button"
+                  onClick={() => setNameFilter("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  title="검색어 지우기"
+                  aria-label="검색어 지우기"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
             <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
             <button
               onClick={() => void loadData(true)}
-              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
             >
               <RefreshCw className="w-3 h-3" /> 새로고침
             </button>
@@ -6844,14 +7422,14 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
-                {records.length === 0 ? (
+                {filteredRecords.length === 0 ? (
                   <tr>
                     <td colSpan={isAdmin ? 9 : 8} className="py-16 text-center text-gray-400">
-                      기록된 임직원 초과근무가 전혀 없습니다.
+                      {normalizedNameFilter ? "검색된 초과근무 기록이 없습니다." : "기록된 임직원 초과근무가 전혀 없습니다."}
                     </td>
                   </tr>
                 ) : (
-                  records.map((r, idx) => (
+                  filteredRecords.map((r, idx) => (
                     <tr key={idx} className="hover:bg-gray-50/50">
                       <td className="py-3 px-2 font-mono text-[11px] text-gray-400">{r.settleDate}</td>
                       <td className="py-3 px-2 font-extrabold text-gray-800">{r.staffName}</td>
@@ -6898,20 +7476,30 @@ function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
         </div>
 
         <div className="divide-y divide-gray-50 font-bold text-xs">
-          {summaryList.length === 0 ? (
-            <p className="py-8 text-center text-gray-400">집계 가능한 초과근무 대상자가 없습니다.</p>
+          {filteredSummaryList.length === 0 ? (
+            <p className="py-8 text-center text-gray-400">
+              {normalizedNameFilter ? "검색된 집계 대상자가 없습니다." : "집계 가능한 초과근무 대상자가 없습니다."}
+            </p>
           ) : (
-            summaryList.map((item, idx) => (
+            filteredSummaryList.map((item, idx) => (
               <div key={idx} className="py-3 flex items-center justify-between">
                 <span className="text-gray-700 font-extrabold">{item.name}</span>
                 <span className={`text-[11px] font-mono p-1 px-2.5 rounded-xl ${
                   item.totalOvertime < 0
-                    ? "bg-amber-55 bg-amber-50 text-amber-700 font-extrabold"
+                    ? "bg-amber-50 text-amber-700 font-extrabold"
                     : item.totalOvertime === 0
-                    ? "bg-gray-105 bg-gray-100 text-gray-500"
+                    ? "bg-gray-100 text-gray-500"
                     : "bg-emerald-50 text-emerald-800 font-extrabold"
                 }`}>
-                  {`전월누적 ${item.previous || 0}h · 이번달 ${item.current || 0}h · 총 ${item.totalOvertime}h`}
+                  <span>{`전월누적 ${item.previous || 0}h · 이번달 ${item.current || 0}h · `}</span>
+                  <span className={Number(item.totalOvertime || 0) > 24 ? "text-[#C93A3A] font-black" : ""}>
+                    {`총 ${item.totalOvertime}h`}
+                  </span>
+                  {(item.manualOvertime !== 0 || item.autoOvertime !== 0) && (
+                    <span className="block mt-0.5 text-[10px] text-gray-400">
+                      {`수기 ${item.manualOvertime || 0}h · 자동/차감 ${item.autoOvertime || 0}h`}
+                    </span>
+                  )}
                 </span>
               </div>
             ))
@@ -7200,7 +7788,7 @@ function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; i
             <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
             <button
               onClick={() => void loadData(true)}
-              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-150 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
             >
               <RefreshCw className="w-3 h-3" /> 새로고침
             </button>
@@ -8256,6 +8844,23 @@ function MonthlyPurchaseSalesSubTab({
     loadPurchases();
     return () => {
       cancelled = true;
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      if (localStorage.getItem(pendingKey) === "1") {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const pendingRows = normalizePurchaseRows(JSON.parse(saved));
+            void gasClient.saveSharedData(sharedKey, pendingRows)
+              .then(() => localStorage.removeItem(pendingKey))
+              .catch((error) => console.warn("Pending monthly purchases save failed during tab change.", error));
+          } catch (error) {
+            console.warn("Pending monthly purchases could not be parsed during tab change.", error);
+          }
+        }
+      }
     };
   }, [branchName, defaultRows, emptyAmounts, normalizePurchaseRows, pendingKey, selectedMonth, sharedKey, storageKey]);
 
@@ -8668,9 +9273,40 @@ function MonthlyPartTimeSalarySubTab({
 
   useEffect(() => {
     return () => {
-      salaryAutoSaveTimerRef.current = null;
+      if (salaryAutoSaveTimerRef.current) {
+        window.clearTimeout(salaryAutoSaveTimerRef.current);
+        salaryAutoSaveTimerRef.current = null;
+      }
+      const salaryPending = localStorage.getItem(salaryPendingKey) === "1";
+      const exclusionPending = localStorage.getItem(exclusionPendingKey) === "1";
+      if (!salaryPending && !exclusionPending) return;
+
+      const savedSalaries = localStorage.getItem(salaryStorageKey);
+      const savedExclusions = localStorage.getItem(exclusionStorageKey);
+      try {
+        const pendingSalaries = savedSalaries ? JSON.parse(savedSalaries) : [];
+        const pendingExclusions = savedExclusions ? JSON.parse(savedExclusions) : [];
+        const saveTasks: Promise<{ success: boolean }>[] = [];
+        if (salaryPending && Array.isArray(pendingSalaries)) {
+          saveTasks.push(gasClient.saveSharedData(salaryDataKey, pendingSalaries));
+          saveTasks.push(gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(pendingSalaries)));
+        }
+        if (exclusionPending && Array.isArray(pendingExclusions)) {
+          saveTasks.push(gasClient.saveSharedData(exclusionDataKey, pendingExclusions));
+        }
+        void Promise.all(saveTasks)
+          .then(() => {
+            if (salaryPending) localStorage.removeItem(salaryPendingKey);
+            if (exclusionPending) localStorage.removeItem(exclusionPendingKey);
+          })
+          .catch((error) => {
+            console.warn("Pending part-time salary save failed during tab change.", error);
+          });
+      } catch (error) {
+        console.warn("Pending part-time salary data could not be parsed during tab change.", error);
+      }
     };
-  }, []);
+  }, [branchName, buildPartTimeProfiles, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, salaryDataKey, salaryPendingKey, salaryStorageKey]);
 
   useEffect(() => {
     let active = true;

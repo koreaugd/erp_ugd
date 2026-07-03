@@ -14,6 +14,7 @@ function getVersionFileUrl() {
 
 export async function ensureLatestAppVersion() {
   if (typeof window === "undefined") return true;
+  if ((import.meta as any).env?.DEV) return true;
 
   try {
     const versionUrl = new URL(getVersionFileUrl(), window.location.href);

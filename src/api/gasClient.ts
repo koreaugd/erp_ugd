@@ -48,6 +48,13 @@ export interface RosterEmployee {
   residentNumber?: string;
   contractType?: "4대보험" | "3.3%";
   entryDate?: string;
+  phone?: string;
+  addReason?: string;
+  fromBranch?: string;
+  transferDate?: string;
+  salaryChanged?: "있음" | "없음";
+  hireDate?: string;
+  addReasonMemo?: string;
   employeeId?: string;
   birthDate?: string;
   salary?: number;
