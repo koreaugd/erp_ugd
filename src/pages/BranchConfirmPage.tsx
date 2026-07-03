@@ -2030,20 +2030,24 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         if (!name) return;
         byName.set(name, [...(byName.get(name) || []), employee]);
       });
+      const duplicateNames: string[] = [];
+      let hasMissingResidentDuplicate = false;
       byName.forEach((group, name) => {
         if (group.length < 2) return;
         const birthKeys = group.map((employee) => residentBirthKey(employee.residentNumber));
-        const hasMissing = birthKeys.some((key) => !key);
-        const distinct = new Set(birthKeys.filter(Boolean));
+        if (birthKeys.some((key) => !key)) hasMissingResidentDuplicate = true;
+        duplicateNames.push(name);
+      });
+      if (duplicateNames.length > 0) {
         nextIssues.push({
           type: "동명이인 확인",
-          message: hasMissing
+          message: hasMissingResidentDuplicate
             ? "동명이인/동일인 확인 필요 (주민등록번호 미입력 포함)"
-            : `동명이인 확인 필요 (${Array.from(distinct).join(", ")})`,
-          names: [name],
+            : "동명이인/동일인 확인 필요",
+          names: duplicateNames,
           level: "danger"
         });
-      });
+      }
 
       setIssues(nextIssues);
     } finally {
