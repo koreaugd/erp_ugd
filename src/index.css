@@ -1839,6 +1839,16 @@ input[type=number] {
   max-width: 170px !important;
 }
 
+.branch-redesign aside > div:first-child .branch-sidebar-branch-name {
+  color: var(--branch-black) !important;
+  font-size: 18px !important;
+  line-height: 1.2 !important;
+  max-width: 100% !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
 .branch-redesign .branch-dashboard-tab .branch-notice-unchecked {
   background: var(--branch-vanilla) !important;
   border-color: var(--branch-black) !important;
@@ -2178,25 +2188,149 @@ input[type=number] {
   background: var(--branch-honey) !important;
 }
 
+/* Final branch section + choice controls override. Keep at file end so it wins. */
+.branch-redesign #orders-tab-view > section,
+.branch-redesign #liquor-inventory-tab > section,
+.branch-redesign #tab-view-orders #orders-tab-view > section,
+.branch-redesign #tab-view-liquorInventory #liquor-inventory-tab > section {
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
+}
+
+.branch-redesign .branch-choice-select {
+  border: 1px solid var(--branch-black) !important;
+  border-radius: 10px !important;
+  box-shadow: inset 0 -1px 0 rgba(33, 33, 33, 0.08) !important;
+  color: var(--branch-black) !important;
+  cursor: pointer !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  outline: none !important;
+}
+
+.branch-redesign .branch-choice-select:focus {
+  box-shadow: 0 0 0 3px rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign .branch-choice-badge {
+  cursor: default !important;
+  line-height: 1.2 !important;
+}
+
+.branch-redesign .branch-choice-required {
+  background: #FDE2E2 !important;
+  border-color: #C93A3A !important;
+  color: #8F1F1F !important;
+}
+
+.branch-redesign .branch-sensitive-hidden {
+  display: inline-flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  justify-content: center !important;
+  border: 1px dashed rgba(33, 33, 33, 0.28) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--branch-alice) 70%, #ffffff) !important;
+  color: rgba(33, 33, 33, 0.64) !important;
+  padding: 4px 6px !important;
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+}
+
+.branch-redesign .branch-sensitive-missing {
+  background: #FDE2E2 !important;
+  border-color: #C93A3A !important;
+  color: #8F1F1F !important;
+}
+
+.branch-redesign .branch-choice-select option {
+  background: #ffffff !important;
+  color: var(--branch-black) !important;
+  font-weight: 900 !important;
+}
+
+.branch-redesign .branch-choice-select option[value=""] {
+  color: rgba(33, 33, 33, 0.46) !important;
+}
+
+.branch-redesign .branch-choice-select option[value="신규입사"],
+.branch-redesign .branch-choice-hire {
+  background: var(--branch-vanilla) !important;
+}
+
+.branch-redesign .branch-choice-select option[value="지점이동"],
+.branch-redesign .branch-choice-transfer {
+  background: var(--branch-alice) !important;
+}
+
+.branch-redesign .branch-choice-select option[value="기존직원"],
+.branch-redesign .branch-choice-existing,
+.branch-redesign .branch-choice-salary-no {
+  background: var(--branch-honey) !important;
+}
+
+.branch-redesign .branch-choice-select option[value="기타"],
+.branch-redesign .branch-choice-other {
+  background: color-mix(in srgb, var(--branch-ghost) 74%, var(--branch-alice)) !important;
+}
+
+.branch-redesign .branch-choice-select option[value="있음"],
+.branch-redesign .branch-choice-salary-yes {
+  background: color-mix(in srgb, var(--branch-vanilla) 76%, #ffffff) !important;
+}
+
+.branch-redesign .branch-choice-placeholder {
+  background: #ffffff !important;
+  border-color: rgba(33, 33, 33, 0.28) !important;
+  border-style: dashed !important;
+  color: rgba(33, 33, 33, 0.56) !important;
+}
+
+.branch-redesign .branch-choice-placeholder.branch-choice-required,
+.branch-redesign .branch-choice-select.branch-choice-required {
+  background: #FDE2E2 !important;
+  border-color: #C93A3A !important;
+  border-style: solid !important;
+  color: #8F1F1F !important;
+}
+
 /* Final sidebar subtab sizing override. Keep after global sidebar button rules. */
 .branch-redesign aside nav button.branch-sidebar-subtab,
 .branch-redesign aside nav button.branch-sidebar-subtab[style] {
-  gap: 6px !important;
-  padding: 5px 9px !important;
-  font-size: 13px !important;
+  gap: 4px !important;
+  padding: 5px 7px !important;
+  font-size: 11px !important;
   line-height: 1.15 !important;
+  white-space: nowrap !important;
 }
 
 .branch-redesign aside nav button.branch-sidebar-subtab span,
 .branch-redesign aside nav button.branch-sidebar-subtab[style] span {
-  font-size: 13px !important;
+  font-size: 11px !important;
   line-height: 1.15 !important;
+  white-space: nowrap !important;
 }
 
 .branch-redesign aside nav button.branch-sidebar-subtab svg,
 .branch-redesign aside nav button.branch-sidebar-subtab[style] svg {
   width: 14px !important;
   height: 14px !important;
+}
+
+.branch-redesign .branch-validation-error,
+.branch-redesign input.branch-validation-error,
+.branch-redesign select.branch-validation-error,
+.branch-redesign textarea.branch-validation-error {
+  border-color: #C93A3A !important;
+  background: #FDE2E2 !important;
+  box-shadow: 0 0 0 2px rgba(201, 58, 58, 0.18) !important;
+}
+
+.branch-redesign .branch-validation-error:focus {
+  border-color: #C93A3A !important;
+  box-shadow: 0 0 0 3px rgba(201, 58, 58, 0.24) !important;
 }
 
 /* Consolidated branch surface, notice-state, and edit-warning lock. */
@@ -2431,7 +2565,7 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 /* Final restore pass after TSX recovery: keep branch UI aligned with admin redesign. */
 @media (min-width: 768px) {
   .branch-redesign aside {
-    width: 280px !important;
+    width: 220px !important;
   }
 }
 
@@ -2921,6 +3055,10 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   background: var(--branch-honey) !important;
 }
 
+.branch-redesign #tab-view-liquorInventory .liquor-stock-alice-green {
+  background: var(--branch-alice) !important;
+}
+
 .branch-redesign .bg-rose-100,
 .branch-redesign .bg-red-100,
 .branch-redesign .bg-violet-100,
@@ -3001,6 +3139,27 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 .branch-redesign #monthly-settle-tab-root [class*="rounded-3xl"],
 .branch-redesign #labor-contract-tab [class*="rounded-2xl"] {
   border-color: rgba(33, 33, 33, 0.12) !important;
+}
+
+.branch-redesign #orders-tab-view > section,
+.branch-redesign #liquor-inventory-tab > section,
+.branch-redesign #roster-tab-view > div.bg-white,
+.branch-redesign #office-work-log-tab > div.bg-white,
+.branch-redesign #tab-view-overtimeLog > div > div.bg-white,
+.branch-redesign #tab-view-partTimeLog > div > div.bg-white,
+.branch-redesign #annual-leave-maintenance > section,
+.branch-redesign #tab-view-annualLeave > div > section.bg-white,
+.branch-redesign #tab-view-annualLeave > div > div.bg-white,
+.branch-redesign #labor-contract-tab > section,
+.branch-redesign #labor-contract-tab > div.bg-white,
+.branch-redesign #monthly-settle-tab-root > div.bg-white,
+.branch-redesign #purchase-sales-subtab,
+.branch-redesign #parttime-salaries-subtab,
+.branch-redesign #cash-expenses-subtab,
+.branch-redesign #cash-management-subtab,
+.branch-redesign #card-expenses-subtab {
+  border: 1px solid var(--branch-black) !important;
+  box-shadow: 0 18px 42px rgba(33, 33, 33, 0.045) !important;
 }
 
 .branch-redesign #tab-view-settle #settle-header-controls,
