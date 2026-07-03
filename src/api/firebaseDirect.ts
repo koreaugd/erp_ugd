@@ -224,7 +224,14 @@ export async function firebaseSaveBranchOwnRoster(branchName: string, employees:
 }
 
 export async function firebaseGetSharedData(dataKey: string) {
-  const snapshot = await getDoc(doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey)));
+  const recordRef = doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey));
+  let snapshot;
+  try {
+    snapshot = await getDocFromServer(recordRef);
+  } catch (error) {
+    console.warn("[Firebase Direct] Server read failed for shared_data; falling back to cached doc.", error);
+    snapshot = await getDoc(recordRef);
+  }
   return snapshot.exists() ? snapshot.data().value ?? null : null;
 }
 

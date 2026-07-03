@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailyListRow, DailySettleDetail, ExpenseDetail, StaffRecord } from "../api/gasClient";
+import type { RosterEmployee } from "../api/gasClient";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
@@ -2663,16 +2664,308 @@ function AdminManualOvertimesSection() {
   );
 }
 
+type AdminLaborContractSubTab = "candidates" | "contracts";
+type ContractCandidateReason = "신규입사" | "지점이동" | "기타";
+type ContractCandidateFilter = "전체" | ContractCandidateReason;
+
+interface ContractCandidateRow {
+  id: string;
+  branchName: string;
+  name: string;
+  division: string;
+  residentBirth: string;
+  reason: ContractCandidateReason;
+  effectiveDate: string;
+  phone: string;
+  salaryChanged: string;
+  memo: string;
+  missingFields: string[];
+}
+
+const isContractCandidateReason = (value: unknown): value is ContractCandidateReason =>
+  value === "신규입사" || value === "지점이동" || value === "기타";
+
+const isContractCandidateEmployee = (value: RosterEmployee): value is RosterEmployee & { addReason: ContractCandidateReason } =>
+  isContractCandidateReason(value.addReason);
+
+const getContractCandidatePhoneTail = (value: unknown) => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.startsWith("010") ? digits.slice(3, 11) : digits.slice(0, 8);
+};
+
+const formatContractCandidatePhone = (value: unknown) => {
+  const tail = getContractCandidatePhoneTail(value);
+  if (tail.length !== 8) return "-";
+  return `010-${tail.slice(0, 4)}-${tail.slice(4)}`;
+};
+
+const getContractCandidateDate = (row: RosterEmployee, reason: ContractCandidateReason) => {
+  if (reason === "신규입사") return String(row.hireDate || row.entryDate || "");
+  if (reason === "지점이동") return String(row.transferDate || row.entryDate || "");
+  return "";
+};
+
+const getContractCandidateMissingFields = (row: RosterEmployee, reason: ContractCandidateReason) => {
+  const missingFields: string[] = [];
+  const residentBirth = String(row.residentNumber || "").replace(/\D/g, "").slice(0, 6);
+  const effectiveDate = getContractCandidateDate(row, reason);
+  if (residentBirth.length !== 6) missingFields.push("주민 앞6");
+  if (reason === "신규입사") {
+    if (!effectiveDate) missingFields.push("입사일");
+    if (getContractCandidatePhoneTail(row.phone).length !== 8) missingFields.push("연락처");
+  }
+  if (reason === "지점이동") {
+    if (!effectiveDate) missingFields.push("이동일");
+    if (row.salaryChanged !== "있음" && row.salaryChanged !== "없음") missingFields.push("급여변동");
+  }
+  if (reason === "기타" && !String(row.addReasonMemo || "").trim()) missingFields.push("기타 내용");
+  return missingFields;
+};
+
+const getAdminReasonChipClass = (reason: ContractCandidateReason) => {
+  if (reason === "신규입사") return "bg-amber-50 text-amber-700 border-amber-100";
+  if (reason === "지점이동") return "bg-blue-50 text-blue-700 border-blue-100";
+  return "bg-slate-100 text-slate-700 border-slate-200";
+};
+
 function AdminLaborContractsSection() {
+  const [activeTab, setActiveTab] = useState<AdminLaborContractSubTab>("candidates");
   const [contracts, setContracts] = useState<any[]>([]);
+  const [candidateRows, setCandidateRows] = useState<ContractCandidateRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
   const [searchName, setSearchName] = useState("");
-  const loadData = async () => { try { setLoading(true); const data = await gasClient.getAllLaborContracts(); setContracts(data || []); } catch (err) { console.error("Failed to load labor contracts:", err); } finally { setLoading(false); } };
-  useEffect(() => { void loadData(); }, []);
-  const saveBranchContracts = async (branchName: string, next: any[]) => { await gasClient.saveSharedData("labor_contracts:" + branchName, next); await gasClient.saveSharedData("labor_contracts_" + branchName, next); await loadData(); };
-  const updateStatus = async (row: any, status: string) => { const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || []; const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item); await saveBranchContracts(row.branchName, next); };
-  const deleteContract = async (row: any) => { if (!window.confirm(row.branchName + " / " + row.name + " 내역을 삭제할까요?")) return; const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || []; await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id)); };
-  const filteredContracts = useMemo(() => contracts.filter((c) => { const matchBranch = !searchBranch || c.branchName?.toLowerCase().includes(searchBranch.toLowerCase()); const matchName = !searchName || c.name?.toLowerCase().includes(searchName.toLowerCase()); return matchBranch && matchName; }).sort((a, b) => { if (a.deleteRequested !== b.deleteRequested) return a.deleteRequested ? -1 : 1; return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }), [contracts, searchBranch, searchName]);
-  return <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section"><div className="bg-white p-6 rounded-2xl border shadow-sm"><div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><h3 className="font-black text-gray-800 text-lg flex items-center gap-2"><Briefcase className="w-5 h-5 text-[#2E6DB4]" /> 전 지점 근로계약서 관리</h3><p className="text-xs text-gray-400 mt-1">지점에서 등록/수정요청한 인적사항의 진행 상태를 변경하거나 삭제요청을 처리합니다.</p></div><button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5"><input value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} placeholder="지점명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /><input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" /></div></div><div className="bg-white rounded-2xl border overflow-hidden shadow-2xs"><div className="overflow-x-auto"><table className="w-full min-w-[920px] text-sm"><thead><tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs"><th className="p-4">등록일</th><th className="py-4 px-3">지점명</th><th className="py-4 px-3">이름</th><th className="py-4 px-3">연락처</th><th className="py-4 px-3 text-right">급여</th><th className="py-4 px-3 text-center">요청</th><th className="py-4 px-3 text-center">진행 상태</th><th className="py-4 px-3 text-center">관리</th></tr></thead><tbody>{loading ? <tr><td colSpan={8} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : filteredContracts.length === 0 ? <tr><td colSpan={8} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr> : filteredContracts.map((c, idx) => <tr key={c.id || idx} className="border-b hover:bg-slate-50/50"><td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td><td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{c.branchName}</td><td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{c.name}</td><td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{c.phone}</td><td className="py-4 px-3 text-right font-black text-zinc-700 whitespace-nowrap">{Number(c.salary || 0).toLocaleString("ko-KR")}원</td><td className="py-4 px-3 text-center">{c.deleteRequested ? <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-black">삭제요청</span> : c.editRequestedAt ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black">수정됨</span> : "-"}</td><td className="py-4 px-3 text-center"><select value={c.status || "발송 대기"} onChange={(e) => void updateStatus(c, e.target.value)} className="border rounded-lg px-2 py-1 text-xs font-black"><option>발송 대기</option><option>발송 완료</option><option>서명 완료</option><option>보류</option></select></td><td className="py-4 px-3 text-center"><button onClick={() => void deleteContract(c)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제</button></td></tr>)}</tbody></table></div></div></div>;
+  const [candidateFilter, setCandidateFilter] = useState<ContractCandidateFilter>("전체");
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [contractData, branchData] = await Promise.all([
+        gasClient.getAllLaborContracts().catch(() => []),
+        gasClient.getBranchList().catch(() => [])
+      ]);
+      setContracts(contractData || []);
+      const branches = (branchData || []).filter((branch) => branch?.role === "branch" && branch.branchName);
+      const rosterResults = await Promise.all(branches.map(async (branch) => {
+        const roster = await gasClient.getBranchOwnRoster(branch.branchName).catch(() => []);
+        return (roster || []).filter(isContractCandidateEmployee).map((row) => {
+          const reason = row.addReason;
+          return {
+            id: `${branch.branchName}-${row.id || row.name}`,
+            branchName: branch.branchName,
+            name: String(row.name || ""),
+            division: String(row.division || "-"),
+            residentBirth: String(row.residentNumber || "").replace(/\D/g, "").slice(0, 6),
+            reason,
+            effectiveDate: getContractCandidateDate(row, reason),
+            phone: formatContractCandidatePhone(row.phone),
+            salaryChanged: String(row.salaryChanged || ""),
+            memo: String(row.addReasonMemo || ""),
+            missingFields: getContractCandidateMissingFields(row, reason)
+          };
+        });
+      }));
+      setCandidateRows(rosterResults.flat().sort((a, b) =>
+        String(b.effectiveDate || "").localeCompare(String(a.effectiveDate || "")) ||
+        a.branchName.localeCompare(b.branchName, "ko") ||
+        a.name.localeCompare(b.name, "ko")
+      ));
+    } catch (err) {
+      console.error("Failed to load labor contracts:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadData();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadData]);
+
+  const saveBranchContracts = async (branchName: string, next: any[]) => {
+    await gasClient.saveSharedData("labor_contracts:" + branchName, next);
+    await gasClient.saveSharedData("labor_contracts_" + branchName, next);
+    await loadData();
+  };
+
+  const updateStatus = async (row: any, status: string) => {
+    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
+    const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item);
+    await saveBranchContracts(row.branchName, next);
+  };
+
+  const deleteContract = async (row: any) => {
+    if (!window.confirm(row.branchName + " / " + row.name + " 내역을 삭제할까요?")) return;
+    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
+    await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id));
+  };
+
+  const filteredContracts = useMemo(() => contracts.filter((contract) => {
+    const matchBranch = !searchBranch || contract.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
+    const matchName = !searchName || contract.name?.toLowerCase().includes(searchName.toLowerCase());
+    return matchBranch && matchName;
+  }).sort((a, b) => {
+    if (a.deleteRequested !== b.deleteRequested) return a.deleteRequested ? -1 : 1;
+    return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  }), [contracts, searchBranch, searchName]);
+
+  const filteredCandidates = useMemo(() => candidateRows.filter((row) => {
+    const matchBranch = !searchBranch || row.branchName.toLowerCase().includes(searchBranch.toLowerCase());
+    const matchName = !searchName || row.name.toLowerCase().includes(searchName.toLowerCase());
+    const matchReason = candidateFilter === "전체" || row.reason === candidateFilter;
+    return matchBranch && matchName && matchReason;
+  }), [candidateRows, candidateFilter, searchBranch, searchName]);
+
+  const candidateCounts = useMemo(() => ({
+    total: candidateRows.length,
+    hire: candidateRows.filter((row) => row.reason === "신규입사").length,
+    transfer: candidateRows.filter((row) => row.reason === "지점이동").length,
+    other: candidateRows.filter((row) => row.reason === "기타").length,
+    missing: candidateRows.filter((row) => row.missingFields.length > 0).length
+  }), [candidateRows]);
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
+      <div className="bg-white p-6 rounded-2xl border shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+              <Briefcase className="w-5 h-5 text-[#2E6DB4]" />
+              전 지점 근로계약서 관리
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">지점 직원현황의 신규입사·지점이동·기타 등록 인원을 함께 확인합니다.</p>
+          </div>
+          <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-5 border-b border-gray-100">
+          <button type="button" onClick={() => setActiveTab("candidates")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "candidates" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>지점 등록 후보 {candidateCounts.total}명</button>
+          <button type="button" onClick={() => setActiveTab("contracts")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "contracts" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>발송 내역 {contracts.length}건</button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+          <input value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} placeholder="지점명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
+          <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
+        </div>
+      </div>
+
+      {activeTab === "candidates" ? (
+        <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-4">
+            <div className="flex flex-wrap gap-2 text-xs font-black">
+              {(["전체", "신규입사", "지점이동", "기타"] as ContractCandidateFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setCandidateFilter(filter)}
+                  className={`rounded-xl border px-3 py-2 ${candidateFilter === filter ? "border-[#2E6DB4] bg-blue-50 text-[#2E6DB4]" : "border-gray-200 bg-white text-gray-500"}`}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px] font-black">
+              <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">정보부족 {candidateCounts.missing}명</span>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">발송대기 {Math.max(candidateCounts.total - candidateCounts.missing, 0)}명</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                  <th className="p-4">상태</th>
+                  <th className="py-4 px-3">추가 사유</th>
+                  <th className="py-4 px-3">지점명</th>
+                  <th className="py-4 px-3">이름</th>
+                  <th className="py-4 px-3">분류</th>
+                  <th className="py-4 px-3">주민 앞6</th>
+                  <th className="py-4 px-3">입사/이동일</th>
+                  <th className="py-4 px-3">연락처/급여변동</th>
+                  <th className="py-4 px-3">기타</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+                ) : filteredCandidates.length === 0 ? (
+                  <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">표시할 계약 발송 후보가 없습니다.</td></tr>
+                ) : filteredCandidates.map((row) => (
+                  <tr key={row.id} className="border-b hover:bg-slate-50/50">
+                    <td className="p-4 whitespace-nowrap">
+                      {row.missingFields.length ? (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">정보부족</span>
+                      ) : (
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">발송대기</span>
+                      )}
+                    </td>
+                    <td className="py-4 px-3 whitespace-nowrap"><span className={`rounded-full border px-2.5 py-1 text-xs font-black ${getAdminReasonChipClass(row.reason)}`}>{row.reason}</span></td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{row.branchName}</td>
+                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{row.name}</td>
+                    <td className="py-4 px-3 text-xs font-black text-gray-500 whitespace-nowrap">{row.division}</td>
+                    <td className="py-4 px-3 font-mono text-xs text-gray-600 whitespace-nowrap">{row.residentBirth || "-"}</td>
+                    <td className="py-4 px-3 font-mono text-xs text-gray-600 whitespace-nowrap">{row.effectiveDate || "-"}</td>
+                    <td className="py-4 px-3 text-xs font-black text-gray-600 whitespace-nowrap">{row.reason === "지점이동" ? row.salaryChanged || "-" : row.phone}</td>
+                    <td className="py-4 px-3 text-xs text-gray-500 max-w-[240px] truncate" title={row.missingFields.join(", ") || row.memo}>{row.missingFields.join(", ") || row.memo || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
+                  <th className="p-4">등록일</th>
+                  <th className="py-4 px-3">지점명</th>
+                  <th className="py-4 px-3">이름</th>
+                  <th className="py-4 px-3">연락처</th>
+                  <th className="py-4 px-3 text-right">급여</th>
+                  <th className="py-4 px-3 text-center">요청</th>
+                  <th className="py-4 px-3 text-center">진행 상태</th>
+                  <th className="py-4 px-3 text-center">관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={8} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+                ) : filteredContracts.length === 0 ? (
+                  <tr><td colSpan={8} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr>
+                ) : filteredContracts.map((contract, idx) => (
+                  <tr key={contract.id || idx} className="border-b hover:bg-slate-50/50">
+                    <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{contract.branchName}</td>
+                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
+                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{contract.phone}</td>
+                    <td className="py-4 px-3 text-right font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
+                    <td className="py-4 px-3 text-center">{contract.deleteRequested ? <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-black">삭제요청</span> : contract.editRequestedAt ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black">수정됨</span> : "-"}</td>
+                    <td className="py-4 px-3 text-center">
+                      <select value={contract.status || "발송 대기"} onChange={(e) => void updateStatus(contract, e.target.value)} className="border rounded-lg px-2 py-1 text-xs font-black">
+                        <option>발송 대기</option>
+                        <option>발송 완료</option>
+                        <option>서명 완료</option>
+                        <option>보류</option>
+                      </select>
+                    </td>
+                    <td className="py-4 px-3 text-center"><button onClick={() => void deleteContract(contract)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
