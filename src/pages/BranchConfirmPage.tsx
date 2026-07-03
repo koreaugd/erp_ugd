@@ -2264,6 +2264,28 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     return [];
   }, [branchName]);
 
+  const refreshRosterCache = useCallback(async (): Promise<Employee[]> => {
+    const hasPendingLocalSave = localStorage.getItem(staffListPendingStorageKey(branchName)) === "1";
+    if (hasPendingLocalSave) return getRoster();
+
+    try {
+      const remoteRoster = await gasClient.getBranchOwnRoster(branchName);
+      const cleaned = remoteRoster
+        .filter((employee: any) => !isSampleEmployee(employee))
+        .map((employee) => normalizeRosterEmployee(employee))
+        .filter((employee): employee is Employee => Boolean(employee));
+      localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(cleaned));
+      return [...cleaned].sort((a, b) => {
+        if (a.division === "정직원" && b.division !== "정직원") return -1;
+        if (a.division !== "정직원" && b.division === "정직원") return 1;
+        return a.name.localeCompare(b.name, "ko");
+      });
+    } catch (error) {
+      console.warn("직원현황 원격 동기화 실패, 로컬 캐시를 사용합니다.", error);
+      return getRoster();
+    }
+  }, [branchName, getRoster]);
+
   const getTodayDateStr = () => {
     const local = new Date();
     const year = local.getFullYear();
@@ -2471,10 +2493,12 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     officeWorkplace: branchName
   }), [branchName, defaultStandardHours]);
 
+  const hasMeaningfulTimeInput = (value?: string) => Boolean(value && value !== "00:00");
+
   const hasStaffWorkInput = (row: StaffRow) =>
     Boolean(
-      row.clockIn ||
-      row.clockOut ||
+      hasMeaningfulTimeInput(row.clockIn) ||
+      hasMeaningfulTimeInput(row.clockOut) ||
       Number(row.workHours || 0) > 0 ||
       Number(row.overtime || 0) > 0 ||
       String(row.overtimeReason || "").trim() ||
@@ -2483,20 +2507,43 @@ function DailySettleTab({ branchName }: { branchName: string }) {
 
   const reconcileDraftStaffRows = useCallback((rows: StaffRow[]) => {
     const roster = getRoster();
+    const rosterByName = new Map<string, Employee>();
+    roster.forEach((emp) => rosterByName.set(emp.name, emp));
     const rosterKeys = new Set(roster.map((emp) => `${emp.name}|${emp.residentNumber || ""}`));
     const rosterNames = new Set(roster.map((emp) => emp.name));
     const usedKeys = new Set<string>();
 
-    const keptRows = rows.filter((row) => {
-      const key = `${row.name}|${row.residentNumber || ""}`;
-      const inRoster = rosterKeys.has(key) || rosterNames.has(row.name);
-      if (inRoster) {
-        usedKeys.add(key);
-        usedKeys.add(`${row.name}|`);
-        return true;
-      }
-      return hasStaffWorkInput(row);
-    });
+    const keptRows = rows
+      .filter((row) => {
+        const key = `${row.name}|${row.residentNumber || ""}`;
+        const inRoster = rosterKeys.has(key) || rosterNames.has(row.name);
+        if (inRoster) {
+          usedKeys.add(key);
+          usedKeys.add(`${row.name}|`);
+          return true;
+        }
+        return hasStaffWorkInput(row);
+      })
+      .map((row) => {
+        // 직원현황에서 수정된 최신 정보(주민번호·직급·입사일·구분 등)를 반영합니다.
+        // 근무 입력값(출퇴근시간·초과근무·메모)은 그대로 보존합니다.
+        const emp = rosterByName.get(row.name);
+        if (!emp) return row;
+        return {
+          ...row,
+          division: emp.division,
+          residentNumber: emp.residentNumber || "",
+          rank: emp.rank || "",
+          entryDate: emp.entryDate || "",
+          phone: emp.phone || "",
+          addReason: emp.addReason,
+          fromBranch: emp.fromBranch || "",
+          transferDate: emp.transferDate || "",
+          hireDate: emp.hireDate || "",
+          addReasonMemo: emp.addReasonMemo || "",
+          standardHours: emp.division === "정직원" ? defaultStandardHours : 0
+        };
+      });
 
     const nextRows = [...keptRows];
     roster.forEach((emp) => {
@@ -2512,10 +2559,10 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     });
 
     return isHeadOffice ? distributeHeadOfficeOvertime(nextRows) : nextRows;
-  }, [getRoster, isHeadOffice, mapEmployeeToStaffRow]);
+  }, [getRoster, isHeadOffice, mapEmployeeToStaffRow, defaultStandardHours]);
 
-  const initRosterInForm = useCallback(() => {
-    const list = getRoster();
+  const initRosterInForm = useCallback((freshRoster?: Employee[]) => {
+    const list = freshRoster || getRoster();
     const mappedRows: StaffRow[] = list.map(mapEmployeeToStaffRow);
     setStaffRows(mappedRows);
   }, [getRoster, mapEmployeeToStaffRow]);
@@ -2760,7 +2807,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
           setStaffMemo("");
           setReviewMemo("");
           setOtherMemo("");
-          initRosterInForm();
+          const freshRoster = await refreshRosterCache();
+          initRosterInForm(freshRoster);
           setTimeout(() => {
             if (restoreDraftIfAvailable({ preservePrevDayCash: prevCashVal })) {
               setStaffRows((current) => reconcileDraftStaffRows(current));
@@ -2780,7 +2828,8 @@ function DailySettleTab({ branchName }: { branchName: string }) {
         setStaffMemo("");
         setReviewMemo("");
         setOtherMemo("");
-        initRosterInForm();
+        const freshRoster = await refreshRosterCache();
+        initRosterInForm(freshRoster);
         setTimeout(() => {
           if (restoreDraftIfAvailable({ preservePrevDayCash: "0" })) {
             setStaffRows((current) => reconcileDraftStaffRows(current));
@@ -2793,7 +2842,7 @@ function DailySettleTab({ branchName }: { branchName: string }) {
     };
 
     checkDuplicateAndLoad();
-  }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable]);
+  }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable, refreshRosterCache]);
 
   // Real-time Sum calculations
   const totalSales = useMemo(() => {
