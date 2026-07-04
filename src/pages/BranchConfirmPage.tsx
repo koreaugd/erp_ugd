@@ -31,7 +31,7 @@ import {
   residentBirthKey,
   toNumberPromptValue,
 } from "./branch/helpers/formatters";
-import { splitDailyMemoMetadata, joinDailyMemoMetadata } from "./branch/helpers/memoMetadata";
+import { updateDailyMetadata } from "./branch/helpers/dailyOps";
 import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "./branch/helpers/chipClasses";
 import type {
   StaffAddReason,
@@ -81,28 +81,6 @@ import { LaborContractTab } from "./branch/tabs/LaborContractTab";
 import { AdminRecordEditModal } from "./branch/tabs/AdminRecordEditModal";
 import { BranchDashboardTab } from "./branch/tabs/BranchDashboardTab";
 
-
-const updateDailyMetadata = async (
-  recordId: string,
-  updater: (metadata: any, detail: DailySettleDetail) => { metadata: any; staff?: any[]; expenses?: any[]; masterPatch?: any } | void
-) => {
-  const detail = await gasClient.getDailyDetail(recordId);
-  const { visibleMemo, metadata } = splitDailyMemoMetadata(detail.master?.memo);
-  const result = updater(metadata, detail) || { metadata };
-  const nextMetadata = result.metadata || metadata;
-  const masterPatch = {
-    ...detail.master,
-    ...(result.masterPatch || {}),
-    memo: joinDailyMemoMetadata(visibleMemo, nextMetadata)
-  };
-  await gasClient.updateDaily(
-    recordId,
-    masterPatch,
-    result.expenses || detail.expenses,
-    result.staff || detail.staff,
-    "관리자"
-  );
-};
 
 
 export default function BranchConfirmPage() {
