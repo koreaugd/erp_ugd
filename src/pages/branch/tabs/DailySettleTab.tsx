@@ -1148,9 +1148,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           mergedRoster.length !== remoteNames.size ||
           mergedRoster.some((employee) => !remoteNames.has(employee.name));
 
+        if (needsRemoteSave) {
+          localStorage.setItem(staffListPendingStorageKey(branchName), "1");
+        }
         localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(mergedRoster));
         if (needsRemoteSave) {
           await gasClient.saveBranchOwnRoster(branchName, mergedRoster);
+          localStorage.removeItem(staffListPendingStorageKey(branchName));
         }
       } catch (e) {
         console.error("Local roster automatic registration failed:", e);
