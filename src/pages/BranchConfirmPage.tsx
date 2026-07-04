@@ -1,84 +1,17 @@
 // src/pages/BranchConfirmPage.tsx
-import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient } from "../api/gasClient";
-import type { AdminBranchSetting, DailySettleDetail, RosterEmployee } from "../api/gasClient";
-import {
-  Calendar, Store, CheckCircle, ArrowRight, ArrowLeft, RefreshCw, LogOut,
-  CircleDollarSign, Plus, Trash2, Clock, User, UserPlus, FileText,
-  ShoppingCart, Landmark, Info, CheckCircle2, AlertTriangle, ShieldAlert, Lock,
-  Users, ClipboardList, Coins, Briefcase, Pencil, Check, TrendingUp, Settings, X,
-  Cloud, Database, UploadCloud, AlertCircle, Search
-} from "lucide-react";
+import { Calendar, Store, ArrowRight, RefreshCw, LogOut, CircleDollarSign, Plus, Trash2, Clock, User, FileText, ShoppingCart, Lock, Users, ClipboardList, Coins, Briefcase, Settings, X, Cloud, Database, UploadCloud, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { formatNumber } from "../utils/formatNumber";
 import { hashPin } from "../utils/hashPin";
 import { ensureLatestAppVersion } from "../utils/appVersion";
-import {
-  formatWithCommas,
-  cleanNumeric,
-  toLocalDateInputValue,
-  toLocalMonthInputValue,
-  addDaysToDateInputValue,
-  addMonthsToMonthInputValue,
-  toDateInputValue,
-  formatResidentNumber,
-  maskResidentNumber,
-  toPhoneTail8,
-  formatMobilePhone,
-  residentBirthKey,
-  toNumberPromptValue,
-} from "./branch/helpers/formatters";
-import { updateDailyMetadata } from "./branch/helpers/dailyOps";
-import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "./branch/helpers/chipClasses";
-import type {
-  StaffAddReason,
-  StaffAddReasonChoice,
-  SalaryChangeChoice,
-  StaffAddDraft,
-  StaffRow,
-  DailySettleValidationField,
-  DailySettleValidationTargets,
-  ExpenseRow,
-  OrderCategory,
-  OrderReportCategory,
-  BranchDailyTab,
-  OrderItem,
-  InventoryProduct,
-  InventoryMovement,
-  Employee,
-  EmployeeEditableField,
-} from "./branch/types";
-import {
-  getSameNameWarning,
-  createStaffAddDraft,
-  staffListStorageKey,
-  staffListPendingStorageKey,
-  staffAddDraftStorageKey,
-  pendingLocalSaveStorageKey,
-  readLocalStaffList,
-  readLocalStaffAddDrafts,
-  isSampleEmployee,
-  createDailySettleValidationTargets,
-  getDailyStaffValidationKey,
-  needsOvertimeReason,
-  applyEmployeeEditableField,
-  parseStaffAddReason,
-  parseStaffAddReasonChoice,
-  parseSalaryChangeStatus,
-  parseSalaryChangeChoice,
-  getAddReasonChoiceClass,
-  getSalaryChoiceClass,
-  employeeNameKey,
-  normalizeRosterEmployee,
-  shouldSkipDailyRosterRegistration,
-  createEmployeeFromStaffRow,
-} from "./branch/helpers/staffHelpers";
+import { cleanNumeric } from "./branch/helpers/formatters";
+import type { BranchDailyTab } from "./branch/types";
 import { AnnualLeaveTab } from "./branch/tabs/AnnualLeaveTab";
 import { LaborContractTab } from "./branch/tabs/LaborContractTab";
-import { AdminRecordEditModal } from "./branch/tabs/AdminRecordEditModal";
 import { BranchDashboardTab } from "./branch/tabs/BranchDashboardTab";
 import { OvertimeLogTab } from "./branch/tabs/OvertimeLogTab";
 import { PartTimeLogTab } from "./branch/tabs/PartTimeLogTab";
