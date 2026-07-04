@@ -72,3 +72,5 @@ export const formatMobilePhone = (tail8: string) => {
 };
 
 export const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
+
+export const toNumberPromptValue = (value: any) => String(value ?? "").replace(/,/g, "");

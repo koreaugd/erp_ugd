@@ -29,7 +29,10 @@ import {
   toPhoneTail8,
   formatMobilePhone,
   residentBirthKey,
+  toNumberPromptValue,
 } from "./branch/helpers/formatters";
+import { splitDailyMemoMetadata, joinDailyMemoMetadata } from "./branch/helpers/memoMetadata";
+import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "./branch/helpers/chipClasses";
 
 
 const getSameNameWarning = (name: string, residentNumber: string | undefined, employees: Array<{ name: string; residentNumber?: string; division?: string }>, division?: string) => {
@@ -49,21 +52,6 @@ const getSameNameWarning = (name: string, residentNumber: string | undefined, em
   return `${cleanName} 이름과 주민등록번호 앞 6자리가 같은 직원이 이미 등록되어 있습니다.`;
 };
 
-const splitDailyMemoMetadata = (memo?: string | null) => {
-  const raw = String(memo || "");
-  const parts = raw.split("\n---\nMETADATA:");
-  let metadata: any = {};
-  if (parts[1]) {
-    try {
-      metadata = JSON.parse(parts.slice(1).join("\n---\nMETADATA:").trim()) || {};
-    } catch {
-      metadata = {};
-    }
-  }
-  return { visibleMemo: parts[0] || "", metadata };
-};
-
-const joinDailyMemoMetadata = (visibleMemo: string, metadata: any) => `${visibleMemo || ""}\n---\nMETADATA:\n${JSON.stringify(metadata || {})}`;
 
 const updateDailyMetadata = async (
   recordId: string,
@@ -87,21 +75,6 @@ const updateDailyMetadata = async (
   );
 };
 
-const toNumberPromptValue = (value: any) => String(value ?? "").replace(/,/g, "");
-
-const getMonthlyExpenseCategoryChipClass = (value: string) => {
-  const text = String(value || "");
-  if (text.includes("식재료")) return "monthly-chip-vanilla";
-  if (text.includes("음료")) return "monthly-chip-alice";
-  return "monthly-chip-honey";
-};
-
-const getMonthlyExpenseUsageChipClass = (value: string) => {
-  const text = String(value || "");
-  if (text.includes("쿠팡")) return "monthly-chip-vanilla";
-  if (text.includes("네이버")) return "monthly-chip-honey";
-  return "monthly-chip-alice";
-};
 
 // ----------------------------------------------------
 // Constants & Types
