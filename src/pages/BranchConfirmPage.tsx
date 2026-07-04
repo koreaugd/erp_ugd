@@ -1641,4 +1641,3 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     </div>
   );
 }
-
