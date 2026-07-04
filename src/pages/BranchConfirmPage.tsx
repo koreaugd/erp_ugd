@@ -2164,13 +2164,43 @@ function BranchDashboardTab({ branchName }: { branchName: string }) {
         nextIssues.push({ type: "전일마감", message: `${getDateStr(-1)} 일일마감 미제출`, level: "info" });
       }
 
-      const missingResident = (roster || []).filter((employee: any) => !residentBirthKey(employee.residentNumber)).map((employee: any) => employee.name).filter(Boolean);
-      const missingEntryDate = (roster || []).filter((employee: any) => !employee.entryDate).map((employee: any) => employee.name).filter(Boolean);
-      if (missingResident.length > 0) {
-        nextIssues.push({ type: "직원현황", message: "주민등록번호 앞6자리 입력 필요", names: missingResident, level: "warn" });
+      const missingAddReason: string[] = [];
+      const incompleteNewHires: string[] = [];
+      const incompleteTransfers: string[] = [];
+      const incompleteOtherReasons: string[] = [];
+      (roster || []).forEach((employee: any) => {
+        const name = String(employee.name || "").trim();
+        if (!name) return;
+        const addReason = parseStaffAddReason(String(employee.addReason || ""));
+        if (!addReason) {
+          missingAddReason.push(name);
+          return;
+        }
+        const residentBirth = residentBirthKey(employee.residentNumber);
+        if (addReason === "신규입사") {
+          const effectiveDate = String(employee.hireDate || employee.entryDate || "");
+          if (!residentBirth || !effectiveDate || toPhoneTail8(String(employee.phone || "")).length !== 8) incompleteNewHires.push(name);
+        }
+        if (addReason === "지점이동") {
+          const effectiveDate = String(employee.transferDate || employee.entryDate || "");
+          const salaryChanged = parseSalaryChangeStatus(String(employee.salaryChanged || ""));
+          if (!residentBirth || !effectiveDate || !salaryChanged) incompleteTransfers.push(name);
+        }
+        if (addReason === "기타" && !String(employee.addReasonMemo || "").trim()) {
+          incompleteOtherReasons.push(name);
+        }
+      });
+      if (missingAddReason.length > 0) {
+        nextIssues.push({ type: "직원현황", message: "추가사유 선택 필요", names: missingAddReason, level: "warn" });
       }
-      if (missingEntryDate.length > 0) {
-        nextIssues.push({ type: "직원현황", message: "입사일 입력 필요", names: missingEntryDate, level: "warn" });
+      if (incompleteNewHires.length > 0) {
+        nextIssues.push({ type: "근로계약 후보", message: "신규입사 필수정보 확인 필요", names: incompleteNewHires, level: "warn" });
+      }
+      if (incompleteTransfers.length > 0) {
+        nextIssues.push({ type: "근로계약 후보", message: "지점이동 필수정보 확인 필요", names: incompleteTransfers, level: "warn" });
+      }
+      if (incompleteOtherReasons.length > 0) {
+        nextIssues.push({ type: "근로계약 후보", message: "기타 사유 내용 입력 필요", names: incompleteOtherReasons, level: "warn" });
       }
 
       const byName = new Map<string, any[]>();
