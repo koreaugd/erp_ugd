@@ -772,16 +772,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     groups.forEach((indexes) => {
       const activeIndexes = indexes.filter((index) => next[index].officeWorkType !== "휴무");
       const standard = activeIndexes.reduce((value, index) => value || Number(next[index].standardHours || 0), 0) || defaultStandardHours;
-      const totalWorkHours = activeIndexes.reduce((sum, index) => sum + Number(next[index].workHours || 0), 0);
+      const workedIndexes = activeIndexes.filter((index) => Number(next[index].workHours || 0) > 0);
+      const totalWorkHours = workedIndexes.reduce((sum, index) => sum + Number(next[index].workHours || 0), 0);
       const totalDelta = parseFloat((totalWorkHours - standard).toFixed(1));
+      if (workedIndexes.length === 0) return;
       if (totalDelta <= 0) {
-        const lastIndex = activeIndexes[activeIndexes.length - 1];
+        const lastIndex = workedIndexes[workedIndexes.length - 1];
         if (lastIndex !== undefined) next[lastIndex].overtime = totalDelta;
         return;
       }
       let cumulativeHours = 0;
       let allocatedOvertime = 0;
-      activeIndexes.forEach((index) => {
+      workedIndexes.forEach((index) => {
         cumulativeHours += Number(next[index].workHours || 0);
         const totalOvertime = Math.max(0, cumulativeHours - standard);
         const rowOvertime = parseFloat((totalOvertime - allocatedOvertime).toFixed(1));
@@ -2200,21 +2202,23 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     return (
                       <tr key={idx} id={`office-work-row-${idx}`} className="hover:bg-gray-50/50">
                         {isExtraSegment ? (
-                          <td colSpan={4} className="py-3.5 px-2 bg-slate-50/60 border-r border-slate-100" aria-label={`${s.name} 추가 근무구간`} />
+                          <td className="py-3.5 px-2 bg-slate-50/60 border-r border-slate-100 text-[10px] font-black text-slate-400 whitespace-nowrap">
+                            추가 구간
+                          </td>
                         ) : (
-                        <>
-                        <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span>{s.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => addOfficeWorkSegment(idx)}
-                              className="whitespace-nowrap rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 hover:bg-blue-100"
-                            >
-                              행 추가
-                            </button>
-                          </div>
-                        </td>
+                          <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <span>{s.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => addOfficeWorkSegment(idx)}
+                                className="whitespace-nowrap rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 hover:bg-blue-100"
+                              >
+                                행 추가
+                              </button>
+                            </div>
+                          </td>
+                        )}
                         <td className="py-3.5 px-2">
                           <select
                             disabled={isDayOff}
@@ -2231,38 +2235,45 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             {transferBranchList.map((branch: any) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
                           </select>
                         </td>
-                        <td className="py-3.5 px-2 text-center">
-                          <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={isDayOff}
-                              onChange={(e) => {
-                                clearStaffValidationTarget("officeWorkRows", s, idx);
-                                executeStaffCalculation(idx, { officeWorkType: e.target.checked ? "휴무" : "근무" });
-                              }}
-                              className="h-3.5 w-3.5 accent-[#2E6DB4]"
-                            />
-                            휴무
-                          </label>
-                        </td>
-                        <td className="py-3.5 px-1">
-                          <select
-                            disabled={isDayOff}
-                            value={String(s.standardHours)}
-                            onChange={(e) => {
-                              clearStaffValidationTarget("officeWorkRows", s, idx);
-                              executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" });
-                            }}
-                            className="w-14 px-1 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
-                          >
-                            <option value="0">0h</option>
-                            <option value="8">8h</option>
-                            <option value="9">9h</option>
-                            <option value="10">10h</option>
-                            <option value="10.5">10.5h</option>
-                          </select>
-                        </td>
-                        </>
+                        {isExtraSegment ? (
+                          <>
+                            <td className="py-3.5 px-2 bg-slate-50/60 text-center text-[10px] font-black text-slate-300">-</td>
+                            <td className="py-3.5 px-1 bg-slate-50/60 text-center font-mono text-[10px] font-black text-slate-300">0h</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="py-3.5 px-2 text-center">
+                              <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={isDayOff}
+                                  onChange={(e) => {
+                                    clearStaffValidationTarget("officeWorkRows", s, idx);
+                                    executeStaffCalculation(idx, { officeWorkType: e.target.checked ? "휴무" : "근무" });
+                                  }}
+                                  className="h-3.5 w-3.5 accent-[#2E6DB4]"
+                                />
+                                휴무
+                              </label>
+                            </td>
+                            <td className="py-3.5 px-1">
+                              <select
+                                disabled={isDayOff}
+                                value={String(s.standardHours)}
+                                onChange={(e) => {
+                                  clearStaffValidationTarget("officeWorkRows", s, idx);
+                                  executeStaffCalculation(idx, { standardHours: Number(e.target.value), officeWorkType: "근무" });
+                                }}
+                                className="w-14 px-1 py-1.5 border border-gray-200 rounded-lg bg-white font-mono text-xs font-bold disabled:bg-gray-100"
+                              >
+                                <option value="0">0h</option>
+                                <option value="8">8h</option>
+                                <option value="9">9h</option>
+                                <option value="10">10h</option>
+                                <option value="10.5">10.5h</option>
+                              </select>
+                            </td>
+                          </>
                         )}
                         <td className="py-3.5 px-2">
                           <input
