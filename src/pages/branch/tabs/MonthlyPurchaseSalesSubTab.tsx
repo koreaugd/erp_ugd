@@ -19,6 +19,53 @@ interface PurchaseSalesRow {
   memo: string;
 }
 
+// 마감제출 전, "지점이 수정/등록한 최신 내용"이 서버(공유)에 반영된 뒤에만 확정되도록 보장한다. 실패하면 blocked=true.
+// (0) 이 기기에 미저장 편집(pending)이 있으면 내용 불문(추가·수정·삭제·비움) 확정 전에 서버로 반영하고 그 상태로 판정
+//     → pending이 옛 서버값에 밀려 무시된 채 확정되는(=옛/삭제전 데이터가 다운로드되는) 사고를 방지. 실패 시 확정 차단(fail-safe).
+// (1) pending이 없으면 서버 최신값을 신뢰(실 데이터 있으면 통과)  (2) 서버가 비었고 로컬에 실 데이터가 있으면 복구 저장
+// (3) 둘 다 없거나 서버 확인 실패 → 중단
+// ※ 지점당 단일 로그인·단일 기기 사용 전제. 같은 지점·달을 두 기기서 동시 편집하는 경우의 충돌 방어는
+//   명시적 결정(2026-07-08)으로 범위 외 — 완전 방어가 필요하면 payload에 버전/타임스탬프를 심어 별도 대응.
+export async function flushMonthlyPurchasesForClose(branchName: string, selectedMonth: string): Promise<{ blocked: boolean }> {
+  const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
+  const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
+  const pendingKey = pendingLocalSaveStorageKey(storageKey);
+  const readLocal = (): PurchaseSalesRow[] | null => {
+    try { const raw = localStorage.getItem(storageKey); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+  const money = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
+  // 실 데이터 판정: 업체명이 입력되고 금액이 있는 행이 하나라도 있어야 한다(빈/미입력 행 제외).
+  const hasMeaningful = (rows: PurchaseSalesRow[] | null) =>
+    Array.isArray(rows) && rows.some((r) => String(r.vendorName || "").trim() !== "" && (money(r.transferAmount) + money(r.monthlyUsageAmount) + money(r.prepaidChargeAmount)) > 0);
+  const local = readLocal();
+
+  // 0) 이 기기에 미저장 편집(pending)이 있으면, 그 최신 상태(행 추가·수정·삭제·비움 모두 포함)를 확정 전에 서버로 반영한다.
+  //    → 지점이 방금 수정하거나 비운 내용이 옛 서버값에 밀려 무시된 채 확정되는 경우를 전부 차단. 저장 실패 시 확정 차단(fail-safe).
+  //    반영 후엔 서버=로컬이므로 로컬 기준으로 판정한다(실 데이터가 없으면 — 예: 전부 비움 — 확정 불가).
+  if (localStorage.getItem(pendingKey) === "1" && Array.isArray(local)) {
+    try { await gasClient.saveSharedData(sharedKey, local as PurchaseSalesRow[]); localStorage.removeItem(pendingKey); }
+    catch { return { blocked: true }; }
+    return hasMeaningful(local) ? { blocked: false } : { blocked: true };
+  }
+
+  // 1) 미저장 편집이 없으면 서버(공유) 최신값을 신뢰한다(오프라인/서버 실패 → throw → 마감 차단).
+  //    실 데이터가 있으면 그대로 확정(로컬로 덮어쓰지 않음).
+  let remote: PurchaseSalesRow[] | null = null;
+  try { remote = await gasClient.getSharedDataFromServer<PurchaseSalesRow[]>(sharedKey); }
+  catch { return { blocked: true }; }
+  if (hasMeaningful(remote)) return { blocked: false };
+
+  // 2) 서버가 비었지만(=pending이 아니어서 아직 안 올라간) 로컬에 실 데이터가 있으면 복구 저장 후 확정.
+  //    → "확정 기록은 있는데 서버 상세가 비어있는" 레거시 상태를 지점 재확정만으로 만회.
+  if (hasMeaningful(local)) {
+    try { await gasClient.saveSharedData(sharedKey, local as PurchaseSalesRow[]); localStorage.removeItem(pendingKey); return { blocked: false }; }
+    catch { return { blocked: true }; }
+  }
+
+  // 3) 서버·로컬 모두 실 데이터 없음 → 확정 불가.
+  return { blocked: true };
+}
+
 export function MonthlyPurchaseSalesSubTab({
   branchName,
   selectedMonth,
@@ -34,6 +81,8 @@ export function MonthlyPurchaseSalesSubTab({
 }) {
   const [rows, setRows] = useState<PurchaseSalesRow[]>([]);
   const autoSaveTimerRef = useRef<number | null>(null);
+  // 저장 세대 카운터: 저장 요청 후 더 최신 편집이 있으면(gen 불일치) pending 플래그를 지우지 않는다.
+  const autoSaveGenRef = useRef(0);
   const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
   const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
@@ -52,32 +101,8 @@ export function MonthlyPurchaseSalesSubTab({
     }));
   }, [normalizePurchaseRows, selectedMonth]);
 
-  const defaultRows = useCallback((): PurchaseSalesRow[] => ([
-    {
-      id: "p1",
-      category: "식재료비",
-      vendorName: "주식회사 식자재창고",
-      transferAmount: "1250000",
-      bank: "국민은행",
-      accountNumber: "123-456-789012",
-      isPrepaid: false,
-      prepaidChargeAmount: "",
-      monthlyUsageAmount: "1250000",
-      memo: "일반 후불 외상 결제"
-    },
-    {
-      id: "p2",
-      category: "식음료외 기타",
-      vendorName: "드림 물류 (선입금 업체)",
-      transferAmount: "0",
-      bank: "신한은행",
-      accountNumber: "987-654-321098",
-      isPrepaid: true,
-      prepaidChargeAmount: "0",
-      monthlyUsageAmount: "450000",
-      memo: "매월 선충전 후 발주금액 차감 방식"
-    }
-  ]), []);
+  // 가짜 샘플 기본행을 두지 않는다(샘플이 서버로 나가 확정되는 것을 방지). 거래처는 '매입 업체 추가'로 입력.
+  const defaultRows = useCallback((): PurchaseSalesRow[] => ([]), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,11 +185,12 @@ export function MonthlyPurchaseSalesSubTab({
     setRows(nextRows);
     localStorage.setItem(storageKey, JSON.stringify(nextRows));
     localStorage.setItem(pendingKey, "1");
+    const gen = ++autoSaveGenRef.current;
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
       gasClient.saveSharedData(sharedKey, nextRows)
         .then(() => {
-          localStorage.removeItem(pendingKey);
+          if (autoSaveGenRef.current === gen) localStorage.removeItem(pendingKey);
           if (showToast) triggerToast("매입매출 내용이 저장되었습니다!", "success");
         })
         .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
@@ -207,10 +233,11 @@ export function MonthlyPurchaseSalesSubTab({
       });
       localStorage.setItem(storageKey, JSON.stringify(nextRows));
       localStorage.setItem(pendingKey, "1");
+      const gen = ++autoSaveGenRef.current;
       if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = window.setTimeout(() => {
         gasClient.saveSharedData(sharedKey, nextRows)
-          .then(() => localStorage.removeItem(pendingKey))
+          .then(() => { if (autoSaveGenRef.current === gen) localStorage.removeItem(pendingKey); })
           .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
       }, 450);
       return nextRows;
@@ -250,8 +277,11 @@ export function MonthlyPurchaseSalesSubTab({
       }));
       localStorage.setItem(storageKey, JSON.stringify(resetRows));
       localStorage.setItem(pendingKey, "1");
+      // 대기 중이던 디바운스 저장이 초기화값을 덮어쓰지 못하도록 타이머 취소 + 세대 갱신.
+      if (autoSaveTimerRef.current) { window.clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
+      const gen = ++autoSaveGenRef.current;
       gasClient.saveSharedData(sharedKey, resetRows)
-        .then(() => localStorage.removeItem(pendingKey))
+        .then(() => { if (autoSaveGenRef.current === gen) localStorage.removeItem(pendingKey); })
         .catch((error) => {
           console.warn("월말마감 취소 금액 초기화 저장 실패:", error);
         });
@@ -265,7 +295,7 @@ export function MonthlyPurchaseSalesSubTab({
   const totalUsage = rows.reduce((acc, r) => acc + (Number(r.monthlyUsageAmount) || 0), 0);
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="purchase-sales-subtab">
+    <div className="space-y-5 animate-fade-in" id="purchase-sales-subtab">
       <div className="flex justify-between items-center pb-3 border-b border-gray-50">
         <div>
           <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">

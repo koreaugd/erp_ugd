@@ -425,7 +425,16 @@ export const gasClient = {
         const rawStandardHours = Number(staff.standardHours || 0);
         const standardHours = rawStandardHours || (branchName === "본사" && staff.division === "정직원" && workHours > 0 ? 10 : 0);
         const storedOvertime = Number(staff.overtime || 0);
-        const effectiveOvertime = storedOvertime !== 0 ? storedOvertime : (calculatedOvertimeByIndex.get(staffIndex) || 0);
+        let effectiveOvertime = storedOvertime !== 0 ? storedOvertime : (calculatedOvertimeByIndex.get(staffIndex) || 0);
+        // 관리자가 초과근무/조기퇴근 기록을 "삭제"하면 그 당시 초과시간 값이 overtimeCleared에 기록되고 사유는 비워집니다.
+        // 조기퇴근/초과시간은 출퇴근 시각에서 다시 계산되어 되살아나므로, 저장을 0으로 덮는 것만으로는 지워지지 않습니다.
+        // 억제 조건: (1) 삭제 마커가 있고 (2) 사유가 비어 있으며 (3) 계산된 값이 삭제 당시 값과 같을 때만 숨깁니다.
+        //  → 출퇴근이 바뀌어 값이 달라지거나, 마감화면에서 사유를 달아 정당하게 재입력하면 자동으로 다시 노출됩니다.
+        const clearedOvertime = staff.overtimeCleared;
+        const hasOvertimeReason = String(staff.overtimeReason || "").trim().length > 0;
+        if (clearedOvertime !== undefined && clearedOvertime !== null && !hasOvertimeReason && Math.abs(Number(clearedOvertime) - effectiveOvertime) < 0.05) {
+          effectiveOvertime = 0;
+        }
         const isDispatchedFromHeadOffice = branchName === "본사" && workplace !== "본사" && Number(staff.workHours || 0) > 0;
         const isPartTime = (staff.division === "파트타이머" || isDispatchedFromHeadOffice) && workHours > 0;
         const isOvertime = staff.division === "정직원" && effectiveOvertime !== 0;
@@ -474,6 +483,12 @@ export const gasClient = {
   async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
     const { firebaseGetSharedData } = await import("./firebaseDirect");
     return await firebaseGetSharedData(dataKey);
+  },
+
+  // 서버 문서만 읽는다(캐시 폴백 없음). 오프라인이면 throw → 마감 검증에서 캐시로 승인되는 것을 막는다.
+  async getSharedDataFromServer<T = unknown>(dataKey: string): Promise<T | null> {
+    const { firebaseGetSharedDataFromServer } = await import("./firebaseDirect");
+    return await firebaseGetSharedDataFromServer(dataKey);
   },
 
   async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
