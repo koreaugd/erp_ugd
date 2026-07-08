@@ -235,6 +235,14 @@ export async function firebaseGetSharedData(dataKey: string) {
   return snapshot.exists() ? snapshot.data().value ?? null : null;
 }
 
+// 마감 검증처럼 캐시로 승인되면 안 되는 경우 전용: 서버 문서만 읽는다.
+// 오프라인/서버 도달 실패 시 캐시로 폴백하지 않고 그대로 throw하여 호출부가 마감을 막을 수 있게 한다.
+export async function firebaseGetSharedDataFromServer(dataKey: string) {
+  const recordRef = doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey));
+  const snapshot = await getDocFromServer(recordRef);
+  return snapshot.exists() ? snapshot.data().value ?? null : null;
+}
+
 export async function firebaseGetBranchList() {
   const snapshot = await getDocs(collection(getDirectDb(), "public_branches"));
   return snapshot.docs.map((item) => item.data() as any).filter((branch) => branch.isActive !== false);

@@ -8,8 +8,22 @@ import { AdminRecordEditModal } from "./AdminRecordEditModal";
 import { toLocalDateInputValue, toLocalMonthInputValue, toNumberPromptValue } from "../helpers/formatters";
 import { updateDailyMetadata } from "../helpers/dailyOps";
 
+// 초과근무 행 식별: 동명이인·다중 근무 세그먼트에서 다른 행을 잘못 건드리지 않도록
+// segmentId(둘 다 있으면) → 출퇴근 시각(둘 다 있으면) → 이름 순으로 매칭합니다.
+// 식별 정보가 없는 구형 데이터는 기존과 동일하게 이름으로만 매칭합니다.
+function isSameOvertimeRow(staff: any, row: any): boolean {
+  const name = staff.staffName || staff.name;
+  if (name !== row.staffName) return false;
+  if (row.segmentId && staff.segmentId) return String(staff.segmentId) === String(row.segmentId);
+  if (row.clockIn && staff.clockIn && row.clockOut && staff.clockOut) {
+    return staff.clockIn === row.clockIn && staff.clockOut === row.clockOut;
+  }
+  return true;
+}
+
 export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
   const [manualName, setManualName] = useState("");
@@ -20,9 +34,9 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
   const [nameFilter, setNameFilter] = useState("");
   const [editOvertime, setEditOvertime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
-  const loadData = useCallback(async (forceRefresh = false) => {
+  const loadData = useCallback(async (forceRefresh = false, opts?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       const [log, manual] = await Promise.all([gasClient.getAttendanceLog(branchName, "overtime", selectedMonth, forceRefresh), gasClient.getSharedData<any[]>(`manual_overtime:${branchName}`)]);
       const manualRows = (manual || []).map((item) => ({
         ...item,
@@ -130,53 +144,73 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       alert("숫자 형식으로 입력해주세요.");
       return;
     }
-    if (!fields.reason.trim()) {
+    const reason = fields.reason.trim();
+    if (!reason) {
       alert("초과근무 시간이 0이 아니면 사유가 필요합니다.");
       return;
     }
-    if (row.manual) {
-      const key = `manual_overtime:${branchName}`;
-      const saved = (await gasClient.getSharedData<any[]>(key)) || [];
-      await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason: fields.reason.trim() } : item));
-    } else if (row.recordId) {
-      await updateDailyMetadata(row.recordId, (metadata, detail) => {
-        const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
-        const nextRows = staffRows.map((staff: any) => {
-          const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtime: hours, overtimeReason: fields.reason.trim() } : staff;
-        });
-        const nextStaff = (detail.staff || []).map((staff: any) => {
-          const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtimeHours: hours, memo: fields.reason.trim() } : staff;
-        });
-        return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-      });
-    }
+    // 낙관적 반영: 모달을 즉시 닫고 표의 값을 바로 갱신 → 저장 완료까지 기다리지 않아도 화면이 반응합니다.
     setEditOvertime(null);
-    await loadData();
+    setRecords((prev) => prev.map((item) => item === row ? { ...item, overtime: hours, overtimeReason: reason } : item));
+    setSaving(true);
+    try {
+      if (row.manual) {
+        const key = `manual_overtime:${branchName}`;
+        const saved = (await gasClient.getSharedData<any[]>(key)) || [];
+        await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason } : item));
+      } else if (row.recordId) {
+        await updateDailyMetadata(row.recordId, (metadata, detail) => {
+          const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+          // overtimeCleared: null → 이전에 삭제(숨김)된 기록이라도 수정하면 다시 정상 노출되도록 마커를 해제합니다.
+          const nextRows = staffRows.map((staff: any) =>
+            isSameOvertimeRow(staff, row) ? { ...staff, overtime: hours, overtimeReason: reason, overtimeCleared: null } : staff);
+          const nextStaff = (detail.staff || []).map((staff: any) =>
+            isSameOvertimeRow(staff, row) ? { ...staff, overtimeHours: hours, memo: reason, overtimeCleared: null } : staff);
+          return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
+        });
+      }
+      await loadData(true, { silent: true });
+    } catch (e) {
+      console.error("초과근무 수정 실패:", e);
+      alert("수정 중 오류가 발생했습니다. 새로고침 후 다시 시도해 주세요.");
+      await loadData(true, { silent: true });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteOvertimeRow = async (row: any) => {
     if (!window.confirm(`${row.staffName}님의 ${row.settleDate} 초과근무 기록을 삭제할까요?`)) return;
-    if (row.manual) {
-      const key = `manual_overtime:${branchName}`;
-      const saved = (await gasClient.getSharedData<any[]>(key)) || [];
-      await gasClient.saveSharedData(key, saved.filter((item) => item.id !== row.id));
-    } else if (row.recordId) {
-      await updateDailyMetadata(row.recordId, (metadata, detail) => {
-        const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
-        const nextRows = staffRows.map((staff: any) => {
-          const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtime: 0, overtimeReason: "" } : staff;
+    // 낙관적 반영: 저장을 기다리지 않고 화면에서 즉시 제거 → 반응 속도 개선.
+    // 실패 시엔 로컬 스냅샷을 되돌리지 않고 서버에서 다시 불러와 정합성을 맞춥니다(요청 겹침 롤백 사고 방지).
+    setRecords((prev) => prev.filter((item) => item !== row));
+    setSaving(true);
+    try {
+      if (row.manual) {
+        const key = `manual_overtime:${branchName}`;
+        const saved = (await gasClient.getSharedData<any[]>(key)) || [];
+        await gasClient.saveSharedData(key, saved.filter((item) => item.id !== row.id));
+      } else if (row.recordId) {
+        // 조기퇴근/초과시간은 출퇴근 시각에서 다시 계산되므로 0으로 덮는 것만으로는 되살아납니다.
+        // 삭제 당시 값을 overtimeCleared에 남기고 사유를 비워, 같은 값이 재계산되고 사유가 없으면 계속 숨기도록 표시합니다.
+        const clearedValue = Number(row.overtime) || 0;
+        await updateDailyMetadata(row.recordId, (metadata, detail) => {
+          const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
+          const nextRows = staffRows.map((staff: any) =>
+            isSameOvertimeRow(staff, row) ? { ...staff, overtime: 0, overtimeReason: "", overtimeCleared: clearedValue } : staff);
+          const nextStaff = (detail.staff || []).map((staff: any) =>
+            isSameOvertimeRow(staff, row) ? { ...staff, overtimeHours: 0, memo: "", overtimeCleared: clearedValue } : staff);
+          return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
         });
-        const nextStaff = (detail.staff || []).map((staff: any) => {
-          const name = staff.staffName || staff.name;
-          return name === row.staffName ? { ...staff, overtimeHours: 0, memo: "" } : staff;
-        });
-        return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-      });
+      }
+      await loadData(true, { silent: true });
+    } catch (e) {
+      console.error("초과근무 삭제 실패:", e);
+      alert("삭제 중 오류가 발생했습니다. 목록을 다시 불러옵니다.");
+      await loadData(true, { silent: true });
+    } finally {
+      setSaving(false);
     }
-    await loadData();
   };
 
   return (
@@ -200,6 +234,11 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
               초과 근무 내역
+              {saving && (
+                <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> 저장 중…
+                </span>
+              )}
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
@@ -310,8 +349,8 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                       {isAdmin && (
                         <td className="py-3 px-2">
                           <div className="flex justify-center gap-1">
-                            <button onClick={() => void handleEditOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
-                            <button onClick={() => void handleDeleteOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                            <button disabled={saving} onClick={() => void handleEditOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">수정</button>
+                            <button disabled={saving} onClick={() => void handleDeleteOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
                           </div>
                         </td>
                       )}

@@ -500,18 +500,18 @@ input[type=number] {
 }
 
 .admin-redesign .admin-monthly-status-confirmed {
-  background: var(--admin-vanilla) !important;
-  color: var(--admin-black) !important;
+  background: #EFF0A3 !important; /* 바닐라 = 제출완료 */
+  color: #1A1A1A !important;
 }
 
 .admin-redesign .admin-monthly-status-pending {
-  background: var(--admin-black) !important;
-  color: var(--admin-ghost) !important;
+  background: #18181B !important; /* 검정 = 미제출 */
+  color: #FFFFFF !important;
 }
 
 .admin-redesign .admin-monthly-status-editing {
-  background: var(--admin-honey) !important;
-  color: var(--admin-black) !important;
+  background: #D8DFE9 !important; /* 앨리스(파란) = 수정중 */
+  color: #1A1A1A !important;
 }
 
 .admin-redesign .admin-logout-link {
@@ -1717,7 +1717,6 @@ input[type=number] {
 .branch-redesign #tab-view-overtimeLog > div,
 .branch-redesign #tab-view-annualLeave > div,
 .branch-redesign #tab-view-partTimeLog > div,
-.branch-redesign #purchase-sales-subtab,
 .branch-redesign #parttime-salaries-subtab,
 .branch-redesign #cash-expenses-subtab,
 .branch-redesign #cash-management-subtab,
@@ -1735,7 +1734,6 @@ input[type=number] {
 .branch-redesign #tab-view-overtimeLog [class*="rounded-2xl"],
 .branch-redesign #tab-view-annualLeave [class*="rounded-2xl"],
 .branch-redesign #tab-view-partTimeLog [class*="rounded-2xl"],
-.branch-redesign #purchase-sales-subtab [class*="rounded-2xl"],
 .branch-redesign #parttime-salaries-subtab [class*="rounded-2xl"],
 .branch-redesign #cash-expenses-subtab [class*="rounded-2xl"],
 .branch-redesign #cash-management-subtab [class*="rounded-2xl"],
@@ -2482,18 +2480,18 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 }
 
 .branch-redesign #monthly-settle-tab-root .monthly-close-status-confirmed {
-  background: var(--branch-honey) !important;
-  color: var(--branch-black) !important;
+  background: #EFF0A3 !important; /* 바닐라 = 제출완료 */
+  color: #1A1A1A !important;
 }
 
 .branch-redesign #monthly-settle-tab-root .monthly-close-status-editing {
-  background: var(--branch-vanilla) !important;
-  color: var(--branch-black) !important;
+  background: #D8DFE9 !important; /* 앨리스(파란) = 수정중 */
+  color: #1A1A1A !important;
 }
 
 .branch-redesign #monthly-settle-tab-root .monthly-close-status-missing {
-  background: var(--branch-black) !important;
-  color: var(--branch-ghost) !important;
+  background: #18181B !important; /* 검정 = 미제출 */
+  color: #FFFFFF !important;
 }
 
 .branch-redesign #annual-leave-maintenance > section,
@@ -3099,7 +3097,6 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 .branch-redesign #tab-view-annualLeave > div,
 .branch-redesign #tab-view-partTimeLog > div,
 .branch-redesign #labor-contract-tab > div,
-.branch-redesign #purchase-sales-subtab > div,
 .branch-redesign #parttime-salaries-subtab > div,
 .branch-redesign #cash-management-subtab > div,
 .branch-redesign #cash-expenses-subtab > div,
@@ -3153,7 +3150,6 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 .branch-redesign #labor-contract-tab > section,
 .branch-redesign #labor-contract-tab > div.bg-white,
 .branch-redesign #monthly-settle-tab-root > div.bg-white,
-.branch-redesign #purchase-sales-subtab,
 .branch-redesign #parttime-salaries-subtab,
 .branch-redesign #cash-expenses-subtab,
 .branch-redesign #cash-management-subtab,
