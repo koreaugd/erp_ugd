@@ -52,8 +52,9 @@ const rosterToRow = (emp: any): FullTimeSalaryRow => ({
 });
 
 // 마감제출 전, 급여 행이 서버(공유)에 반드시 존재하도록 보장한다. 실패하면 blocked=true로 마감을 막는다.
-// (1) 미저장 편집(pending) → 그 최신값을 서버 반영  (2) 서버에 이미 있으면 그대로(덮어쓰지 않음)
-// (3) 서버에 없으면 로컬(로스터 자동생성 포함)을 서버 저장  (4) 서버 확인/저장 실패 → 중단
+// (0) 미저장 편집(pending) → 실 데이터 여부와 무관하게 로컬 최신본(행 삭제·0원 편집 포함)을 서버로 반영
+//     → 방금 지우거나 0으로 바꾼 급여가 옛 서버값에 밀려 무시된 채 확정되는 것을 차단
+// (1) pending 없으면 서버 최신값 신뢰  (2) 서버 비었지만 로컬에 실 데이터면 복구 저장  (3) 둘 다 없으면 중단
 export async function flushFullTimeSalaryForClose(branchName: string, selectedMonth: string): Promise<{ blocked: boolean }> {
   const storageKey = `erp_monthly_fulltime_salary_${branchName}_${selectedMonth}`;
   const sharedKey = `monthly_fulltime_salary:${branchName}:${selectedMonth}`;
@@ -68,17 +69,29 @@ export async function flushFullTimeSalaryForClose(branchName: string, selectedMo
     Array.isArray(rows) && rows.some((r) => money(r.thisSalary) + money(r.taxiEtc) + money(r.bonusTip) + money(r.overtimePay) > 0);
   const local = readLocal();
 
-  // 1) 미저장 편집(pending)이 있고 실 데이터면 서버에 반영 후 확정.
-  if (localStorage.getItem(pendingKey) === "1" && hasMeaningful(local)) {
+  // 0) 미저장 편집(pending)이 있으면 실 데이터 여부와 무관하게 로컬 최신본(추가·수정·삭제·0원 편집 모두)을 서버로 반영한다.
+  //    → 지점이 방금 지우거나 0으로 바꾼 급여가 옛 서버값에 밀려 무시된 채 확정되는 것을 차단. 저장 실패 시 확정 차단(fail-safe).
+  //    반영 후엔 서버=로컬이므로 로컬 기준으로 판정한다(실 데이터가 없으면 — 예: 전부 비움/0원 — 확정 불가).
+  if (localStorage.getItem(pendingKey) === "1" && Array.isArray(local)) {
+    try { await gasClient.saveSharedData(sharedKey, local as FullTimeSalaryRow[]); localStorage.removeItem(pendingKey); }
+    catch { return { blocked: true }; }
+    return hasMeaningful(local) ? { blocked: false } : { blocked: true };
+  }
+
+  // 1) 미저장 편집이 없으면 서버(공유) 최신값을 신뢰한다. 실 데이터가 있으면 그대로 확정.
+  let remote: FullTimeSalaryRow[] | null = null;
+  try { remote = await gasClient.getSharedDataFromServer<FullTimeSalaryRow[]>(sharedKey); }
+  catch { return { blocked: true }; }
+  if (hasMeaningful(remote)) return { blocked: false };
+
+  // 2) 서버가 비었지만 로컬에 실 데이터가 있으면 복구 저장 후 확정(레거시 상태 만회).
+  if (hasMeaningful(local)) {
     try { await gasClient.saveSharedData(sharedKey, local as FullTimeSalaryRow[]); localStorage.removeItem(pendingKey); return { blocked: false }; }
     catch { return { blocked: true }; }
   }
 
-  // 2) 서버(공유)에 실 데이터가 있어야 확정 가능. 자동/기본 행만이면 차단한다.
-  let remote: FullTimeSalaryRow[] | null = null;
-  try { remote = await gasClient.getSharedDataFromServer<FullTimeSalaryRow[]>(sharedKey); }
-  catch { return { blocked: true }; }
-  return hasMeaningful(remote) ? { blocked: false } : { blocked: true };
+  // 3) 서버·로컬 모두 실 데이터 없음 → 확정 불가.
+  return { blocked: true };
 }
 
 export function MonthlyFullTimeSalarySubTab({
