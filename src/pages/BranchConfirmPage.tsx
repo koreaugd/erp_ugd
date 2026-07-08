@@ -222,7 +222,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   };
 
   const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract">("dashboard");
-  const [monthlyTab, setMonthlyTab] = useState<"purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
+  const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const mainTabs = [
     { id: "dashboard", label: "대시보드", icon: ClipboardList },
@@ -249,6 +249,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   ] as Array<{ id: BranchDailyTab; label: string; icon: typeof CircleDollarSign }>;
 
   const monthlySubTabs = [
+    { id: "fullTimeSalary", label: "정직원 급여대장", icon: Users },
     { id: "purchaseSales", label: "매입매출", icon: FileText },
     { id: "partTimeSalary", label: "파트타이머 급여대장", icon: Users },
     { id: "cashManagement", label: "현금관리", icon: CircleDollarSign },
@@ -285,6 +286,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       moneyFormatSuffix: "원",
       salaryTaxRate: "3.3%",
       adminSecurityPasscode: "1234",
+      fullTimeSalaryPasscode: "",
       excelIncludeSheets: {
         purchaseSales: true,
         partTimeSalary: true,
@@ -386,6 +388,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const [formMoneyFormatSuffix, setFormMoneyFormatSuffix] = useState(adminSettings.moneyFormatSuffix);
   const [formSalaryTaxRate, setFormSalaryTaxRate] = useState(adminSettings.salaryTaxRate);
   const [formAdminSecurityPasscode, setFormAdminSecurityPasscode] = useState(adminSettings.adminSecurityPasscode || "1234");
+  const [formFullTimeSalaryPasscode, setFormFullTimeSalaryPasscode] = useState(adminSettings.fullTimeSalaryPasscode || "");
   const [formExcelSheets, setFormExcelSheets] = useState(adminSettings.excelIncludeSheets || {
     purchaseSales: true,
     partTimeSalary: true,
@@ -432,6 +435,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       setFormMoneyFormatSuffix(adminSettings.moneyFormatSuffix);
       setFormSalaryTaxRate(adminSettings.salaryTaxRate);
       setFormAdminSecurityPasscode(adminSettings.adminSecurityPasscode || "1234");
+      setFormFullTimeSalaryPasscode(adminSettings.fullTimeSalaryPasscode || "");
       setFormExcelSheets(adminSettings.excelIncludeSheets || {
         purchaseSales: true,
         partTimeSalary: true,
@@ -476,6 +480,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       moneyFormatSuffix: formMoneyFormatSuffix,
       salaryTaxRate: formSalaryTaxRate,
       adminSecurityPasscode: formAdminSecurityPasscode,
+      fullTimeSalaryPasscode: formFullTimeSalaryPasscode.trim() === "1234" ? "" : formFullTimeSalaryPasscode.trim(),
       excelIncludeSheets: formExcelSheets,
     };
     localStorage.setItem("erp_admin_settings", JSON.stringify(updated));
@@ -1081,6 +1086,18 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                               className="w-full px-3 py-2 border border-gray-200 rounded-xl font-bold text-xs focus:outline-hidden focus:border-zinc-900"
                             />
                             <p className="text-[10px] text-gray-400 mt-1 font-semibold">* 급여정산 소득세 공제 문구 (기본: 3.3%)</p>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold text-gray-700 block mb-1">정직원 급여대장 열람 비밀번호</label>
+                            <input
+                              type="text"
+                              value={formFullTimeSalaryPasscode}
+                              onChange={(e) => setFormFullTimeSalaryPasscode(e.target.value)}
+                              placeholder="비밀번호를 설정하세요"
+                              className="w-full px-3 py-2 border border-gray-200 rounded-xl font-bold text-xs focus:outline-hidden focus:border-zinc-900"
+                            />
+                            <p className="text-[10px] text-gray-400 mt-1 font-semibold">* 월말마감 &gt; 정직원 급여대장 탭 진입 시 요구되는 비밀번호. 설정하지 않으면 급여대장을 열 수 없습니다(기본값 없음).</p>
                           </div>
                         </div>
                       </div>
