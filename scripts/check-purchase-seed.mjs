@@ -179,4 +179,7 @@ async function main() {
   process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+// 직접 실행일 때만 CLI 를 돌린다. 순수 함수만 가져다 쓰는 import 는 Firestore 에 접속하지 않는다.
+// process.argv[1] 은 `node -e` 나 REPL 에서 undefined 이므로 반드시 먼저 확인해야 한다.
+const entryPoint = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (entryPoint && import.meta.url === entryPoint) await main();
