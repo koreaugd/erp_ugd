@@ -14,3 +14,4 @@ db_simulation.json
 # *.xlsx           : 지점별 거래처 이체리스트 등 원본 엑셀
 scripts/backups/
 *.xlsx
+__pycache__/
