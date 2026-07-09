@@ -9,7 +9,7 @@ import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import { assembleMonthlyCloseWorkbook, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -2433,7 +2433,9 @@ function AdminMonthlyClosingStatusSection() {
 
   // 지점·섹션별 마감 엑셀 내보내기 (기본 양식 — 최종 템플릿 확정 전 임시 데이터 덤프).
   // 서버 전용 읽기로 신선한 데이터를 받고, 실패 시 파일을 만들지 않고 중단한다.
-  const downloadBranchSection = async (branchName: string, section: "salesSummary" | "purchase" | "salary") => {
+  // 'purchase'는 5시트 통합 downloadBranchMonthlyClose가 담당하므로 타입에서 제외한다
+  // (여기로 들어오면 else 분기를 타 정직원 급여 엑셀이 잘못 나간다).
+  const downloadBranchSection = async (branchName: string, section: "salesSummary" | "salary") => {
     const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
     // '확정' 표시는 있으나 서버에 상세가 없을 때, 관리자에게 복구 방법을 안내한다.
     // (정산 산출물이므로 서버 전용 읽기를 유지한다 — 네트워크 실패는 아래 바깥 catch에서 다운로드 취소로 처리.)
@@ -2463,24 +2465,8 @@ function AdminMonthlyClosingStatusSection() {
         ];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "매출집계");
         filename = `${branchName}_${selectedMonth}_매출집계.xlsx`;
-      } else if (section === "purchase") {
-        // 옛 지점화면 '월말마감' 엑셀의 매입매출 시트와 동일한 컬럼 구성.
-        const purchases: any = await gasClient.getSharedDataFromServer<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`);
-        if (!Array.isArray(purchases) || !purchases.length) { window.alert(emptyMsg("월말마감(매입매출)", "매입매출")); return; }
-        const pRows = purchases.map((r: any) => ({
-          "분류항목": r.category,
-          "송금/사용 대상업체명": r.vendorName,
-          "선입금 충전방식?": r.isPrepaid ? "선입금" : "후불이체",
-          "이체필요 금액 (원)": num(r.transferAmount),
-          "충전금액 (원)": num(r.prepaidChargeAmount),
-          "실제 이달사용액 (원)": num(r.monthlyUsageAmount),
-          "은행": r.bank,
-          "계좌번호": r.accountNumber,
-          "거래 비고 고지": r.memo,
-        }));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pRows), "매입매출");
-        filename = `${branchName}_${selectedMonth}_월말마감.xlsx`;
       } else {
+        // 매입매출(purchase) 섹션은 downloadBranchMonthlyClose(5시트 통합)로 처리하므로 여기서는 정직원 급여만 담당한다.
         const salary: any = await gasClient.getSharedDataFromServer<any[]>(`monthly_fulltime_salary:${branchName}:${selectedMonth}`);
         if (!Array.isArray(salary) || !salary.length) { window.alert(emptyMsg("정직원 급여", "정직원 급여대장")); return; }
         const salRows = salary.map((r: any) => ({
@@ -2524,6 +2510,15 @@ function AdminMonthlyClosingStatusSection() {
           `${branchName} · ${selectedMonth} 월말마감(매입매출) 상세 데이터가 서버에 없습니다.\n\n` +
           `'확정' 표시는 있으나 실제 내역이 서버에 저장돼 있지 않습니다.\n` +
           `해당 지점에서 [월말마감 → 매입매출] 탭을 연 뒤 저장하고 다시 '확정'하면 다운로드됩니다.`
+        );
+        return;
+      }
+      // 확정 게이트와 동일 기준: export에 0 초과 금액으로 나가는 행이 하나도 없으면(레거시/빈 확정) 빈 워크북을 만들지 않고 중단.
+      if (!purchases.some(purchaseRowHasExportableAmount)) {
+        window.alert(
+          `${branchName} · ${selectedMonth} 월말마감(매입매출)에 실제 금액이 있는 내역이 없습니다.\n\n` +
+          `모든 행의 이체필요/이달사용 금액이 비어 있어 다운로드할 내용이 없습니다.\n` +
+          `해당 지점에서 [월말마감 → 매입매출] 탭에서 금액을 입력하고 다시 '확정'해주세요.`
         );
         return;
       }
