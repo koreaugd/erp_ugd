@@ -1365,6 +1365,19 @@ input[type=number] {
   border-color: rgba(33, 33, 33, 0.12) !important;
 }
 
+/* 매입매출 분류항목별 행 색상 — DESIGN.md 색상 토큰 사용.
+   .branch-redesign tbody tr:nth-child(odd/even) 줄무늬가 !important라, ID(#purchase-sales-subtab)
+   특이성으로 이겨서 분류 색이 실제로 적용되게 한다. (식재료비=바닐라, 주류비=허니, 식음료외 기타=엘리스) */
+.branch-redesign #purchase-sales-subtab tbody tr[data-cat="식재료비"] {
+  background: var(--branch-vanilla) !important;
+}
+.branch-redesign #purchase-sales-subtab tbody tr[data-cat="주류비"] {
+  background: var(--branch-honey) !important;
+}
+.branch-redesign #purchase-sales-subtab tbody tr[data-cat="식음료외 기타"] {
+  background: var(--branch-alice) !important;
+}
+
 .branch-select-redesign {
   background: var(--branch-ghost) !important;
 }

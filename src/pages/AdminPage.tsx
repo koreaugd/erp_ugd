@@ -9,7 +9,8 @@ import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import { 
+import { assembleMonthlyCloseWorkbook, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
@@ -2500,6 +2501,54 @@ function AdminMonthlyClosingStatusSection() {
     }
   };
 
+  // 지점 '월말마감' 엑셀 — 옛 지점화면과 동일한 5개 시트(매입매출·파트타이머급여·현금지출·카드지출·현금관리)를
+  // 한 파일로 생성한다. 개편(1b22d0e) 전 지점화면 handleDownloadExcel을 관리자용으로 이식(데이터는 서버에서 신선하게 조회).
+  const downloadBranchMonthlyClose = async (branchName: string) => {
+    try {
+      // fail-closed + 서버 전용: 모든 소스를 캐시 폴백 없는 서버 전용 리더로 읽고, 하나라도 실패(throw)하면
+      // Promise.all이 reject → 아래 catch에서 다운로드를 취소한다. 실패를 삼켜 빈/오래된 데이터로 채우면
+      // 파트타이머급여·현금지출·카드지출·현금관리 시트가 '데이터 없음/구값'인 채 '정상 파일'처럼 다운로드돼
+      // (중복이체·누락·stale) 눈에 띄지 않는 오류가 된다. (전지점 매출집계 다운로드와 동일한 fail-closed 원칙)
+      const [purchases, roster, salaries, exclusions, profiles, history] = await Promise.all([
+        gasClient.getSharedDataFromServer<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`),
+        gasClient.getBranchOwnRosterFromServer(branchName),
+        gasClient.getSharedDataFromServer<any[]>(`part_time_salaries:${branchName}:${selectedMonth}`),
+        gasClient.getSharedDataFromServer<string[]>(`part_time_salary_exclusions:${branchName}:${selectedMonth}`),
+        gasClient.getSharedDataFromServer<Record<string, any>>(`part_time_profiles:${branchName}`),
+        gasClient.getBranchHistoryFromServer(branchName, selectedMonth),
+      ]);
+
+      // 매입매출 확정건에는 매입 데이터가 있어야 정상. 서버가 정상 응답했으나 비어 있으면(레거시/미저장) 재확정을 안내하고 중단.
+      if (!Array.isArray(purchases) || purchases.length === 0) {
+        window.alert(
+          `${branchName} · ${selectedMonth} 월말마감(매입매출) 상세 데이터가 서버에 없습니다.\n\n` +
+          `'확정' 표시는 있으나 실제 내역이 서버에 저장돼 있지 않습니다.\n` +
+          `해당 지점에서 [월말마감 → 매입매출] 탭을 연 뒤 저장하고 다시 '확정'하면 다운로드됩니다.`
+        );
+        return;
+      }
+
+      const data: MonthlyCloseData = {
+        branchName,
+        month: selectedMonth,
+        purchases,
+        roster: Array.isArray(roster) ? roster : [],
+        salaries: Array.isArray(salaries) ? salaries : [],
+        exclusions: Array.isArray(exclusions) ? exclusions : [],
+        profiles: profiles && typeof profiles === "object" ? profiles : {},
+        history: Array.isArray(history) ? history : [],
+      };
+
+      const XLSX = await import("xlsx-js-style");
+      const wb = assembleMonthlyCloseWorkbook(XLSX, data);
+      const monthNumber = Number(selectedMonth.split("-")[1]) || 0;
+      XLSX.writeFile(wb, `월말정산_${branchName}${monthNumber}월_결산자료.xlsx`);
+    } catch (error) {
+      console.error("월말마감 엑셀 다운로드 실패:", error);
+      window.alert("월말마감 데이터를 서버에서 불러오지 못해 엑셀 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+    }
+  };
+
   // 전지점 매출집계 엑셀 (첨부 양식: POS 매출집계 컬럼 구성, 한 지점당 한 행).
   const downloadAllSalesSummary = async () => {
     const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
@@ -2609,7 +2658,7 @@ function AdminMonthlyClosingStatusSection() {
                   <button
                     type="button"
                     disabled={!ok}
-                    onClick={() => void downloadBranchSection(branch.branchName, section)}
+                    onClick={() => void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section))}
                     title={ok ? "엑셀 다운로드 (기본 양식)" : "확정된 마감만 다운로드할 수 있습니다"}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1A3C6E] text-white text-[11px] font-black transition-colors hover:bg-[#15325c] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
                   >

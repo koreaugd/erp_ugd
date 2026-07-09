@@ -329,6 +329,13 @@ export const gasClient = {
     }
   },
 
+  // 서버 전용·fail-closed 히스토리 조회: 실패를 []로 삼키지 않고 그대로 throw한다.
+  // 월말마감 엑셀 등 "빈/오래된 데이터로 조용히 채우면 안 되는" 정산 산출물 전용.
+  async getBranchHistoryFromServer(branchName: string, month?: string): Promise<MasterDaily[]> {
+    const { firebaseGetBranchHistoryFromServer } = await import("./firebaseDirect");
+    return await firebaseGetBranchHistoryFromServer(branchName, month);
+  },
+
   /**
    * 전체 지점 설정 목록 반환
    */
@@ -471,6 +478,12 @@ export const gasClient = {
   async getBranchOwnRoster(branchName: string): Promise<RosterEmployee[]> {
     const { firebaseGetBranchOwnRoster } = await import("./firebaseDirect");
     return await firebaseGetBranchOwnRoster(branchName);
+  },
+
+  // 서버 전용·fail-closed 명단 조회: 캐시 폴백 없이 서버 문서만 읽고 실패 시 throw. 월말마감 엑셀 등 전용.
+  async getBranchOwnRosterFromServer(branchName: string): Promise<RosterEmployee[]> {
+    const { firebaseGetBranchOwnRosterFromServer } = await import("./firebaseDirect");
+    return await firebaseGetBranchOwnRosterFromServer(branchName);
   },
 
   async saveBranchOwnRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {

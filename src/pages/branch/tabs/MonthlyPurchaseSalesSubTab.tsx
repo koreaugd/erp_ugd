@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyPurchaseSalesSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Coins, FileText, Landmark, Plus, Trash2, TrendingUp } from "lucide-react";
+import { Check, Coins, Landmark, Plus, Trash2, TrendingUp } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
@@ -16,8 +16,21 @@ interface PurchaseSalesRow {
   isPrepaid: boolean;
   prepaidChargeAmount?: string;
   monthlyUsageAmount: string;
+  // 이체 필요 여부: 체크=이체 필요(기본), 해제=이미 결제 완료. 옛 데이터엔 없으므로 로드 시 true로 보정.
+  transferNeeded?: boolean;
   memo: string;
 }
+
+// 분류항목 표시 정렬 순서 (식재료비 → 주류비 → 식음료외 기타). 저장 순서는 건드리지 않고 화면 표시에만 사용.
+const CATEGORY_ORDER: Record<PurchaseSalesRow["category"], number> = {
+  "식재료비": 0,
+  "주류비": 1,
+  "식음료외 기타": 2,
+};
+
+// 분류항목별 행 배경색은 index.css에서 DESIGN.md 토큰(--branch-vanilla/honey/alice)으로 지정한다.
+// (.branch-redesign #purchase-sales-subtab tbody tr[data-cat=...]) — tbody nth-child !important 줄무늬를
+// ID 특이성으로 이겨야 하므로 Tailwind bg 클래스 대신 CSS 규칙 + data-cat 속성으로 처리.
 
 // 마감제출 전, "지점이 수정/등록한 최신 내용"이 서버(공유)에 반영된 뒤에만 확정되도록 보장한다. 실패하면 blocked=true.
 // (0) 이 기기에 미저장 편집(pending)이 있으면 내용 불문(추가·수정·삭제·비움) 확정 전에 서버로 반영하고 그 상태로 판정
@@ -88,7 +101,12 @@ export function MonthlyPurchaseSalesSubTab({
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
 
   const normalizePurchaseRows = useCallback((sourceRows: PurchaseSalesRow[]) => {
-    return sourceRows.map((row) => ({ ...row, prepaidChargeAmount: row.prepaidChargeAmount || "" }));
+    return sourceRows.map((row) => ({
+      ...row,
+      prepaidChargeAmount: row.prepaidChargeAmount || "",
+      // 옛 데이터엔 transferNeeded가 없으므로 기본 '이체 필요(true)'로 보정.
+      transferNeeded: row.transferNeeded ?? true,
+    }));
   }, []);
 
   const emptyAmounts = useCallback((sourceRows: PurchaseSalesRow[]) => {
@@ -97,7 +115,9 @@ export function MonthlyPurchaseSalesSubTab({
       id: `p_${selectedMonth}_${row.id || Date.now()}`,
       transferAmount: "",
       prepaidChargeAmount: "",
-      monthlyUsageAmount: ""
+      monthlyUsageAmount: "",
+      // 이월 시 '결제완료' 상태는 초기화한다 — 다음 달 결제 여부는 아직 미정이므로 '이체 필요'로 시작.
+      transferNeeded: true
     }));
   }, [normalizePurchaseRows, selectedMonth]);
 
@@ -256,6 +276,7 @@ export function MonthlyPurchaseSalesSubTab({
       isPrepaid: false,
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
+      transferNeeded: true,
       memo: ""
     };
     persistRows([...rows, nextRow]);
@@ -273,7 +294,9 @@ export function MonthlyPurchaseSalesSubTab({
         ...row,
         transferAmount: "",
         prepaidChargeAmount: "",
-        monthlyUsageAmount: ""
+        monthlyUsageAmount: "",
+        // 금액 초기화 시 '결제완료' 상태도 초기화 — 재입력한 이체가 결제완료로 오인돼 배너·엑셀에서 누락되는 것을 방지.
+        transferNeeded: true
       }));
       localStorage.setItem(storageKey, JSON.stringify(resetRows));
       localStorage.setItem(pendingKey, "1");
@@ -290,36 +313,17 @@ export function MonthlyPurchaseSalesSubTab({
   }, [pendingKey, resetToken, sharedKey, storageKey]);
 
   // Calculations
-  const totalTransfer = rows.reduce((acc, r) => acc + (Number(r.transferAmount) || 0), 0);
+  // 결제완료(이체 필요 해제) 업체는 이체 불필요이므로 이체 합계에서 제외 — 관리자 엑셀(이체금액 0 처리)과 일치시킨다.
+  const totalTransfer = rows.reduce((acc, r) => acc + (r.transferNeeded === false ? 0 : (Number(r.transferAmount) || 0)), 0);
   const totalPrepaidCharge = rows.reduce((acc, r) => acc + (Number(r.prepaidChargeAmount) || 0), 0);
   const totalUsage = rows.reduce((acc, r) => acc + (Number(r.monthlyUsageAmount) || 0), 0);
 
+  // 화면 표시용 정렬: 분류항목 순서대로(식재료비→주류비→식음료외 기타). Array.sort는 안정 정렬이라 같은 분류 내 입력 순서는 유지된다.
+  // 저장(rows)·자동저장·확정 로직은 원래 순서를 그대로 쓰므로 표시 정렬은 부작용이 없다.
+  const displayRows = [...rows].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99));
+
   return (
     <div className="space-y-5 animate-fade-in" id="purchase-sales-subtab">
-      <div className="flex justify-between items-center pb-3 border-b border-gray-50">
-        <div>
-          <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
-            <FileText className="w-4 h-4 text-[#2E6DB4]" />
-            월말 이체 필요한 거래처 등록
-          </h3>
-          <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
-            이체 필요한 업체만 기입을 하세요. 쿠팡,네이버는 등록x
-          </p>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleAddRow}
-            disabled={isLocked}
-            className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            <Plus className="w-3.5 h-3.5" /> 매입 업체 추가
-          </button>
-          <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 shadow-subtle ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
-            <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
-          </div>
-        </div>
-      </div>
       {isLocked && (
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
           월말마감이 확정되어 입력값이 잠겨 있습니다. 수정하려면 상단의 월말마감 수정 버튼을 눌러주세요.
@@ -339,7 +343,7 @@ export function MonthlyPurchaseSalesSubTab({
         </div>
         <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
           <div>
-            <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 실제 현금이체 합계</span>
+            <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 이체 필요 합계 (결제완료 제외)</span>
             <p className="text-xl font-black text-gray-900 font-mono mt-0.5">{formatNumber(totalTransfer)} 원</p>
           </div>
           <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
@@ -357,33 +361,48 @@ export function MonthlyPurchaseSalesSubTab({
         </div>
       </div>
 
+      {/* 매입 업체 추가 / 저장 상태 — 지점이 작성하는 표 바로 위에 배치 */}
+      <div className="flex justify-end items-center gap-2">
+        <button
+          onClick={handleAddRow}
+          disabled={isLocked}
+          className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+        >
+          <Plus className="w-3.5 h-3.5" /> 매입 업체 추가
+        </button>
+        <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 shadow-subtle ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+          <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
+        </div>
+      </div>
+
       {/* Sheet Table */}
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="w-full text-left text-xs border-collapse font-medium">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">
               <th className="py-3 px-3">분류항목</th>
-              <th className="py-3 px-3">송금/사용 대상업체명</th>
-              <th className="py-3 px-3 w-32">선입금 충전방식?</th>
-              <th className="py-3 px-3 w-32">충전금액 (원)</th>
-              <th className="py-3 px-3 w-36">이체필요 금액 (원)</th>
-              <th className="py-3 px-3 w-32">실제 이달사용액 (원)</th>
-              <th className="py-3 px-3 w-28">은행</th>
+              <th className="py-3 px-3">업체명</th>
+              <th className="py-3 px-3 w-28">선입금 충전?</th>
+              <th className="py-3 px-3 w-24 text-center">이체 필요?</th>
+              <th className="py-3 px-3 w-24">충전금액 (원)</th>
+              <th className="py-3 px-3 w-24">이체필요 금액 (원)</th>
+              <th className="py-3 px-3 w-24">실제 이달사용액 (원)</th>
+              <th className="py-3 px-3 w-20">은행</th>
               <th className="py-3 px-3">계좌번호</th>
               <th className="py-3 px-3">거래 비고 고지</th>
               <th className="py-3 px-3 text-center w-12">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[11px]">
-            {rows.length === 0 ? (
+            {displayRows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-16 text-center text-gray-400">
+                <td colSpan={11} className="py-16 text-center text-gray-400">
                   매입매출에 등록된 거래처가 없습니다. 상단의 '매입 업체 추가'를 클릭해 작성해주세요.
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
-                <tr key={row.id} className="hover:bg-zinc-50/30">
+              displayRows.map((row) => (
+                <tr key={row.id} data-cat={row.category} className="transition-colors">
                   <td className="py-2 px-2.5">
                     <select
                       value={row.category}
@@ -416,6 +435,20 @@ export function MonthlyPurchaseSalesSubTab({
                         className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
                       <span className="text-[9px] font-black text-gray-600">선입금</span>
+                    </label>
+                  </td>
+                  <td className="py-2 px-2.5 text-center">
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={row.transferNeeded ?? true}
+                        disabled={isLocked}
+                        onChange={(e) => handleUpdateRow(row.id, "transferNeeded", e.target.checked)}
+                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
+                      />
+                      <span className={`text-[9px] font-black ${(row.transferNeeded ?? true) ? "text-rose-600" : "text-gray-400"}`}>
+                        {(row.transferNeeded ?? true) ? "이체필요" : "결제완료"}
+                      </span>
                     </label>
                   </td>
                   <td className="py-2 px-2.5">
