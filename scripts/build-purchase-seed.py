@@ -115,6 +115,9 @@ def build(xlsx_path, month):
 
 
 def main():
+    if len(sys.argv) != 4:
+        print("사용법: python scripts/build-purchase-seed.py <엑셀경로> <대상월 YYYY-MM> <출력 JSON경로>", file=sys.stderr)
+        sys.exit(1)
     xlsx_path, month, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     documents, skipped, problems = build(xlsx_path, month)
 
