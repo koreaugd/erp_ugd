@@ -156,7 +156,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       id: `p_${nextMonth}_${row.id || Date.now()}`,
       transferAmount: "",
       prepaidChargeAmount: "",
-      monthlyUsageAmount: ""
+      monthlyUsageAmount: "",
+      // 이월 시 '결제완료' 상태는 초기화 — 다음 달은 '이체 필요'로 시작(월 단위 결제 상태).
+      transferNeeded: true
     }));
     localStorage.setItem(nextLocalKey, JSON.stringify(carriedRows));
     await gasClient.saveSharedData(nextKey, carriedRows);
@@ -230,7 +232,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       ...row,
       transferAmount: "",
       prepaidChargeAmount: "",
-      monthlyUsageAmount: ""
+      monthlyUsageAmount: "",
+      // 금액 초기화 시 '결제완료' 상태도 초기화 — 이후 재입력한 이체가 결제완료로 오인돼 누락되는 것을 방지.
+      transferNeeded: true
     }));
     localStorage.setItem(`erp_monthly_purchases_${branchName}_${selectedMonth}`, JSON.stringify(resetRows));
     await gasClient.saveSharedData(`monthly_purchases:${branchName}:${selectedMonth}`, resetRows);
@@ -239,9 +243,21 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const handleCancel = useCallback(async (section: CloseSection) => {
     if (section === "purchase") {
       if (!window.confirm("매입매출 마감을 취소하고 거래처 금액 입력값만 초기화할까요?\n거래처명, 은행, 계좌, 기타내용은 유지됩니다.")) return;
+      // 초기화 실패 시 되돌릴 '취소 직전 상태'를 미리 캡처한다(하드코딩 confirmed 금지 — 실제 이전 상태로 복원).
+      const prevStatus = getSectionStatus("purchase");
       try {
         await saveSectionClose("purchase", "pending");
-        await resetMonthlyPurchaseAmounts();
+        try {
+          await resetMonthlyPurchaseAmounts();
+        } catch (resetError) {
+          // 보상(rollback): 금액 초기화가 실패하면 마감 상태를 '취소 직전 상태'로 되돌린다.
+          // → '마감은 pending인데 금액·결제완료는 옛값 그대로' 어긋남을 막고, 없던 확정을 만들지 않는다.
+          //   (두 문서 write가 원자적이지 않아 실패 시 이전 상태로 복원; 이전이 미제출(null)이면 복원 대상이 없어 그대로 둔다.)
+          if (prevStatus === "confirmed" || prevStatus === "editing" || prevStatus === "pending") {
+            await saveSectionClose("purchase", prevStatus).catch(() => {});
+          }
+          throw resetError;
+        }
         setPurchaseResetToken((value) => value + 1);
         triggerToast(`${selectedMonth} 매입매출 마감이 취소되고 거래처 금액이 초기화되었습니다.`, "success");
       } catch (error: any) {
@@ -258,7 +274,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 취소에 실패했습니다.", "error");
     }
-  }, [resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast]);
+  }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast]);
 
   const handleCancelEdit = useCallback(async (section: CloseSection) => {
     try {
