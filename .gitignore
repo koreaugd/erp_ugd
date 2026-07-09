@@ -8,3 +8,9 @@ public/app-version.json
 .env*
 !.env.example
 db_simulation.json
+
+# 거래처 계좌번호가 평문으로 담긴 산출물 — 저장소에 남기지 않는다.
+# scripts/backups/ : seed-*.mjs 가 덮어쓰기 직전 상태를 스냅샷한 파일 (revert-backup.mjs 가 읽는다)
+# *.xlsx           : 지점별 거래처 이체리스트 등 원본 엑셀
+scripts/backups/
+*.xlsx
