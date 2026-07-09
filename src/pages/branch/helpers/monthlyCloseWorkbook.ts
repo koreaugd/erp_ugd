@@ -33,6 +33,44 @@ export interface SheetSpec {
 
 const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
 
+const isBlank = (v: unknown) => v === undefined || v === null || String(v).trim() === "";
+
+/**
+ * 매입매출 대장 '이체 필요금액' 칸의 값.
+ * '이체 필요?' 해제(=이미 결제완료) 업체는 0으로 표기해 HQ 중복이체를 방지한다.
+ * (transferNeeded는 옛 데이터엔 없으므로 undefined면 기본 true=이체 필요로 간주)
+ */
+export function purchaseTransferExportValue(r: any): number {
+  return r?.transferNeeded === false ? 0 : num(r?.transferAmount);
+}
+
+/**
+ * 매입매출 대장 '이달사용금액' 칸의 값. 공란("")이면 export에 빈 칸으로 나간다.
+ * - 선입금 업체: 발주액 합계(monthlyUsageAmount).
+ * - 이체 필요 후불업체: 이체필요금액=사용액이라 중복 방지로 공란.
+ * - 결제완료 후불업체: 이미 결제한 업체의 실제 사용액.
+ *   사용액이 비어 있으면 이체금액으로 폴백한다 — UI가 두 필드를 미러링하므로 통상 같은 값이고,
+ *   비어 있는 건 구버전/외부 유입 데이터뿐이라 금액이 0으로 증발하지 않게 보존한다.
+ *   (사용자가 명시적으로 "0"을 넣은 경우는 공란이 아니므로 그대로 0.)
+ */
+export function purchaseUsageExportValue(r: any): number | "" {
+  if (r?.isPrepaid) return num(r?.monthlyUsageAmount);
+  if (r?.transferNeeded !== false) return "";
+  return isBlank(r?.monthlyUsageAmount) ? num(r?.transferAmount) : num(r?.monthlyUsageAmount);
+}
+
+/**
+ * 매입매출 행이 실제 export(매입매출 대장)에 0 초과 금액으로 나가는지 판정.
+ * 확정 게이트(hasMeaningful)와 관리자 다운로드 게이트가 동일 기준을 쓰도록 공유하며,
+ * export 값 자체를 재사용해 '확정인데 워크북은 0/0' 불일치가 구조적으로 생기지 않게 한다.
+ * (선입금 충전액은 export 컬럼이 없으므로 판정에서 제외.)
+ */
+export function purchaseRowHasExportableAmount(r: any): boolean {
+  if (String(r?.vendorName || "").trim() === "") return false;
+  const usage = purchaseUsageExportValue(r);
+  return purchaseTransferExportValue(r) + (usage === "" ? 0 : usage) > 0;
+}
+
 /**
  * 5개 시트(매입매출·파트타이머급여·현금지출·카드지출·현금관리)의 헤더/행/열폭 스펙을 계산.
  * XLSX에 의존하지 않는 순수 함수 — 동일 입력이면 동일 출력.
@@ -51,22 +89,16 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   // 1. 매입매출 대장
   // ─────────────────────────────────────────────
   const purchaseHeaders = ["매출항목", "업체명", "이체 필요금액", "은행", "계좌번호", "기타내용", "이달사용금액", "오류"];
-  const purchaseRows: (string | number)[][] = purchases.map((r: any) => {
-    // '이체 필요?' 해제(=이미 결제완료) 업체는 '이체 필요금액'을 0으로 표기해 HQ 중복이체를 방지한다.
-    // (transferNeeded는 옛 데이터엔 없으므로 undefined면 기본 true=이체 필요로 간주)
-    const transferNeeded = r.transferNeeded !== false;
-    return [
-      r.category,
-      r.vendorName,
-      transferNeeded ? num(r.transferAmount) : 0,
-      r.bank,
-      r.accountNumber,
-      r.memo,
-      // 선입금 업체만 '이달사용금액'을 노출(후불이체 업체는 이체필요금액=사용액이라 공란). 기존 서식과 동일.
-      r.isPrepaid ? num(r.monthlyUsageAmount) : "",
-      "",
-    ];
-  });
+  const purchaseRows: (string | number)[][] = purchases.map((r: any) => [
+    r.category,
+    r.vendorName,
+    purchaseTransferExportValue(r),
+    r.bank,
+    r.accountNumber,
+    r.memo,
+    purchaseUsageExportValue(r),
+    "",
+  ]);
 
   // ─────────────────────────────────────────────
   // 2. 파트타이머 급여대장
