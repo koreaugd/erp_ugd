@@ -5,6 +5,7 @@ import { gasClient } from "../../../api/gasClient";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
+import { purchaseRowHasExportableAmount } from "../helpers/monthlyCloseWorkbook";
 
 interface PurchaseSalesRow {
   id: string;
@@ -46,10 +47,11 @@ export async function flushMonthlyPurchasesForClose(branchName: string, selected
   const readLocal = (): PurchaseSalesRow[] | null => {
     try { const raw = localStorage.getItem(storageKey); return raw ? JSON.parse(raw) : null; } catch { return null; }
   };
-  const money = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
-  // 실 데이터 판정: 업체명이 입력되고 금액이 있는 행이 하나라도 있어야 한다(빈/미입력 행 제외).
+  // 확정 판정은 실제 export(5시트 매입매출 대장)에 0 초과 금액으로 나가는 행이 하나라도 있는지로 본다.
+  // export에 안 나가는 값(결제완료 이체금액·선입금 충전액)만으로 확정되면 '확정인데 워크북은 0/0' 모순이 생기므로,
+  // 관리자 다운로드 게이트와 동일한 공유 헬퍼(purchaseRowHasExportableAmount)를 사용한다.
   const hasMeaningful = (rows: PurchaseSalesRow[] | null) =>
-    Array.isArray(rows) && rows.some((r) => String(r.vendorName || "").trim() !== "" && (money(r.transferAmount) + money(r.monthlyUsageAmount) + money(r.prepaidChargeAmount)) > 0);
+    Array.isArray(rows) && rows.some(purchaseRowHasExportableAmount);
   const local = readLocal();
 
   // 0) 이 기기에 미저장 편집(pending)이 있으면, 그 최신 상태(행 추가·수정·삭제·비움 모두 포함)를 확정 전에 서버로 반영한다.
@@ -249,6 +251,11 @@ export function MonthlyPurchaseSalesSubTab({
           updated.prepaidChargeAmount = "";
           updated.monthlyUsageAmount = updated.transferAmount || "";
         }
+        // 이체 필요?를 다시 체크(true)하면 비선입금 업체의 이달사용액은 이체 필요금액을 다시 미러링한다.
+        // (결제완료 상태에서 따로 적은 값은 '이체 필요' 복귀 시 이체금액 기준으로 되돌린다.)
+        if (field === "transferNeeded" && val === true && !updated.isPrepaid) {
+          updated.monthlyUsageAmount = updated.transferAmount || "";
+        }
         return updated;
       });
       localStorage.setItem(storageKey, JSON.stringify(nextRows));
@@ -343,7 +350,7 @@ export function MonthlyPurchaseSalesSubTab({
         </div>
         <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
           <div>
-            <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 이체 필요 합계 (결제완료 제외)</span>
+            <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 이체 필요 합계 (체크된 항목만)</span>
             <p className="text-xl font-black text-gray-900 font-mono mt-0.5">{formatNumber(totalTransfer)} 원</p>
           </div>
           <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
@@ -446,8 +453,8 @@ export function MonthlyPurchaseSalesSubTab({
                         onChange={(e) => handleUpdateRow(row.id, "transferNeeded", e.target.checked)}
                         className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
-                      <span className={`text-[9px] font-black ${(row.transferNeeded ?? true) ? "text-rose-600" : "text-gray-400"}`}>
-                        {(row.transferNeeded ?? true) ? "이체필요" : "결제완료"}
+                      <span className={`text-[9px] ${(row.transferNeeded ?? true) ? "font-black text-rose-600" : "font-normal text-gray-400"}`}>
+                        이체필요
                       </span>
                     </label>
                   </td>
@@ -469,10 +476,12 @@ export function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.transferAmount)}
-                      disabled={isLocked}
+                      disabled={isLocked || row.transferNeeded === false}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
-                      placeholder="송금 필요 금액"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-black text-right focus:outline-none focus:border-[#2E6DB4] text-red-650 disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      placeholder={row.transferNeeded === false ? "-" : "송금 필요 금액"}
+                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
+                        row.transferNeeded === false ? "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed" : "border-gray-200 focus:border-[#2E6DB4] text-red-650 disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      }`}
                     />
                   </td>
                   <td className="py-2 px-2.5">
@@ -480,11 +489,11 @@ export function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
-                      disabled={isLocked || !row.isPrepaid}
+                      disabled={isLocked || !(row.isPrepaid || row.transferNeeded === false)}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder={row.isPrepaid ? "발주액 합계" : "-"}
+                      placeholder={row.isPrepaid ? "발주액 합계" : (row.transferNeeded === false ? "이달 사용액" : "-")}
                       className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-gray-800" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                        (row.isPrepaid || row.transferNeeded === false) ? "border-gray-200 focus:border-[#2E6DB4] text-gray-800" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
                       }`}
                     />
                   </td>
