@@ -129,6 +129,18 @@ export async function firebaseGetBranchHistory(branchName: string, month?: strin
     .sort((a, b) => b.settleDate.localeCompare(a.settleDate));
 }
 
+// 서버 문서만 읽어 지점 마감 히스토리를 반환한다(캐시 폴백 없음). 서버 도달 실패 시 그대로 throw.
+// 월말마감 엑셀처럼 "빈/오래된 데이터로 조용히 채우면 위험한" 경우 전용 — 호출부가 실패를 감지해 다운로드를 취소할 수 있게 한다.
+export async function firebaseGetBranchHistoryFromServer(branchName: string, month?: string): Promise<MasterDaily[]> {
+  await waitForFirebaseUser();
+  const snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
+  return snapshot.docs
+    .map((item) => toMaster((item.data() as any).master || {}))
+    .filter((master) => master.branchName === branchName)
+    .filter((master) => !month || master.settleDate.startsWith(month))
+    .sort((a, b) => b.settleDate.localeCompare(a.settleDate));
+}
+
 export async function firebaseGetEditLogs() {
   const snapshot = await getDocs(collection(getDirectDb(), "edit_logs"));
   return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
@@ -214,6 +226,16 @@ export async function firebaseGetBranchOwnRoster(branchName: string) {
   const directDoc = await getDocFromServer(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)));
   if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocs(collection(getDirectDb(), "branch_own_rosters"));
+  const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
+  return entry?.employees || [];
+}
+
+// 서버 문서만 읽는 지점 자체 명단 조회(직접 문서·레거시 컬렉션 폴백 모두 서버 전용, 캐시 폴백 없음).
+// 실패 시 throw. 월말마감 엑셀처럼 오래된 로스터로 급여시트를 만들면 안 되는 fail-closed 산출물 전용.
+export async function firebaseGetBranchOwnRosterFromServer(branchName: string) {
+  const directDoc = await getDocFromServer(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)));
+  if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
+  const snapshot = await getDocsFromServer(collection(getDirectDb(), "branch_own_rosters"));
   const entry = snapshot.docs.map((item) => item.data() as any).find((item) => item.branchName === branchName);
   return entry?.employees || [];
 }
