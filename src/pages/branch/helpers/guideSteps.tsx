@@ -135,6 +135,14 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
           ))}
         </div>
 
+        {/* 참고 박스: 본문 규칙이 아니라 보충 예시임을 회색 배경 + '참고' 라벨로 구분한다. */}
+        <div className="mt-2.5 rounded-lg bg-zinc-100 px-3 py-2 text-[11px] text-zinc-600">
+          <span className="inline-flex items-center gap-1 font-black text-zinc-500">💡 참고</span>
+          <p className="mt-1">
+            <b className="font-black text-zinc-700">선입금(충전) 업체 예</b> — 찬수산, 영평, 마블러스푸드, SPC 등 미리 충전해 둔 잔액에서 차감해 쓰는 업체입니다.
+          </p>
+        </div>
+
         <p className="mt-2.5 text-[11.5px] text-zinc-600">
           다음 달로 넘어가면 거래처명·은행·계좌는 그대로 이월되고 <b className="font-black">금액만 비워집니다.</b>
         </p>
