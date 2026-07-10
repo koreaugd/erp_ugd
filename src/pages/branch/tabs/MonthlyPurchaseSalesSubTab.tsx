@@ -441,7 +441,9 @@ export function MonthlyPurchaseSalesSubTab({
                         onChange={(e) => handleUpdateRow(row.id, "isPrepaid", e.target.checked)}
                         className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
-                      <span className="text-[9px] font-black text-gray-600">선입금</span>
+                      <span className={`text-[9px] ${row.isPrepaid ? "font-black text-rose-600" : "font-normal text-gray-400"}`}>
+                        선입금
+                      </span>
                     </label>
                   </td>
                   <td className="py-2 px-2.5 text-center">
