@@ -4,16 +4,20 @@
  *   node scripts/revert-backup.mjs <backup.json>            # dry-run (기본)
  *   node scripts/revert-backup.mjs <backup.json> --commit
  *
- * 백업 형식: { entries: [{ dataKey, previous, expectedAfter? }] }
+ * 백업 형식: { entries: [{ dataKey, previous, expectedAfter?, expectedUpdatedAt? }] }
  *   previous === null  → 당시 문서가 없었음 → 복구 시 삭제
- *   previous === [...] → 당시 값 → 복구 시 그 값으로 setDoc
+ *   previous === [...] → 당시 값 → 복구 시 그 값으로 복구
  *
- *   expectedAfter 가 있으면 '조건부 복구'다. 현재 문서 값이 expectedAfter 와 정확히 같을 때만 되돌린다.
- *   다르면 그 항목은 건너뛴다. 두 가지를 동시에 막는다:
+ *   expectedAfter 가 있으면 '조건부 복구'다. 현재 문서가 마이그레이션이 써 넣은 그 상태일 때만 되돌린다.
+ *   세 가지를 동시에 막는다:
  *     1) 마이그레이션이 실제로 쓰지 못한 문서를 낡은 값으로 덮어쓰는 것
- *        (기록은 쓰기 전에 남기므로, 건너뛴 문서도 백업 파일에는 들어 있다)
+ *        (기록은 쓰기 전에 남기므로, 못 쓴 문서도 백업 파일에는 들어 있다)
  *     2) 마이그레이션 뒤 지점이 직접 고친 문서를 되돌려 그 편집을 날리는 것
+ *     3) 마이그레이션이 못 썼는데 지점이 우연히 똑같은 값을 손으로 입력한 문서를 되돌리는 것
+ *        → 값만 봐서는 1)과 구분할 수 없다. 그래서 expectedUpdatedAt(마이그레이션이 찍은 updatedAt)까지 대조한다.
+ *          지점이 저장하면 자기 시각이 찍히므로 우연의 일치가 성립하지 않는다.
  *   expectedAfter 가 없는 옛 백업(seed/carry)은 종전대로 무조건 복구한다.
+ *   expectedAfter 만 있고 expectedUpdatedAt 이 없는 백업은 값 대조만 한다(구버전 호환).
  *
  * 순서 주의: 같은 dataKey 를 건드린 백업이 여러 개면 "나중 것부터" 되돌려야 한다.
  * (예: 6월 시드 백업에는 7월 잔재 문서 복원 항목이 섞여 있어, 7월 이월 백업보다 먼저 되돌리면
@@ -32,17 +36,24 @@ export const RESTORE = "값복구";
 
 /**
  * 이 항목을 어떻게 할지 정한다. Firestore 를 모르는 순수 함수라 단위 검증이 가능하다.
- *   current === undefined 는 '문서 없음'.
+ *   current === undefined 는 '문서 없음'. currentUpdatedAt 은 그 문서의 updatedAt 필드.
  */
-export function revertAction(entry, current) {
-  if (entry.expectedAfter !== undefined && !deepEqual(current, entry.expectedAfter)) return SKIP;
+export function revertAction(entry, current, currentUpdatedAt) {
+  if (entry.expectedAfter !== undefined) {
+    // 시각 대조가 먼저다. 값이 우연히 같아도 내가 쓴 문서가 아니면 되돌리면 안 된다.
+    if (entry.expectedUpdatedAt !== undefined && currentUpdatedAt !== entry.expectedUpdatedAt) return SKIP;
+    if (!deepEqual(current, entry.expectedAfter)) return SKIP;
+  }
   return entry.previous === null ? DELETE : RESTORE;
 }
 
 /** 왜 건너뛰는지 사람이 읽을 이유. 진단용이라 판단 로직에는 쓰지 않는다. */
-export function skipReason(entry, current) {
+export function skipReason(entry, current, currentUpdatedAt) {
   if (current === undefined) return "문서가 없음";
   if (deepEqual(current, entry.previous)) return "마이그레이션이 이 문서를 쓰지 않았음 (되돌릴 것 없음)";
+  if (deepEqual(current, entry.expectedAfter) && entry.expectedUpdatedAt !== undefined && currentUpdatedAt !== entry.expectedUpdatedAt) {
+    return "값은 같지만 마이그레이션이 쓴 문서가 아님 (지점이 같은 값을 직접 입력) — 되돌리면 그 입력이 사라짐";
+  }
   return "마이그레이션 뒤 값이 또 바뀌었음 (지점 편집으로 보임) — 되돌리면 그 편집이 사라짐";
 }
 
@@ -98,15 +109,21 @@ async function main() {
     const snapshot = await getDocFromServer(sharedRef(dataKey));
     return snapshot.exists() ? snapshot.data().value ?? null : undefined;
   };
+  /** 값과 updatedAt 을 함께 읽는다. 문서가 없으면 둘 다 undefined. */
+  const readDoc = async (dataKey) => {
+    const snapshot = await getDocFromServer(sharedRef(dataKey));
+    if (!snapshot.exists()) return { value: undefined, updatedAt: undefined };
+    return { value: snapshot.data().value ?? null, updatedAt: snapshot.data().updatedAt };
+  };
 
   const describe = (v) => (v === undefined ? "문서없음" : Array.isArray(v) ? `${v.length}행` : String(v));
 
   console.log(`\n■ 복구 계획: ${basename(backupPath)} (${backup.entries.length}개 문서)\n`);
   const plan = [];
   for (const entry of backup.entries) {
-    const current = await readShared(entry.dataKey);
-    const action = revertAction(entry, current);
-    plan.push({ ...entry, current, action, reason: action === SKIP ? skipReason(entry, current) : "" });
+    const { value: current, updatedAt: currentUpdatedAt } = await readDoc(entry.dataKey);
+    const action = revertAction(entry, current, currentUpdatedAt);
+    plan.push({ ...entry, current, action, reason: action === SKIP ? skipReason(entry, current, currentUpdatedAt) : "" });
     const detail = action === SKIP ? plan[plan.length - 1].reason : action === DELETE ? "" : `(${entry.previous.length}행)`;
     console.log(`  ${entry.dataKey.padEnd(46)} 현재 ${describe(current).padStart(8)} → ${action} ${detail}`);
   }
@@ -144,8 +161,9 @@ async function main() {
       await runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(sharedRef(item.dataKey));
         const current = snapshot.exists() ? snapshot.data().value ?? null : undefined;
-        if (revertAction(item, current) !== item.action) {
-          throw new Error(`계획 이후 값이 바뀌었습니다 (${skipReason(item, current)}) — 다시 실행하세요`);
+        const currentUpdatedAt = snapshot.exists() ? snapshot.data().updatedAt : undefined;
+        if (revertAction(item, current, currentUpdatedAt) !== item.action) {
+          throw new Error(`계획 이후 값이 바뀌었습니다 (${skipReason(item, current, currentUpdatedAt)}) — 다시 실행하세요`);
         }
         if (item.previous === null) transaction.delete(sharedRef(item.dataKey));
         else transaction.set(sharedRef(item.dataKey), { value: item.previous, updatedAt: now });

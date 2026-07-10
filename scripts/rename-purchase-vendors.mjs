@@ -107,7 +107,7 @@ export function blockedBranchNames(blocked) {
 // ---------------------------------------------------------------- CLI
 async function main() {
   const { initializeApp } = await import("firebase/app");
-  const { getFirestore, doc, getDocFromServer, runTransaction, collection, getDocs } = await import("firebase/firestore");
+  const { getFirestore, doc, getDocFromServer, runTransaction, collection, getDocsFromServer } = await import("firebase/firestore");
   const { default: config } = await import("../firebase-applet-config.json", { with: { type: "json" } });
   const { blockedTargets, reportBlocked } = await import("./lib/close-guard.mjs");
   const { signInAsAdmin } = await import("./lib/admin-auth.mjs");
@@ -133,8 +133,15 @@ async function main() {
   };
 
   // 대상 지점을 하드코딩하지 않는다. 미시드 지점이 직접 적어 넣은 비알 오타도 잡아야 한다.
-  const snapshot = await getDocs(collection(db, "public_branches"));
+  // getDocs 가 아니라 getDocsFromServer 를 쓴다. getDocs 는 서버가 안 되면 조용히 로컬 캐시로
+  // 대체되는데, 캐시가 비면 '활성 지점 0곳' → '바꿀 게 없음' → exit 0 으로 성공을 가장한다.
+  // 그러면 마감 가드도 돌지 않는다. 읽기 실패는 예외로 터져야 한다.
+  const snapshot = await getDocsFromServer(collection(db, "public_branches"));
   const branchNames = snapshot.docs.map((d) => d.data()).filter((b) => b?.branchName && b.isActive !== false).map((b) => b.branchName);
+  if (branchNames.length === 0) {
+    console.error("중단: 활성 지점을 하나도 읽지 못했습니다. public_branches 조회가 실패했거나 비어 있습니다.");
+    process.exit(1);
+  }
 
   // 존재하는 문서를 전부 읽는다. 바꿀 게 없는 달도 마감 가드에는 넣어야 한다 —
   // 같은 지점의 어느 한 달이라도 확정/수정중이면 그 지점은 통째로 손대지 않는다.
@@ -209,11 +216,12 @@ async function main() {
   }
 
   // 되돌리기 기록은 '되돌릴 수 없는 쓰기'보다 먼저 디스크에 남긴다. 커밋 직후 프로세스가 죽어도
-  // 기록이 남아 있도록. 대신 각 항목에 '변경 후 기대값(expectedAfter)'을 함께 적어,
-  // revert-backup.mjs 가 현재 값이 그 기대값일 때만 복구하게 한다.
-  //   - 트랜잭션이 건너뛴 문서  → 현재 값 ≠ 기대값 → 복구 대상에서 제외 (지점의 최신 편집을 덮지 않는다)
-  //   - 커밋 뒤 지점이 또 고친 문서 → 현재 값 ≠ 기대값 → 복구 거부
-  // 미리 다 써두면서도 낡은 값을 덮어쓰지 않는 유일한 방법이다.
+  // 기록이 남아 있도록. 대신 각 항목에 '변경 후 기대값(expectedAfter)'과 '내가 찍을 시각
+  // (expectedUpdatedAt)'을 함께 적어, revert-backup.mjs 가 그 둘이 모두 맞을 때만 복구하게 한다.
+  //   - 트랜잭션이 건너뛴 문서       → 현재 값 ≠ 기대값 → 복구 제외 (지점의 최신 편집을 덮지 않는다)
+  //   - 커밋 뒤 지점이 또 고친 문서   → 현재 값·시각 ≠ 기대값 → 복구 거부
+  //   - 못 썼는데 지점이 우연히 같은 값을 손으로 입력한 문서 → 시각이 다르다 → 복구 거부
+  // 미리 다 써두면서도 남의 편집을 덮지 않는 방법이다.
   mkdirSync(resolve(SCRIPT_DIR, "backups"), { recursive: true });
   // pid 는 타임스탬프 '앞'에 넣는다. revert-backup 의 순서 가드가 파일명 끝의 -(숫자10자리+).json 을 읽기 때문이다.
   const backupPath = resolve(SCRIPT_DIR, "backups", `rename-backup-${months.join("_")}-p${process.pid}-${Date.now()}.json`);
@@ -235,7 +243,10 @@ async function main() {
   for (const [branchName, entries] of byBranch) {
     // entry.rows 는 previous 로부터 결정적으로 계산된 값이고, 트랜잭션은 current === previous 를
     // 확인한 뒤에만 쓴다. 따라서 실제로 써지는 값과 expectedAfter 는 항상 같다.
-    for (const entry of entries) backupEntries.push({ dataKey: entry.dataKey, previous: entry.previous, expectedAfter: entry.rows });
+    // now 는 아래 transaction.update 가 찍을 바로 그 값이다.
+    for (const entry of entries) {
+      backupEntries.push({ dataKey: entry.dataKey, previous: entry.previous, expectedAfter: entry.rows, expectedUpdatedAt: now });
+    }
     saveBackup();
 
     try {
