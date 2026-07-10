@@ -383,7 +383,7 @@ export function MonthlyPurchaseSalesSubTab({
       </div>
 
       {/* Sheet Table */}
-      <div className="overflow-x-auto rounded-2xl border border-gray-100">
+      <div className="overflow-x-auto rounded-2xl border border-gray-100" data-guide="purchase-table">
         <table className="w-full text-left text-xs border-collapse font-medium">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">

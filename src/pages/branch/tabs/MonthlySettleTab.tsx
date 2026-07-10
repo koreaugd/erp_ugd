@@ -1,8 +1,10 @@
 // src/pages/branch/tabs/MonthlySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AlertTriangle, CheckCircle2, Coins, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Coins, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
+import { GuideCallouts } from "../../../components/GuideCallouts";
+import { purchaseSalesGuideSteps } from "../helpers/guideSteps";
 import { addMonthsToMonthInputValue } from "../helpers/formatters";
 import { MonthlyFullTimeSalarySubTab, flushFullTimeSalaryForClose } from "./MonthlyFullTimeSalarySubTab";
 import { MonthlyPurchaseSalesSubTab, flushMonthlyPurchasesForClose } from "./MonthlyPurchaseSalesSubTab";
@@ -66,6 +68,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monthlyCloseRecords, setMonthlyCloseRecords] = useState<any[]>([]);
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
+  // 매입매출 탭 "작성방법 보기" 투어. 수동으로만 열린다(자동 노출 없음).
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -191,7 +195,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     if (section === "purchase") {
       const flush = await flushMonthlyPurchasesForClose(branchName, selectedMonth);
       if (flush.blocked) {
-        triggerToast("매입매출(거래처)에 저장된 데이터가 없거나 서버 반영에 실패했습니다. 거래처 내역을 확인한 뒤 다시 시도해주세요.", "error");
+        triggerToast("매입매출(거래처)에 금액이 0보다 큰 행이 하나도 없거나 서버 반영에 실패했습니다. 거래처 금액을 입력한 뒤 다시 시도해주세요.", "error");
         return;
       }
     }
@@ -389,6 +393,29 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             {toast.message}
           </div>
         </div>
+      )}
+
+      {/* 작성방법 안내: 매입매출 탭에서만. 버튼을 다시 누르면 사라진다.
+          켜둔 채로 작성할 수 있게 배경을 어둡게 하지 않고, 말풍선 바깥 클릭은 화면으로 통과시킨다.
+          마감 확정으로 화면이 잠겨도 버튼은 살아있다(잠긴 뒤 규칙을 찾아보는 경우가 많다).
+          단, 로딩 중에는 거래처 표가 아직 없어 그 말풍선이 통째로 빠지므로 버튼을 잠근다. */}
+      {activeSubTab === "purchaseSales" && (
+        <>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setGuideOpen((prev) => !prev)}
+              disabled={loading}
+              aria-pressed={guideOpen}
+              title={loading ? "화면을 불러오는 중입니다" : undefined}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                guideOpen ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900 hover:brightness-95"
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" /> {guideOpen ? "작성방법 닫기" : "작성방법 보기"}
+            </button>
+          </div>
+          <GuideCallouts open={guideOpen} steps={purchaseSalesGuideSteps} onClose={() => setGuideOpen(false)} />
+        </>
       )}
 
       {/* 매출집계: 매입매출 탭에서 결산포털 위에 (자체 제출/수정/취소, 매월 1일 작성 가능) */}
