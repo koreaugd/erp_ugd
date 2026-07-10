@@ -276,11 +276,12 @@ export function SalesSummarySection({
   }, []);
 
   // ---- 렌더 헬퍼: 라벨(좌) + 입력값(우). 모든 칸 필수(빈칸이면 붉게 표시), 0 입력은 유효 ----
-  const rowField = (fieldKey: keyof SalesSummary, label: string) => {
+  // guideAnchor: 작성방법 안내 말풍선이 붙을 칸에만 붙인다(GuideCallouts가 data-guide로 찾는다).
+  const rowField = (fieldKey: keyof SalesSummary, label: string, guideAnchor?: string) => {
     const isBlank = !filled(String(data[fieldKey] || ""));
     const err = showErrors && isBlank;
     return (
-      <div key={fieldKey} className="flex items-center justify-between gap-2">
+      <div key={fieldKey} className="flex items-center justify-between gap-2" data-guide={guideAnchor}>
         <span className={`text-[11px] font-black shrink-0 ${err ? "text-rose-600" : "text-zinc-700"}`}>{label}</span>
         <input
           type="text"
@@ -325,6 +326,7 @@ export function SalesSummarySection({
               value={selectedMonth}
               onChange={(e) => onMonthChange?.(e.target.value)}
               disabled={!onMonthChange}
+              data-guide="sales-summary-month"
               className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer disabled:cursor-not-allowed"
             />
             <button onClick={handleSubmitClick} className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
@@ -375,7 +377,7 @@ export function SalesSummarySection({
           <div className={pillTitleCls}><Utensils className="w-3.5 h-3.5" /> 매출구성</div>
           {rowField("menuSales", "메뉴매출")}
           {rowField("liquorSales", "주류매출")}
-          {rowField("seatCharge", "자릿값(예약정산금)")}
+          {rowField("seatCharge", "자릿값(예약정산금)", "sales-summary-seat-charge")}
           {isGeumshabba && rowField("coverCharge", "커버차지")}
           <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 자릿값(예약정산금): 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요.</p>
           {autoRow(isGeumshabba ? "실매출과 차이(메뉴+주류+커버)" : "실매출과 차이(메뉴+주류)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
