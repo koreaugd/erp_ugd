@@ -516,12 +516,6 @@ export const gasClient = {
     return await firebaseGetAllManualOvertimes();
   },
 
-  // shared_data에서 키 접두사로 문서 열거(예: "monthly_purchases:"). 실제 저장된 키/지점명을 그대로 얻는다.
-  async getSharedDataByPrefix(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
-    const { firebaseGetSharedDataByPrefix } = await import("./firebaseDirect");
-    return await firebaseGetSharedDataByPrefix(prefix);
-  },
-
   async getAllLaborContracts(): Promise<any[]> {
     const { firebaseGetAllLaborContracts } = await import("./firebaseDirect");
     return await firebaseGetAllLaborContracts();
