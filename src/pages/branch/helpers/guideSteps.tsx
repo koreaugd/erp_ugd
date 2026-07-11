@@ -64,8 +64,7 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
     body: (
       <Bullets
         items={[
-          <>자릿값(예약정산금)은 <b className="font-black">매출 합계에 들어가지 않습니다.</b> 별도 정산 항목이라 검산에서 빠집니다.</>,
-          <>캐치테이블 이용 매장은 <b className="font-black text-rose-700">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료 → 해당 월 선택</b> 후 나오는 금액을 입력하세요.</>,
+          <>캐치테이블 이용 매장은 <b className="font-black text-rose-700">캐치테이블 관리자페이지 → 정산 →<br />부가세 참고자료 → 해당 월 선택</b> 후 나오는 금액을 입력하세요.</>,
         ]}
       />
     ),
@@ -75,6 +74,7 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
     anchor: "sales-summary-month",
     title: "결산월 선택과 마감",
     placement: "below",
+    arrow: "center",
     // 첫 줄이 한 줄에 들어가도록 폭을 잡았다(whitespace-nowrap과 짝).
     width: 560,
     body: (
@@ -88,83 +88,84 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
     ),
   },
   {
-    // 표 안쪽 오른쪽 위 — 체크박스 규칙
+    // 체크박스 규칙 + 비알 작성법을 한 말풍선에 좌우로 담고 가운데 세로 회색선으로 나눈다.
+    // 표/버튼을 잠깐 가려도 되도록 위쪽(above)에 배치한다(사용자 요청).
     anchor: "purchase-table",
-    id: "purchase-table-checkbox",
-    title: "체크박스와 금액칸",
-    width: 580,
+    id: "purchase-table-guide",
+    title: "거래처 표 작성방법",
+    placement: "above",
+    width: 860,
     body: (
-      <div>
-        {/* 가로 스크롤을 두지 않는다 — 말풍선 몸통은 클릭이 통과하므로 손으로 밀 수 없기 때문.
-            대신 좁은 화면(<sm)에서는 5컬럼 표가 뭉개지므로 카드 형태로 바꿔 그린다.
-            두 형태 모두 CHECKBOX_RULES 하나에서 그려 내용이 어긋나지 않게 한다. */}
-        <table className="hidden sm:table w-full border-collapse text-[11px]">
-          <thead>
-            <tr className="bg-zinc-100 text-zinc-600">
-              <th className="text-left font-black py-1.5 px-2 whitespace-nowrap">상황</th>
-              <th className="text-center font-black py-1.5 px-2">선입금?</th>
-              <th className="text-center font-black py-1.5 px-2">이체필요?</th>
-              <th className="text-left font-black py-1.5 px-2">실제사용금액</th>
-              <th className="text-left font-black py-1.5 px-2">입력할 칸</th>
-            </tr>
-          </thead>
-          <tbody className="font-semibold">
-            {CHECKBOX_RULES.map((rule) => (
-              <tr key={rule.situation} className="border-t border-gray-100">
-                <td className="py-1.5 px-2 whitespace-nowrap">{rule.situation}</td>
-                <td className="py-1.5 px-2 text-center">{rule.prepaid}</td>
-                <td className="py-1.5 px-2 text-center">{rule.transferNeeded}</td>
-                <td className="py-1.5 px-2">{rule.usage}</td>
-                <td className="py-1.5 px-2">{rule.input}</td>
+      // 좌우 2열은 말풍선이 860px를 다 펼치는 넓은 화면(lg)에서만. 그 아래에선 단일 열로 쌓고 가로선으로 구분.
+      // (sm에서 2열로 바꾸면 왼쪽 5컬럼 표가 들어갈 폭이 부족해 넘친다 — 몸통은 클릭 통과라 손으로 밀 수도 없다.)
+      <div className="flex flex-col lg:flex-row lg:gap-4">
+        {/* 왼쪽 — 체크박스와 금액칸 */}
+        <div className="lg:flex-1 lg:min-w-0">
+          <p className="mb-2 text-[12px] font-black text-zinc-900">체크박스와 금액칸</p>
+          {/* 가로 스크롤을 두지 않는다 — 말풍선 몸통은 클릭이 통과하므로 손으로 밀 수 없기 때문.
+              대신 좁은 화면(<sm)에서는 5컬럼 표가 뭉개지므로 카드 형태로 바꿔 그린다.
+              두 형태 모두 CHECKBOX_RULES 하나에서 그려 내용이 어긋나지 않게 한다. */}
+          <table className="hidden sm:table w-full border-collapse text-[11px]">
+            <thead>
+              <tr className="bg-zinc-100 text-zinc-600">
+                <th className="text-left font-black py-1.5 px-2 whitespace-nowrap">상황</th>
+                <th className="text-center font-black py-1.5 px-2">선입금?</th>
+                <th className="text-center font-black py-1.5 px-2">이체필요?</th>
+                <th className="text-left font-black py-1.5 px-2">실제사용금액</th>
+                <th className="text-left font-black py-1.5 px-2">입력할 칸</th>
               </tr>
+            </thead>
+            <tbody className="font-semibold">
+              {CHECKBOX_RULES.map((rule) => (
+                <tr key={rule.situation} className="border-t border-gray-100">
+                  <td className="py-1.5 px-2 whitespace-nowrap">{rule.situation}</td>
+                  <td className="py-1.5 px-2 text-center">{rule.prepaid}</td>
+                  <td className="py-1.5 px-2 text-center">{rule.transferNeeded}</td>
+                  <td className="py-1.5 px-2">{rule.usage}</td>
+                  <td className="py-1.5 px-2">{rule.input}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="sm:hidden space-y-2">
+            {CHECKBOX_RULES.map((rule) => (
+              <div key={rule.situation} className="rounded-lg border border-gray-200 p-2 space-y-1">
+                <p className="font-black text-zinc-900">{rule.situation}</p>
+                <p className="flex items-center gap-1.5 text-[11px]">
+                  <span className="text-zinc-500">선입금?</span> {rule.prepaid}
+                  <span className="text-zinc-500 ml-2">이체필요?</span> {rule.transferNeeded}
+                </p>
+                <p className="text-[11px]"><span className="text-zinc-500">실제사용금액</span> {rule.usage}</p>
+                <p className="text-[11px]"><span className="text-zinc-500">입력할 칸</span> {rule.input}</p>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
 
-        <div className="sm:hidden space-y-2">
-          {CHECKBOX_RULES.map((rule) => (
-            <div key={rule.situation} className="rounded-lg border border-gray-200 p-2 space-y-1">
-              <p className="font-black text-zinc-900">{rule.situation}</p>
-              <p className="flex items-center gap-1.5 text-[11px]">
-                <span className="text-zinc-500">선입금?</span> {rule.prepaid}
-                <span className="text-zinc-500 ml-2">이체필요?</span> {rule.transferNeeded}
-              </p>
-              <p className="text-[11px]"><span className="text-zinc-500">실제사용금액</span> {rule.usage}</p>
-              <p className="text-[11px]"><span className="text-zinc-500">입력할 칸</span> {rule.input}</p>
-            </div>
-          ))}
-        </div>
+          {/* 참고 박스: 본문 규칙이 아니라 보충 예시임을 회색 배경 + '참고' 라벨로 구분한다. */}
+          <div className="mt-2.5 rounded-lg bg-zinc-100 px-3 py-2 text-[11px] text-zinc-600">
+            <span className="inline-flex items-center gap-1 font-black text-zinc-500">💡 참고</span>
+            <p className="mt-1">
+              <b className="font-black text-zinc-700">선입금(충전) 업체 예</b> — 찬수산, 영평, 마블러스푸드, SPC 등 미리 충전해 둔 잔액에서 차감해 쓰는 업체입니다.
+            </p>
+          </div>
 
-        {/* 참고 박스: 본문 규칙이 아니라 보충 예시임을 회색 배경 + '참고' 라벨로 구분한다. */}
-        <div className="mt-2.5 rounded-lg bg-zinc-100 px-3 py-2 text-[11px] text-zinc-600">
-          <span className="inline-flex items-center gap-1 font-black text-zinc-500">💡 참고</span>
-          <p className="mt-1">
-            <b className="font-black text-zinc-700">선입금(충전) 업체 예</b> — 찬수산, 영평, 마블러스푸드, SPC 등 미리 충전해 둔 잔액에서 차감해 쓰는 업체입니다.
+          <p className="mt-2.5 text-[11.5px] text-zinc-600">
+            다음 달로 넘어가면 거래처명·은행·계좌는 그대로 이월되고 <b className="font-black">금액만 비워집니다.</b>
           </p>
         </div>
 
-        <p className="mt-2.5 text-[11.5px] text-zinc-600">
-          다음 달로 넘어가면 거래처명·은행·계좌는 그대로 이월되고 <b className="font-black">금액만 비워집니다.</b>
-        </p>
-      </div>
-    ),
-  },
-  {
-    // 같은 표에 붙지만 위쪽에 놓아 표 안 오른쪽 위의 체크박스 말풍선과 겹치지 않게 한다.
-    // 비알(BR)은 한 업체지만 품목별로 행을 나눠 적는다 — 기존 엑셀 월말마감 안내에 있던 규칙.
-    anchor: "purchase-table",
-    id: "purchase-table-bial",
-    title: "비알(BR) 작성방법",
-    placement: "above",
-    width: 330,
-    body: (
-      <div>
-        <p className="mb-2">
-          <b className="font-black text-rose-700">비알(BR)</b>은 한 업체지만 <b className="font-black">품목별로 행을 나눠</b> 적습니다.
-          <br />
-          행마다 은행·계좌번호를 각각 넣어주세요.
-        </p>
-        <div>
+        {/* 가운데 구분선 — 넓은 화면은 세로선, 좁은 화면은 오른쪽 블록 위쪽 가로선 */}
+        <div className="hidden lg:block w-px bg-zinc-300 self-stretch" />
+
+        {/* 오른쪽 — 비알(BR) 작성방법 */}
+        <div className="mt-3 pt-3 border-t border-zinc-200 lg:mt-0 lg:pt-0 lg:border-t-0 lg:w-[240px] lg:shrink-0">
+          <p className="mb-2 text-[12px] font-black text-zinc-900">비알(BR) 작성방법</p>
+          <p className="mb-2">
+            <b className="font-black text-rose-700">비알(BR)</b>은 한 업체지만 <b className="font-black">품목별로 행을 나눠</b> 적습니다.
+            <br />
+            행마다 은행·계좌번호를 각각 넣어주세요.
+          </p>
           <table className="w-full border-collapse text-[11px]">
             <thead>
               <tr className="bg-zinc-100 text-zinc-600">

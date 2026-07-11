@@ -389,14 +389,14 @@ export function MonthlyPurchaseSalesSubTab({
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">
               <th className="py-3 px-3">분류항목</th>
               <th className="py-3 px-3">업체명</th>
-              <th className="py-3 px-3 w-28">선입금 충전?</th>
-              <th className="py-3 px-3 w-24 text-center">이체 필요?</th>
+              <th className="py-3 px-3 w-20">선입금 충전?</th>
+              <th className="py-3 px-3 w-20 text-center">이체 필요?</th>
               <th className="py-3 px-3 w-24">충전금액 (원)</th>
               <th className="py-3 px-3 w-24">이체필요 금액 (원)</th>
               <th className="py-3 px-3 w-24">실제 이달사용액 (원)</th>
               <th className="py-3 px-3 w-20">은행</th>
-              <th className="py-3 px-3">계좌번호</th>
-              <th className="py-3 px-3">거래 비고 고지</th>
+              <th className="py-3 px-3 min-w-[160px]">계좌번호</th>
+              <th className="py-3 px-3 min-w-[150px]">거래 비고 고지</th>
               <th className="py-3 px-3 text-center w-12">Action</th>
             </tr>
           </thead>

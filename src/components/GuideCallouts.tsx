@@ -26,6 +26,8 @@ export interface GuideStep {
    * inside-top-right: 앵커 안쪽 오른쪽 위에 겹쳐 놓는다. 표처럼 넓은 앵커용. (기본값)
    */
   placement?: "below" | "above" | "inside-top-right";
+  /** 꼬리(뾰족한 부분)의 가로 위치. start=왼쪽(기본), center=말풍선 가운데. below/above에서만 보인다. */
+  arrow?: "start" | "center";
 }
 
 const BUBBLE_W = 340; // 말풍선 기본 너비(px)
@@ -130,17 +132,18 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
               role="note"
               aria-label={`${step.title} 작성방법`}
             >
-              {/* 말풍선 꼬리 — 앵커 아래에 붙으면 위를, 위에 붙으면 아래를 가리킨다 */}
+              {/* 말풍선 꼬리 — 앵커 아래에 붙으면 위를, 위에 붙으면 아래를 가리킨다.
+                  arrow="center"면 말풍선 가운데, 아니면 왼쪽(ARROW_LEFT). 꼬리 한 변 12px의 절반(6)만큼 보정. */}
               {spot.placement === "below" && (
                 <div
                   className="absolute w-3 h-3 bg-[#EFF0A3] border-l-2 border-t-2 border-rose-600 rotate-45"
-                  style={{ top: -8, left: ARROW_LEFT }}
+                  style={{ top: -8, left: step.arrow === "center" ? spot.width / 2 - 6 : ARROW_LEFT }}
                 />
               )}
               {spot.placement === "above" && (
                 <div
                   className="absolute w-3 h-3 bg-white border-r-2 border-b-2 border-rose-600 rotate-45"
-                  style={{ bottom: -8, left: ARROW_LEFT }}
+                  style={{ bottom: -8, left: step.arrow === "center" ? spot.width / 2 - 6 : ARROW_LEFT }}
                 />
               )}
               <div className="relative flex justify-between items-center gap-2 px-3.5 py-2 bg-[#EFF0A3] border-b-2 border-rose-600 rounded-t-xl">
