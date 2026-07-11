@@ -192,3 +192,88 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
     ),
   },
 ];
+
+// 일일마감정산 탭 — 각 섹션 작성 안내. 화면 위→아래 순서.
+export const dailySettleGuideSteps: GuideStep[] = [
+  {
+    anchor: "daily-settle-date",
+    title: "마감 대상 날짜",
+    placement: "below",
+    width: 300,
+    body: (
+      <p>
+        마감할 <b className="font-black text-rose-700">영업일 날짜가 맞는지</b> 꼭 확인하세요.
+      </p>
+    ),
+  },
+  {
+    // 금고 현금 잔액 칸에 붙인다. 아래(below)면 그 밑 지출 섹션 안내와 겹치므로 위(above)에 두고 꼬리는 칸을 가리키게.
+    anchor: "daily-cash-balance",
+    title: "금고 현금 잔액",
+    placement: "above",
+    arrow: "anchor",
+    width: 340,
+    body: (
+      // 넓은 화면은 한 줄, 좁은 화면(<sm)은 폭이 줄어 잘리므로 줄바꿈 허용.
+      <p className="sm:whitespace-nowrap">
+        <b className="font-black text-rose-700">매장에 있는 실제 현금을 세어서</b> 적어주세요.
+      </p>
+    ),
+  },
+  {
+    // 근무자 섹션 제목에 붙인다. 위/아래 섹션과 겹치지 않게 오른쪽(right)으로 낸다.
+    anchor: "daily-staff-limit",
+    title: "근무자 · 기준 한도시간",
+    placement: "right",
+    width: 700,
+    body: (
+      // xl(1280)+에서만 한 줄로 우측 길게 — 지점 화면은 사이드바(220px) 때문에 그보다 좁으면
+      // 오른쪽에 700px가 안 들어가 아래로 폴백된다. 폴백 구간에서 nowrap이 켜지면 어색하므로 xl에서만 켠다.
+      <Bullets
+        items={[
+          <span className="xl:whitespace-nowrap"><b className="font-black">주 6일 근무한 경우</b>, 휴무를 반납하고 근무를 한 것이니 <b className="font-black text-rose-700">주 6일 중 하루는 기준 한도시간을 0으로</b> 체크하세요.</span>,
+          <span className="xl:whitespace-nowrap">본사 지원, 타매장 직원 지원은 <b className="font-black text-rose-700">파트타이머로</b> 잡아주세요.</span>,
+        ]}
+      />
+    ),
+  },
+  {
+    // 현금 지출 내역 섹션 헤더. 입력 행을 가리지 않게 위(above)에 붙인다.
+    anchor: "daily-cash-expense",
+    title: "현금 지출 내역",
+    placement: "above",
+    width: 340,
+    body: (
+      <p>
+        <b className="font-black text-rose-700">매장 계좌로 현금을 입금</b>한 경우에도 이곳에 적어주세요.
+        <br />
+        지출 분류에서 <b className="font-black text-rose-700">현금입금</b>을 선택하면 됩니다.
+      </p>
+    ),
+  },
+  {
+    anchor: "daily-card-expense",
+    title: "카드 지출 내역",
+    placement: "above",
+    width: 340,
+    body: (
+      <p>
+        <b className="font-black text-rose-700">계좌이체 요청 건을 제외한 모든 결제</b>를 입력하세요.
+        <br />
+        인터넷 즉시결제·카드결제 등 모두 포함됩니다.
+      </p>
+    ),
+  },
+  {
+    anchor: "daily-other-memo",
+    title: "기타 전달 메모",
+    placement: "above",
+    width: 580,
+    body: (
+      // 넓은 화면은 한 줄로 우측으로 길게, 좁은 화면(<sm)은 줄바꿈.
+      <p className="sm:whitespace-nowrap">
+        <b className="font-black">ERP 시스템 개선</b>에 대한 의견을 적어주세요. 적어주신 내용은 <b className="font-black text-rose-700">ERP 성능 개선에 활용</b>됩니다.
+      </p>
+    ),
+  },
+];

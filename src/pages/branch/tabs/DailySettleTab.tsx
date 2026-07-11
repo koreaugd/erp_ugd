@@ -1,8 +1,10 @@
 // src/pages/branch/tabs/DailySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle, CheckCircle2, CircleDollarSign, ClipboardList, Clock, Coins, FileText, Info, Lock, Plus, ShieldAlert, Trash2, User } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, CircleDollarSign, ClipboardList, Clock, Coins, FileText, Info, Lock, Plus, ShieldAlert, Trash2, User } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
+import { GuideCallouts } from "../../../components/GuideCallouts";
+import { dailySettleGuideSteps } from "../helpers/guideSteps";
 import { formatNumber } from "../../../utils/formatNumber";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
@@ -87,6 +89,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const isHeadOffice = branchName === "본사";
   const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
 
+  // 일일마감 '작성방법 보기' 토글(여러 섹션 안내를 한 번에). 탭 진입 시 기본으로 켜 둔다(사용자가 닫을 수 있음).
+  const [dailyGuideOpen, setDailyGuideOpen] = useState(true);
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
   // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
   const [writer, setWriter] = useState<string>("");
@@ -1604,10 +1608,25 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         </div>
       )}
 
+      {/* 작성방법 안내: 탭 최상단 가운데. 버튼을 다시 누르면 사라진다. 몸통은 클릭이 통과해 켜둔 채 작성 가능.
+          GuideCallouts는 포털이라 여기 두어도 각 섹션의 data-guide 위치에 그려진다(없는 앵커는 건너뜀). */}
+      <div className="flex justify-center">
+        <button
+          onClick={() => setDailyGuideOpen((prev) => !prev)}
+          aria-pressed={dailyGuideOpen}
+          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer ${
+            dailyGuideOpen ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900 hover:brightness-95"
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" /> {dailyGuideOpen ? "작성방법 닫기" : "작성방법 보기"}
+        </button>
+      </div>
+      <GuideCallouts open={dailyGuideOpen} steps={dailySettleGuideSteps} onClose={() => setDailyGuideOpen(false)} />
+
       {/* Date & Writer Row */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6" id="settle-header-controls">
         <div className="grid grid-cols-2 gap-4 grow">
-          <div className="flex flex-col space-y-1.5 relative">
+          <div className="flex flex-col space-y-1.5 relative" data-guide="daily-settle-date">
             <div className="flex items-center justify-between">
               <label className="text-xs font-extrabold text-[#1C3C6E] flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-[#2E6DB4]" /> 마감 대상 날짜
@@ -1784,7 +1803,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             { key: undefined, label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
             { key: "cashBalance" as const, label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
           ].map((field, idx) => (
-            <div key={idx} className="flex flex-col space-y-1.5">
+            <div key={idx} className="flex flex-col space-y-1.5" data-guide={field.key === "cashBalance" ? "daily-cash-balance" : undefined}>
               <span className="text-xs font-semibold text-gray-500">{field.label}</span>
               <input
                 type="text"
@@ -1820,7 +1839,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="expenses-section">
         {/* Cash Expense table */}
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between" data-guide="daily-cash-expense">
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-amber-500" /> 현금 지출 내역
             </h3>
@@ -1904,7 +1923,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
         {/* Card Expense table */}
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between" data-guide="daily-card-expense">
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-blue-500" /> 카드 지출 내역
             </h3>
@@ -2114,7 +2133,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="staff-attendance-section">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
           <div>
-            <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
+            <h3 className="text-sm font-black text-gray-800 flex items-center gap-2 w-fit" data-guide="daily-staff-limit">
               <Clock className="w-4 h-4 text-[#2E6DB4]" />
               근무자
             </h3>
@@ -2589,7 +2608,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           </div>
         </div>}
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" data-guide="daily-other-memo">
           <label className="text-xs font-bold text-gray-600 flex flex-wrap items-center gap-2">
             <span>{isHeadOffice ? "기타 전달 메모" : "📝 기타 전달 메모"}</span>
             {!isHeadOffice && (
