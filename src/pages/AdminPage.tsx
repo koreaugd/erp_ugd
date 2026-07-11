@@ -10,6 +10,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { OrderVendorImportTool } from "./OrderVendorImportTool";
 import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -968,6 +969,7 @@ export default function AdminPage() {
                 <button onClick={() => setMonthlyClosingTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
                 <button onClick={() => setMonthlyClosingTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
               </div>
+              {monthlyClosingTab === "status" && <OrderVendorImportTool />}
               {monthlyClosingTab === "status" && <AdminMonthlyClosingStatusSection />}
               {monthlyClosingTab === "cashManagement" && <AdminCashManagementSection fixedTab="cashManagement" />}
               {monthlyClosingTab === "cashExpenses" && <AdminCashManagementSection fixedTab="cashExpenses" />}
