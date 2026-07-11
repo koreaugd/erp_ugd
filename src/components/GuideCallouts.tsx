@@ -23,11 +23,12 @@ export interface GuideStep {
   /**
    * below: 앵커 바로 아래에 붙인다. 입력칸처럼 작은 앵커용 — 앵커를 가리지 않는다.
    * above: 앵커 바로 위에 붙인다. 아래가 페이지 끝이거나 아래로 밀기 싫을 때.
+   * right: 앵커 오른쪽에 붙인다. 위/아래 섹션과 겹치기 싫은 작은 앵커(제목 등)용.
    * inside-top-right: 앵커 안쪽 오른쪽 위에 겹쳐 놓는다. 표처럼 넓은 앵커용. (기본값)
    */
-  placement?: "below" | "above" | "inside-top-right";
-  /** 꼬리(뾰족한 부분)의 가로 위치. start=왼쪽(기본), center=말풍선 가운데. below/above에서만 보인다. */
-  arrow?: "start" | "center";
+  placement?: "below" | "above" | "right" | "inside-top-right";
+  /** 꼬리(뾰족한 부분)의 가로 위치. start=왼쪽(기본), center=말풍선 가운데, anchor=앵커 중앙을 가리킴. below/above에서만. */
+  arrow?: "start" | "center" | "anchor";
 }
 
 const BUBBLE_W = 340; // 말풍선 기본 너비(px)
@@ -38,7 +39,8 @@ const ARROW_LEFT = 22; // 말풍선 왼쪽 모서리에서 화살표까지
 
 type Rect = { top: number; left: number; width: number; height: number };
 type Placement = NonNullable<GuideStep["placement"]>;
-type Spot = { id: string; top: number; left: number; width: number; placement: Placement; ring: Rect };
+// arrowX: below/above 꼬리의 가로 위치. right 꼬리는 CSS로 왼쪽면 세로 중앙에 둔다(높이 측정 불필요).
+type Spot = { id: string; top: number; left: number; width: number; placement: Placement; arrowX: number; ring: Rect };
 
 const stepId = (step: GuideStep) => step.id ?? step.anchor;
 
@@ -62,19 +64,37 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
       const ring: Rect = { top: r.top + scrollY, left: r.left + scrollX, width: r.width, height: r.height };
 
       const width = Math.min(step.width ?? BUBBLE_W, docWidth - EDGE * 2);
-      const placement: Placement = step.placement ?? "inside-top-right";
       const clamp = (left: number) => Math.min(Math.max(EDGE, left), Math.max(EDGE, docWidth - width - EDGE));
+
+      // right는 오른쪽에 말풍선 폭이 안 들어가면(모바일 등) below로 폴백한다.
+      // 안 그러면 앵커 위로 겹쳐 그려지고 꼬리가 화면 가장자리를 가리킨다.
+      const placementReq: Placement = step.placement ?? "inside-top-right";
+      const fellBack = placementReq === "right" && docWidth - (ring.left + ring.width + BELOW_GAP) - EDGE < width;
+      const placement: Placement = fellBack ? "below" : placementReq;
 
       // above는 말풍선 높이를 알아야 하지만 그리기 전에는 알 수 없다.
       // 앵커 위쪽 모서리에 두고 CSS translateY(-100%)로 끌어올려 높이 측정을 피한다.
       const top =
         placement === "below" ? ring.top + ring.height + BELOW_GAP
         : placement === "above" ? ring.top - BELOW_GAP
+        // right: 앵커 세로 중앙에 두고 말풍선을 -translate-y-1/2로 올려 꼬리(50%)가 앵커 중앙을 가리키게 한다.
+        : placement === "right" ? ring.top + ring.height / 2
         : ring.top + INSET;
       const left =
-        placement === "inside-top-right" ? clamp(ring.left + ring.width - width - INSET) : clamp(ring.left);
+        placement === "inside-top-right" ? clamp(ring.left + ring.width - width - INSET)
+        : placement === "right" ? clamp(ring.left + ring.width + BELOW_GAP)
+        : clamp(ring.left);
 
-      next.push({ id: stepId(step), top, left, width, placement, ring });
+      // below/above 꼬리 가로 위치: start=왼쪽, center=말풍선 가운데, anchor=앵커 중앙(말풍선 안으로 가둠).
+      // right에서 below로 폴백한 경우엔 앵커를 가리키도록 anchor로 강제한다.
+      const arrowMode = fellBack ? "anchor" : (step.arrow ?? "start");
+      const anchorCenterX = ring.left + ring.width / 2;
+      const arrowX =
+        arrowMode === "center" ? width / 2 - 6
+        : arrowMode === "anchor" ? Math.min(Math.max(anchorCenterX - left - 6, 14), width - 26)
+        : ARROW_LEFT;
+
+      next.push({ id: stepId(step), top, left, width, placement, arrowX, ring });
     }
 
     // 값이 그대로면 상태를 갱신하지 않는다 — ResizeObserver ↔ 리렌더 순환을 막는다.
@@ -126,24 +146,30 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
                 클릭을 받는 것은 닫기(X) 버튼 하나뿐이다. */}
             <div
               className={`absolute pointer-events-none bg-white border-2 border-rose-600 rounded-2xl shadow-xl ${
-                spot.placement === "above" ? "-translate-y-full" : ""
+                spot.placement === "above" ? "-translate-y-full" : spot.placement === "right" ? "-translate-y-1/2" : ""
               }`}
               style={{ top: spot.top, left: spot.left, width: spot.width }}
               role="note"
               aria-label={`${step.title} 작성방법`}
             >
-              {/* 말풍선 꼬리 — 앵커 아래에 붙으면 위를, 위에 붙으면 아래를 가리킨다.
-                  arrow="center"면 말풍선 가운데, 아니면 왼쪽(ARROW_LEFT). 꼬리 한 변 12px의 절반(6)만큼 보정. */}
+              {/* 말풍선 꼬리 — below=위, above=아래, right=왼쪽을 가리킨다. below/above 가로 위치는 arrowX(measure), right는 CSS 세로 중앙. */}
               {spot.placement === "below" && (
                 <div
                   className="absolute w-3 h-3 bg-[#EFF0A3] border-l-2 border-t-2 border-rose-600 rotate-45"
-                  style={{ top: -8, left: step.arrow === "center" ? spot.width / 2 - 6 : ARROW_LEFT }}
+                  style={{ top: -8, left: spot.arrowX }}
                 />
               )}
               {spot.placement === "above" && (
                 <div
                   className="absolute w-3 h-3 bg-white border-r-2 border-b-2 border-rose-600 rotate-45"
-                  style={{ bottom: -8, left: step.arrow === "center" ? spot.width / 2 - 6 : ARROW_LEFT }}
+                  style={{ bottom: -8, left: spot.arrowX }}
+                />
+              )}
+              {spot.placement === "right" && (
+                // 왼쪽면 세로 가운데를 가리킨다. top:50% + translateY(-50%)로 말풍선 높이와 무관하게 중앙.
+                <div
+                  className="absolute w-3 h-3 bg-white border-l-2 border-b-2 border-rose-600 rotate-45 -translate-y-1/2"
+                  style={{ left: -8, top: "50%" }}
                 />
               )}
               <div className="relative flex justify-between items-center gap-2 px-3.5 py-2 bg-[#EFF0A3] border-b-2 border-rose-600 rounded-t-xl">
