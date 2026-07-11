@@ -354,6 +354,18 @@ export async function firebaseGetAllLaborContracts() {
   return allContracts;
 }
 
+// shared_data에서 키 접두사로 문서를 열거한다(예: "monthly_purchases:"). 도구가 실제 저장된 지점명을
+// 별도 지점목록에 의존하지 않고 데이터 키에서 직접 얻기 위해 사용한다.
+export async function firebaseGetSharedDataByPrefix(prefix: string): Promise<Array<{ key: string; value: unknown }>> {
+  const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
+  const out: Array<{ key: string; value: unknown }> = [];
+  snapshot.forEach((docSnap) => {
+    const key = decodeURIComponent(docSnap.id);
+    if (key.startsWith(prefix)) out.push({ key, value: docSnap.data().value ?? null });
+  });
+  return out;
+}
+
 export enum OperationType {
   CREATE = "create",
   UPDATE = "update",
