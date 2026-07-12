@@ -2,9 +2,10 @@
 // 지출 내역(현금/카드) 입력을 엑셀 시트처럼 다루는 그리드.
 // - PC(xl 이상): 격자 테두리 + 행번호. Tab/Enter/화살표로 칸 이동, 현재 셀을 강조 표시.
 // - 그 이하 화면: 기존 카드형 입력 유지(좁은 폭에서 시트는 오히려 불편하므로).
-import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { ExpenseRow } from "../types";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import {
@@ -28,14 +29,12 @@ const COL_CLASSIFICATION = 0;
 const COL_USAGE = 1;
 const COL_AMOUNT = 2;
 const COL_DETAIL = 3;
-const LAST_COL = COL_DETAIL;
 const COLUMN_LABELS = ["지출분류", "사용처", "금액", "지출상세내용"];
 
 /** 행번호 | 지출분류 | 사용처 | 금액 | 지출상세내용 | 삭제 */
 const GRID_COLS = "grid grid-cols-[1.75rem_5.5rem_4.75rem_6rem_minmax(0,1fr)_1.75rem]";
 
 type Variant = "cash" | "card";
-type CellPos = { row: number; col: number };
 
 interface ExpenseGridProps {
   variant: Variant;
@@ -80,9 +79,6 @@ export function ExpenseGrid({
   const style = VARIANT_STYLE[variant];
   const errorRows = new Set(errorRowIndexes);
 
-  /** 지금 편집 중인 셀. 셀·행번호·머리글을 함께 강조해 위치를 눈으로 확인할 수 있게 한다. */
-  const [activeCell, setActiveCell] = useState<CellPos | null>(null);
-
   /**
    * 금액 칸에 숫자가 아닌 글자를 친 행. 입력이 조용히 무시되면 키보드가 고장 난 줄 알기 쉬우므로 이유를 알려준다.
    * 잠깐 떴다가 사라진다.
@@ -108,62 +104,23 @@ export function ExpenseGrid({
     updateCell(rowIndex, "amount", cleaned);
   };
 
-  // 셀 좌표 -> DOM 엘리먼트. 키보드 이동은 전적으로 이 레지스트리를 통한다.
-  const cellRefs = useRef<Map<string, HTMLElement | null>>(new Map());
-  const registerCell = (rowIndex: number, col: number) => (el: HTMLElement | null) => {
-    const key = `${rowIndex}-${col}`;
-    if (el) cellRefs.current.set(key, el);
-    else cellRefs.current.delete(key);
-  };
+  // 엑셀식 칸 이동. 매입매출 표와 같은 훅을 쓴다.
+  // activeCell은 지금 편집 중인 셀 — 셀·행번호·머리글을 함께 강조해 위치를 눈으로 확인할 수 있게 한다.
+  const { cellProps, activeCell, isActive, requestFocus } = useSheetKeyboardNav({
+    rowCount: rows.length,
+    colCount: COLUMN_LABELS.length,
+    onAppendRow: (col) => appendRow(col)
+  });
 
-  /** 행이 새로 붙은 뒤에야 포커스를 줄 수 있으므로, 다음 렌더까지 목표 좌표를 들고 있는다. */
-  const pendingFocus = useRef<CellPos | null>(null);
-
-  const focusEl = (el: HTMLElement | null | undefined) => {
-    if (!el) return false;
-    el.focus();
-    if (el instanceof HTMLInputElement) el.select();
-    return true;
-  };
-
-  /** 위/아래 행의 같은 열로. 그 칸이 비활성이면 옆 칸으로 흘려보낸다. */
-  const focusVertical = (rowIndex: number, col: number) => {
-    if (rowIndex < 0 || rowIndex >= rows.length) return false;
-    for (const candidate of [col, col + 1, col - 1, COL_CLASSIFICATION]) {
-      if (candidate < 0 || candidate > LAST_COL) continue;
-      if (focusEl(cellRefs.current.get(`${rowIndex}-${candidate}`))) return true;
-    }
-    return false;
-  };
-
-  /** 같은 행에서 좌/우로. 행 끝을 넘어가면 이웃 행으로 넘긴다(Tab과 같은 흐름). */
-  const focusHorizontal = (rowIndex: number, col: number, delta: 1 | -1) => {
-    let next = col + delta;
-    while (next >= 0 && next <= LAST_COL) {
-      if (focusEl(cellRefs.current.get(`${rowIndex}-${next}`))) return true;
-      next += delta;
-    }
-    if (delta === 1) return focusVertical(rowIndex + 1, COL_CLASSIFICATION);
-    return focusVertical(rowIndex - 1, LAST_COL);
-  };
-
+  /**
+   * 맨 아랫줄에서 더 내려가려 할 때 / 행 추가 버튼을 눌렀을 때 빈 행을 한 줄 붙인다.
+   * 커서 예약은 업데이터 밖에서 한다 — setState 업데이터는 순수해야 하고, 개발 모드에서 두 번 호출될 수 있다.
+   */
   const appendRow = (focusCol?: number) => {
-    let appended = false;
-    onRowsChange((prev) => {
-      if (prev.length >= MAX_EXPENSE_ROWS) return prev;
-      appended = true;
-      if (focusCol !== undefined) pendingFocus.current = { row: prev.length, col: focusCol };
-      return [...prev, createEmptyExpenseRow()];
-    });
-    return appended;
+    if (rows.length >= MAX_EXPENSE_ROWS) return;
+    if (focusCol !== undefined) requestFocus(rows.length, focusCol);
+    onRowsChange((prev) => (prev.length >= MAX_EXPENSE_ROWS ? prev : [...prev, createEmptyExpenseRow()]));
   };
-
-  useEffect(() => {
-    const target = pendingFocus.current;
-    if (!target) return;
-    pendingFocus.current = null;
-    focusVertical(target.row, target.col);
-  }, [rows.length]);
 
   const updateCell = (rowIndex: number, field: keyof ExpenseRow, value: string) => {
     onRowsChange((prev) => {
@@ -181,69 +138,6 @@ export function ExpenseGrid({
     onRowsChange((prev) => padExpenseRows(prev.filter((_, i) => i !== rowIndex)));
   };
 
-  /**
-   * 시트 키 조작. 네 칸 모두 규칙이 같다.
-   * - ↑ ↓          : 위/아래 행 (드롭다운 칸에서도 옵션 변경이 아니라 행 이동이다)
-   *                   마지막 행에서 ↓를 누르면 새 행이 생기며 그리로 내려간다.
-   * - ← →          : 왼/오른쪽 칸. 글자 입력 칸에서는 커서가 끝에 닿았을 때만 넘어간다.
-   * - Enter        : 아래 행 (Shift+Enter는 위 행)
-   * - Alt+↓        : 드롭다운 목록 펼치기 (브라우저 기본 동작에 맡긴다)
-   * - Tab          : 가로채지 않는다. DOM 순서가 곧 셀 순서라 브라우저 기본 동작으로 충분하다.
-   */
-  const handleCellKeyDown = (
-    event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>,
-    rowIndex: number,
-    col: number
-  ) => {
-    // Alt+↓ / Alt+↑ 는 드롭다운을 펼치고 접는 기본 동작이므로 건드리지 않는다.
-    if (event.altKey) return;
-
-    const isSelect = col === COL_CLASSIFICATION || col === COL_USAGE;
-    const moveDown = () => {
-      if (rowIndex + 1 < rows.length) focusVertical(rowIndex + 1, col);
-      else appendRow(col);
-    };
-
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (event.shiftKey) focusVertical(rowIndex - 1, col);
-      else moveDown();
-      return;
-    }
-
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      if (event.key === "ArrowDown") moveDown();
-      else focusVertical(rowIndex - 1, col);
-      return;
-    }
-
-    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-      const delta = event.key === "ArrowRight" ? 1 : -1;
-      if (isSelect) {
-        event.preventDefault();
-        focusHorizontal(rowIndex, col, delta);
-        return;
-      }
-      const input = event.currentTarget as HTMLInputElement;
-      const { selectionStart, selectionEnd, value } = input;
-      if (selectionStart === null || selectionEnd === null || selectionStart !== selectionEnd) return;
-      const atStart = selectionStart === 0;
-      const atEnd = selectionStart === value.length;
-      if ((delta === -1 && atStart) || (delta === 1 && atEnd)) {
-        event.preventDefault();
-        focusHorizontal(rowIndex, col, delta);
-      }
-    }
-  };
-
-  /** 셀 하나가 포커스를 잡거나 잃을 때 현재 위치를 갱신한다. */
-  const cellFocusProps = (rowIndex: number, col: number) => ({
-    onFocus: () => setActiveCell({ row: rowIndex, col }),
-    onBlur: () => setActiveCell((current) => (current?.row === rowIndex && current?.col === col ? null : current))
-  });
-
-  const isActive = (rowIndex: number, col: number) => activeCell?.row === rowIndex && activeCell?.col === col;
 
   // 시트의 컬럼명은 화면상의 글자일 뿐이라 보조기술이 읽지 못한다. 칸마다 "3번 행 금액"처럼 이름을 달아준다.
   const cellLabel = (rowIndex: number, col: number) => `${rowIndex + 1}번 행 ${COLUMN_LABELS[col]}`;
@@ -310,12 +204,10 @@ export function ExpenseGrid({
                   {/* 지출분류 */}
                   <div className={cellWrap(rowIndex, COL_CLASSIFICATION)}>
                     <select
-                      ref={registerCell(rowIndex, COL_CLASSIFICATION)}
+                      {...cellProps(rowIndex, COL_CLASSIFICATION)}
                       aria-label={cellLabel(rowIndex, COL_CLASSIFICATION)}
                       value={row.classification}
                       onChange={(e) => updateCell(rowIndex, "classification", e.target.value)}
-                      onKeyDown={(e) => handleCellKeyDown(e, rowIndex, COL_CLASSIFICATION)}
-                      {...cellFocusProps(rowIndex, COL_CLASSIFICATION)}
                       className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer`}
                     >
                       {EXPENSE_CLASSIFICATIONS.map((item) => (
@@ -341,12 +233,10 @@ export function ExpenseGrid({
                   ) : (
                     <div className={cellWrap(rowIndex, COL_USAGE)}>
                       <select
-                        ref={registerCell(rowIndex, COL_USAGE)}
+                        {...cellProps(rowIndex, COL_USAGE)}
                         aria-label={cellLabel(rowIndex, COL_USAGE)}
                         value={row.usage}
                         onChange={(e) => updateCell(rowIndex, "usage", e.target.value)}
-                        onKeyDown={(e) => handleCellKeyDown(e, rowIndex, COL_USAGE)}
-                        {...cellFocusProps(rowIndex, COL_USAGE)}
                         className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer`}
                       >
                         {EXPENSE_USAGES.map((item) => (
@@ -362,7 +252,7 @@ export function ExpenseGrid({
                   {/* 금액 */}
                   <div className={cellWrap(rowIndex, COL_AMOUNT)}>
                     <input
-                      ref={registerCell(rowIndex, COL_AMOUNT)}
+                      {...cellProps(rowIndex, COL_AMOUNT)}
                       id={`daily-${variant}-expense-amount-${rowIndex}`}
                       aria-label={cellLabel(rowIndex, COL_AMOUNT)}
                       type="text"
@@ -370,8 +260,6 @@ export function ExpenseGrid({
                       value={formatWithCommas(row.amount)}
                       onChange={(e) => handleAmountInput(rowIndex, e.target.value)}
                       onCompositionEnd={(e) => handleAmountInput(rowIndex, e.currentTarget.value)}
-                      onKeyDown={(e) => handleCellKeyDown(e, rowIndex, COL_AMOUNT)}
-                      {...cellFocusProps(rowIndex, COL_AMOUNT)}
                       className={`${cellBase} text-right font-mono`}
                     />
                     {amountHintRow === rowIndex && (
@@ -387,31 +275,27 @@ export function ExpenseGrid({
                   {/* 지출상세내용 */}
                   <div className={cellWrap(rowIndex, COL_DETAIL)}>
                     <input
-                      ref={registerCell(rowIndex, COL_DETAIL)}
+                      {...cellProps(rowIndex, COL_DETAIL)}
                       id={`daily-${variant}-expense-detail-${rowIndex}`}
                       aria-label={cellLabel(rowIndex, COL_DETAIL)}
                       type="text"
                       value={row.detail}
                       onChange={(e) => updateCell(rowIndex, "detail", e.target.value)}
-                      onKeyDown={(e) => handleCellKeyDown(e, rowIndex, COL_DETAIL)}
-                      {...cellFocusProps(rowIndex, COL_DETAIL)}
                       className={cellBase}
                     />
                   </div>
 
-                  {/* 행 삭제 */}
+                  {/* 행 삭제 — 모든 행에서 지울 수 있다(기본 줄은 지워도 빈 줄이 다시 채워진다). */}
                   <div className="border-r border-b border-gray-300 flex items-center justify-center">
-                    {!isExpenseRowBlank(row) && (
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        onClick={() => removeRow(rowIndex)}
-                        title="행 삭제"
-                        className="text-gray-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => removeRow(rowIndex)}
+                      title={`${rowIndex + 1}번 행 삭제`}
+                      className="text-gray-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               );
@@ -446,15 +330,14 @@ export function ExpenseGrid({
                 errorRows.has(rowIndex) ? "border-rose-400 bg-rose-50" : "border-gray-100 bg-gray-50"
               }`}
             >
-              {!isExpenseRowBlank(row) && (
-                <button
-                  type="button"
-                  onClick={() => removeRow(rowIndex)}
-                  className="absolute top-2 right-2 text-gray-400 hover:text-rose-500 p-1 rounded-lg transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => removeRow(rowIndex)}
+                title={`${rowIndex + 1}번 행 삭제`}
+                className="absolute top-2 right-2 text-gray-400 hover:text-rose-500 p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
 
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <div className="flex flex-col space-y-1">
