@@ -250,11 +250,13 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   }, [sheetMonth, isCurrentMonth, todayKey]);
 
   /**
-   * "전일" 칸의 기준일 — 시트의 마지막 날.
-   * 이번 달이면 오늘이므로 전일 = 어제까지의 재고.
-   * 지난 달을 펼쳐 보면 그 달 말일이 기준이 되어, 오늘까지의 재고가 섞여 보이지 않는다.
+   * 맨 왼쪽 기준 재고 칸의 기준일 — 시트의 첫 날(그 달 1일).
+   *
+   * 이 칸은 1일 바로 왼쪽에 있으므로, 거기서 출발해 오른쪽으로 입고를 더하고 판매를 빼면
+   * 각 날짜의 재고가 나와야 한다. 즉 값은 "그 달이 시작되기 전 재고"여야 한다.
+   * (마지막 날 기준으로 두면 왼쪽 끝 숫자와 그 옆 1일 재고가 이어지지 않아 검산이 어긋난다.)
    */
-  const sheetAnchorDate = sheetDates[sheetDates.length - 1] ?? todayKey;
+  const sheetAnchorDate = sheetDates[0] ?? todayKey;
 
   const getDraftOrSavedAmount = (productId: string, date: string, field: "inbound" | "sold") => {
     const draft = draftCells[productId + "|" + date]?.[field];
@@ -443,13 +445,9 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   rowSpan={2}
                   style={{ left: COL_CATEGORY_W + COL_ITEM_W, width: COL_PREV_W, minWidth: COL_PREV_W }}
                   className="liquor-stock-alice-green sticky top-0 z-30 p-2 text-center whitespace-nowrap border-r-2 border-r-slate-900"
-                  title={
-                    isCurrentMonth
-                      ? "어제까지의 입고·판매를 모두 반영한 재고"
-                      : `${sheetAnchorDate} 직전까지의 입고·판매를 반영한 재고`
-                  }
+                  title="이 달이 시작되기 전 재고입니다. 여기서 출발해 오른쪽으로 입고를 더하고 판매를 빼면 그날의 재고가 됩니다."
                 >
-                  {isCurrentMonth ? "전일" : "직전"}
+                  월초
                 </th>
                 {sheetDates.map((date) => (
                   <th
