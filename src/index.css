@@ -1382,6 +1382,36 @@ input[type=number] {
   background: var(--branch-ghost) !important;
 }
 
+/* ── 엑셀형 시트 셀 ────────────────────────────────────────────────────────
+   표를 엑셀처럼 보이게 하려면 입력칸의 테두리·배경을 지우고 칸(td) 전체를 채워야 한다.
+   그런데 위 `.branch-redesign input/select/textarea`가 background·border-color를 !important로
+   강제하므로 Tailwind의 border-0/bg-transparent가 먹지 않는다.
+   → data-cat 행 색상과 같은 전략으로, ID 특이성(1,2,0 > 0,1,1)으로 이겨서 되돌린다.
+   격자선과 현재 셀 강조는 감싸는 td가 그린다. */
+.branch-redesign #purchase-sales-subtab .sheet-cell-input,
+.branch-redesign #parttime-salaries-subtab .sheet-cell-input {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* 주류 재고 시트: 입고(파랑)/판매(분홍) 칸 배경은 td가 칠하므로 input은 비워 둔다. */
+.branch-redesign #liquor-inventory-tab .liquor-sheet-cell {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* 쓸 수 없는 칸은 회색으로 잠근다(선입금 미체크 행의 충전금액 칸 등). */
+.branch-redesign #purchase-sales-subtab .sheet-cell-input:disabled,
+.branch-redesign #parttime-salaries-subtab .sheet-cell-input:disabled {
+  background: rgba(33, 33, 33, 0.06) !important;
+  color: rgba(33, 33, 33, 0.35) !important;
+  cursor: not-allowed;
+}
+
 .branch-redesign aside nav button:not(.text-white):not([style]),
 .branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]),
 .branch-redesign aside nav button[class*="hover:bg-white"]:not(.text-white):not([style]) {

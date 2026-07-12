@@ -8,6 +8,7 @@ import type { OrderCategory, OrderItem, OrderReportCategory } from "../types";
 import { cleanNumeric, formatWithCommas, toLocalMonthInputValue } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { ORDER_CATEGORIES, ORDER_DEFAULT_VENDORS, VENDOR_HINT, ALL_ORDER_CATEGORIES, getOrderCategoryHeaderClass, monthDays } from "../helpers/orderHelpers";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
 export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const storageKey = "erp_orders_" + branchName;
@@ -279,6 +280,13 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const totals = matrixVendors.map((vendor) => filteredOrders.filter((order) => order.vendorName === vendor).reduce((sum, order) => sum + Number(order.amount || 0), 0));
   const monthTotal = totals.reduce((sum, item) => sum + item, 0);
 
+  // 엑셀식 칸 이동. 행=날짜, 열=거래처. 날짜 행은 달력이 정하므로 행 추가는 없다.
+  const matrixDays = monthDays(reportMonth);
+  const { cellProps, activeCell, isActive } = useSheetKeyboardNav({
+    rowCount: matrixDays.length,
+    colCount: matrixVendors.length
+  });
+
   return (
     <div className="space-y-5" id="orders-tab-view">
       <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
@@ -316,7 +324,9 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3>
-              <p className="text-xs text-gray-400 mt-1">날짜별 칸에 금액을 입력하면 자동 저장됩니다.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                날짜별 칸에 금액을 입력하면 자동 저장됩니다. 화살표·Tab·Enter로 칸을 옮길 수 있습니다.
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <div className="px-3 py-2 rounded-xl bg-[#2E6DB4]/10 text-[#1A3C6E] text-xs font-black">월 합계 {formatNumber(monthTotal)}원</div>
@@ -348,34 +358,63 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                 <th rowSpan={2} className="p-3 min-w-[130px] text-right bg-slate-100 align-middle">일 합계</th>
               </tr>
               <tr>
-                {matrixVendors.map((vendor) => {
+                {matrixVendors.map((vendor, colIndex) => {
                   const category = vendorCategoryOf(vendor);
+                  // 분류별 색은 그대로 두고, 지금 편집 중인 열만 안쪽 테두리로 짚어준다.
+                  const columnActive = activeCell?.col === colIndex;
                   return (
-                    <th key={vendor} className={`p-2 min-w-[92px] text-center border-r border-b ${getOrderCategoryHeaderClass(category)}`}>
+                    <th
+                      key={vendor}
+                      className={`p-2 min-w-[92px] text-center border-r border-b ${getOrderCategoryHeaderClass(category)} ${
+                        columnActive ? "ring-2 ring-inset ring-[#2E6DB4]" : ""
+                      }`}
+                    >
                       {vendor}
                     </th>
                   );
                 })}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
-              {monthDays(reportMonth).map((day) => {
+            <tbody className="[&_td]:border-b [&_td]:border-gray-200">
+              {matrixDays.map((day, rowIndex) => {
                 const dateKey = reportMonth + "-" + day;
                 const rowValues = matrixVendors.map((vendor) => {
                   const draftValue = orderDraftCells[dateKey + "|" + vendor];
                   return draftValue !== undefined ? Number(draftValue || 0) : cellAmount(dateKey, vendor);
                 });
                 const rowTotal = rowValues.reduce((sum, item) => sum + item, 0);
+                const rowActive = activeCell?.row === rowIndex;
                 return (
                   <tr key={dateKey} className="hover:bg-slate-50/70">
-                    <td className="sticky left-0 bg-white p-3 text-center font-mono font-black text-gray-600 border-r">{Number(day)}</td>
-                    {rowValues.map((value, index) => {
-                      const vendor = matrixVendors[index];
+                    {/* 날짜 칸 — 지금 편집 중인 행을 짚어준다 */}
+                    <td
+                      className={`sticky left-0 p-3 text-center font-mono font-black border-r transition-colors ${
+                        rowActive ? "bg-blue-50 text-[#2E6DB4]" : "bg-white text-gray-600"
+                      }`}
+                    >
+                      {Number(day)}
+                    </td>
+                    {rowValues.map((value, colIndex) => {
+                      const vendor = matrixVendors[colIndex];
                       const draftKey = dateKey + "|" + vendor;
                       const draftValue = orderDraftCells[draftKey];
+                      const cellActive = isActive(rowIndex, colIndex);
                       return (
-                        <td key={vendor} className="p-1.5 text-right font-mono border-r">
-                          <input value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")} onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)} inputMode="numeric" maxLength={9} className="w-[74px] rounded-lg border border-gray-200 px-1.5 py-1.5 text-right font-mono font-black focus:border-[#2E6DB4] focus:outline-none" />
+                        <td
+                          key={vendor}
+                          className={`p-0 text-right font-mono border-r relative ${
+                            cellActive ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4] z-10 bg-white" : ""
+                          }`}
+                        >
+                          <input
+                            {...cellProps(rowIndex, colIndex)}
+                            value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")}
+                            onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)}
+                            aria-label={`${Number(day)}일 ${vendor} 발주금액`}
+                            inputMode="numeric"
+                            maxLength={9}
+                            className="w-full h-9 bg-transparent border-0 rounded-none px-2 text-right font-mono font-black focus:outline-none"
+                          />
                         </td>
                       );
                     })}

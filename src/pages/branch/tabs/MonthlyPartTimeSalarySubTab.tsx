@@ -5,6 +5,19 @@ import { gasClient } from "../../../api/gasClient";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas, toDateInputValue } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
+
+// 표에 보이는 순서 그대로의 셀 좌표. 성명(0)·기본급여(8)·제외버튼(11)은 입력 칸이 아니라 커서가 서지 않는다.
+const COL_RESIDENT = 1;
+const COL_ENTRY_DATE = 2;
+const COL_BANK = 3;
+const COL_ACCOUNT = 4;
+const COL_HOURLY_RATE = 5;
+const COL_HOURS = 6;
+const COL_TIPS = 7;
+const COL_ATTENDANCE = 9;
+const COL_MEMO = 10;
+const PARTTIME_COL_COUNT = 12;
 
 interface PartTimeSalaryRow {
   employeeId: string;
@@ -504,6 +517,22 @@ export function MonthlyPartTimeSalarySubTab({
   const totalHours = visibleSalaries.reduce((acc, s) => acc + (Number(s.accumulatedHours) || 0), 0);
   const totalSalary = visibleSalaries.reduce((acc, s) => acc + (Number(s.calculatedSalary) || 0), 0);
 
+  // 엑셀처럼 키보드로 칸을 옮긴다. 행은 명부에서 오므로 행 추가는 없다(onAppendRow 없음).
+  const { cellProps, isActive } = useSheetKeyboardNav({
+    rowCount: visibleSalaries.length,
+    colCount: PARTTIME_COL_COUNT
+  });
+
+  // 엑셀 셀: 격자선은 td가 긋고, 현재 칸은 굵은 테두리로 짚어준다.
+  const cellTd = (rowIndex: number, col: number, extra = "") =>
+    [
+      "border-r border-b border-black/10 p-0 relative",
+      isActive(rowIndex, col) ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4] z-10" : "",
+      extra
+    ].join(" ");
+  // sheet-cell-input: index.css에서 전역 input 배경/테두리 !important를 ID 특이성으로 되돌리는 클래스.
+  const cellInput = "sheet-cell-input w-full h-9 px-2 text-xs focus:outline-none";
+
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
       <div className="flex justify-between items-center pb-3 border-b border-gray-50 flex-col sm:flex-row gap-3">
@@ -570,92 +599,111 @@ export function MonthlyPartTimeSalarySubTab({
                 </td>
               </tr>
             ) : (
-              visibleSalaries.map((sal) => (
+              visibleSalaries.map((sal, rowIndex) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
-                  <td className="py-3 px-3 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
+                  <td className="border-r border-b border-black/10 py-3 px-3 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
                     {sal.name}
                   </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className={cellTd(rowIndex, COL_RESIDENT)}>
                     <input
+                      {...cellProps(rowIndex, COL_RESIDENT)}
+                      aria-label={`${sal.name} 주민등록번호`}
                       type="text"
                       value={sal.residentNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "residentNumber", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-bold text-gray-800 tracking-tighter text-center"
+                      className={`${cellInput} font-mono font-bold text-gray-800 tracking-tighter text-center`}
                     />
                   </td>
-                  <td className="py-2.5 px-1">
+                  <td className={cellTd(rowIndex, COL_ENTRY_DATE)}>
                     <input
+                      {...cellProps(rowIndex, COL_ENTRY_DATE)}
+                      aria-label={`${sal.name} 입사일자`}
                       type="date"
                       value={toDateInputValue(sal.entryDate)}
                       onChange={(e) => handleUpdate(sal.employeeId, "entryDate", e.target.value)}
-                      className="w-[108px] p-1 bg-white border border-gray-200 rounded text-xs text-gray-800 text-center"
+                      className={`${cellInput} text-gray-800 text-center`}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className={cellTd(rowIndex, COL_BANK)}>
                     <input
+                      {...cellProps(rowIndex, COL_BANK)}
+                      aria-label={`${sal.name} 은행`}
                       type="text"
                       value={sal.bank}
                       onChange={(e) => handleUpdate(sal.employeeId, "bank", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-bold text-gray-800 text-center"
+                      className={`${cellInput} font-bold text-gray-800 text-center`}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className={cellTd(rowIndex, COL_ACCOUNT)}>
                     <input
+                      {...cellProps(rowIndex, COL_ACCOUNT)}
+                      aria-label={`${sal.name} 입금 계좌번호`}
                       type="text"
                       value={sal.accountNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "accountNumber", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-medium text-gray-850"
+                      className={`${cellInput} font-mono font-medium text-gray-850`}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 text-right">
+                  <td className={cellTd(rowIndex, COL_HOURLY_RATE)}>
                     <input
+                      {...cellProps(rowIndex, COL_HOURLY_RATE)}
+                      aria-label={`${sal.name} 시급`}
                       type="number"
                       value={sal.hourlyRate}
                       onChange={(e) => handleUpdate(sal.employeeId, "hourlyRate", e.target.value)}
-                      className="w-full p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-gray-800"
+                      className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>
-                  <td className="py-2.5 px-1 text-right">
+                  <td className={cellTd(rowIndex, COL_HOURS)}>
                     <input
+                      {...cellProps(rowIndex, COL_HOURS)}
+                      aria-label={`${sal.name} 누적시간`}
                       type="number"
                       value={sal.accumulatedHours}
                       onChange={(e) => handleUpdate(sal.employeeId, "accumulatedHours", e.target.value)}
-                      className="w-[58px] p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-blue-600"
+                      className={`${cellInput} font-mono font-black text-right text-blue-600`}
                     />
                   </td>
-                  <td className="py-2.5 px-1 text-right">
+                  <td className={cellTd(rowIndex, COL_TIPS)}>
                     <input
+                      {...cellProps(rowIndex, COL_TIPS)}
+                      aria-label={`${sal.name} 팁/기타`}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(sal.tipsEtcAmount || "")}
                       onChange={(e) => handleUpdate(sal.employeeId, "tipsEtcAmount", e.target.value)}
                       placeholder="0"
-                      className="w-[74px] p-1 bg-white border border-gray-200 rounded text-xs font-mono font-black text-right text-emerald-700"
+                      className={`${cellInput} font-mono font-black text-right text-emerald-700`}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 text-right font-mono font-black text-gray-700">
+                  <td className="border-r border-b border-black/10 py-2.5 px-1.5 text-right font-mono font-black text-gray-700">
                     {formatNumber(Number(sal.calculatedSalary) || 0)}원
                   </td>
-                  <td className="py-2.5 px-1.5">
+                  <td className={cellTd(rowIndex, COL_ATTENDANCE)}>
                     <input
+                      {...cellProps(rowIndex, COL_ATTENDANCE)}
+                      aria-label={`${sal.name} 근무일정`}
                       type="text"
                       value={sal.attendanceDates}
                       onChange={(e) => handleUpdate(sal.employeeId, "attendanceDates", e.target.value)}
-                      className="w-full p-1 bg-zinc-50 border border-gray-200 rounded text-[10px] font-mono text-zinc-600 truncate focus:outline-none focus:bg-white"
+                      className={`${cellInput} text-[10px] font-mono text-zinc-600 truncate`}
                       title={sal.attendanceDates}
                     />
                   </td>
-                  <td className="py-2.5 px-1.5 min-w-[260px]">
+                  <td className={cellTd(rowIndex, COL_MEMO, "min-w-[260px]")}>
                     <input
+                      {...cellProps(rowIndex, COL_MEMO)}
+                      aria-label={`${sal.name} 기타 비고`}
                       type="text"
                       value={sal.memo}
                       onChange={(e) => handleUpdate(sal.employeeId, "memo", e.target.value)}
-                      className="w-full p-2 bg-white border border-gray-200 rounded text-xs font-medium placeholder-gray-300"
+                      className={`${cellInput} font-medium placeholder-gray-300`}
                     />
                   </td>
-                  <td className="py-2.5 px-2 text-center">
+                  <td className="border-b border-black/10 py-2.5 px-2 text-center">
                     <button
                       type="button"
+                      tabIndex={-1}
                       onClick={() => handleExcludeEmployee(sal)}
                       className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[10px] font-bold text-rose-600 transition-colors hover:bg-rose-100"
                       title="이번 달 파트타이머 급여대장에서만 제외"

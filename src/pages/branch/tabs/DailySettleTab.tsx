@@ -10,6 +10,7 @@ import type { DailySettleValidationField, DailySettleValidationTargets, Employee
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { ExpenseGrid } from "../components/ExpenseGrid";
 import { getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import { createDailySettleValidationTargets, createEmployeeFromStaffRow, createStaffAddDraft, employeeNameKey, getAddReasonChoiceClass, getDailyStaffValidationKey, isSampleEmployee, needsOvertimeReason, normalizeRosterEmployee, parseStaffAddReasonChoice, shouldSkipDailyRosterRegistration, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
 export function DailySettleTab({ branchName }: { branchName: string }) {
@@ -691,6 +692,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const cardExpensesSum = useMemo(() => {
     return cardExpenses.reduce((acc, exp) => acc + (Number(exp.amount) || 0), 0);
   }, [cardExpenses]);
+
+  // 근무자 표를 엑셀처럼 방향키로 오간다. 지점(9칸)과 본사(11칸) 표는 한 번에 하나만 뜨므로 훅도 하나면 된다.
+  // 계산 결과 칸(근무/초과)과 삭제 버튼에는 cellProps를 달지 않는다 — 훅이 알아서 건너뛴다.
+  const { cellProps: staffCellProps } = useSheetKeyboardNav({
+    rowCount: staffRows.length,
+    colCount: isHeadOffice ? 11 : 9
+  });
 
   // 상세 내용은 적었는데 금액이 비어 있는 행. 그냥 두면 저장 시 조용히 사라지므로 제출을 막는다.
   const incompleteCashExpenseRows = useMemo(
@@ -2061,7 +2069,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
         {isHeadOffice && (
           <>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pt-5">
             <table className="w-full text-left border-collapse text-xs min-w-[1160px]">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
@@ -2069,7 +2077,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                   <th className="py-3 px-2 w-36">근무지점</th>
                   <th className="py-3 px-2 w-24 text-center">휴무</th>
                   <th className="py-3 px-1 w-16">기준</th>
-                  <th className="py-3 px-2 w-24">업무시작</th>
+                  <th className="py-3 px-2 w-24 relative">
+                    {/* 시트 조작법 — 실제로 타이핑을 시작하는 업무시작 칸 바로 위에 띄운다. */}
+                    <span className="absolute -top-4 left-2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
+                      ↑ ↓ ← → · Tab · Enter 로 칸 이동
+                    </span>
+                    업무시작
+                  </th>
                   <th className="py-3 px-2 w-24">업무마감</th>
                   <th className="py-3 px-1 w-14 text-right">근무</th>
                   <th className="py-3 px-1 w-14 text-right">초과</th>
@@ -2114,6 +2128,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         )}
                         <td className="py-3.5 px-2">
                           <select
+                            {...staffCellProps(idx, 1)}
+                            aria-label={`${s.name} 근무지점`}
                             disabled={isDayOff}
                             value={s.officeWorkplace || branchName}
                             onChange={(e) => {
@@ -2138,6 +2154,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             <td className="py-3.5 px-2 text-center">
                               <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
                                 <input
+                                  {...staffCellProps(idx, 2)}
+                                  aria-label={`${s.name} 휴무`}
                                   type="checkbox"
                                   checked={isDayOff}
                                   onChange={(e) => {
@@ -2151,6 +2169,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             </td>
                             <td className="py-3.5 px-1">
                               <select
+                                {...staffCellProps(idx, 3)}
+                                aria-label={`${s.name} 기준 시간`}
                                 disabled={isDayOff}
                                 value={String(s.standardHours)}
                                 onChange={(e) => {
@@ -2170,6 +2190,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         )}
                         <td className="py-3.5 px-2">
                           <input
+                            {...staffCellProps(idx, 4)}
+                            aria-label={`${s.name} 업무시작`}
                             type="text"
                             disabled={isDayOff}
                             value={s.clockIn}
@@ -2185,6 +2207,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         </td>
                         <td className="py-3.5 px-2">
                           <input
+                            {...staffCellProps(idx, 5)}
+                            aria-label={`${s.name} 업무마감`}
                             type="text"
                             disabled={isDayOff}
                             value={s.clockOut}
@@ -2209,6 +2233,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         </td>
                         <td className="py-3.5 px-2">
                           <input
+                            {...staffCellProps(idx, 8)}
+                            aria-label={`${s.name} 업무내용`}
                             type="text"
                             disabled={isDayOff}
                             value={s.officeTaskMemo || ""}
@@ -2224,6 +2250,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         </td>
                         <td className="py-3.5 px-2">
                           <input
+                            {...staffCellProps(idx, 9)}
+                            aria-label={`${s.name} 초과 사유`}
                             type="text"
                             disabled={isDayOff || !needsOvertimeReason(s)}
                             value={s.overtimeReason}
@@ -2241,6 +2269,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         <td className="py-3.5 px-2 text-center">
                           <button
                             type="button"
+                            tabIndex={-1}
+                            title={`${s.name} 행 삭제`}
                             onClick={() => setStaffRows(prev => prev.filter((_, i) => i !== idx))}
                             className="text-gray-400 hover:text-rose-500 p-1.5 hover:bg-rose-50 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center"
                           >
@@ -2281,14 +2311,20 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         )}
 
         {!isHeadOffice && (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto pt-5">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
                 <th className="py-3 px-2">이름 (성명)</th>
                 <th className="py-3 px-2">계약 구분</th>
                 <th className="py-3 px-2">기준 한도시간</th>
-                <th className="py-3 px-2">출근 시간</th>
+                <th className="py-3 px-2 relative">
+                  {/* 시트 조작법 — 실제로 타이핑을 시작하는 출근 시간 칸 바로 위에 띄운다. */}
+                  <span className="absolute -top-4 left-2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
+                    ↑ ↓ ← → · Tab · Enter 로 칸 이동
+                  </span>
+                  출근 시간
+                </th>
                 <th className="py-3 px-2">퇴근 시간</th>
                 <th className="py-3 px-2">실 근무 시간</th>
                 <th className="py-3 px-2">초과 시간</th>
@@ -2316,6 +2352,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       {/* Division Dropdown */}
                       <td className="py-3.5 px-2 relative">
                         <select
+                          {...staffCellProps(idx, 1)}
+                          aria-label={`${s.name} 계약 구분`}
                           value={s.division}
                           onChange={(e) => {
                             const div = e.target.value as "정직원" | "파트타이머";
@@ -2338,6 +2376,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                           </span>
                         ) : (
                           <select
+                            {...staffCellProps(idx, 2)}
+                            aria-label={`${s.name} 기준 한도시간`}
                             value={String(s.standardHours)}
                             onChange={(e) => {
                               executeStaffCalculation(idx, { standardHours: Number(e.target.value) });
@@ -2355,6 +2395,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       {/* Clock In */}
                       <td className="py-3.5 px-2">
                         <input
+                          {...staffCellProps(idx, 3)}
+                          aria-label={`${s.name} 출근 시간`}
                           type="text"
                           value={s.clockIn}
                           onChange={(e) => executeStaffCalculation(idx, { clockIn: e.target.value })}
@@ -2369,6 +2411,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       {/* Clock Out */}
                       <td className="py-3.5 px-2 relative">
                         <input
+                          {...staffCellProps(idx, 4)}
+                          aria-label={`${s.name} 퇴근 시간`}
                           type="text"
                           value={s.clockOut}
                           onChange={(e) => executeStaffCalculation(idx, { clockOut: e.target.value })}
@@ -2408,6 +2452,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       {/* Overtime Reason */}
                       <td className="py-3.5 px-2 max-w-[200px]">
                         <input
+                          {...staffCellProps(idx, 7)}
+                          aria-label={`${s.name} 초과 상세 사유`}
                           type="text"
                           value={s.overtimeReason}
                           onChange={(e) => {
@@ -2429,6 +2475,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       <td className="py-3.5 px-2 text-center">
                         <button
                           type="button"
+                          tabIndex={-1}
+                          title={`${s.name} 행 삭제`}
                           onClick={() => {
                             setStaffRows(prev => prev.filter((_, i) => i !== idx));
                           }}
