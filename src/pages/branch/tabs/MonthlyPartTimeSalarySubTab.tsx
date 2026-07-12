@@ -1,7 +1,8 @@
 // src/pages/branch/tabs/MonthlyPartTimeSalarySubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Trash2, Users } from "lucide-react";
+import { Check, Trash2 } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas, toDateInputValue } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
@@ -466,51 +467,6 @@ export function MonthlyPartTimeSalarySubTab({
     triggerToast(`${employee.name} 님을 이번 달 급여대장에서 제외했습니다.`);
   };
 
-  const handleSave = async () => {
-    try {
-      // 1. Maintain profiles in local database for long-term memoization
-      salaries.forEach((sal) => {
-        const profile = {
-          residentNumber: sal.residentNumber,
-          entryDate: sal.entryDate,
-          contractStatus: sal.contractStatus,
-          bank: sal.bank,
-          accountNumber: sal.accountNumber,
-          hourlyRate: sal.hourlyRate
-        };
-        localStorage.setItem(`erp_pt_profile_${branchName}_${sal.employeeId}`, JSON.stringify(profile));
-      });
-
-      const profiles = salaries.reduce((result: Record<string, any>, sal) => {
-        result[sal.employeeId] = {
-          residentNumber: sal.residentNumber,
-          entryDate: sal.entryDate,
-          contractStatus: sal.contractStatus,
-          bank: sal.bank,
-          accountNumber: sal.accountNumber,
-          hourlyRate: sal.hourlyRate
-        };
-        return result;
-      }, {});
-
-      // 2. Save current month's specific transactions
-      localStorage.setItem(salaryStorageKey, JSON.stringify(salaries));
-      localStorage.setItem(exclusionStorageKey, JSON.stringify(excludedEmployeeIds));
-      localStorage.setItem(salaryPendingKey, "1");
-      localStorage.setItem(exclusionPendingKey, "1");
-      await Promise.all([
-        gasClient.saveSharedData(salaryDataKey, salaries),
-        gasClient.saveSharedData(`part_time_profiles:${branchName}`, profiles),
-        gasClient.saveSharedData(exclusionDataKey, excludedEmployeeIds)
-      ]);
-      localStorage.removeItem(salaryPendingKey);
-      localStorage.removeItem(exclusionPendingKey);
-      triggerToast("파트타이머 급여대장이 직원현황 연동 및 시각화 저장 성공하였습니다!", "success");
-    } catch {
-      triggerToast("급여지급 대장 등록 안됨", "error");
-    }
-  };
-
   // Grand totals
   // 실제 근무시간이 없는 인원은 이번 달 급여대장에 표시하지 않습니다.
   const visibleSalaries = salaries.filter((salary) => Number(salary.accumulatedHours) > 0);
@@ -537,9 +493,8 @@ export function MonthlyPartTimeSalarySubTab({
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
       <div className="flex justify-between items-center pb-3 border-b border-gray-50 flex-col sm:flex-row gap-3">
         <div>
-          <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5 leading-snug">
-            <Users className="w-5 h-5 text-[#2E6DB4]" />
-            아르바이트(파트타이머) 월 종합 급여 기산표
+          <h3 className="text-sm font-black text-zinc-900 leading-snug w-fit">
+            파트타이머 급여대장
           </h3>
           <p className="text-[10px] text-gray-400 font-extrabold mt-1">
              직원현황의 파트타이머 리스트가 자동으로 연동되고, 이번 달 일일 일지에서 실시간 근무시간과 출근일이 집계되어 프리필링됩니다.
@@ -552,27 +507,24 @@ export function MonthlyPartTimeSalarySubTab({
         </div>
       </div>
 
-      {/* Stats cards block */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100 flex justify-between items-center">
-          <div>
-            <span className="text-[9px] text-zinc-450 font-black">총합 누적근무 (시간)</span>
-            <p className="text-lg font-black text-zinc-850 font-mono mt-0.5">{totalHours} hr</p>
-          </div>
-          <span className="text-xs bg-zinc-200/50 p-2 rounded-xl text-zinc-650 font-bold font-mono">
-            {visibleSalaries.length} 명
-          </span>
-        </div>
-        <div className="bg-zinc-50 p-4 rounded-2xl border border-zinc-100 flex justify-between items-center">
-          <div>
-            <span className="text-[9px] text-zinc-450 font-black">총액 원시급여 합계 (세전)</span>
-            <p className="text-lg font-black text-[#2E6DB4] font-mono mt-0.5">{formatNumber(totalSalary)} 원</p>
-          </div>
-          <span className="text-[10px] text-zinc-400 font-bold">100% 자동 산정</span>
-        </div>
+      {/* 요약 — 숫자 세 개뿐이다. 카드 두 장으로 나눠 키우면 표를 밀어낼 뿐이라 한 줄로 붙인다. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2">
+        <span className="text-[11px] font-black text-zinc-500">
+          누적근무 <b className="ml-1 font-mono text-sm text-zinc-800">{totalHours} hr</b>
+        </span>
+        <span className="text-[11px] font-black text-zinc-500">
+          급여합계(세전) <b className="ml-1 font-mono text-sm text-[#2E6DB4]">{formatNumber(totalSalary)} 원</b>
+        </span>
+        <span className="text-[11px] font-black text-zinc-500">
+          인원 <b className="ml-1 font-mono text-sm text-zinc-800">{visibleSalaries.length} 명</b>
+        </span>
+        <span className="ml-auto text-[10px] font-bold text-zinc-400">100% 자동 산정</span>
       </div>
 
       {/* Ledger Table */}
+      {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
+      <div className="relative">
+      <SheetKeyHint />
       <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
         <table className="w-full text-left text-xs border-collapse font-medium min-w-[1330px]">
           <thead>
@@ -717,6 +669,7 @@ export function MonthlyPartTimeSalarySubTab({
             )}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   );

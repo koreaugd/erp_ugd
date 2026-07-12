@@ -421,6 +421,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
+    // 이름 없이 사유만 골라둔 줄은 예전엔 말없이 버려졌다. 지웠는지 잊었는지 알 수 없으니 짚어준다.
+    const namelessWithReason = staffAddDrafts.filter((draft) => !draft.name.trim() && draft.addReason);
+    if (namelessWithReason.length > 0) {
+      triggerToast("이름을 적지 않은 줄이 있습니다. 이름을 넣거나 그 줄을 삭제해 주세요.", "error");
+      return;
+    }
+
     const nextRows: StaffRow[] = [];
 
     for (const draft of filledDrafts) {
@@ -2047,7 +2054,16 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 <option value="정직원">정직원</option>
                 <option value="파트타이머">파트타이머</option>
               </select>
-              <select value={draft.addReason} onChange={(e) => updateStaffAddDraft(draft.id, { addReason: parseStaffAddReasonChoice(e.target.value) })} className={`w-32 px-2 py-1.5 text-xs ${getAddReasonChoiceClass(draft.addReason)}`}>
+              {/* 이름을 적었는데 사유가 비어 있으면 등록이 막힌다 — 등록 버튼을 눌러봐야 알 게 아니라 지금 바로 짚어준다. */}
+              <select
+                value={draft.addReason}
+                onChange={(e) => updateStaffAddDraft(draft.id, { addReason: parseStaffAddReasonChoice(e.target.value) })}
+                aria-label="추가사유"
+                title={draft.name.trim() && !draft.addReason ? "추가사유를 골라야 등록됩니다." : undefined}
+                className={`w-32 px-2 py-1.5 text-xs ${getAddReasonChoiceClass(draft.addReason)} ${
+                  draft.name.trim() && !draft.addReason ? "ring-2 ring-rose-400 ring-offset-0" : ""
+                }`}
+              >
                 <option value="">선택</option>
                 <option value="신규입사">신규입사</option>
                 <option value="지점이동">지점이동</option>

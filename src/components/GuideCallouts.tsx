@@ -25,8 +25,10 @@ export interface GuideStep {
    * above: 앵커 바로 위에 붙인다. 아래가 페이지 끝이거나 아래로 밀기 싫을 때.
    * right: 앵커 오른쪽에 붙인다. 위/아래 섹션과 겹치기 싫은 작은 앵커(제목 등)용.
    * inside-top-right: 앵커 안쪽 오른쪽 위에 겹쳐 놓는다. 표처럼 넓은 앵커용. (기본값)
+   * inside-top-left: 앵커 안쪽 왼쪽 위에 겹쳐 놓는다.
+   * outside-top-left: 앵커 바깥 왼쪽 위. 말풍선의 오른쪽 아래 모서리가 앵커의 왼쪽 위 모서리에 닿는다.
    */
-  placement?: "below" | "above" | "right" | "inside-top-right";
+  placement?: "below" | "above" | "right" | "inside-top-right" | "inside-top-left" | "outside-top-left";
   /** 꼬리(뾰족한 부분)의 가로 위치. start=왼쪽(기본), center=말풍선 가운데, anchor=앵커 중앙을 가리킴. below/above에서만. */
   arrow?: "start" | "center" | "anchor";
 }
@@ -79,10 +81,15 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
         : placement === "above" ? ring.top - BELOW_GAP
         // right: 앵커 세로 중앙에 두고 말풍선을 -translate-y-1/2로 올려 꼬리(50%)가 앵커 중앙을 가리키게 한다.
         : placement === "right" ? ring.top + ring.height / 2
+        // outside-top-left: 앵커 위쪽 모서리에 두고 -translate-y-full로 끌어올린다(높이 측정을 피한다).
+        : placement === "outside-top-left" ? ring.top
         : ring.top + INSET;
       const left =
         placement === "inside-top-right" ? clamp(ring.left + ring.width - width - INSET)
+        : placement === "inside-top-left" ? clamp(ring.left + INSET)
         : placement === "right" ? clamp(ring.left + ring.width + BELOW_GAP)
+        // 말풍선 오른쪽 끝이 앵커 왼쪽 모서리에 닿게 한다.
+        : placement === "outside-top-left" ? clamp(ring.left - width)
         : clamp(ring.left);
 
       // below/above 꼬리 가로 위치: start=왼쪽, center=말풍선 가운데, anchor=앵커 중앙(말풍선 안으로 가둠).
@@ -146,7 +153,9 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
                 클릭을 받는 것은 닫기(X) 버튼 하나뿐이다. */}
             <div
               className={`absolute pointer-events-none bg-white border-2 border-rose-600 rounded-2xl shadow-xl ${
-                spot.placement === "above" ? "-translate-y-full" : spot.placement === "right" ? "-translate-y-1/2" : ""
+                spot.placement === "above" || spot.placement === "outside-top-left" ? "-translate-y-full"
+                : spot.placement === "right" ? "-translate-y-1/2"
+                : ""
               }`}
               style={{ top: spot.top, left: spot.left, width: spot.width }}
               role="note"

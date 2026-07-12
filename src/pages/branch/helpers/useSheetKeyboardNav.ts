@@ -82,6 +82,25 @@ export function useSheetKeyboardNav({
     [rowCount, colCount]
   );
 
+  /**
+   * 같은 열을 지킨 채 위/아래로. 잠긴 칸은 건너뛰고 그 열의 다음 살아있는 칸으로 간다.
+   *
+   * focusCell을 쓰면 안 된다 — 그건 잠긴 칸을 만나면 옆 열로 흘려보내는 규칙이라,
+   * ↓를 누르다 잠긴 칸을 만나면 커서가 오른쪽 아래로 새어나간다.
+   * 세로 이동에서 열이 바뀌면 엉뚱한 칸에 숫자를 치게 된다.
+   */
+  const focusColumnwise = useCallback(
+    (row: number, col: number, delta: 1 | -1) => {
+      let next = row + delta;
+      while (next >= 0 && next < rowCount) {
+        if (focusElement(cellRefs.current.get(`${next}-${col}`))) return true;
+        next += delta;
+      }
+      return false;
+    },
+    [rowCount]
+  );
+
   /** 같은 행에서 좌/우로. 행 끝을 넘어가면 이웃 행으로 넘긴다(Tab과 같은 흐름). */
   const focusSideways = useCallback(
     (row: number, col: number, delta: 1 | -1) => {
@@ -119,14 +138,17 @@ export function useSheetKeyboardNav({
 
       const element = event.currentTarget;
 
+      // 아래로 갈 칸이 남아 있으면 그리로.
+      // 새 행은 "정말 마지막 행일 때"만 만든다 — 아래가 전부 잠긴 칸이라 못 내려가는 것뿐인데
+      // 행을 늘려버리면, 훑어보기만 하던 사용자가 표 중간에서 빈 행을 만들게 된다.
       const moveDown = () => {
-        if (row + 1 < rowCount) focusCell(row + 1, col);
-        else onAppendRow?.(col);
+        if (focusColumnwise(row, col, 1)) return;
+        if (row + 1 >= rowCount) onAppendRow?.(col);
       };
 
       if (event.key === "Enter") {
         event.preventDefault();
-        if (event.shiftKey) focusCell(row - 1, col);
+        if (event.shiftKey) focusColumnwise(row, col, -1);
         else moveDown();
         return;
       }
@@ -134,7 +156,7 @@ export function useSheetKeyboardNav({
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         if (event.key === "ArrowDown") moveDown();
-        else focusCell(row - 1, col);
+        else focusColumnwise(row, col, -1);
         return;
       }
 
@@ -164,7 +186,7 @@ export function useSheetKeyboardNav({
         }
       }
     },
-    [rowCount, focusCell, focusSideways, onAppendRow]
+    [rowCount, focusColumnwise, focusSideways, onAppendRow]
   );
 
   /** 각 셀(input/select)에 그대로 펼쳐 넣는다. */

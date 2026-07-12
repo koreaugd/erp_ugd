@@ -2192,48 +2192,14 @@ input[type=number] {
   color: var(--branch-black) !important;
 }
 
-.branch-redesign .monthly-expense-filter-bar {
-  background: var(--branch-ghost) !important;
-  border: 1px solid rgba(33, 33, 33, 0.14) !important;
-  border-radius: 18px !important;
-  padding: 10px !important;
-}
-
-.branch-redesign .monthly-expense-filter-bar select {
-  background: var(--branch-ghost) !important;
-  border-color: var(--branch-black) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign .monthly-expense-chip {
-  display: inline-flex !important;
-  align-items: center !important;
-  border: 1px solid var(--branch-black) !important;
-  border-radius: 999px !important;
-  color: var(--branch-black) !important;
-  font-size: 10px !important;
-  font-weight: 900 !important;
-  line-height: 1 !important;
-  padding: 5px 9px !important;
-}
-
-.branch-redesign .monthly-chip-vanilla {
-  background: var(--branch-vanilla) !important;
-}
-
-.branch-redesign .monthly-chip-alice {
-  background: var(--branch-alice) !important;
-}
-
-.branch-redesign .monthly-chip-honey {
-  background: var(--branch-honey) !important;
-}
-
 /* Final branch section + choice controls override. Keep at file end so it wins. */
-.branch-redesign #orders-tab-view > section,
-.branch-redesign #liquor-inventory-tab > section,
-.branch-redesign #tab-view-orders #orders-tab-view > section,
-.branch-redesign #tab-view-liquorInventory #liquor-inventory-tab > section {
+/* 자식 선택자(> section)를 쓰면 안 된다.
+   조작법 칩을 얹으려고 섹션을 relative 래퍼로 한 겹 감싸는 순간 손자가 되어 규칙에서 빠지고,
+   그 카드만 테두리가 사라진다. 깊이와 무관하게 걸리도록 후손 선택자로 둔다. */
+.branch-redesign #orders-tab-view section,
+.branch-redesign #liquor-inventory-tab section,
+.branch-redesign #tab-view-orders #orders-tab-view section,
+.branch-redesign #tab-view-liquorInventory #liquor-inventory-tab section {
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
   box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
@@ -2816,43 +2782,6 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   color: var(--branch-black) !important;
 }
 
-.branch-redesign .monthly-expense-filter-bar {
-  background: var(--branch-ghost) !important;
-  border: 1px solid rgba(33, 33, 33, 0.14) !important;
-  border-radius: 18px !important;
-  padding: 10px !important;
-}
-
-.branch-redesign .monthly-expense-filter-bar select {
-  background: var(--branch-ghost) !important;
-  border-color: var(--branch-black) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign .monthly-expense-chip {
-  display: inline-flex !important;
-  align-items: center !important;
-  border: 1px solid var(--branch-black) !important;
-  border-radius: 999px !important;
-  color: var(--branch-black) !important;
-  font-size: 10px !important;
-  font-weight: 900 !important;
-  line-height: 1 !important;
-  padding: 5px 9px !important;
-}
-
-.branch-redesign .monthly-chip-vanilla {
-  background: var(--branch-vanilla) !important;
-}
-
-.branch-redesign .monthly-chip-alice {
-  background: var(--branch-alice) !important;
-}
-
-.branch-redesign .monthly-chip-honey {
-  background: var(--branch-honey) !important;
-}
-
 /* Final branch daily-settle pass: newest user direction wins. */
 .branch-redesign #tab-view-settle #settle-header-controls,
 .branch-redesign #tab-view-settle #settlement-finance-section {
@@ -3181,6 +3110,21 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   border-color: rgba(33, 33, 33, 0.12) !important;
 }
 
+/* 지점 화면의 흰 카드는 전부 테두리를 갖는다.
+   아래 규칙들처럼 탭 id마다 따로 적어 두면(#orders-tab-view > section …) 목록에서 빠진 탭은
+   테두리가 없고, 섹션을 래퍼로 한 겹 감싸는 순간에도 규칙이 빠져나간다.
+   말풍선(GuideCallouts)은 body로 포털되어 main 밖에 있으므로 이 규칙에 걸리지 않는다. */
+.branch-redesign main section.bg-white,
+.branch-redesign main div[class*="bg-white"][class*="rounded-2xl"],
+.branch-redesign main div[class*="bg-white"][class*="rounded-3xl"],
+/* 흰 배경이 아닌 컨테이너도 포함한다 — 월말마감 하위탭의 표 래퍼는
+   `overflow-x-auto rounded-2xl border border-gray-100`이라 흰 배경 조건에 걸리지 않았다.
+   개발자가 border-gray-100으로 테두리를 의도해 둔 요소는 모두 같은 테두리를 갖는다. */
+.branch-redesign main [class*="rounded-2xl"][class*="border-gray-100"],
+.branch-redesign main [class*="rounded-3xl"][class*="border-gray-100"] {
+  border: 1px solid var(--branch-black) !important;
+}
+
 .branch-redesign #orders-tab-view > section,
 .branch-redesign #liquor-inventory-tab > section,
 .branch-redesign #roster-tab-view > div.bg-white,
@@ -3494,5 +3438,79 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 }
 
 .branch-redesign .monthly-chip-honey {
+  background: var(--branch-honey) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   월말마감 하위탭 카드 테두리 — 마지막에 못 박는다.
+
+   기존에는 탭 id마다 규칙을 따로 두었는데(#parttime-salaries-subtab 등),
+   화면에서 실제로 먹지 않아 파트타이머 급여대장·현금관리·현금지출·카드지출만
+   테두리가 빠져 있었다. 여기서 파일 맨 끝에 명시색으로 다시 지정한다.
+   ───────────────────────────────────────────────────────────── */
+.branch-redesign #monthly-settle-tab-root div[class*="bg-white"][class*="rounded-3xl"],
+.branch-redesign #monthly-settle-tab-root div[class*="bg-white"][class*="rounded-2xl"],
+.branch-redesign #monthly-settle-tab-root div[class*="overflow-x-auto"][class*="rounded-2xl"],
+.branch-redesign #parttime-salaries-subtab,
+.branch-redesign #cash-expenses-subtab,
+.branch-redesign #cash-management-subtab,
+.branch-redesign #card-expenses-subtab {
+  border: 1px solid #212121 !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   발주관리 대분류 색.
+
+   Tailwind 색 유틸(bg-amber-100/bg-indigo-100/bg-slate-200)로 칠하면
+   위쪽 디자인 규칙들이 전부 토큰으로 덮어써서(amber→바닐라, indigo·slate→alice)
+   네 분류가 같은 색이 되거나 색이 사라진다. 전용 클래스로 못 박는다.
+   ───────────────────────────────────────────────────────────── */
+.branch-redesign .order-cat {
+  border: 1px solid var(--branch-black) !important;
+  color: var(--branch-black) !important;
+}
+.branch-redesign .order-cat-food {
+  background: var(--branch-vanilla) !important;
+}
+.branch-redesign .order-cat-side {
+  background: var(--branch-alice) !important;
+}
+.branch-redesign .order-cat-liquor {
+  background: var(--branch-honey) !important;
+}
+.branch-redesign .order-cat-etc {
+  background: #ffffff !important;
+}
+
+/* 거래처 칩처럼 여러 개가 촘촘히 늘어서는 자리에서는 검은 테두리가 시끄럽다.
+   색(분류)은 그대로 두고 테두리만 연하게 낮춘다. */
+.branch-redesign .order-cat-soft {
+  border-color: rgba(33, 33, 33, 0.14) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   조회 표의 행 구분선.
+
+   divide-gray-* / border-gray-* 는 위쪽 디자인 규칙이 검정으로 덮어써서
+   행마다 굵은 검은 줄이 그어진다. 색 유틸을 타지 않는 전용 클래스로 못 박는다.
+   ───────────────────────────────────────────────────────────── */
+.branch-redesign .sheet-rows-soft > tr {
+  border-top-color: rgba(33, 33, 33, 0.07) !important;
+  border-bottom-color: rgba(33, 33, 33, 0.07) !important;
+}
+/* 날짜가 바뀌는 자리만 조금 진하게 — 덩어리 경계가 보일 만큼만. */
+.branch-redesign .sheet-rows-soft > tr.row-group-start {
+  border-top: 1px solid rgba(33, 33, 33, 0.22) !important;
+}
+
+/* 결제수단 칩 — 현금은 바닐라, 카드는 허니듀. */
+.branch-redesign .pay-chip {
+  border: 1px solid rgba(33, 33, 33, 0.14) !important;
+  color: var(--branch-black) !important;
+}
+.branch-redesign .pay-chip-cash {
+  background: var(--branch-vanilla) !important;
+}
+.branch-redesign .pay-chip-card {
   background: var(--branch-honey) !important;
 }

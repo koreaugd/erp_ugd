@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AlertTriangle, BookOpen, CheckCircle2, Coins, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
@@ -340,9 +340,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const renderPortalHeader = () => (
     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
       <div className="space-y-2">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
-          <Coins className="w-4 h-4" />
-          월말마감
+        {/* 매입매출 탭에서는 위쪽 '매출집계'와 짝이 되도록 '매입집계'로 부른다. */}
+        <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
+          {activeSubTab === "purchaseSales" ? "매입집계" : "월말마감"}
         </div>
         <p className="text-[10px] text-gray-400 font-bold max-w-md">
           {adminSettings.monthlyReportDesc}
@@ -360,13 +360,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               style={{ color: adminSettings.monthlyAccentColor }}
               className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
             />
-            <button
-              onClick={fetchHistory}
-              className="monthly-action-refresh p-2 px-3.5 bg-zinc-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all hover:bg-zinc-850 cursor-pointer shadow-subtle"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-              이력 갱신
-            </button>
+            {/* '이력 갱신' 버튼은 없앴다 — 탭을 열 때와 결산월을 바꿀 때 자동으로 다시 불러오고,
+                지출·현금관리 탭에서 수정·삭제하면 그쪽에서 refreshHistory를 부른다. 손으로 누를 일이 없다. */}
             {activeSubTab === "fullTimeSalary" && renderCloseControls("salary")}
             {activeSubTab === "purchaseSales" && renderCloseControls("purchase")}
           </div>
@@ -401,7 +396,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           단, 로딩 중에는 거래처 표가 아직 없어 그 말풍선이 통째로 빠지므로 버튼을 잠근다. */}
       {activeSubTab === "purchaseSales" && (
         <>
-          <div className="flex justify-end">
+          {/* 일일마감 탭과 같은 자리 — 탭 최상단 가운데. */}
+          <div className="flex justify-center">
             <button
               onClick={() => setGuideOpen((prev) => !prev)}
               disabled={loading}
@@ -436,7 +432,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
       {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") ? (
         /* 월말마감: 헤더 + 내용(거래처/급여대장)을 한 카드로 묶음 (구분선 없음) */
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5 md:p-6 space-y-5">
+        /* 여백은 위쪽 매출집계 카드(p-6)와 같아야 두 카드의 제목 pill이 같은 세로선에 선다. */
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-5">
           {renderPortalHeader()}
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center space-y-3">
@@ -451,9 +448,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         </div>
       ) : (
         <>
-          <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
-            {renderPortalHeader()}
-          </div>
+          {/* 파트타이머 급여대장·현금관리·현금지출·카드지출에는 '월말마감' 헤더 카드를 두지 않는다.
+              이 탭들에서 그 카드는 제목과 설명만 담고 있었다 — 결산월 선택·마감 버튼은
+              매입매출/정직원급여 탭에서만 렌더되므로 지워도 잃는 기능이 없다. */}
           {loading ? (
             <div className="py-24 flex flex-col items-center justify-center bg-white rounded-3xl border border-gray-100 shadow-sm space-y-3">
               <LoadingSpinner size="lg" />
