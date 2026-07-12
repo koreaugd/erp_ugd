@@ -1,8 +1,9 @@
 // src/pages/branch/tabs/SalesSummarySection.tsx
 // 월말마감 매입매출 탭 상단 - 매출집계 섹션 (자동계산 + 검증 + 경고 + 빈칸사유)
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { AlertTriangle, TrendingUp, CreditCard, Utensils, CheckCircle2, Pencil, Trash2, X, FileText } from "lucide-react";
+import { AlertTriangle, TrendingUp, CreditCard, Utensils, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
@@ -324,12 +325,13 @@ export function SalesSummarySection({
   const pillTitleCls = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[11px] font-black leading-none";
 
   return (
-    <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4 animate-fade-in" id="sales-summary-section">
+    <div className="relative bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4 animate-fade-in" id="sales-summary-section">
+      <SheetKeyHint />
       {/* 헤더 (월말마감결산포탈과 동일 배치): 제목 pill(좌) / 결산월 선택 + 마감버튼(우), 제출상태는 그 아래 */}
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 pb-3 border-b border-gray-50">
         <div>
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
-            <FileText className="w-4 h-4" /> 매출집계
+          <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
+            매출집계
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 w-full md:w-auto">

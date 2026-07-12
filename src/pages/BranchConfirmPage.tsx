@@ -222,6 +222,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   };
 
   const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract">("dashboard");
+  // 열려 있는 탭을 다시 누르면 하위 목록을 접는다. 다른 탭으로 옮기면 다시 펼쳐진다.
+  const [subNavOpen, setSubNavOpen] = useState(true);
   const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const mainTabs = [
@@ -568,6 +570,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
               <div key={mt.id} className="w-full">
               <button
                 onClick={() => {
+                  // 이미 열려 있는 탭을 다시 누르면 하위 목록만 접는다(화면은 그대로 둔다).
+                  if (active) {
+                    setSubNavOpen((prev) => !prev);
+                    return;
+                  }
+                  setSubNavOpen(true);
                   setMainCategory(mt.id as any);
                   if (mt.id === "dashboard") {
                     setActiveTab("dashboard");
@@ -592,7 +600,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 <IconComp className="w-4 h-4" />
                 <span>{mt.label}</span>
               </button>
-              {active && mt.id === "daily" && (
+              {active && subNavOpen && mt.id === "daily" && (
                 <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
                   {dailySubTabs.map((tab) => {
                     const IconSub = tab.icon;
@@ -613,7 +621,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                   })}
                 </div>
               )}
-              {active && mt.id === "monthly" && (
+              {active && subNavOpen && mt.id === "monthly" && (
                 <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
                   {monthlySubTabs.map((tab) => {
                     const IconSub = tab.icon;

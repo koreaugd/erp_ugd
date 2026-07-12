@@ -19,19 +19,14 @@ const Key = ({ children }: { children: ReactNode }) => (
   <b className="font-black text-zinc-900 bg-zinc-100 border border-zinc-300 rounded px-1 mx-px">{children}</b>
 );
 
+// 칸 이동 방법은 표 위의 SheetKeyHint 칩이 늘 보여준다 — 말풍선에서 되풀이하지 않는다.
+// 여기 남기는 것은 칩만 봐서는 모르는 사실 하나뿐이다: 마지막 줄에서 행이 늘어난다는 것.
 const ExpenseSheetGuide = () => (
-  <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
-    <p className="font-black text-zinc-900">엑셀처럼 키보드로 입력하세요</p>
-    <Bullets
-      items={[
-        <>
-          <Key>Tab</Key> <Key>Enter</Key> 방향키(<Key>↑</Key> <Key>↓</Key> <Key>←</Key> <Key>→</Key>)로 칸을 옮깁니다.
-        </>,
-        <>
-          <b className="font-black text-rose-700">맨 아랫줄에서 ↓ 또는 Enter를 누르면 새 행이 생깁니다.</b>
-        </>
-      ]}
-    />
+  <div className="mt-2.5 pt-2.5 border-t border-zinc-200">
+    <p>
+      <Key>↓</Key> <Key>Enter</Key>{" "}
+      <b className="font-black text-rose-700">맨 아랫줄에서 ↓ 또는 Enter를 누르면 새 행이 생깁니다.</b>
+    </p>
   </div>
 );
 
@@ -301,6 +296,144 @@ export const dailySettleGuideSteps: GuideStep[] = [
       <p className="sm:whitespace-nowrap">
         <b className="font-black">ERP 시스템 개선</b>에 대한 의견을 적어주세요. 적어주신 내용은 <b className="font-black text-rose-700">ERP 성능 개선에 활용</b>됩니다.
       </p>
+    ),
+  },
+];
+
+export const orderGuideSteps: GuideStep[] = [
+  {
+    anchor: "order-vendor-category",
+    title: "대분류를 먼저 선택하세요",
+    placement: "below",
+    // 폭은 가장 긴 줄에 맞춘다. 넉넉히 잡으면 오른쪽이 텅 빈 채로 화면만 가린다.
+    width: 350,
+    body: (
+      <p className="lg:whitespace-nowrap">
+        <b className="font-black text-rose-700">대분류를 먼저 고른 뒤</b> 오른쪽에 거래처명을 적습니다.
+      </p>
+    ),
+  },
+  {
+    anchor: "order-vendor-name",
+    title: "거래처명 적기",
+    placement: "above",
+    width: 400,
+    body: (
+      <p className="lg:whitespace-nowrap">
+        여러 곳을 한 번에 넣으려면 <b className="font-black text-rose-700">쉼표나 줄바꿈</b>으로 구분해 적으세요.
+      </p>
+    ),
+  },
+  {
+    anchor: "order-report-category",
+    title: "대분류별 거래처 보기 · 지우기",
+    placement: "above",
+    width: 370,
+    body: (
+      <Bullets
+        items={[
+          <span className="lg:whitespace-nowrap">
+            분류를 선택하면 <b className="font-black text-rose-700">거래처 목록이 보입니다.</b>
+          </span>,
+          <span className="lg:whitespace-nowrap">
+            상단에 있는 거래처 이름 옆 <b className="font-black text-rose-700">X</b>로 지웁니다.
+          </span>,
+          <span className="lg:whitespace-nowrap">
+            거래처를 삭제해도 <b className="font-black text-rose-700">이미 입력한 발주금액은 남습니다.</b>
+          </span>
+        ]}
+      />
+    ),
+  },
+  {
+    anchor: "order-matrix",
+    title: "발주내역 표 작성방법",
+    // 표 안쪽 오른쪽 위. above로 두면 위 섹션의 말풍선과 겹친다.
+    placement: "inside-top-right",
+    // 줄바꿈을 막았으므로 폭이 모자라면 글자가 말풍선 밖으로 삐져나간다.
+    // 가장 긴 줄("금액이 있는 칸을 고른 뒤 …")이 약 485px라 여유를 두고 잡는다.
+    width: 545,
+    body: (
+      <>
+        <Bullets
+          items={[
+            <span className="lg:whitespace-nowrap">
+              그날 받은 <b className="font-black text-rose-700">명세서(거래명세표)의 금액</b>을 해당 날짜 · 거래처 칸에 적습니다.
+            </span>,
+            <span className="lg:whitespace-nowrap">
+              명세서가 없으면 <b className="font-black text-rose-700">실제 발주한 금액</b>을 적습니다.
+            </span>
+          ]}
+        />
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+          <p className="font-black text-zinc-900">특이사항은 칸에 메모로 남기세요</p>
+          <Bullets
+            items={[
+              <span className="lg:whitespace-nowrap">
+                금액이 있는 칸을 고른 뒤 <b className="font-black text-rose-700">메모 아이콘</b>을 누르거나 <b className="font-black text-rose-700">우클릭</b>하면 메모창이 열립니다.
+              </span>,
+              <span className="lg:whitespace-nowrap">
+                <b className="font-black text-rose-700">금액을 지우면 메모도 함께 사라집니다</b> (지우기 전에 물어봅니다).
+              </span>
+            ]}
+          />
+        </div>
+      </>
+    ),
+  },
+];
+
+export const liquorGuideSteps: GuideStep[] = [
+  {
+    anchor: "liquor-product-add",
+    title: "주류 상품 등록",
+    // 폼 바깥 왼쪽 위 — 말풍선 오른쪽 아래 모서리가 폼의 왼쪽 위 모서리에 닿는다.
+    placement: "outside-top-left",
+    width: 520,
+    body: (
+      <Bullets
+        items={[
+          <span className="lg:whitespace-nowrap">
+            분류를 고르고 상품명을 적어 <b className="font-black text-rose-700">상품 추가</b>를 누르면 아래 시트에 줄이 생깁니다.
+          </span>,
+          <span className="lg:whitespace-nowrap">
+            여러 개를 한 번에 넣으려면 <b className="font-black text-rose-700">쉼표나 줄바꿈</b>으로 구분해 적으세요.
+          </span>
+        ]}
+      />
+    ),
+  },
+  {
+    anchor: "liquor-month-sheet",
+    title: "재고 시트 작성방법",
+    placement: "inside-top-right",
+    width: 560,
+    body: (
+      <>
+        <Bullets
+          items={[
+            <span className="lg:whitespace-nowrap">
+              날짜마다 입 · 판 · 재 세 칸이 붙어 있습니다. <b className="font-black text-rose-700">입(입고) · 판(판매)만 적으세요.</b>
+            </span>,
+            <span className="lg:whitespace-nowrap">
+              재고가 <b className="font-black text-rose-700">음수(빨간색)</b>면 입고를 빠뜨렸거나 판매를 과하게 적은 것입니다.
+            </span>
+          ]}
+        />
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+          <p className="font-black text-zinc-900">가격과 상품 삭제</p>
+          <Bullets
+            items={[
+              <span className="lg:whitespace-nowrap">
+                <b className="font-black text-rose-700">입고가 · 판매가</b>를 적으면 마진률이 자동으로 나옵니다 (날짜와 무관한 상품 정보입니다).
+              </span>,
+              <span className="lg:whitespace-nowrap">
+                상품을 지우려면 상품명 오른쪽 끝의 <b className="font-black text-rose-700">X</b>를 누르세요.
+              </span>
+            ]}
+          />
+        </div>
+      </>
     ),
   },
 ];

@@ -1,7 +1,8 @@
 // src/pages/branch/tabs/MonthlyPurchaseSalesSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Coins, Landmark, Plus, Trash2, TrendingUp } from "lucide-react";
+import { Check, Plus, Trash2 } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
@@ -233,18 +234,6 @@ export function MonthlyPurchaseSalesSubTab({
     }, 450);
   }, [pendingKey, sharedKey, storageKey, triggerToast]);
 
-  const handleSave = async () => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(rows));
-      localStorage.setItem(pendingKey, "1");
-      await gasClient.saveSharedData(sharedKey, rows);
-      localStorage.removeItem(pendingKey);
-      triggerToast("매입매출 내용이 저장되었습니다!", "success");
-    } catch {
-      triggerToast("저장 중 부득이한 에러발생", "error");
-    }
-  };
-
   const handleUpdateRow = (id: string, field: keyof PurchaseSalesRow, val: any) => {
     if (isLocked) return;
     const nextValue = ["transferAmount", "prepaidChargeAmount", "monthlyUsageAmount"].includes(String(field))
@@ -355,11 +344,12 @@ export function MonthlyPurchaseSalesSubTab({
   // 저장(rows)·자동저장·확정 로직은 원래 순서를 그대로 쓰므로 표시 정렬은 부작용이 없다.
   const displayRows = [...rows].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99));
 
-  // 엑셀처럼 키보드로 칸을 옮긴다. 마지막 행에서 ↓/Enter를 누르면 업체가 한 줄 늘어난다.
+  // 엑셀처럼 키보드로 칸을 옮긴다.
+  // 마지막 행에서 ↓/Enter로 행을 늘리지는 않는다 — 아래로 훑어보다가 실수로 빈 업체가 생긴다.
+  // 업체는 '매입 업체 추가' 버튼으로만 늘린다.
   const { cellProps, isActive, focusCell } = useSheetKeyboardNav({
     rowCount: displayRows.length,
-    colCount: PURCHASE_COL_COUNT,
-    onAppendRow: () => addRowAndFocus()
+    colCount: PURCHASE_COL_COUNT
   });
 
   // 엑셀 셀: 격자선은 td가 긋고, 현재 칸은 굵은 테두리로 짚어준다. 분류별 행 색상(data-cat)은 그대로 비쳐 보인다.
@@ -392,41 +382,12 @@ export function MonthlyPurchaseSalesSubTab({
       )}
 
       {/* Aggregate Banner cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
-          <div>
-            <span className="text-[10px] text-gray-400 font-black font-sans">선입금 충전금액 합계</span>
-            <p className="text-xl font-black text-blue-700 font-mono mt-0.5">{formatNumber(totalPrepaidCharge)} 원</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-700">
-            <Landmark className="w-5 h-5" />
-          </div>
-        </div>
-        <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
-          <div>
-            <span className="text-[10px] text-gray-400 font-black font-sans">이번 달 이체 필요 합계 (체크된 항목만)</span>
-            <p className="text-xl font-black text-gray-900 font-mono mt-0.5">{formatNumber(totalTransfer)} 원</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
-            <Coins className="w-5 h-5" />
-          </div>
-        </div>
-        <div className="bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100/80 flex justify-between items-center">
-          <div>
-            <span className="text-[10px] text-gray-400 font-black font-sans">이달 실제 총 사용금액 합계 (선입금 포함)</span>
-            <p className="text-xl font-black text-[#2E6DB4] font-mono mt-0.5">{formatNumber(totalUsage)} 원</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-[#2E6DB4]">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-        </div>
-      </div>
+      {/* 합계 카드 3장을 없앴다 — 세 숫자는 각각 표의 한 열 합계라, 그 열 바로 아래(표 바닥 합계 행)에
+          있어야 무슨 숫자인지 설명 없이 읽힌다. 합계 행이 바닥에 고정돼 늘 보이므로,
+          위쪽에 같은 숫자를 또 띄우면 같은 값을 두 군데서 관리하게 될 뿐이다. */}
 
       {/* 매입 업체 추가 / 저장 상태 — 지점이 작성하는 표 바로 위에 배치 */}
-      <div className="flex justify-between items-center gap-2">
-        <p className="text-[10px] text-gray-400 font-bold">
-          Tab · Enter · 방향키로 칸을 옮길 수 있습니다. 맨 아랫줄에서 ↓ 또는 Enter를 누르면 업체가 한 줄 추가됩니다.
-        </p>
+      <div className="flex flex-wrap justify-end items-center gap-2">
         <div className="flex items-center gap-2">
         <button
           onClick={addRowAndFocus}
@@ -441,8 +402,10 @@ export function MonthlyPurchaseSalesSubTab({
         </div>
       </div>
 
-      {/* Sheet Table */}
-      <div className="overflow-x-auto rounded-2xl border border-gray-100" data-guide="purchase-table">
+      {/* Sheet Table — 표 자체가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
+      <div className="relative">
+      <SheetKeyHint />
+      <div className="max-h-[62vh] overflow-auto rounded-2xl border border-gray-100" data-guide="purchase-table">
         <table className="w-full text-left text-xs border-collapse font-medium">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">
@@ -617,7 +580,21 @@ export function MonthlyPurchaseSalesSubTab({
               ))
             )}
           </tbody>
+          {/* 합계는 각 열 바로 아래에 정렬돼야 무슨 숫자인지 설명이 필요 없다.
+              스크롤과 무관하게 바닥에 붙여 둔다(발주내역 리포트와 같은 방식). */}
+          {rows.length > 0 && (
+            <tfoot className="sticky bottom-0 z-10">
+              <tr className="bg-zinc-100 text-[11px] font-black text-zinc-800 shadow-[0_-1px_0_0_rgb(203_213_225)]">
+                <td className="bg-zinc-100 py-2 px-3" colSpan={4}>합계</td>
+                <td className="bg-zinc-100 py-2 px-3 text-right font-mono">{formatNumber(totalPrepaidCharge)}</td>
+                <td className="bg-zinc-100 py-2 px-3 text-right font-mono">{formatNumber(totalTransfer)}</td>
+                <td className="bg-zinc-100 py-2 px-3 text-right font-mono text-[#2E6DB4]">{formatNumber(totalUsage)}</td>
+                <td className="bg-zinc-100 py-2 px-3" colSpan={4}></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
+      </div>
       </div>
     </div>
   );
