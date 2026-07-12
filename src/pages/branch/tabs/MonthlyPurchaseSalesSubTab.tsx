@@ -6,6 +6,20 @@ import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { purchaseRowHasExportableAmount } from "../helpers/monthlyCloseWorkbook";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
+
+// 표에 보이는 순서 그대로의 셀 좌표. 키보드 이동이 이 순서를 따른다.
+const COL_CATEGORY = 0;
+const COL_VENDOR = 1;
+const COL_IS_PREPAID = 2;
+const COL_TRANSFER_NEEDED = 3;
+const COL_PREPAID_CHARGE = 4;
+const COL_TRANSFER_AMOUNT = 5;
+const COL_MONTHLY_USAGE = 6;
+const COL_BANK = 7;
+const COL_ACCOUNT = 8;
+const COL_MEMO = 9;
+const PURCHASE_COL_COUNT = 10;
 
 interface PurchaseSalesRow {
   id: string;
@@ -287,6 +301,18 @@ export function MonthlyPurchaseSalesSubTab({
       memo: ""
     };
     persistRows([...rows, nextRow]);
+    return nextRow.id;
+  };
+
+  /**
+   * 새로 추가한 행으로 커서를 보내기 위해 id를 들고 있는다.
+   * 표는 분류항목으로 정렬돼 표시되므로 새 행이 맨 아래로 간다는 보장이 없다 — 그려진 뒤 위치를 찾아야 한다.
+   */
+  const pendingFocusRowId = useRef<string | null>(null);
+
+  const addRowAndFocus = () => {
+    const newId = handleAddRow();
+    if (newId) pendingFocusRowId.current = newId;
   };
 
   const handleDeleteRow = (id: string) => {
@@ -329,6 +355,34 @@ export function MonthlyPurchaseSalesSubTab({
   // 저장(rows)·자동저장·확정 로직은 원래 순서를 그대로 쓰므로 표시 정렬은 부작용이 없다.
   const displayRows = [...rows].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99));
 
+  // 엑셀처럼 키보드로 칸을 옮긴다. 마지막 행에서 ↓/Enter를 누르면 업체가 한 줄 늘어난다.
+  const { cellProps, isActive, focusCell } = useSheetKeyboardNav({
+    rowCount: displayRows.length,
+    colCount: PURCHASE_COL_COUNT,
+    onAppendRow: () => addRowAndFocus()
+  });
+
+  // 엑셀 셀: 격자선은 td가 긋고, 현재 칸은 굵은 테두리로 짚어준다. 분류별 행 색상(data-cat)은 그대로 비쳐 보인다.
+  const cellTd = (rowIndex: number, col: number, extra = "") =>
+    [
+      "border-r border-b border-black/10 p-0 relative",
+      isActive(rowIndex, col) ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4] z-10" : "",
+      extra
+    ].join(" ");
+  // sheet-cell-input: index.css에서 전역 input 배경/테두리 !important를 ID 특이성으로 되돌리는 클래스.
+  const cellInput = "sheet-cell-input w-full h-9 px-2 text-xs focus:outline-none";
+
+  // 새로 추가한 업체가 그려지면 그 행의 업체명 칸으로 커서를 보낸다.
+  // (분류항목 정렬 때문에 새 행이 표 맨 아래에 있지 않을 수 있어, id로 위치를 찾는다.)
+  useEffect(() => {
+    const targetId = pendingFocusRowId.current;
+    if (!targetId) return;
+    const index = displayRows.findIndex((row) => row.id === targetId);
+    if (index < 0) return;
+    pendingFocusRowId.current = null;
+    focusCell(index, COL_VENDOR);
+  }, [displayRows, focusCell]);
+
   return (
     <div className="space-y-5 animate-fade-in" id="purchase-sales-subtab">
       {isLocked && (
@@ -369,9 +423,13 @@ export function MonthlyPurchaseSalesSubTab({
       </div>
 
       {/* 매입 업체 추가 / 저장 상태 — 지점이 작성하는 표 바로 위에 배치 */}
-      <div className="flex justify-end items-center gap-2">
+      <div className="flex justify-between items-center gap-2">
+        <p className="text-[10px] text-gray-400 font-bold">
+          Tab · Enter · 방향키로 칸을 옮길 수 있습니다. 맨 아랫줄에서 ↓ 또는 Enter를 누르면 업체가 한 줄 추가됩니다.
+        </p>
+        <div className="flex items-center gap-2">
         <button
-          onClick={handleAddRow}
+          onClick={addRowAndFocus}
           disabled={isLocked}
           className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
         >
@@ -379,6 +437,7 @@ export function MonthlyPurchaseSalesSubTab({
         </button>
         <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 shadow-subtle ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
           <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
+        </div>
         </div>
       </div>
 
@@ -408,131 +467,147 @@ export function MonthlyPurchaseSalesSubTab({
                 </td>
               </tr>
             ) : (
-              displayRows.map((row) => (
+              displayRows.map((row, rowIndex) => (
                 <tr key={row.id} data-cat={row.category} className="transition-colors">
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_CATEGORY)}>
                     <select
+                      {...cellProps(rowIndex, COL_CATEGORY)}
+                      aria-label={`${rowIndex + 1}번 행 분류항목`}
                       value={row.category}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "category", e.target.value)}
-                      className="w-full p-1.5 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-800 focus:outline-none disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      className={`${cellInput} font-bold text-gray-800 cursor-pointer`}
                     >
                       <option value="식재료비">식재료비</option>
                       <option value="주류비">주류비</option>
                       <option value="식음료외 기타">식음료외 기타</option>
                     </select>
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_VENDOR)}>
                     <input
+                      {...cellProps(rowIndex, COL_VENDOR)}
+                      aria-label={`${rowIndex + 1}번 행 업체명`}
                       type="text"
                       value={row.vendorName}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "vendorName", e.target.value)}
                       placeholder="자재상호 혹은 업체명"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      className={`${cellInput} font-bold placeholder-gray-300`}
                     />
                   </td>
-                  <td className="py-2 px-2.5 text-center">
-                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <td className={cellTd(rowIndex, COL_IS_PREPAID, "text-center")}>
+                    <label className="flex h-9 items-center justify-center gap-1.5 cursor-pointer select-none">
                       <input
+                        {...cellProps(rowIndex, COL_IS_PREPAID)}
+                        aria-label={`${rowIndex + 1}번 행 선입금 충전`}
                         type="checkbox"
                         checked={row.isPrepaid}
                         disabled={isLocked}
                         onChange={(e) => handleUpdateRow(row.id, "isPrepaid", e.target.checked)}
-                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
+                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-2 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
                       <span className={`text-[9px] ${row.isPrepaid ? "font-black text-rose-600" : "font-normal text-gray-400"}`}>
                         선입금
                       </span>
                     </label>
                   </td>
-                  <td className="py-2 px-2.5 text-center">
-                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <td className={cellTd(rowIndex, COL_TRANSFER_NEEDED, "text-center")}>
+                    <label className="flex h-9 items-center justify-center gap-1.5 cursor-pointer select-none">
                       <input
+                        {...cellProps(rowIndex, COL_TRANSFER_NEEDED)}
+                        aria-label={`${rowIndex + 1}번 행 이체 필요`}
                         type="checkbox"
                         checked={row.transferNeeded ?? true}
                         disabled={isLocked}
                         onChange={(e) => handleUpdateRow(row.id, "transferNeeded", e.target.checked)}
-                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-1 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
+                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-2 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
                       />
                       <span className={`text-[9px] ${(row.transferNeeded ?? true) ? "font-black text-rose-600" : "font-normal text-gray-400"}`}>
                         이체필요
                       </span>
                     </label>
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_PREPAID_CHARGE)}>
                     <input
+                      {...cellProps(rowIndex, COL_PREPAID_CHARGE)}
+                      aria-label={`${rowIndex + 1}번 행 충전금액`}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.prepaidChargeAmount || "")}
                       disabled={isLocked || !row.isPrepaid}
                       onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "충전 금액" : "-"}
-                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        row.isPrepaid ? "border-gray-200 focus:border-[#2E6DB4] text-blue-700" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
-                      }`}
+                      className={`${cellInput} font-mono font-black text-right text-blue-700`}
                     />
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_TRANSFER_AMOUNT)}>
                     <input
+                      {...cellProps(rowIndex, COL_TRANSFER_AMOUNT)}
+                      aria-label={`${rowIndex + 1}번 행 이체필요 금액`}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.transferAmount)}
                       disabled={isLocked || row.transferNeeded === false}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
                       placeholder={row.transferNeeded === false ? "-" : "송금 필요 금액"}
-                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        row.transferNeeded === false ? "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed" : "border-gray-200 focus:border-[#2E6DB4] text-red-650 disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
-                      }`}
+                      className={`${cellInput} font-mono font-black text-right text-red-650`}
                     />
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_MONTHLY_USAGE)}>
                     <input
+                      {...cellProps(rowIndex, COL_MONTHLY_USAGE)}
+                      aria-label={`${rowIndex + 1}번 행 실제 이달사용액`}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
                       disabled={isLocked || !(row.isPrepaid || row.transferNeeded === false)}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
                       placeholder={row.isPrepaid ? "발주액 합계" : (row.transferNeeded === false ? "이달 사용액" : "-")}
-                      className={`w-full p-1.5 border rounded-lg text-xs font-mono font-black text-right focus:outline-none ${
-                        (row.isPrepaid || row.transferNeeded === false) ? "border-gray-200 focus:border-[#2E6DB4] text-gray-800" : "bg-zinc-100 text-gray-400 border-gray-200 cursor-not-allowed"
-                      }`}
+                      className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_BANK)}>
                     <input
+                      {...cellProps(rowIndex, COL_BANK)}
+                      aria-label={`${rowIndex + 1}번 행 은행`}
                       type="text"
                       value={row.bank}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "bank", e.target.value)}
                       placeholder="은행"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-bold placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      className={`${cellInput} font-bold placeholder-gray-300`}
                     />
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_ACCOUNT)}>
                     <input
+                      {...cellProps(rowIndex, COL_ACCOUNT)}
+                      aria-label={`${rowIndex + 1}번 행 계좌번호`}
                       type="text"
                       value={row.accountNumber}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "accountNumber", e.target.value)}
                       placeholder="계좌 번호 입력"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-mono font-medium placeholder-gray-300 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      className={`${cellInput} font-mono font-medium placeholder-gray-300`}
                     />
                   </td>
-                  <td className="py-2 px-2.5">
+                  <td className={cellTd(rowIndex, COL_MEMO)}>
                     <input
+                      {...cellProps(rowIndex, COL_MEMO)}
+                      aria-label={`${rowIndex + 1}번 행 거래 비고`}
                       type="text"
                       value={row.memo}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "memo", e.target.value)}
                       placeholder="예시: 매월 자동 이체"
-                      className="w-full p-1.5 border border-gray-200 rounded-lg text-xs font-semibold placeholder-gray-350 focus:outline-none focus:border-[#2E6DB4] disabled:bg-zinc-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                      className={`${cellInput} font-semibold placeholder-gray-350`}
                     />
                   </td>
-                  <td className="py-2 px-2.5 text-center">
+                  <td className="border-b border-black/10 p-0 text-center">
                     <button
                       onClick={() => handleDeleteRow(row.id)}
                       disabled={isLocked}
+                      tabIndex={-1}
+                      title={`${rowIndex + 1}번 행 삭제`}
                       className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer disabled:text-gray-200 disabled:cursor-not-allowed"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

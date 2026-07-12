@@ -6,6 +6,7 @@ import { gasClient } from "../../../api/gasClient";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
 export interface SalesSummary {
   totalSales: string;
@@ -275,15 +276,28 @@ export function SalesSummarySection({
     return () => window.removeEventListener("ugd_show_monthly_errors", onShow);
   }, []);
 
+  // 세 카드를 하나의 격자로 보고 방향키로 오간다.
+  // 열 = 카드(매출구성/결제구성/매출요약), 행 = 카드 안의 칸 순번. 카드마다 칸 수가 달라 빈 자리가 생기는데,
+  // 훅이 없는 칸을 만나면 옆 칸으로 흘려보내므로 들쭉날쭉한 격자도 그대로 동작한다.
+  const { cellProps } = useSheetKeyboardNav({ rowCount: 4, colCount: 3 });
+
   // ---- 렌더 헬퍼: 라벨(좌) + 입력값(우). 모든 칸 필수(빈칸이면 붉게 표시), 0 입력은 유효 ----
   // guideAnchor: 작성방법 안내 말풍선이 붙을 칸에만 붙인다(GuideCallouts가 data-guide로 찾는다).
-  const rowField = (fieldKey: keyof SalesSummary, label: string, guideAnchor?: string) => {
+  const rowField = (
+    fieldKey: keyof SalesSummary,
+    label: string,
+    /** 셀 좌표. 열 = 카드(0 매출구성 / 1 결제구성 / 2 매출요약), 행 = 그 카드 안의 순번. */
+    cell: { row: number; col: number },
+    guideAnchor?: string
+  ) => {
     const isBlank = !filled(String(data[fieldKey] || ""));
     const err = showErrors && isBlank;
     return (
       <div key={fieldKey} className="flex items-center justify-between gap-2" data-guide={guideAnchor}>
         <span className={`text-[11px] font-black shrink-0 ${err ? "text-rose-600" : "text-zinc-700"}`}>{label}</span>
         <input
+          {...cellProps(cell.row, cell.col)}
+          aria-label={label}
           type="text"
           inputMode="numeric"
           value={formatWithCommas(String(data[fieldKey] || ""))}
@@ -375,26 +389,26 @@ export function SalesSummarySection({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={cardCls}>
           <div className={pillTitleCls}><Utensils className="w-3.5 h-3.5" /> 매출구성</div>
-          {rowField("menuSales", "메뉴매출")}
-          {rowField("liquorSales", "주류매출")}
-          {rowField("seatCharge", "자릿값(예약정산금)", "sales-summary-seat-charge")}
-          {isGeumshabba && rowField("coverCharge", "커버차지")}
+          {rowField("menuSales", "메뉴매출", { row: 0, col: 0 })}
+          {rowField("liquorSales", "주류매출", { row: 1, col: 0 })}
+          {rowField("seatCharge", "자릿값(예약정산금)", { row: 2, col: 0 }, "sales-summary-seat-charge")}
+          {isGeumshabba && rowField("coverCharge", "커버차지", { row: 3, col: 0 })}
           <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 자릿값(예약정산금): 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요.</p>
           {autoRow(isGeumshabba ? "실매출과 차이(메뉴+주류+커버)" : "실매출과 차이(메뉴+주류)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
         </div>
         <div className={cardCls}>
           <div className={pillTitleCls}><CreditCard className="w-3.5 h-3.5" /> 결제구성</div>
-          {rowField("cardPay", "카드결제")}
-          {rowField("cashPlain", "단순현금결제")}
-          {rowField("cashReceipt", "현금영수증")}
+          {rowField("cardPay", "카드결제", { row: 0, col: 1 })}
+          {rowField("cashPlain", "단순현금결제", { row: 1, col: 1 })}
+          {rowField("cashReceipt", "현금영수증", { row: 2, col: 1 })}
           {autoRow("실매출과 차이", formatNumber(paymentDiff), filled(data.netSales) && paymentDiff !== 0)}
         </div>
         <div className={cardCls}>
           <div className={pillTitleCls}><TrendingUp className="w-3.5 h-3.5" /> 매출요약</div>
-          {rowField("totalSales", "총매출")}
-          {rowField("totalDiscount", "총할인")}
-          {rowField("netSales", "실매출")}
-          {rowField("receiptCount", "영수건수")}
+          {rowField("totalSales", "총매출", { row: 0, col: 2 })}
+          {rowField("totalDiscount", "총할인", { row: 1, col: 2 })}
+          {rowField("netSales", "실매출", { row: 2, col: 2 })}
+          {rowField("receiptCount", "영수건수", { row: 3, col: 2 })}
           {autoRow("영수단가", unitPrice === null ? "-" : formatNumber(unitPrice))}
         </div>
       </div>
