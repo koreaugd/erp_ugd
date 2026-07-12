@@ -14,6 +14,27 @@ const Bullets = ({ items }: { items: ReactNode[] }) => (
   </ul>
 );
 
+// 현금·카드 지출 시트의 조작법. 두 섹션 안내에 같은 내용이 들어가므로 한곳에 둔다.
+const Key = ({ children }: { children: ReactNode }) => (
+  <b className="font-black text-zinc-900 bg-zinc-100 border border-zinc-300 rounded px-1 mx-px">{children}</b>
+);
+
+const ExpenseSheetGuide = () => (
+  <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+    <p className="font-black text-zinc-900">엑셀처럼 키보드로 입력하세요</p>
+    <Bullets
+      items={[
+        <>
+          <Key>Tab</Key> <Key>Enter</Key> 방향키(<Key>↑</Key> <Key>↓</Key> <Key>←</Key> <Key>→</Key>)로 칸을 옮깁니다.
+        </>,
+        <>
+          <b className="font-black text-rose-700">맨 아랫줄에서 ↓ 또는 Enter를 누르면 새 행이 생깁니다.</b>
+        </>
+      ]}
+    />
+  </div>
+);
+
 // 체크 상태는 ☐/☑ 문자 대신 SVG 아이콘으로 그린다.
 // 한글 글꼴에 U+2610/U+2611 글리프가 없어 빈 네모나 물음표로 깨지는 것을 피한다.
 const Unchecked = () => (
@@ -242,26 +263,32 @@ export const dailySettleGuideSteps: GuideStep[] = [
     anchor: "daily-cash-expense",
     title: "현금 지출 내역",
     placement: "above",
-    width: 340,
+    width: 420,
     body: (
-      <p>
-        <b className="font-black text-rose-700">매장 계좌로 현금을 입금</b>한 경우에도 이곳에 적어주세요.
-        <br />
-        지출 분류에서 <b className="font-black text-rose-700">현금입금</b>을 선택하면 됩니다.
-      </p>
+      <>
+        <p>
+          <b className="font-black text-rose-700">매장 계좌로 현금을 입금</b>한 경우에도 이곳에 적어주세요.
+          <br />
+          지출 분류에서 <b className="font-black text-rose-700">현금입금</b>을 선택하면 됩니다.
+        </p>
+        <ExpenseSheetGuide />
+      </>
     ),
   },
   {
     anchor: "daily-card-expense",
     title: "카드 지출 내역",
     placement: "above",
-    width: 340,
+    width: 420,
     body: (
-      <p>
-        <b className="font-black text-rose-700">계좌이체 요청 건을 제외한 모든 결제</b>를 입력하세요.
-        <br />
-        인터넷 즉시결제·카드결제 등 모두 포함됩니다.
-      </p>
+      <>
+        <p>
+          <b className="font-black text-rose-700">계좌이체 요청 건을 제외한 모든 결제</b>를 입력하세요.
+          <br />
+          인터넷 즉시결제·카드결제 등 모두 포함됩니다.
+        </p>
+        <ExpenseSheetGuide />
+      </>
     ),
   },
   {

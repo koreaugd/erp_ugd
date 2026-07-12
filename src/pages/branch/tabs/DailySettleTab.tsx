@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/DailySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, CircleDollarSign, ClipboardList, Clock, Coins, FileText, Info, Lock, Plus, ShieldAlert, Trash2, User } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, CircleDollarSign, ClipboardList, Clock, Coins, FileText, Info, Lock, ShieldAlert, Trash2, User } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
@@ -8,6 +8,8 @@ import { dailySettleGuideSteps } from "../helpers/guideSteps";
 import { formatNumber } from "../../../utils/formatNumber";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
+import { ExpenseGrid } from "../components/ExpenseGrid";
+import { getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
 import { createDailySettleValidationTargets, createEmployeeFromStaffRow, createStaffAddDraft, employeeNameKey, getAddReasonChoiceClass, getDailyStaffValidationKey, isSampleEmployee, needsOvertimeReason, normalizeRosterEmployee, parseStaffAddReasonChoice, shouldSkipDailyRosterRegistration, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
 export function DailySettleTab({ branchName }: { branchName: string }) {
@@ -130,13 +132,9 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const [transferBranchList, setTransferBranchList] = useState<any[]>([]);
   const [loadingTransferBranches, setLoadingTransferBranches] = useState(false);
 
-  // Expenses
-  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>([
-    { classification: "식재료", usage: "쿠팡", detail: "", amount: "" }
-  ]);
-  const [cardExpenses, setCardExpenses] = useState<ExpenseRow[]>([
-    { classification: "식재료", usage: "쿠팡", detail: "", amount: "" }
-  ]);
+  // Expenses — 시트처럼 빈 행을 미리 깔아두고, 마지막 행을 채우면 아래로 자동 증식한다.
+  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([]));
+  const [cardExpenses, setCardExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([]));
 
   // Personnel List states
   const [staffRows, setStaffRows] = useState<StaffRow[]>([]);
@@ -209,8 +207,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       setStaffMemo(draft.staffMemo || "");
       setReviewMemo(draft.reviewMemo || "");
       setOtherMemo(draft.otherMemo || "");
-      setCashExpenses(Array.isArray(draft.cashExpenses) ? draft.cashExpenses : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-      setCardExpenses(Array.isArray(draft.cardExpenses) ? draft.cardExpenses : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+      setCashExpenses(padExpenseRows(draft.cashExpenses));
+      setCardExpenses(padExpenseRows(draft.cardExpenses));
       setStaffRows(Array.isArray(draft.staffRows) ? draft.staffRows : []);
       return true;
     } catch (error) {
@@ -538,8 +536,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           if (metadataParsed) {
             // Restore from perfect JSON metadata
             setStaffRows(isHeadOffice ? distributeHeadOfficeOvertime(metadataParsed.staffRows || []) : metadataParsed.staffRows || []);
-            setCashExpenses(metadataParsed.cashExpenses || []);
-            setCardExpenses(metadataParsed.cardExpenses || []);
+            setCashExpenses(padExpenseRows(metadataParsed.cashExpenses));
+            setCardExpenses(padExpenseRows(metadataParsed.cardExpenses));
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
             setPrevDayCash(prevCashVal);
             setCashDiffReason(metadataParsed.cashDiffReason || "");
@@ -573,8 +571,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 };
               });
 
-            setCashExpenses(savedCashExps.length > 0 ? savedCashExps : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-            setCardExpenses(savedCardExps.length > 0 ? savedCardExps : [{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+            setCashExpenses(padExpenseRows(savedCashExps));
+            setCardExpenses(padExpenseRows(savedCardExps));
 
              // Map staff from fallback
              const roster = getRoster();
@@ -634,8 +632,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setCardSales("");
           setTransferSales("");
           setDeliverySales("");
-          setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-          setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+          setCashExpenses(padExpenseRows([]));
+          setCardExpenses(padExpenseRows([]));
           setMemo("");
           setCashBalance("");
           setPrevDayCash(prevCashVal);
@@ -693,6 +691,16 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const cardExpensesSum = useMemo(() => {
     return cardExpenses.reduce((acc, exp) => acc + (Number(exp.amount) || 0), 0);
   }, [cardExpenses]);
+
+  // 상세 내용은 적었는데 금액이 비어 있는 행. 그냥 두면 저장 시 조용히 사라지므로 제출을 막는다.
+  const incompleteCashExpenseRows = useMemo(
+    () => cashExpenses.map((row, index) => (isExpenseRowIncomplete(row) ? index : -1)).filter((index) => index >= 0),
+    [cashExpenses]
+  );
+  const incompleteCardExpenseRows = useMemo(
+    () => cardExpenses.map((row, index) => (isExpenseRowIncomplete(row) ? index : -1)).filter((index) => index >= 0),
+    [cardExpenses]
+  );
 
   useEffect(() => {
     if (!draftReady || checking || submittedResult) return;
@@ -872,30 +880,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     });
   };
 
-  // Dynamic Expenses Controls
-  const addExpenseRow = (type: "cash" | "card") => {
-    const list = type === "cash" ? cashExpenses : cardExpenses;
-    const setList = type === "cash" ? setCashExpenses : setCardExpenses;
-    setList([...list, { classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-  };
-
-  const removeExpenseRow = (type: "cash" | "card", index: number) => {
-    const list = type === "cash" ? cashExpenses : cardExpenses;
-    const setList = type === "cash" ? setCashExpenses : setCardExpenses;
-    if (list.length === 1) {
-      setList([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-    } else {
-      setList(list.filter((_, i) => i !== index));
-    }
-  };
-
-  const updateExpenseField = (type: "cash" | "card", index: number, field: keyof ExpenseRow, value: string) => {
-    const list = type === "cash" ? cashExpenses : cardExpenses;
-    const setList = type === "cash" ? setCashExpenses : setCardExpenses;
-    const copy = [...list];
-    copy[index] = { ...copy[index], [field]: value };
-    setList(copy);
-  };
+  // 지출 행의 추가/삭제/수정은 ExpenseGrid가 내부에서 처리한다.
 
   const addOfficeWorkSegment = (index: number) => {
     setStaffRows((prev) => {
@@ -1034,6 +1019,43 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       return;
     }
 
+    // 쓰다 만 지출 행(금액 누락 / 상세 누락)은 그대로 두면 저장이 어긋나므로, 제출 전에 해당 칸으로 커서를 보낸다.
+    const findIncompleteExpense = () => {
+      for (const [variant, label, rows] of [
+        ["cash", "현금", cashExpenses],
+        ["card", "카드", cardExpenses]
+      ] as const) {
+        const index = rows.findIndex((row) => getExpenseRowProblem(row) !== null);
+        if (index >= 0) return { variant, label, index, problem: getExpenseRowProblem(rows[index])! };
+      }
+      return null;
+    };
+    const incompleteExpense = findIncompleteExpense();
+    if (incompleteExpense) {
+      const { variant, label, index, problem } = incompleteExpense;
+      setValidationErrors(true);
+      triggerToast(
+        problem === "missing-amount"
+          ? `${label} 지출 ${index + 1}번 행의 금액을 입력해 주세요. 금액이 비었거나 0원이면 저장되지 않습니다. (내용이 잘못 들어간 행이면 휴지통으로 지워 주세요.)`
+          : `${label} 지출 ${index + 1}번 행의 지출 상세 내용을 입력해 주세요. 무엇에 쓴 돈인지 적어야 합니다.`,
+        "error"
+      );
+      window.requestAnimationFrame(() => {
+        const field = problem === "missing-amount" ? "amount" : "detail";
+        // 지출 입력은 넓은 화면이면 시트, 좁은 화면이면 카드형으로 갈린다.
+        // 숨겨진 쪽은 offsetParent가 없으므로, 지금 화면에 떠 있는 칸을 골라 커서를 보낸다.
+        const candidates = [
+          document.getElementById(`daily-${variant}-expense-${field}-${index}`),
+          document.getElementById(`daily-${variant}-expense-${field}-${index}-card`)
+        ].filter((el): el is HTMLElement => el instanceof HTMLElement);
+        const target = candidates.find((el) => el.offsetParent !== null) ?? candidates[0];
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.focus({ preventScroll: true });
+      });
+      return;
+    }
+
     if (!writerName && !hasExistingRecord) {
       setValidationErrors(true);
       triggerToast("마감 작성자 이름을 꼭 입력해 주세요.", "error");
@@ -1093,10 +1115,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
     try {
       // 1. Pack full high-fidelity JSON metadata for complete state restorability
+      // 시트는 빈 행을 늘 깔아두므로, 메타데이터에는 실제 지출 행만 담는다(빈 행은 복원 시 다시 채워진다).
       const serializeMetaData = JSON.stringify({
         staffRows,
-        cashExpenses,
-        cardExpenses,
+        cashExpenses: cashExpenses.filter(isExpenseRowFilled),
+        cardExpenses: cardExpenses.filter(isExpenseRowFilled),
         cashBalance,
         prevDayCash,
         cashDiffReason,
@@ -1169,14 +1192,14 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       // 2. Format Expenses matching legacy GAS DB row model properties
       const formattedExpenses = isHeadOffice ? [] : [
         ...cashExpenses
-          .filter((e) => e.amount.trim() !== "")
+          .filter(isExpenseRowFilled)
           .map((e) => ({
             expenseType: "현금지출" as const,
             itemName: `${e.classification} | ${e.usage} | ${e.detail.trim()}`,
             amount: Number(e.amount) || 0
           })),
         ...cardExpenses
-          .filter((e) => e.amount.trim() !== "")
+          .filter(isExpenseRowFilled)
           .map((e) => ({
             expenseType: "카드지출" as const,
             itemName: `${e.classification} | ${e.usage} | ${e.detail.trim()}`,
@@ -1245,8 +1268,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setCardSales("");
     setTransferSales("");
     setDeliverySales("");
-    setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
-    setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]);
+    setCashExpenses(padExpenseRows([]));
+    setCardExpenses(padExpenseRows([]));
     setMemo("");
     setCashBalance("");
     setPrevDayCash("0");
@@ -1738,7 +1761,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     return;
                   }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); setCardExpenses([{ classification: "식재료", usage: "쿠팡", detail: "", amount: "" }]); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 id="daily-settle-reset-button"
@@ -1837,173 +1860,24 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
       {/* EXPENSE TABLES SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="expenses-section">
-        {/* Cash Expense table */}
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between" data-guide="daily-cash-expense">
-            <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500" /> 현금 지출 내역
-            </h3>
-            <span className="text-xs font-extrabold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg">
-              합계: {formatNumber(cashExpensesSum)} 원
-            </span>
-          </div>
-
-          <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
-            {cashExpenses.map((exp, idx) => (
-              <div key={idx} className="p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-2 relative">
-                <button
-                  onClick={() => removeExpenseRow("cash", idx)}
-                  className="absolute top-2 right-2 text-gray-400 hover:text-rose-500 p-1 rounded-lg transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">지출 분류</span>
-                    <select
-                      value={exp.classification}
-                      onChange={(e) => updateExpenseField("cash", idx, "classification", e.target.value as any)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
-                    >
-                      {["식재료", "소모품등 기타", "부식비", "음료", "현금입금"].map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {exp.classification !== "현금입금" && <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">사용처</span>
-                    <select
-                      value={exp.usage}
-                      onChange={(e) => updateExpenseField("cash", idx, "usage", e.target.value as any)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
-                    >
-                      {["쿠팡", "네이버", "인근매장", "그외기타", "현금입금"].map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                  </div>}
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2 flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">지출 상세 내용</span>
-                    <input
-                      type="text"
-                      placeholder="구체적 명세 기록"
-                      value={exp.detail}
-                      onChange={(e) => updateExpenseField("cash", idx, "detail", e.target.value)}
-                      className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs bg-white"
-                    />
-                  </div>
-                  <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">금액</span>
-                    <input
-                      type="text"
-                      placeholder="금액(원)"
-                      value={formatWithCommas(exp.amount)}
-                      onChange={(e) => {
-                        updateExpenseField("cash", idx, "amount", cleanNumeric(e.target.value));
-                      }}
-                      className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs text-right font-mono bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={() => addExpenseRow("cash")}
-            className="w-full py-2 bg-gray-50 hover:bg-gray-100 border border-dashed border-gray-200 font-bold text-xs text-gray-500 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" /> 개별 현금지출 행 추가
-          </button>
-        </div>
-
-        {/* Card Expense table */}
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between" data-guide="daily-card-expense">
-            <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500" /> 카드 지출 내역
-            </h3>
-            <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">
-              합계: {formatNumber(cardExpensesSum)} 원
-            </span>
-          </div>
-
-          <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
-            {cardExpenses.map((exp, idx) => (
-              <div key={idx} className="p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-2 relative">
-                <button
-                  onClick={() => removeExpenseRow("card", idx)}
-                  className="absolute top-2 right-2 text-gray-400 hover:text-rose-500 p-1 rounded-lg transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">지출 분류</span>
-                    <select
-                      value={exp.classification}
-                      onChange={(e) => updateExpenseField("card", idx, "classification", e.target.value as any)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
-                    >
-                      {["식재료", "소모품등 기타", "부식비", "음료", "현금입금"].map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">사용처</span>
-                    <select
-                      value={exp.usage}
-                      onChange={(e) => updateExpenseField("card", idx, "usage", e.target.value as any)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
-                    >
-                      {["쿠팡", "네이버", "인근매장", "그외기타", "현금입금"].map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2 flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">지출 상세 내용</span>
-                    <input
-                      type="text"
-                      placeholder="구체적 명세 기록"
-                      value={exp.detail}
-                      onChange={(e) => updateExpenseField("card", idx, "detail", e.target.value)}
-                      className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs bg-white"
-                    />
-                  </div>
-                  <div className="flex flex-col space-y-1">
-                    <span className="text-[10px] font-bold text-gray-400">금액</span>
-                    <input
-                      type="text"
-                      placeholder="금액(원)"
-                      value={formatWithCommas(exp.amount)}
-                      onChange={(e) => {
-                        updateExpenseField("card", idx, "amount", cleanNumeric(e.target.value));
-                      }}
-                      className="px-2.5 py-1 border border-gray-200 rounded-lg text-xs text-right font-mono bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={() => addExpenseRow("card")}
-            className="w-full py-2 bg-gray-50 hover:bg-gray-100 border border-dashed border-gray-200 font-bold text-xs text-gray-500 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" /> 개별 카드지출 행 추가
-          </button>
-        </div>
+        <ExpenseGrid
+          variant="cash"
+          title="현금 지출 내역"
+          sum={cashExpensesSum}
+          rows={cashExpenses}
+          onRowsChange={setCashExpenses}
+          errorRowIndexes={incompleteCashExpenseRows}
+          guideKey="daily-cash-expense"
+        />
+        <ExpenseGrid
+          variant="card"
+          title="카드 지출 내역"
+          sum={cardExpensesSum}
+          rows={cardExpenses}
+          onRowsChange={setCardExpenses}
+          errorRowIndexes={incompleteCardExpenseRows}
+          guideKey="daily-card-expense"
+        />
       </div>
 
       {/* CASH SETTLE/CLOSING SECTION (현금마감) */}
