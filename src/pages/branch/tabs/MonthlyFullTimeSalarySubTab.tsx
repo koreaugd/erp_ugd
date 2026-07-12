@@ -3,9 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Users, Plus, Trash2, Lock, Check, ShieldCheck } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatResidentNumber, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey, readLocalStaffList } from "../helpers/staffHelpers";
+import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
 interface FullTimeSalaryRow {
   id: string;
@@ -326,6 +328,14 @@ export function MonthlyFullTimeSalarySubTab({
   const totOt = sum((r) => num(r.overtimePay));
   const totAll = sum(rowTotal);
 
+  // 엑셀식 칸 이동. 행은 직원명부에서 오므로 행 추가는 없다(onAppendRow 없음).
+  // 편집 가능한 칸만 센다 — '총 금액'은 자동계산이라 커서가 서지 않는다.
+  //
+  // 반드시 아래 잠금 화면 return보다 위에 있어야 한다.
+  // 아래에 두면 잠겨 있을 때는 이 훅이 호출되지 않다가 잠금을 풀면 갑자기 호출되어
+  // 훅 순서가 바뀌고 React가 터진다.
+  const { cellProps } = useSheetKeyboardNav({ rowCount: rows.length, colCount: 11 });
+
   // ---- 잠금 화면 ----
   if (!unlocked) {
     return (
@@ -414,6 +424,9 @@ export function MonthlyFullTimeSalarySubTab({
         </div>
       )}
 
+      {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
+      <div className="relative">
+      <SheetKeyHint />
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="text-left text-[11px] border-collapse font-medium" style={{ minWidth: 1200 }}>
           <thead>
@@ -441,22 +454,23 @@ export function MonthlyFullTimeSalarySubTab({
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              rows.map((row, rowIndex) => (
                 <tr key={row.id} className="hover:bg-indigo-50/20">
-                  <td className="px-2 py-1.5"><input type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className={cellText} /></td>
-                  <td className="px-2 py-1.5"><input type="text" value={row.rank} disabled={isLocked} onChange={(e) => updateRow(row.id, "rank", e.target.value)} placeholder="직급" className={cellText} /></td>
-                  <td className="px-2 py-1.5"><input type="text" value={row.residentNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "residentNumber", e.target.value)} placeholder="주민번호" className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input type="date" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input type="text" value={row.accountNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "accountNumber", e.target.value)} placeholder="은행/계좌번호" className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input type="text" inputMode="numeric" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
-                  <td className="px-2 py-1.5"><input type="text" inputMode="numeric" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input type="text" inputMode="numeric" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input type="text" inputMode="numeric" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input type="text" inputMode="numeric" value={formatWithCommas(row.overtimePay)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimePay", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 0)} type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className={cellText} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 1)} type="text" value={row.rank} disabled={isLocked} onChange={(e) => updateRow(row.id, "rank", e.target.value)} placeholder="직급" className={cellText} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 2)} type="text" value={row.residentNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "residentNumber", e.target.value)} placeholder="주민번호" className={`${cellText} font-mono`} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 3)} type="date" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 4)} type="text" value={row.accountNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "accountNumber", e.target.value)} placeholder="은행/계좌번호" className={`${cellText} font-mono`} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 5)} type="text" inputMode="numeric" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 6)} type="text" inputMode="numeric" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 7)} type="text" inputMode="numeric" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 8)} type="text" inputMode="numeric" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 9)} type="text" inputMode="numeric" value={formatWithCommas(row.overtimePay)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimePay", e.target.value)} placeholder="0" className={cellNum} /></td>
                   <td className="px-2 py-1.5 text-right font-mono font-black text-indigo-700">{formatNumber(rowTotal(row))}</td>
-                  <td className="px-2 py-1.5"><input type="text" value={row.memo} disabled={isLocked} onChange={(e) => updateRow(row.id, "memo", e.target.value)} placeholder="비고" className={cellText} /></td>
+                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 10)} type="text" value={row.memo} disabled={isLocked} onChange={(e) => updateRow(row.id, "memo", e.target.value)} placeholder="비고" className={cellText} /></td>
                   <td className="px-2 py-1.5 text-center">
-                    <button onClick={() => deleteRow(row.id)} disabled={isLocked} className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer disabled:text-gray-200 disabled:cursor-not-allowed" title="행 삭제">
+                    {/* Tab은 칸 사이 이동에 쓴다 — 순서에 끼면 마지막 칸에서 Tab이 다음 행이 아니라 여기로 온다. */}
+                    <button onClick={() => deleteRow(row.id)} disabled={isLocked} tabIndex={-1} className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer disabled:text-gray-200 disabled:cursor-not-allowed" title="행 삭제">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
@@ -478,6 +492,7 @@ export function MonthlyFullTimeSalarySubTab({
             </tfoot>
           )}
         </table>
+      </div>
       </div>
     </div>
   );

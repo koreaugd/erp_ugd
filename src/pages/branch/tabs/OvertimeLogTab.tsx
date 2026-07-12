@@ -301,19 +301,20 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
             <span className="text-xs text-gray-400 font-bold">마감 기록실에서 초과근무 장부를 이첩 중...</span>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          // 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
+          <div className="max-h-[60vh] overflow-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                  <th className="py-2.5 px-2">마감일자</th>
-                  <th className="py-2.5 px-2">직원명</th>
-                  <th className="py-2.5 px-2">출근</th>
-                  <th className="py-2.5 px-2">퇴근</th>
-                  <th className="py-2.5 px-2 text-center">근무시간</th>
-                  <th className="py-2.5 px-2 text-center">기준근무</th>
-                  <th className="py-2.5 px-2 text-center">초과시간</th>
-                  <th className="py-2.5 px-2 max-w-[150px]">초과사유 및 경위</th>
-                  {isAdmin && <th className="py-2.5 px-2 text-center">관리</th>}
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(243_244_246)]">
+                <tr className="text-gray-400 font-bold">
+                  <th className="py-2 px-2">마감일자</th>
+                  <th className="py-2 px-2">직원명</th>
+                  <th className="py-2 px-2">출근</th>
+                  <th className="py-2 px-2">퇴근</th>
+                  <th className="py-2 px-2 text-center">근무시간</th>
+                  <th className="py-2 px-2 text-center">기준근무</th>
+                  <th className="py-2 px-2 text-center">초과시간</th>
+                  <th className="py-2 px-2 max-w-[150px]">초과사유 및 경위</th>
+                  {isAdmin && <th className="py-2 px-2 text-center">관리</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
@@ -324,15 +325,18 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                     </td>
                   </tr>
                 ) : (
-                  filteredRecords.map((r, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50/50">
-                      <td className="py-3 px-2 font-mono text-[11px] text-gray-400">{r.settleDate}</td>
-                      <td className="py-3 px-2 font-extrabold text-gray-800">{r.staffName}</td>
-                      <td className="py-3 px-2 font-mono text-gray-500">{r.clockIn}</td>
-                      <td className="py-3 px-2 font-mono text-gray-500">{r.clockOut}</td>
-                      <td className="py-3 px-2 text-center font-bold text-gray-650">{r.workHours}h</td>
-                      <td className="py-3 px-2 text-center text-gray-400">{r.standardHours}h</td>
-                      <td className="py-3 px-2 text-center">
+                  filteredRecords.map((r, idx) => {
+                    // 같은 날짜가 이어지면 날짜는 한 번만 적고, 날짜가 바뀌는 자리에만 굵은 선을 긋는다.
+                    const newDate = idx === 0 || filteredRecords[idx - 1].settleDate !== r.settleDate;
+                    return (
+                    <tr key={idx} className={`hover:bg-gray-50/50 ${newDate && idx > 0 ? "border-t-2 border-t-gray-200" : ""}`}>
+                      <td className="py-2 px-2 font-mono text-[11px] text-gray-400">{newDate ? r.settleDate : ""}</td>
+                      <td className="py-2 px-2 font-extrabold text-gray-800">{r.staffName}</td>
+                      <td className="py-2 px-2 font-mono text-gray-500">{r.clockIn}</td>
+                      <td className="py-2 px-2 font-mono text-gray-500">{r.clockOut}</td>
+                      <td className="py-2 px-2 text-center font-bold text-gray-650">{r.workHours}h</td>
+                      <td className="py-2 px-2 text-center text-gray-400">{r.standardHours}h</td>
+                      <td className="py-2 px-2 text-center">
                         {r.overtime < 0 ? (
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-amber-50 text-amber-700 font-bold">
                             {r.overtime}h (조기퇴근)
@@ -343,19 +347,20 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                           </span>
                         )}
                       </td>
-                      <td className="py-3 px-2 max-w-[150px] truncate scrollbar-none font-bold text-gray-500" title={r.overtimeReason}>
+                      <td className="py-2 px-2 max-w-[150px] truncate scrollbar-none font-bold text-gray-500" title={r.overtimeReason}>
                         {r.overtimeReason}
                       </td>
                       {isAdmin && (
-                        <td className="py-3 px-2">
+                        <td className="py-2 px-2">
                           <div className="flex justify-center gap-1">
-                            <button disabled={saving} onClick={() => void handleEditOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">수정</button>
-                            <button disabled={saving} onClick={() => void handleDeleteOvertimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
+                            <button disabled={saving} onClick={() => void handleEditOvertimeRow(r)} className="px-2 py-0.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">수정</button>
+                            <button disabled={saving} onClick={() => void handleDeleteOvertimeRow(r)} className="px-2 py-0.5 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
                           </div>
                         </td>
                       )}
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>

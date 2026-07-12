@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { ExpenseRow } from "../types";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import {
@@ -152,8 +153,10 @@ export function ExpenseGrid({
     ].join(" ");
 
   return (
-    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-      <div className="flex items-center justify-between" data-guide={guideKey}>
+    <div className="relative bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+      {/* 조작법은 표를 보는 순간 알아야 한다 — 작성방법 버튼을 눌러야 보이면 늦다. */}
+      <SheetKeyHint />
+      <div className="flex flex-wrap items-center justify-between gap-2" data-guide={guideKey}>
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${style.dot}`} /> {title}
         </h3>

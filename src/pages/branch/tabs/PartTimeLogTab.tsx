@@ -355,18 +355,19 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
             <span className="text-xs text-gray-400 font-bold">마감 기록실에서 아르바이트 대장을 불러오는 중...</span>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          // 한 달치 기록이 통째로 세로로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
+          <div className="max-h-[60vh] overflow-auto">
             <table className="w-full text-left text-xs border-collapse font-medium animate-fade-in">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                  <th className="py-2.5 px-3">마감일자</th>
-                  <th className="py-2.5 px-3">직원명</th>
-                  {branchName === "본사" && <th className="py-2.5 px-3">근무지점</th>}
-                  <th className="py-2.5 px-3">출근</th>
-                  <th className="py-2.5 px-3">퇴근</th>
-                  <th className="py-2.5 px-3 text-center">근무시간</th>
-                  <th className="py-2.5 px-3">작성자 (결재)</th>
-                  {isAdmin && <th className="py-2.5 px-3 text-center">관리</th>}
+              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(243_244_246)]">
+                <tr className="text-gray-400 font-bold">
+                  <th className="py-2 px-2">마감일자</th>
+                  <th className="py-2 px-2">직원명</th>
+                  {branchName === "본사" && <th className="py-2 px-2">근무지점</th>}
+                  <th className="py-2 px-2">출근</th>
+                  <th className="py-2 px-2">퇴근</th>
+                  <th className="py-2 px-2 text-center">근무시간</th>
+                  <th className="py-2 px-2">작성자 (결재)</th>
+                  {isAdmin && <th className="py-2 px-2 text-center">관리</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -377,29 +378,34 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
                     </td>
                   </tr>
                 ) : (
-                  records.map((r, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50/50">
-                      <td className="py-3.5 px-3 font-mono text-[11px] text-gray-400">{r.settleDate}</td>
-                      <td className="py-3.5 px-3 font-extrabold text-gray-800 text-sm">{r.staffName}</td>
-                      {branchName === "본사" && <td className="py-3.5 px-3 text-xs font-bold text-gray-600">{r.officeWorkplace || "본사"}</td>}
-                      <td className="py-3.5 px-3 font-mono text-gray-650">{r.clockIn}</td>
-                      <td className="py-3.5 px-3 font-mono text-gray-650">{r.clockOut}</td>
-                      <td className="py-3.5 px-3 text-center">
-                        <span className="bg-blue-50 text-[#2E6DB4] font-black font-mono text-xs px-2.5 py-1 rounded-lg">
-                          {r.workHours} 시간
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-3 text-gray-400 font-bold">{r.writer}</td>
-                      {isAdmin && (
-                        <td className="py-3.5 px-3">
-                          <div className="flex justify-center gap-1">
-                            <button onClick={() => void handleEditPartTimeRow(r)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
-                            <button onClick={() => void handleDeletePartTimeRow(r)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
-                          </div>
+                  records.map((r, idx) => {
+                    // 같은 날짜가 이어지면 날짜를 한 번만 적고, 날짜가 바뀌는 자리에만 굵은 선을 긋는다.
+                    // 날짜가 매 행 반복되면 눈이 그걸 다 읽느라 정작 사람·시간을 못 훑는다.
+                    const newDate = idx === 0 || records[idx - 1].settleDate !== r.settleDate;
+                    return (
+                      <tr key={idx} className={`hover:bg-gray-50/50 ${newDate && idx > 0 ? "border-t-2 border-t-gray-200" : ""}`}>
+                        <td className="py-2 px-2 font-mono text-[11px] text-gray-400">{newDate ? r.settleDate : ""}</td>
+                        <td className="py-2 px-2 font-extrabold text-gray-800">{r.staffName}</td>
+                        {branchName === "본사" && <td className="py-2 px-2 font-bold text-gray-600">{r.officeWorkplace || "본사"}</td>}
+                        <td className="py-2 px-2 font-mono text-gray-650">{r.clockIn}</td>
+                        <td className="py-2 px-2 font-mono text-gray-650">{r.clockOut}</td>
+                        <td className="py-2 px-2 text-center">
+                          <span className="bg-blue-50 text-[#2E6DB4] font-black font-mono text-xs px-2 py-0.5 rounded-lg">
+                            {r.workHours} 시간
+                          </span>
                         </td>
-                      )}
-                    </tr>
-                  ))
+                        <td className="py-2 px-2 text-gray-400 font-bold">{r.writer}</td>
+                        {isAdmin && (
+                          <td className="py-2 px-2">
+                            <div className="flex justify-center gap-1">
+                              <button onClick={() => void handleEditPartTimeRow(r)} className="px-2 py-0.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                              <button onClick={() => void handleDeletePartTimeRow(r)} className="px-2 py-0.5 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -172,23 +172,24 @@ export function MonthlyCashExpensesSubTab({
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-gray-100">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
+      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
+      <div className="max-h-[60vh] overflow-auto rounded-2xl border border-gray-100">
+        <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
+          <thead className="sticky top-0 z-10">
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] uppercase">
-              <th className="py-3 px-4">마감 일자</th>
-              <th className="py-3 px-4">결제 수단</th>
-              <th className="py-3 px-4 text-right">지출 금액</th>
-              <th className="py-3 px-4">거래처 (사용처)</th>
-              <th className="py-3 px-4">분류 항목</th>
-              <th className="py-3 px-4">지출내용 (세부)</th>
-              <th className="py-3 px-4">비고</th>
-              <th className="py-3 px-4">작성자</th>
-              <th className="py-3 px-4">입력 시각</th>
-              {isAdmin && <th className="py-3 px-4 text-center">관리</th>}
+              <th className="py-2 px-2.5 w-[96px]">마감 일자</th>
+              <th className="py-2 px-2.5 w-[72px]">결제 수단</th>
+              <th className="py-2 px-2.5 text-right w-[104px]">지출 금액</th>
+              <th className="py-2 px-2.5">거래처 (사용처)</th>
+              <th className="py-2 px-2.5">분류 항목</th>
+              <th className="py-2 px-2.5">지출내용 (세부)</th>
+              <th className="py-2 px-2.5">비고</th>
+              <th className="py-2 px-2.5">작성자</th>
+              <th className="py-2 px-2.5">입력 시각</th>
+              {isAdmin && <th className="py-2 px-2.5 text-center">관리</th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-150 text-[11px] font-sans">
+          <tbody className="sheet-rows-soft divide-y text-[11px] font-sans">
             {filteredItems.length === 0 ? (
               <tr>
                 <td colSpan={isAdmin ? 10 : 9} className="py-20 text-center text-gray-400 font-bold">
@@ -196,29 +197,33 @@ export function MonthlyCashExpensesSubTab({
                 </td>
               </tr>
             ) : (
-              filteredItems.map((it, idx) => (
-                <tr key={idx} className="hover:bg-zinc-50/40">
-                  <td className="py-3.5 px-4 font-mono font-bold text-gray-500">{it.date}</td>
-                  <td className="py-3.5 px-4">
-                    <span className="bg-orange-50 border border-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-md">
+              filteredItems.map((it, idx) => {
+                // 같은 날짜가 이어지면 날짜는 한 번만 적고, 날짜가 바뀌는 자리에만 선을 긋는다.
+                // 날짜가 매 행 반복되면 눈이 그걸 다 읽느라 정작 금액·사용처를 못 훑는다.
+                const newDate = idx === 0 || filteredItems[idx - 1].date !== it.date;
+                return (
+                <tr key={idx} className={`hover:bg-zinc-50/40 ${newDate && idx > 0 ? "row-group-start" : ""}`}>
+                  <td className="py-2 px-2.5 font-mono font-bold text-gray-500">{newDate ? it.date : ""}</td>
+                  <td className="py-2 px-2.5">
+                    <span className="pay-chip pay-chip-cash inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap">
                       {it.paymentType}
                     </span>
                   </td>
-                  <td className="py-3.5 px-4 text-right font-mono font-black text-gray-800 text-xs">
+                  <td className="py-2 px-2.5 text-right font-mono font-black text-gray-800 text-xs">
                     {formatNumber(it.amount)} 원
                   </td>
-                  <td className="py-3.5 px-4 font-bold text-zinc-800">
+                  <td className="py-2 px-2.5 font-bold text-zinc-800">
                     <span className={`monthly-expense-chip ${getMonthlyExpenseUsageChipClass(it.usage)}`}>{it.usage}</span>
                   </td>
-                  <td className="py-3.5 px-4 font-bold text-blue-650">
+                  <td className="py-2 px-2.5 font-bold text-blue-650">
                     <span className={`monthly-expense-chip ${getMonthlyExpenseCategoryChipClass(it.classification)}`}>{it.classification}</span>
                   </td>
-                  <td className="py-3.5 px-4 text-gray-550 font-semibold">{it.detail || "공란"}</td>
-                  <td className="py-3.5 px-4 text-gray-400 font-bold">확인완료</td>
-                  <td className="py-3.5 px-4 text-zinc-600 font-bold">{it.author}</td>
-                  <td className="py-3.5 px-4 font-mono text-gray-400">{it.timestamp}</td>
+                  <td className="py-2 px-2.5 text-gray-550 font-semibold">{it.detail || "공란"}</td>
+                  <td className="py-2 px-2.5 text-gray-400 font-bold">확인완료</td>
+                  <td className="py-2 px-2.5 text-zinc-600 font-bold">{it.author}</td>
+                  <td className="py-2 px-2.5 font-mono text-gray-400">{it.timestamp}</td>
                   {isAdmin && (
-                    <td className="py-3.5 px-4">
+                    <td className="py-2 px-2.5">
                       <div className="flex justify-center gap-1">
                         <button onClick={() => void handleEditExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
                         <button onClick={() => void handleDeleteExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
@@ -226,7 +231,8 @@ export function MonthlyCashExpensesSubTab({
                     </td>
                   )}
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

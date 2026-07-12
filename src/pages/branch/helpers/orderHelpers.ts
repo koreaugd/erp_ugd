@@ -28,14 +28,20 @@ export const getLiquorCategoryClass = (category: string) => {
   return classes[category] || classes.기타;
 };
 
+/**
+ * 대분류 색. Tailwind 색 유틸(bg-amber-100 등)을 쓰면 안 된다 —
+ * 지점 디자인 CSS가 그것들을 디자인 토큰으로 싹 덮어써서(amber→바닐라, indigo·slate→alice)
+ * 네 분류가 같은 색으로 뭉개지거나 색이 아예 사라진다.
+ * 덮어쓰기를 타지 않는 전용 클래스를 쓰고, 실제 색은 index.css에서 토큰으로 준다.
+ */
 export const getOrderCategoryHeaderClass = (category: string) => {
   const classes: Record<string, string> = {
-    식자재: "bg-amber-100 text-amber-900 border-amber-300",
-    부식비: "bg-teal-100 text-teal-900 border-teal-300",
-    주류: "bg-indigo-100 text-indigo-900 border-indigo-300",
-    "식음료외 기타": "bg-slate-200 text-slate-800 border-slate-300"
+    식자재: "order-cat order-cat-food",
+    부식비: "order-cat order-cat-side",
+    주류: "order-cat order-cat-liquor",
+    "식음료외 기타": "order-cat order-cat-etc"
   };
-  return classes[category] || "bg-gray-100 text-gray-700 border-gray-300";
+  return classes[category] || "order-cat order-cat-etc";
 };
 
 export const monthDays = (monthValue: string) => {
