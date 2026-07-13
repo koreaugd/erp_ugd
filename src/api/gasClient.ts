@@ -1,5 +1,27 @@
 // src/api/gasClient.ts
 
+import { isMissingChunkError, reloadForMissingChunk } from "../utils/chunkReload";
+
+/**
+ * 파이어베이스 통신 코드는 미리 받아두지 않고, 저장·조회·제출하는 순간에 받아온다.
+ * 그 파일 이름에는 빌드마다 바뀌는 번호가 붙고(firebaseDirect-a1b2c3.js), 배포하면 옛 파일은
+ * 서버에서 사라진다. 그래서 배포 전에 열어둔 화면이 제출을 누르면 "없는 파일"을 달라고 하게 된다.
+ *
+ * 부르는 쪽은 이 실패를 자기 try/catch 로 붙잡아 토스트로 띄우고 끝낸다 — 전역 감시망
+ * (installChunkReloadGuard)에 걸리지 않아 자동 새로고침이 발동하지 않고, 지점은 제출이 안 되는
+ * 상태에 갇힌다. 그러니 삼켜지기 전에 여기서 알아채고 최신 파일을 받아온다.
+ */
+async function loadFirebaseDirect() {
+  try {
+    return await import("./firebaseDirect");
+  } catch (err) {
+    if (isMissingChunkError(err) && (await reloadForMissingChunk("firebaseDirect"))) {
+      throw new Error("새 버전이 배포되어 화면을 다시 불러옵니다. 잠시만 기다려 주세요.");
+    }
+    throw err;
+  }
+}
+
 export interface BranchSetting {
   branchName: string;
   brand: string;
@@ -192,7 +214,7 @@ async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id
     
     // In Netlify/static environments (where server.ts is non-existent), we mirror directly from the browser.
     if (!isServerEnv) {
-      const { isFirebaseConfigValid, getDirectDb, backupSettleDirect, backupSettingDirect, deleteSettingDirect } = await import("./firebaseDirect");
+      const { isFirebaseConfigValid, getDirectDb, backupSettleDirect, backupSettingDirect, deleteSettingDirect } = await loadFirebaseDirect();
       if (isFirebaseConfigValid()) {
         const db = getDirectDb();
         if (db) {
@@ -229,12 +251,12 @@ export const gasClient = {
     if (!branchName) {
       return { exists: false, record: null };
     }
-    const { firebaseGetDailyFormBootstrap } = await import("./firebaseDirect");
+    const { firebaseGetDailyFormBootstrap } = await loadFirebaseDirect();
     return await firebaseGetDailyFormBootstrap(branchName, settleDate);
   },
 
   async getDailyFormBootstrap(branchName: string, settleDate: string): Promise<DailyFormBootstrap> {
-    const { firebaseGetDailyFormBootstrap } = await import("./firebaseDirect");
+    const { firebaseGetDailyFormBootstrap } = await loadFirebaseDirect();
     return await firebaseGetDailyFormBootstrap(branchName, settleDate);
   },
 
@@ -246,7 +268,7 @@ export const gasClient = {
       throw new Error("지점 정보가 없습니다. 로그아웃 후 다시 로그인하고 지점을 선택해 주세요.");
     }
     // masterData는 구버전 GAS 호환용 별칭 (신버전은 master 우선, 구버전은 masterData 사용)
-    const { firebaseSubmitDaily } = await import("./firebaseDirect");
+    const { firebaseSubmitDaily } = await loadFirebaseDirect();
     const result = await firebaseSubmitDaily(master, expenses || [], staff || []);
     clearReadCache();
     if (result && result.recordId) {
@@ -266,7 +288,7 @@ export const gasClient = {
     staff?: StaffRecord[],
     modifiedBy?: string
   ): Promise<{ success: boolean }> {
-    const { firebaseUpdateDaily } = await import("./firebaseDirect");
+    const { firebaseUpdateDaily } = await loadFirebaseDirect();
     const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy);
     clearReadCache();
     if (result && result.success !== false) {
@@ -282,19 +304,19 @@ export const gasClient = {
   },
 
   async deleteDaily(recordId: string): Promise<{ success: boolean }> {
-    const { firebaseDeleteDaily } = await import("./firebaseDirect");
+    const { firebaseDeleteDaily } = await loadFirebaseDirect();
     const result = await firebaseDeleteDaily(recordId);
     clearReadCache();
     return result;
   },
 
   async getEditLogs(): Promise<any[]> {
-    const { firebaseGetEditLogs } = await import("./firebaseDirect");
+    const { firebaseGetEditLogs } = await loadFirebaseDirect();
     return await firebaseGetEditLogs();
   },
 
   async deleteEditLog(logId: string): Promise<{ success: boolean }> {
-    const { firebaseDeleteEditLog } = await import("./firebaseDirect");
+    const { firebaseDeleteEditLog } = await loadFirebaseDirect();
     const result = await firebaseDeleteEditLog(logId);
     clearReadCache();
     return result;
@@ -304,7 +326,7 @@ export const gasClient = {
    * 특정 일자의 전체 지점 마감 리스트 조회
    */
   async getDailyList(settleDate: string, adminPinHash?: string): Promise<DailyListRow[]> {
-    const { firebaseGetDailyList } = await import("./firebaseDirect");
+    const { firebaseGetDailyList } = await loadFirebaseDirect();
     return await firebaseGetDailyList(settleDate);
   },
 
@@ -312,7 +334,7 @@ export const gasClient = {
    * 특정 레코드 상세 조회 (마스터 + 지출 + 인원)
    */
   async getDailyDetail(recordId: string): Promise<DailySettleDetail> {
-    const { firebaseGetDailyDetail } = await import("./firebaseDirect");
+    const { firebaseGetDailyDetail } = await loadFirebaseDirect();
     return await firebaseGetDailyDetail(recordId);
   },
 
@@ -321,7 +343,7 @@ export const gasClient = {
    */
   async getBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
     try {
-      const { firebaseGetBranchHistory } = await import("./firebaseDirect");
+      const { firebaseGetBranchHistory } = await loadFirebaseDirect();
       return await firebaseGetBranchHistory(branchName, month);
     } catch (err) {
       console.warn("getBranchHistory Action Failed. Returning empty fallback array.", err);
@@ -332,7 +354,7 @@ export const gasClient = {
   // 서버 전용·fail-closed 히스토리 조회: 실패를 []로 삼키지 않고 그대로 throw한다.
   // 월말마감 엑셀 등 "빈/오래된 데이터로 조용히 채우면 안 되는" 정산 산출물 전용.
   async getBranchHistoryFromServer(branchName: string, month?: string): Promise<MasterDaily[]> {
-    const { firebaseGetBranchHistoryFromServer } = await import("./firebaseDirect");
+    const { firebaseGetBranchHistoryFromServer } = await loadFirebaseDirect();
     return await firebaseGetBranchHistoryFromServer(branchName, month);
   },
 
@@ -340,7 +362,7 @@ export const gasClient = {
    * 전체 지점 설정 목록 반환
    */
   async getBranchList(): Promise<BranchSetting[]> {
-    const { firebaseGetBranchList } = await import("./firebaseDirect");
+    const { firebaseGetBranchList } = await loadFirebaseDirect();
     return await firebaseGetBranchList();
   },
 
@@ -358,7 +380,7 @@ export const gasClient = {
     const pending = pendingAttendanceRequests.get(cacheKey);
     if (!forceRefresh && pending) return pending;
 
-    const { firebaseGetBranchHistory, firebaseGetDailyDetail } = await import("./firebaseDirect");
+    const { firebaseGetBranchHistory, firebaseGetDailyDetail } = await loadFirebaseDirect();
     const request = (async () => {
       const allHistory = await firebaseGetBranchHistory(branchName);
       const history = allHistory.filter((item) => {
@@ -464,60 +486,60 @@ export const gasClient = {
   },
 
   async getStaffRoster(branchName: string): Promise<RosterEmployee[]> {
-    const { firebaseGetStaffRoster } = await import("./firebaseDirect");
+    const { firebaseGetStaffRoster } = await loadFirebaseDirect();
     return await firebaseGetStaffRoster(branchName);
   },
 
   async saveStaffRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
-    const { firebaseSaveStaffRoster } = await import("./firebaseDirect");
+    const { firebaseSaveStaffRoster } = await loadFirebaseDirect();
     const result = await firebaseSaveStaffRoster(branchName, employees);
     clearReadCache();
     return result;
   },
 
   async getBranchOwnRoster(branchName: string): Promise<RosterEmployee[]> {
-    const { firebaseGetBranchOwnRoster } = await import("./firebaseDirect");
+    const { firebaseGetBranchOwnRoster } = await loadFirebaseDirect();
     return await firebaseGetBranchOwnRoster(branchName);
   },
 
   // 서버 전용·fail-closed 명단 조회: 캐시 폴백 없이 서버 문서만 읽고 실패 시 throw. 월말마감 엑셀 등 전용.
   async getBranchOwnRosterFromServer(branchName: string): Promise<RosterEmployee[]> {
-    const { firebaseGetBranchOwnRosterFromServer } = await import("./firebaseDirect");
+    const { firebaseGetBranchOwnRosterFromServer } = await loadFirebaseDirect();
     return await firebaseGetBranchOwnRosterFromServer(branchName);
   },
 
   async saveBranchOwnRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
-    const { firebaseSaveBranchOwnRoster } = await import("./firebaseDirect");
+    const { firebaseSaveBranchOwnRoster } = await loadFirebaseDirect();
     const result = await firebaseSaveBranchOwnRoster(branchName, employees);
     clearReadCache();
     return result;
   },
 
   async getSharedData<T = unknown>(dataKey: string): Promise<T | null> {
-    const { firebaseGetSharedData } = await import("./firebaseDirect");
+    const { firebaseGetSharedData } = await loadFirebaseDirect();
     return await firebaseGetSharedData(dataKey);
   },
 
   // 서버 문서만 읽는다(캐시 폴백 없음). 오프라인이면 throw → 마감 검증에서 캐시로 승인되는 것을 막는다.
   async getSharedDataFromServer<T = unknown>(dataKey: string): Promise<T | null> {
-    const { firebaseGetSharedDataFromServer } = await import("./firebaseDirect");
+    const { firebaseGetSharedDataFromServer } = await loadFirebaseDirect();
     return await firebaseGetSharedDataFromServer(dataKey);
   },
 
   async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
-    const { firebaseSaveSharedData } = await import("./firebaseDirect");
+    const { firebaseSaveSharedData } = await loadFirebaseDirect();
     const result = await firebaseSaveSharedData(dataKey, value);
     clearReadCache();
     return result;
   },
 
   async getAllManualOvertimes(): Promise<any[]> {
-    const { firebaseGetAllManualOvertimes } = await import("./firebaseDirect");
+    const { firebaseGetAllManualOvertimes } = await loadFirebaseDirect();
     return await firebaseGetAllManualOvertimes();
   },
 
   async getAllLaborContracts(): Promise<any[]> {
-    const { firebaseGetAllLaborContracts } = await import("./firebaseDirect");
+    const { firebaseGetAllLaborContracts } = await loadFirebaseDirect();
     return await firebaseGetAllLaborContracts();
   },
 
@@ -576,7 +598,7 @@ export const gasClient = {
     );
 
     if (!isServerEnvironment) {
-      const { getDirectFirebaseStatus } = await import("./firebaseDirect");
+      const { getDirectFirebaseStatus } = await loadFirebaseDirect();
       return await getDirectFirebaseStatus();
     }
 
@@ -586,7 +608,7 @@ export const gasClient = {
       return await response.json();
     } catch (err) {
       console.warn("[Firebase API] Server status route failed. Utilizing direct browser connector.", err);
-      const { getDirectFirebaseStatus } = await import("./firebaseDirect");
+      const { getDirectFirebaseStatus } = await loadFirebaseDirect();
       return await getDirectFirebaseStatus();
     }
   },
@@ -602,7 +624,7 @@ export const gasClient = {
     );
 
     if (!isServerEnvironment) {
-      const { syncDirectToFirebase } = await import("./firebaseDirect");
+      const { syncDirectToFirebase } = await loadFirebaseDirect();
       return await syncDirectToFirebase();
     }
 
@@ -612,7 +634,7 @@ export const gasClient = {
       return await response.json();
     } catch (err) {
       console.warn("[Firebase API] Server sync route failed. Utilizing direct browser syncer.", err);
-      const { syncDirectToFirebase } = await import("./firebaseDirect");
+      const { syncDirectToFirebase } = await loadFirebaseDirect();
       return await syncDirectToFirebase();
     }
   },
@@ -628,7 +650,7 @@ export const gasClient = {
     );
 
     if (!isServerEnvironment) {
-      const { restoreDirectFromFirebase } = await import("./firebaseDirect");
+      const { restoreDirectFromFirebase } = await loadFirebaseDirect();
       return await restoreDirectFromFirebase();
     }
 
@@ -638,7 +660,7 @@ export const gasClient = {
       return await response.json();
     } catch (err) {
       console.warn("[Firebase API] Server restore route failed. Utilizing direct browser restorer.", err);
-      const { restoreDirectFromFirebase } = await import("./firebaseDirect");
+      const { restoreDirectFromFirebase } = await loadFirebaseDirect();
       return await restoreDirectFromFirebase();
     }
   }
