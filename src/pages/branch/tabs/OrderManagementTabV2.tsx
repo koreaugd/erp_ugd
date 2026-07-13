@@ -605,9 +605,12 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                 const rowActive = activeCell?.row === rowIndex;
                 return (
                   <tr key={dateKey} className="hover:bg-slate-50/70">
-                    {/* 날짜 칸 — 지금 편집 중인 행을 짚어준다 */}
+                    {/* 날짜 칸 — 왼쪽에 고정되고, 지금 편집 중인 행을 짚어준다.
+                        z-20이 없으면 안 된다: 금액 칸들이 relative(위치 지정)라, 같은 층위에서는
+                        DOM 순서상 뒤에 오는 금액 칸이 위에 그려져 가로 스크롤 시 날짜를 덮는다.
+                        메모 말풍선(z-30)보다는 아래여야 하므로 z-20으로 둔다. */}
                     <td
-                      className={`sticky left-0 p-1.5 text-center font-mono font-black border-r transition-colors ${
+                      className={`sticky left-0 z-20 p-1.5 text-center font-mono font-black border-r transition-colors ${
                         rowActive ? "bg-blue-50 text-[#2E6DB4]" : "bg-white text-gray-600"
                       }`}
                     >
