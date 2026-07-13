@@ -2,6 +2,7 @@
 import React, { Suspense, lazy } from "react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { AppSessionGuard } from "./components/AppSessionGuard";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const BranchConfirmPage = lazy(() => import("./pages/BranchConfirmPage"));
@@ -20,6 +21,8 @@ function PageFallback() {
 export default function App() {
   return (
     <AuthProvider>
+      {/* 새 배포 갈아끼우기 + 유휴 자동 로그아웃. 화면을 그리지 않고 뒤에서 지킨다. */}
+      <AppSessionGuard />
       <HashRouter>
         <Suspense fallback={<PageFallback />}>
         <Routes>
