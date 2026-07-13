@@ -50,17 +50,15 @@ interface ExpenseGridProps {
 
 const VARIANT_STYLE: Record<
   Variant,
-  { dot: string; sumText: string; sumBg: string; cellOutline: string; headHighlight: string }
+  { sumText: string; sumBg: string; cellOutline: string; headHighlight: string }
 > = {
   cash: {
-    dot: "bg-amber-500",
     sumText: "text-amber-600",
     sumBg: "bg-amber-50",
     cellOutline: "outline-2 -outline-offset-2 outline-amber-500",
     headHighlight: "bg-amber-100 text-amber-800"
   },
   card: {
-    dot: "bg-blue-500",
     sumText: "text-blue-600",
     sumBg: "bg-blue-50",
     cellOutline: "outline-2 -outline-offset-2 outline-blue-600",
@@ -148,7 +146,7 @@ export function ExpenseGrid({
   const cellWrap = (rowIndex: number, col: number) =>
     [
       "border-r border-b border-gray-300 relative min-w-0",
-      errorRows.has(rowIndex) ? "bg-rose-50" : "",
+      errorRows.has(rowIndex) ? "expense-row-error" : "",
       isActive(rowIndex, col) ? `outline ${style.cellOutline} z-10 bg-white` : ""
     ].join(" ");
 
@@ -157,9 +155,7 @@ export function ExpenseGrid({
       {/* 조작법은 표를 보는 순간 알아야 한다 — 작성방법 버튼을 눌러야 보이면 늦다. */}
       <SheetKeyHint />
       <div className="flex flex-wrap items-center justify-between gap-2" data-guide={guideKey}>
-        <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${style.dot}`} /> {title}
-        </h3>
+        <h3 className="text-sm font-black text-gray-800">{title}</h3>
         <span className={`text-xs font-extrabold ${style.sumText} ${style.sumBg} px-2.5 py-1 rounded-lg`}>
           합계: {formatNumber(sum)} 원
         </span>
@@ -197,7 +193,7 @@ export function ExpenseGrid({
                       rowActive
                         ? `${style.headHighlight} font-bold`
                         : errorRows.has(rowIndex)
-                          ? "bg-gray-50 text-rose-500 font-bold"
+                          ? "bg-gray-50 expense-rownum-error font-bold"
                           : "bg-gray-50 text-gray-400"
                     }`}
                   >
@@ -330,7 +326,7 @@ export function ExpenseGrid({
             <div
               key={rowIndex}
               className={`p-3 border rounded-xl space-y-2 relative ${
-                errorRows.has(rowIndex) ? "border-rose-400 bg-rose-50" : "border-gray-100 bg-gray-50"
+                errorRows.has(rowIndex) ? "expense-card-error" : "border-gray-100 bg-gray-50"
               }`}
             >
               <button
