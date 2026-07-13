@@ -515,7 +515,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                 <tr key={product.id} className="hover:bg-slate-50/70">
                   <td
                     style={{ left: 0, width: COL_CATEGORY_W, minWidth: COL_CATEGORY_W }}
-                    className="sticky z-10 bg-white p-1 whitespace-nowrap border-r border-b border-black/10"
+                    className="sticky z-20 bg-white p-1 whitespace-nowrap border-r border-b border-black/10"
                   >
                     <span className={`inline-flex min-w-[52px] justify-center rounded-lg border px-1.5 py-0.5 text-[11px] font-black ${getLiquorCategoryClass(product.classification)}`}>{product.classification}</span>
                   </td>
@@ -524,7 +524,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                       태블릿에는 hover가 없어 지울 방법이 통째로 사라진다. 늘 보이고 Tab으로도 닿아야 한다. */}
                   <td
                     style={{ left: LEFT_ITEM, width: COL_ITEM_W, minWidth: COL_ITEM_W }}
-                    className="sticky z-10 bg-white p-1 font-black text-gray-900 border-r border-b border-black/10"
+                    className="sticky z-20 bg-white p-1 font-black text-gray-900 border-r border-b border-black/10"
                   >
                     <div className="flex items-center gap-1">
                       <span className="block flex-1 truncate" title={product.itemName}>{product.itemName}</span>
@@ -541,7 +541,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   </td>
                   <td
                     style={{ left: LEFT_COST, width: COL_COST_W, minWidth: COL_COST_W }}
-                    className="sticky z-10 bg-white p-0 border-r border-b border-black/10"
+                    className="sticky z-20 bg-white p-0 border-r border-b border-black/10"
                   >
                     <input
                       value={costValue ? formatWithCommas(costValue) : ""}
@@ -555,7 +555,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   </td>
                   <td
                     style={{ left: LEFT_SALE, width: COL_SALE_W, minWidth: COL_SALE_W }}
-                    className="sticky z-10 bg-white p-0 border-r border-b border-black/10"
+                    className="sticky z-20 bg-white p-0 border-r border-b border-black/10"
                   >
                     <input
                       value={saleValue ? formatWithCommas(saleValue) : ""}
@@ -570,7 +570,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   {/* 마진률 — 자동 계산. 판매가가 없으면 계산할 수 없으므로 비워 둔다. */}
                   <td
                     style={{ left: LEFT_MARGIN, width: COL_MARGIN_W, minWidth: COL_MARGIN_W }}
-                    className={`sticky z-10 p-1 text-center font-mono font-black border-r border-b border-black/10 ${
+                    className={`sticky z-20 p-1 text-center font-mono font-black border-r border-b border-black/10 ${
                       margin === null ? "bg-white text-gray-300" : margin < 0 ? "bg-rose-50 text-rose-700" : "bg-white text-slate-700"
                     }`}
                   >
@@ -579,7 +579,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   {/* 월초 재고 — 이 달 시작 시점. 오른쪽으로 입고를 더하고 판매를 빼면 그날의 재고가 된다. */}
                   <td
                     style={{ left: LEFT_PREV, width: COL_PREV_W, minWidth: COL_PREV_W }}
-                    className="liquor-stock-alice-green sticky z-10 p-1 text-center font-mono font-black border-r-2 border-r-slate-900 border-b border-b-black/10"
+                    className="liquor-stock-alice-green sticky z-20 p-1 text-center font-mono font-black border-r-2 border-r-slate-900 border-b border-b-black/10"
                   >
                     {stockBeforeDate(product.id, sheetAnchorDate)}
                   </td>
