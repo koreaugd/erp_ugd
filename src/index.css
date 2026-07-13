@@ -3514,3 +3514,17 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 .branch-redesign .pay-chip-card {
   background: var(--branch-honey) !important;
 }
+
+/* 지출 시트에서 금액이 빠진 행을 빨갛게 짚어주는 표시.
+   bg-rose-50 으로 칠하면 위쪽 디자인 규칙이 그걸 연한 청회색(alice)으로 덮어써서
+   "제출 전에 누락을 잡아라"는 장치가 화면에서 사라진다. 전용 클래스로 못 박는다. */
+.branch-redesign .expense-row-error {
+  background: #fee2e2 !important;
+}
+.branch-redesign .expense-card-error {
+  background: #fee2e2 !important;
+  border-color: #dc2626 !important;
+}
+.branch-redesign .expense-rownum-error {
+  color: #b91c1c !important;
+}

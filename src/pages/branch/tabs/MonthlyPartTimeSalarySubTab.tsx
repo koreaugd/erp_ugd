@@ -487,7 +487,7 @@ export function MonthlyPartTimeSalarySubTab({
       extra
     ].join(" ");
   // sheet-cell-input: index.css에서 전역 input 배경/테두리 !important를 ID 특이성으로 되돌리는 클래스.
-  const cellInput = "sheet-cell-input w-full h-9 px-2 text-xs focus:outline-none";
+  const cellInput = "sheet-cell-input w-full h-8 px-1.5 text-xs focus:outline-none";
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
@@ -525,22 +525,23 @@ export function MonthlyPartTimeSalarySubTab({
       {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
       <div className="relative">
       <SheetKeyHint />
-      <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
+      {/* 인원이 많으면 표가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
+      <div className="max-h-[62vh] overflow-auto rounded-2xl border border-gray-100 shadow-xs">
         <table className="w-full text-left text-xs border-collapse font-medium min-w-[1330px]">
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
-              <th className="py-3 px-3 w-20 whitespace-nowrap">성명 (사원)</th>
-              <th className="py-3 px-3 w-32 whitespace-nowrap">주민등록번호</th>
-              <th className="py-3 px-2 w-28 whitespace-nowrap">입사일자</th>
-              <th className="py-3 px-3 w-20 whitespace-nowrap">은행</th>
-              <th className="py-3 px-3 w-32 whitespace-nowrap">입금 계좌번호</th>
-              <th className="py-3 px-3 w-20 text-right whitespace-nowrap">시급 (원)</th>
-              <th className="py-3 px-2 w-16 text-right whitespace-nowrap">누적시간</th>
-              <th className="py-3 px-2 w-20 text-right whitespace-nowrap">팁/기타</th>
-              <th className="py-3 px-3 w-24 text-right whitespace-nowrap">기본급여</th>
-              <th className="py-3 px-3 w-28 whitespace-nowrap">근무일정 (출근일)</th>
-              <th className="py-3 px-3 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
-              <th className="py-3 px-3 w-20 text-center whitespace-nowrap">제외</th>
+              <th className="py-2 px-2 w-20 whitespace-nowrap">성명 (사원)</th>
+              <th className="py-2 px-2 w-32 whitespace-nowrap">주민등록번호</th>
+              <th className="py-2 px-2 w-28 whitespace-nowrap">입사일자</th>
+              <th className="py-2 px-2 w-20 whitespace-nowrap">은행</th>
+              <th className="py-2 px-2 w-32 whitespace-nowrap">입금 계좌번호</th>
+              <th className="py-2 px-2 w-20 text-right whitespace-nowrap">시급 (원)</th>
+              <th className="py-2 px-2 w-16 text-right whitespace-nowrap">누적시간</th>
+              <th className="py-2 px-2 w-20 text-right whitespace-nowrap">팁/기타</th>
+              <th className="py-2 px-2 w-24 text-right whitespace-nowrap">기본급여</th>
+              <th className="py-2 px-2 w-28 whitespace-nowrap">근무일정 (출근일)</th>
+              <th className="py-2 px-2 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
+              <th className="py-2 px-2 w-20 text-center whitespace-nowrap">제외</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
@@ -553,7 +554,7 @@ export function MonthlyPartTimeSalarySubTab({
             ) : (
               visibleSalaries.map((sal, rowIndex) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
-                  <td className="border-r border-b border-black/10 py-3 px-3 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
+                  <td className="border-r border-b border-black/10 py-1.5 px-2 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
                     {sal.name}
                   </td>
                   <td className={cellTd(rowIndex, COL_RESIDENT)}>
@@ -628,7 +629,7 @@ export function MonthlyPartTimeSalarySubTab({
                       className={`${cellInput} font-mono font-black text-right text-emerald-700`}
                     />
                   </td>
-                  <td className="border-r border-b border-black/10 py-2.5 px-1.5 text-right font-mono font-black text-gray-700">
+                  <td className="border-r border-b border-black/10 py-1.5 px-1.5 text-right font-mono font-black text-gray-700">
                     {formatNumber(Number(sal.calculatedSalary) || 0)}원
                   </td>
                   <td className={cellTd(rowIndex, COL_ATTENDANCE)}>
@@ -652,7 +653,7 @@ export function MonthlyPartTimeSalarySubTab({
                       className={`${cellInput} font-medium placeholder-gray-300`}
                     />
                   </td>
-                  <td className="border-b border-black/10 py-2.5 px-2 text-center">
+                  <td className="border-b border-black/10 py-1.5 px-2 text-center">
                     <button
                       type="button"
                       tabIndex={-1}
