@@ -254,10 +254,13 @@ export const dailySettleGuideSteps: GuideStep[] = [
     ),
   },
   {
-    // 현금 지출 내역 섹션 헤더. 입력 행을 가리지 않게 위(above)에 붙인다.
+    // 현금 지출 내역 섹션 헤더. 아래(below)에 붙인다.
+    // above로 두면 카드 밖 위쪽(매출 카드)까지 튀어 올라가 날짜·금고잔액 안내와 겹친다.
+    // below면 자기 카드 안에 머무르고, 지출 카드는 좌우 2열이라 카드 지출 안내와도 안 부딪힌다.
+    // (좁은 화면에서 두 카드가 세로로 쌓일 때도 아래쪽 카드 안내가 위 카드를 덮지 않는다.)
     anchor: "daily-cash-expense",
     title: "현금 지출 내역",
-    placement: "above",
+    placement: "below",
     width: 420,
     body: (
       <>
@@ -271,9 +274,10 @@ export const dailySettleGuideSteps: GuideStep[] = [
     ),
   },
   {
+    // 현금 지출 안내와 같은 이유로 below. (위 주석 참고)
     anchor: "daily-card-expense",
     title: "카드 지출 내역",
-    placement: "above",
+    placement: "below",
     width: 420,
     body: (
       <>
@@ -302,43 +306,51 @@ export const dailySettleGuideSteps: GuideStep[] = [
 
 export const orderGuideSteps: GuideStep[] = [
   {
-    anchor: "order-vendor-category",
-    title: "대분류를 먼저 선택하세요",
-    placement: "below",
-    // 폭은 가장 긴 줄에 맞춘다. 넉넉히 잡으면 오른쪽이 텅 빈 채로 화면만 가린다.
-    width: 350,
-    body: (
-      <p className="lg:whitespace-nowrap">
-        <b className="font-black text-rose-700">대분류를 먼저 고른 뒤</b> 오른쪽에 거래처명을 적습니다.
-      </p>
-    ),
-  },
-  {
-    anchor: "order-vendor-name",
-    title: "거래처명 적기",
+    // 대분류 칸과 거래처명 칸을 따로 가리키던 말풍선 둘을 하나로 합쳤다.
+    // 둘은 같은 입력 줄에 붙어 있어 말풍선끼리 겹쳤고, 어차피 왼→오 한 흐름이라 나눌 이유가 없었다.
+    // 앵커는 입력 줄 전체(선택 → 거래처명 → 추가)라 빨간 테두리가 그 줄을 통째로 감싼다.
+    // above: 아래로 내리면 바로 밑 거래처 칩 목록을 덮는다. 위쪽은 빈 여백이라 가릴 것이 없다.
+    anchor: "order-vendor-add",
+    title: "거래처 추가하기",
     placement: "above",
-    width: 400,
+    // 폭은 가장 긴 줄(둘째 줄)에 맞춘다. 넉넉히 잡으면 오른쪽이 텅 빈 채로 화면만 가린다.
+    // 글머리표 들여쓰기(pl-4)만큼 예전 400px보다 넓게 잡았다.
+    width: 430,
     body: (
-      <p className="lg:whitespace-nowrap">
-        여러 곳을 한 번에 넣으려면 <b className="font-black text-rose-700">쉼표나 줄바꿈</b>으로 구분해 적으세요.
-      </p>
+      <Bullets
+        items={[
+          <span className="lg:whitespace-nowrap">
+            <b className="font-black text-rose-700">대분류를 먼저 고른 뒤</b> 오른쪽에 거래처명을 적습니다.
+          </span>,
+          <span className="lg:whitespace-nowrap">
+            여러 곳을 한 번에 넣으려면 <b className="font-black text-rose-700">쉼표나 줄바꿈</b>으로 구분해 적으세요.
+          </span>
+        ]}
+      />
     ),
   },
   {
     anchor: "order-report-category",
     title: "대분류별 거래처 보기 · 지우기",
+    // above다. 다른 배치는 모두 아래 발주내역 표의 말풍선(inside-top-right)과 같은 자리로 떨어진다.
+    //   - below: 곧장 표 위로 떨어져 겹친다.
+    //   - right: 오른쪽 공간이 모자라면 GuideCallouts가 below로 폴백한다(태블릿 폭에서도 걸린다) — 결국 같은 충돌.
+    // 예전에 above가 위쪽 '거래처 추가' 카드의 대분류 안내와 겹쳤지만, 그 안내는 거래처명 안내와 합쳐져
+    // 입력 줄 위(order-vendor-add)로 올라갔다. 이제 이 말풍선이 올라오는 칩 목록 자리는 비어 있다.
     placement: "above",
     width: 370,
+    // 줄바꿈은 sm부터 막는다(lg가 아니라). 위로 올라가는 말풍선이라 줄이 늘면 그만큼 더 높이 올라가
+    // 입력 줄 위의 order-vendor-add 말풍선에 닿는다. 세 줄로 묶어두면 올라가는 높이가 고정된다.
     body: (
       <Bullets
         items={[
-          <span className="lg:whitespace-nowrap">
+          <span className="sm:whitespace-nowrap">
             분류를 선택하면 <b className="font-black text-rose-700">거래처 목록이 보입니다.</b>
           </span>,
-          <span className="lg:whitespace-nowrap">
+          <span className="sm:whitespace-nowrap">
             상단에 있는 거래처 이름 옆 <b className="font-black text-rose-700">X</b>로 지웁니다.
           </span>,
-          <span className="lg:whitespace-nowrap">
+          <span className="sm:whitespace-nowrap">
             거래처를 삭제해도 <b className="font-black text-rose-700">이미 입력한 발주금액은 남습니다.</b>
           </span>
         ]}
