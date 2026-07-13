@@ -481,14 +481,15 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
           한 줄에 붙이고 글자·높이를 표에 맞춰 줄였다(주류재고 상단과 같은 규칙). */}
       <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
         <h3 className="text-sm font-black text-gray-900 w-fit">거래처 추가</h3>
-        <div className="flex flex-wrap items-center gap-1.5">
+        {/* 안내 말풍선은 대분류·거래처명 칸을 따로 가리키지 않고 이 줄 전체를 하나로 가리킨다.
+            둘로 나누면 말풍선이 서로 겹치고, 어차피 "왼쪽부터 오른쪽으로" 한 흐름이라 나눌 이유가 없다. */}
+        <div className="flex flex-wrap items-center gap-1.5" data-guide="order-vendor-add">
           {/* 고른 대분류의 색이 그대로 칸에 들어간다 — 아래 거래처 칩·표 머리글과 같은 색이라 눈으로 이어진다. */}
           <select
             value={vendorCategory}
             onChange={(e) => setVendorCategory(e.target.value as OrderCategory | "")}
             disabled={!loaded}
             aria-label="대분류"
-            data-guide="order-vendor-category"
             className={`h-8 w-[124px] rounded-lg px-2 text-[11px] font-extrabold ${
               vendorCategory ? getOrderCategoryHeaderClass(vendorCategory) : "border border-gray-200 bg-white text-gray-400"
             }`}
@@ -496,7 +497,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
             <option value="">선택</option>
             {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <label className="relative group" data-guide="order-vendor-name">
+          <label className="relative group">
             {/* textarea여야 한다 — input은 붙여넣을 때 줄바꿈을 지워버려 여러 곳 한 번에 넣기가 깨진다. */}
             <textarea
               value={vendorText}
