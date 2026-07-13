@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, 
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { dailySettleGuideSteps } from "../helpers/guideSteps";
 import { formatNumber } from "../../../utils/formatNumber";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
@@ -1662,7 +1663,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       <GuideCallouts open={dailyGuideOpen} steps={dailySettleGuideSteps} onClose={() => setDailyGuideOpen(false)} />
 
       {/* Date & Writer Row */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6" id="settle-header-controls">
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4" id="settle-header-controls">
         <div className="grid grid-cols-2 gap-4 grow">
           <div className="flex flex-col space-y-1.5 relative" data-guide="daily-settle-date">
             <div className="flex items-center justify-between">
@@ -1683,7 +1684,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
               <button
                 type="button"
                 onClick={() => setShowStatusCalendar(prev => !prev)}
-                className="px-4 py-2.5 border border-gray-200 rounded-xl font-mono text-sm text-gray-700 bg-gray-50/50 hover:bg-zinc-100/50 hover:border-gray-300 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all cursor-pointer w-full text-left flex justify-between items-center"
+                className="h-9 px-3 border border-gray-200 rounded-xl font-mono text-sm text-gray-700 bg-gray-50/50 hover:bg-zinc-100/50 hover:border-gray-300 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all cursor-pointer w-full text-left flex justify-between items-center"
               >
                 <span>{settleDate || "날짜를 선택해 주세요"}</span>
                 <Calendar className="w-4 h-4 text-gray-400" />
@@ -1720,10 +1721,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             </span>
           </div>
         ) : (
-          <div className="px-4 py-3 bg-zinc-50 border border-zinc-200 rounded-2xl flex items-center gap-2 text-xs text-zinc-700 leading-normal max-w-sm md:ml-auto">
-            <Info className="w-4 h-4 text-zinc-500 shrink-0" />
-            <span>선택하신 날짜({settleDate})로 오늘 마감 작성을 새롭게 수행하십시오.</span>
-          </div>
+          // 큰 회색 박스로 감쌀 만한 내용이 아니다 — 한 줄 안내다.
+          <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 md:ml-auto">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            {settleDate} 마감을 새로 작성합니다.
+          </span>
         )}
       </div>
 
@@ -1827,13 +1829,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           {!isHeadOffice && (
             <>
           {/* COMPACT SALES ROW (1 Line) */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="sales-section">
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm sales-section-head" id="sales-section">
+        {/* h3는 감싸지 말 것 — index.css가 `#sales-section > h3` 직계자식 선택자로 pill 모양을 입힌다.
+            합계는 형제로 나란히 두고, 줄 정렬만 부모 flex가 맡는다(지출 시트와 같은 규칙: 합계는 제목 줄에). */}
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <CircleDollarSign className="w-4 h-4 text-[#2E6DB4]" />
           매출
         </h3>
+        <span className="daily-total-chip">
+          당일 총매출 <b className="ml-1 font-mono text-base">{formatNumber(totalSales)}</b> 원
+        </span>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="compact-sales-grid">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3" id="compact-sales-grid">
           {[
             { key: "cardSales" as const, label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "" },
             { key: "cashSales" as const, label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "" },
@@ -1841,8 +1848,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             { key: undefined, label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
             { key: "cashBalance" as const, label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
           ].map((field, idx) => (
-            <div key={idx} className="flex flex-col space-y-1.5" data-guide={field.key === "cashBalance" ? "daily-cash-balance" : undefined}>
-              <span className="text-xs font-semibold text-gray-500">{field.label}</span>
+            <div key={idx} className="flex flex-col space-y-1" data-guide={field.key === "cashBalance" ? "daily-cash-balance" : undefined}>
+              <span className="text-[11px] font-bold text-gray-400">{field.label}</span>
               <input
                 type="text"
                 value={formatWithCommas(field.value)}
@@ -1852,24 +1859,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 }}
                 id={field.key ? `settle-${field.key}-input` : undefined}
                 placeholder={field.placeholder}
-                className={`w-full px-3 py-2 border text-sm text-right font-mono font-bold rounded-xl bg-gray-50/30 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
+                className={`w-full h-9 px-3 border text-sm text-right font-mono font-bold rounded-xl bg-gray-50/30 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
                   validationErrors && field.key && hasValidationField(field.key) ? "branch-validation-error" : "border-gray-200"
                 }`}
               />
             </div>
           ))}
-        </div>
-
-        {/* Dynamic Total Sum Card */}
-        <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-xs font-extrabold text-gray-400">네 가지 항목 합계</span>
-          <div className="text-right">
-            <span className="text-sm font-semibold text-gray-400 mr-2">당일 총매출:</span>
-            <span className="text-lg font-black font-mono text-[#2E6DB4] bg-[#D6E4F0]/40 px-3 py-1 rounded-xl">
-              {formatNumber(totalSales)}
-            </span>
-            <span className="text-xs font-bold text-[#2E6DB4] ml-1">원</span>
-          </div>
         </div>
       </div>
 
@@ -1896,92 +1891,42 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       </div>
 
       {/* CASH SETTLE/CLOSING SECTION (현금마감) */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="cash-closing-section">
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="cash-closing-section">
         <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
           <Coins className="w-4 h-4 text-[#2E6DB4]" />
           현금마감 정산 (시재 일치 점검)
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-zinc-50/50 p-5 rounded-2xl border border-gray-150">
-          {/* 전일현금 */}
-          <div className="flex flex-col space-y-1.5 bg-white p-3 rounded-xl border border-gray-100">
-            <span className="text-[11px] font-bold text-gray-400">전일현금 (이월현금) [자동조회]</span>
-            <div className="py-1.5 text-right font-mono font-black text-xs text-gray-700">
-              {formatNumber(Number(prevDayCash) || 0)} 원
+        {/* 입력 칸이 하나도 없는 순수 계산 표시다. 카드 7장으로 쪼개 두니 300px를 쓰면서도
+            정작 "전일 + 매출 − 지출 = 이론값, 실사와 얼마나 다른가" 라는 흐름이 안 보였다.
+            식을 그대로 한 줄로 편다. 숫자와 계산은 그대로다.
+            차이는 마감을 막는 사건이라 색으로 크게 짚어준다(Tailwind 색은 디자인 CSS가 덮어써서 전용 클래스를 쓴다). */}
+        {(() => {
+          const theory = (Number(prevDayCash) || 0) + (Number(cashSales) || 0) - cashExpensesSum;
+          const diffVal = (Number(cashBalance) || 0) - theory;
+          return (
+            <div className="cash-flow-row">
+              <span>전일현금 <b className="ml-1 font-mono text-sm">{formatNumber(Number(prevDayCash) || 0)}</b></span>
+              <span className="cash-flow-op">+</span>
+              <span>현금매출 <b className="ml-1 font-mono text-sm">{formatNumber(Number(cashSales) || 0)}</b></span>
+              <span className="cash-flow-op">−</span>
+              <span>현금지출 <b className="ml-1 font-mono text-sm">{formatNumber(cashExpensesSum)}</b></span>
+              <span className="cash-flow-op">=</span>
+              <span className="cash-flow-box">이론상 잔액 <b className="ml-1 font-mono text-sm">{formatNumber(theory)}</b> 원</span>
+              <span className="cash-flow-box">금고 실사 <b className="ml-1 font-mono text-sm">{formatNumber(Number(cashBalance) || 0)}</b> 원</span>
+              {diffVal === 0 ? (
+                <span className="cash-flow-box cash-flow-diff-ok inline-flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" /> 차이 0원 · 일치
+                </span>
+              ) : (
+                <span className="cash-flow-box cash-flow-diff-bad">
+                  차이 <b className="ml-1 font-mono text-sm">{diffVal > 0 ? "+" : ""}{formatNumber(diffVal)}</b> 원 · {diffVal > 0 ? "과잉" : "부족"}
+                </span>
+              )}
+              <span className="ml-auto text-[11px] font-bold text-gray-400">계좌이체 {formatNumber(Number(transferSales) || 0)}원</span>
             </div>
-          </div>
-
-          {/* 오늘현금매출 */}
-          <div className="flex flex-col space-y-1.5 bg-white p-3 rounded-xl border border-gray-100">
-            <span className="text-[11px] font-bold text-gray-400">오늘 현금매출 (+)</span>
-            <div className="py-1.5 text-right font-mono font-black text-xs text-gray-700">
-              {formatNumber(Number(cashSales) || 0)} 원
-            </div>
-          </div>
-
-          {/* 오늘현금지출 */}
-          <div className="flex flex-col space-y-1.5 bg-white p-3 rounded-xl border border-gray-100">
-            <span className="text-[11px] font-bold text-gray-400">오늘 현금지출 (-)</span>
-            <div className="py-1.5 text-right font-mono font-black text-xs text-rose-500">
-              {formatNumber(cashExpensesSum)} 원
-            </div>
-          </div>
-
-          {/* 오늘계좌이체 */}
-          <div className="flex flex-col space-y-1.5 bg-white p-3 rounded-xl border border-gray-100">
-            <span className="text-[11px] font-bold text-gray-400">오늘 계좌이체</span>
-            <div className="py-1.5 text-right font-mono font-black text-xs text-gray-600">
-              {formatNumber(Number(transferSales) || 0)} 원
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-[#F8FAFC] p-4 rounded-xl border border-dotted border-gray-200">
-          {/* 이론상잔액 */}
-          <div className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-gray-100 font-bold">
-            <span className="text-xs font-bold text-gray-500">이론상 잔액</span>
-            <span className="text-sm font-extrabold font-mono text-gray-800">
-              {formatNumber((Number(prevDayCash) || 0) + (Number(cashSales) || 0) - cashExpensesSum)} 원
-            </span>
-          </div>
-
-          {/* 금고실사현금 (실제) */}
-          <div className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-gray-100 font-bold">
-            <span className="text-xs font-bold text-[#2E6DB4]">금고실사현금 (매출 입력란 기준)</span>
-            <span className="text-sm font-extrabold font-mono text-[#2E6DB4]">
-              {formatNumber(Number(cashBalance) || 0)} 원
-            </span>
-          </div>
-
-          {/* 차이 */}
-          <div className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-gray-100 font-bold">
-            <span className="text-xs font-bold text-gray-500">차이 (실사 - 이론)</span>
-            {(() => {
-              const theory = (Number(prevDayCash) || 0) + (Number(cashSales) || 0) - cashExpensesSum;
-              const actual = Number(cashBalance) || 0;
-              const diffVal = actual - theory;
-              if (diffVal === 0) {
-                return (
-                  <span className="text-xs font-black text-emerald-600 flex items-center gap-1">
-                    <CheckCircle className="w-3.5 h-3.5 animate-pulse" /> 0원 (일치)
-                  </span>
-                );
-              } else if (diffVal > 0) {
-                return (
-                  <span className="text-xs font-black text-indigo-600">
-                    +{formatNumber(diffVal)} 원 (과잉)
-                  </span>
-                );
-              } else {
-                return (
-                  <span className="text-xs font-black text-rose-600">
-                    {formatNumber(diffVal)} 원 (부족)
-                  </span>
-                );
-              }
-            })()}
-          </div>
-        </div>
+          );
+        })()}
 
         {/* 차이 사유 기입 피드백 */}
         {(() => {
@@ -1990,11 +1935,9 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           const diffVal = actual - theory;
           if (diffVal !== 0) {
             return (
-              <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200/60 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs text-amber-800 font-extrabold">
-                  <span className="text-base">⚠️</span>
-                  <span>이론상 잔액과 금고 실사 현금이 일치하지 않습니다. 불일치 사유를 아래에 아주 자세히 기재해주십시오.</span>
-                </div>
+              // 위 계산식이 이미 차이를 빨갛게 짚어준다 — 같은 말을 문단으로 또 하지 않는다. 사유 칸만 남긴다.
+              <div className="space-y-1.5">
+                <span className="text-xs font-extrabold text-gray-500">불일치 사유 (필수)</span>
                 <textarea
                   placeholder="예: 카드 단말기 오취소 후 현금 재결제 처리, 혹은 거스름돈 착오로 인한 시재 부족 발생 등 사유 기록"
                   value={cashDiffReason}
@@ -2019,7 +1962,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           )}
 
       {/* STAFF HOURS TABLE SECTION */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="staff-attendance-section">
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="staff-attendance-section">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
           <div>
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-2 w-fit" data-guide="daily-staff-limit">
@@ -2085,27 +2028,24 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
         {isHeadOffice && (
           <>
-          <div className="overflow-x-auto pt-5">
-            <table className="w-full text-left border-collapse text-xs min-w-[1160px]">
-              <thead>
+          {/* 칩은 표 바로 위에. 표 컨테이너가 overflow-auto라 그 안에 두면 잘린다 — 바깥 relative 층에 얹는다. */}
+          <div className="relative pt-4">
+          <SheetKeyHint />
+          <div className="max-h-[60vh] overflow-auto">
+            <table className="w-full text-left border-collapse text-xs min-w-[1160px] whitespace-nowrap">
+              <thead className="sticky top-0 z-10">
                 <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                  <th className="py-3 px-2 w-20">이름</th>
-                  <th className="py-3 px-2 w-36">근무지점</th>
-                  <th className="py-3 px-2 w-24 text-center">휴무</th>
-                  <th className="py-3 px-1 w-16">기준</th>
-                  <th className="py-3 px-2 w-24 relative">
-                    {/* 시트 조작법 — 실제로 타이핑을 시작하는 업무시작 칸 바로 위에 띄운다. */}
-                    <span className="absolute -top-4 left-2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
-                      ↑ ↓ ← → · Tab · Enter 로 칸 이동
-                    </span>
-                    업무시작
-                  </th>
-                  <th className="py-3 px-2 w-24">업무마감</th>
-                  <th className="py-3 px-1 w-14 text-right">근무</th>
-                  <th className="py-3 px-1 w-14 text-right">초과</th>
-                  <th className="py-3 px-2 min-w-[280px]">업무내용</th>
-                  <th className="py-3 px-2 w-44">초과 사유</th>
-                  <th className="py-3 px-2 w-10 text-center">삭제</th>
+                  <th className="py-2 px-2 w-20">이름</th>
+                  <th className="py-2 px-2 w-36">근무지점</th>
+                  <th className="py-2 px-2 w-24 text-center">휴무</th>
+                  <th className="py-2 px-1 w-16">기준</th>
+                  <th className="py-2 px-2 w-24">업무시작</th>
+                  <th className="py-2 px-2 w-24">업무마감</th>
+                  <th className="py-2 px-1 w-14 text-right">근무</th>
+                  <th className="py-2 px-1 w-14 text-right">초과</th>
+                  <th className="py-2 px-2 min-w-[280px]">업무내용</th>
+                  <th className="py-2 px-2 w-44">초과 사유</th>
+                  <th className="py-2 px-2 w-10 text-center">삭제</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
@@ -2125,11 +2065,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     return (
                       <tr key={idx} id={`office-work-row-${idx}`} className="hover:bg-gray-50/50">
                         {isExtraSegment ? (
-                          <td className="py-3.5 px-2 bg-slate-50/60 border-r border-slate-100 text-[10px] font-black text-slate-400 whitespace-nowrap">
+                          <td className="py-1.5 px-2 bg-slate-50/60 border-r border-slate-100 text-[10px] font-black text-slate-400 whitespace-nowrap">
                             추가 구간
                           </td>
                         ) : (
-                          <td className="py-3.5 px-2 font-bold text-gray-800 whitespace-nowrap">
+                          <td className="py-1.5 px-2 font-bold text-gray-800 whitespace-nowrap">
                             <div className="flex items-center gap-2">
                               <span>{s.name}</span>
                               <button
@@ -2142,7 +2082,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             </div>
                           </td>
                         )}
-                        <td className="py-3.5 px-2">
+                        <td className="py-1.5 px-2">
                           <select
                             {...staffCellProps(idx, 1)}
                             aria-label={`${s.name} 근무지점`}
@@ -2162,12 +2102,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                         </td>
                         {isExtraSegment ? (
                           <>
-                            <td className="py-3.5 px-2 bg-slate-50/60 text-center text-[10px] font-black text-slate-300">-</td>
-                            <td className="py-3.5 px-1 bg-slate-50/60 text-center font-mono text-[10px] font-black text-slate-300">0h</td>
+                            <td className="py-1.5 px-2 bg-slate-50/60 text-center text-[10px] font-black text-slate-300">-</td>
+                            <td className="py-1.5 px-1 bg-slate-50/60 text-center font-mono text-[10px] font-black text-slate-300">0h</td>
                           </>
                         ) : (
                           <>
-                            <td className="py-3.5 px-2 text-center">
+                            <td className="py-1.5 px-2 text-center">
                               <label className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-black text-gray-600 cursor-pointer">
                                 <input
                                   {...staffCellProps(idx, 2)}
@@ -2183,7 +2123,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                                 휴무
                               </label>
                             </td>
-                            <td className="py-3.5 px-1">
+                            <td className="py-1.5 px-1">
                               <select
                                 {...staffCellProps(idx, 3)}
                                 aria-label={`${s.name} 기준 시간`}
@@ -2204,7 +2144,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             </td>
                           </>
                         )}
-                        <td className="py-3.5 px-2">
+                        <td className="py-1.5 px-2">
                           <input
                             {...staffCellProps(idx, 4)}
                             aria-label={`${s.name} 업무시작`}
@@ -2221,7 +2161,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockIn`] ? "branch-validation-error" : "border-gray-200"}`}
                           />
                         </td>
-                        <td className="py-3.5 px-2">
+                        <td className="py-1.5 px-2">
                           <input
                             {...staffCellProps(idx, 5)}
                             aria-label={`${s.name} 업무마감`}
@@ -2238,16 +2178,16 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             className={`w-20 px-2 py-1.5 border rounded-lg font-mono text-xs disabled:bg-gray-100 ${timeErrors[`${idx}-clockOut`] ? "branch-validation-error" : "border-gray-200"}`}
                           />
                         </td>
-                        <td className="py-3.5 px-1 text-right font-mono font-black text-sky-700 relative">
+                        <td className="py-1.5 px-1 text-right font-mono font-black text-sky-700 relative">
                           {s.workHours || 0}h
                           {s.workHours > 13 && <span className="absolute z-10 right-0 top-10 whitespace-nowrap rounded bg-rose-600 px-2 py-1 text-[10px] font-bold text-white shadow">근무시간이 맞는지 확인해 주세요.</span>}
                         </td>
-                        <td className="py-3.5 px-1 text-right font-mono font-black">
+                        <td className="py-1.5 px-1 text-right font-mono font-black">
                           <span className={s.overtime > 0 ? "text-emerald-600" : s.overtime < 0 ? "text-rose-500" : "text-gray-400"}>
                             {s.overtime > 0 ? "+" : ""}{s.overtime || 0}h
                           </span>
                         </td>
-                        <td className="py-3.5 px-2">
+                        <td className="py-1.5 px-2">
                           <input
                             {...staffCellProps(idx, 8)}
                             aria-label={`${s.name} 업무내용`}
@@ -2264,7 +2204,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             }`}
                           />
                         </td>
-                        <td className="py-3.5 px-2">
+                        <td className="py-1.5 px-2">
                           <input
                             {...staffCellProps(idx, 9)}
                             aria-label={`${s.name} 초과 사유`}
@@ -2282,7 +2222,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                             }`}
                           />
                         </td>
-                        <td className="py-3.5 px-2 text-center">
+                        <td className="py-1.5 px-2 text-center">
                           <button
                             type="button"
                             tabIndex={-1}
@@ -2299,6 +2239,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 )}
               </tbody>
             </table>
+          </div>
           </div>
           <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -2327,25 +2268,22 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         )}
 
         {!isHeadOffice && (
-        <div className="overflow-x-auto pt-5">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
+        // 칩은 표 바로 위에. 표 컨테이너가 overflow-auto라 그 안에 두면 잘린다 — 바깥 relative 층에 얹는다.
+        <div className="relative pt-4">
+        <SheetKeyHint />
+        <div className="max-h-[60vh] overflow-auto">
+          <table className="w-full text-left border-collapse text-xs min-w-[980px] whitespace-nowrap">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                <th className="py-3 px-2">이름 (성명)</th>
-                <th className="py-3 px-2">계약 구분</th>
-                <th className="py-3 px-2">기준 한도시간</th>
-                <th className="py-3 px-2 relative">
-                  {/* 시트 조작법 — 실제로 타이핑을 시작하는 출근 시간 칸 바로 위에 띄운다. */}
-                  <span className="absolute -top-4 left-2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
-                    ↑ ↓ ← → · Tab · Enter 로 칸 이동
-                  </span>
-                  출근 시간
-                </th>
-                <th className="py-3 px-2">퇴근 시간</th>
-                <th className="py-3 px-2">실 근무 시간</th>
-                <th className="py-3 px-2">초과 시간</th>
-                <th className="py-3 px-2 max-w-[200px]">초과 상세 사유 (오버타임 필요기입)</th>
-                <th className="py-3 px-2 w-10 text-center">삭제</th>
+                <th className="py-2 px-2">이름 (성명)</th>
+                <th className="py-2 px-2">계약 구분</th>
+                <th className="py-2 px-2">기준 한도시간</th>
+                <th className="py-2 px-2">출근 시간</th>
+                <th className="py-2 px-2">퇴근 시간</th>
+                <th className="py-2 px-2">실 근무 시간</th>
+                <th className="py-2 px-2">초과 시간</th>
+                <th className="py-2 px-2 max-w-[200px]">초과 상세 사유 (오버타임 필요기입)</th>
+                <th className="py-2 px-2 w-10 text-center">삭제</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-medium">
@@ -2363,10 +2301,10 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                   return (
                     <tr key={idx} className="hover:bg-gray-50/50">
                       {/* Name */}
-                      <td className="py-3.5 px-2 font-bold text-gray-800">{s.name}</td>
+                      <td className="py-1.5 px-2 font-bold text-gray-800">{s.name}</td>
 
                       {/* Division Dropdown */}
-                      <td className="py-3.5 px-2 relative">
+                      <td className="py-1.5 px-2 relative">
                         <select
                           {...staffCellProps(idx, 1)}
                           aria-label={`${s.name} 계약 구분`}
@@ -2385,7 +2323,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Standard Criterion Hours Dropdown */}
-                      <td className="py-3.5 px-2">
+                      <td className="py-1.5 px-2">
                         {s.division === "파트타이머" ? (
                           <span className="branch-parttime-standard-hours inline-block py-1.5 px-3 bg-gray-100 text-gray-400 font-mono text-center font-bold rounded-lg min-w-[75px]">
                             0h
@@ -2409,7 +2347,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Clock In */}
-                      <td className="py-3.5 px-2">
+                      <td className="py-1.5 px-2">
                         <input
                           {...staffCellProps(idx, 3)}
                           aria-label={`${s.name} 출근 시간`}
@@ -2425,7 +2363,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Clock Out */}
-                      <td className="py-3.5 px-2 relative">
+                      <td className="py-1.5 px-2 relative">
                         <input
                           {...staffCellProps(idx, 4)}
                           aria-label={`${s.name} 퇴근 시간`}
@@ -2441,7 +2379,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Work Hours calculated */}
-                        <td className="py-3.5 px-2 font-mono font-bold text-gray-600 relative">
+                        <td className="py-1.5 px-2 font-mono font-bold text-gray-600 relative">
                         <span className={`py-1 px-2.5 rounded-md ${s.workHours > 0 ? "bg-sky-100 text-sky-700" : "bg-gray-100 text-gray-600"}`}>
                           {s.workHours} h
                         </span>
@@ -2449,7 +2387,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Overtime (over / deficit) */}
-                      <td className="py-3.5 px-2">
+                      <td className="py-1.5 px-2">
                         {s.overtime > 0 ? (
                           <span className="branch-overtime-chip branch-overtime-positive py-1 px-2 bg-emerald-50 text-emerald-600 font-mono font-black rounded-md">
                             +{s.overtime} h
@@ -2466,7 +2404,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Overtime Reason */}
-                      <td className="py-3.5 px-2 max-w-[200px]">
+                      <td className="py-1.5 px-2 max-w-[200px]">
                         <input
                           {...staffCellProps(idx, 7)}
                           aria-label={`${s.name} 초과 상세 사유`}
@@ -2488,7 +2426,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
 
                       {/* Deletion control */}
-                      <td className="py-3.5 px-2 text-center">
+                      <td className="py-1.5 px-2 text-center">
                         <button
                           type="button"
                           tabIndex={-1}
@@ -2507,6 +2445,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
               )}
             </tbody>
           </table>
+        </div>
         </div>
         )}
       </div>

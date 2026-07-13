@@ -3514,3 +3514,72 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 .branch-redesign .pay-chip-card {
   background: var(--branch-honey) !important;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   일일마감정산 — 매출 섹션의 합계와 현금마감 계산식.
+
+   Tailwind 색 유틸(bg-rose-*, text-rose-* 등)은 위쪽 디자인 규칙이 전부 덮어쓴다.
+   차이 금액을 빨갛게 짚어주려면 전용 클래스로 못 박아야 한다.
+   ───────────────────────────────────────────────────────────── */
+
+/* 제목(h3)과 합계를 한 줄에 세운다.
+   h3를 div로 감싸면 안 된다 — `#sales-section > h3` 직계자식 선택자가 pill 모양을 입히기 때문. */
+.branch-redesign .sales-section-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px 16px;
+}
+.branch-redesign .sales-section-head > #compact-sales-grid {
+  grid-column: 1 / -1;
+}
+.branch-redesign .daily-total-chip {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  border: 1px solid rgba(33, 33, 33, 0.14);
+  border-radius: 10px;
+  /* 카드 배경을 값으로 복제하지 않는다 — 복제하면 카드 쪽 규칙이 바뀔 때 또 어긋난다.
+     투명하게 두면 카드 배경이 그대로 비쳐 언제나 정확히 같은 색이다. */
+  background: transparent !important;
+  color: var(--branch-black) !important;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+/* 현금마감 계산식 한 줄 */
+.branch-redesign .cash-flow-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(33, 33, 33, 0.55);
+}
+.branch-redesign .cash-flow-op {
+  color: rgba(33, 33, 33, 0.35);
+}
+.branch-redesign .cash-flow-box {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(33, 33, 33, 0.14);
+  border-radius: 10px;
+  /* 카드 배경을 값으로 복제하지 않는다 — 투명하게 두면 카드 배경이 그대로 비쳐 언제나 정확히 같은 색이다. */
+  background: transparent !important;
+  padding: 5px 10px;
+  color: var(--branch-black) !important;
+}
+/* 차이 — 마감을 막는 사건이라 눈에 띄어야 한다. */
+.branch-redesign .cash-flow-diff-ok {
+  background: var(--branch-honey) !important;
+  border-color: rgba(33, 33, 33, 0.2) !important;
+  color: var(--branch-black) !important;
+}
+.branch-redesign .cash-flow-diff-bad {
+  background: #fee2e2 !important;
+  border-color: #dc2626 !important;
+  color: #b91c1c !important;
+}
