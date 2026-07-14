@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyPartTimeSalarySubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Trash2 } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -8,7 +8,9 @@ import { cleanNumeric, formatWithCommas, toDateInputValue } from "../helpers/for
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
-// 표에 보이는 순서 그대로의 셀 좌표. 성명(0)·기본급여(8)·제외버튼(11)은 입력 칸이 아니라 커서가 서지 않는다.
+// 표에 보이는 순서 그대로의 셀 좌표. 기본급여(8)는 자동 계산이라 커서가 서지 않는다.
+// 성명(0)은 수기로 추가한 행에서만 입력 칸이다 — 자동으로 만들어진 행의 이름은 직원명부에서 오므로 고칠 수 없다.
+const COL_NAME = 0;
 const COL_RESIDENT = 1;
 const COL_ENTRY_DATE = 2;
 const COL_BANK = 3;
@@ -18,7 +20,49 @@ const COL_HOURS = 6;
 const COL_TIPS = 7;
 const COL_ATTENDANCE = 9;
 const COL_MEMO = 10;
-const PARTTIME_COL_COUNT = 12;
+const PARTTIME_COL_COUNT = 11;
+
+// 수기로 추가한 행.
+//
+// 이 표의 행은 직원명부의 파트타이머와 일일마감의 근무기록에서 매번 다시 만들어진다.
+// 수기 행은 그 두 곳 어디에도 없는 사람이라, 다시 만들 때 목록에 직접 붙여 주지 않으면 통째로 사라진다.
+// id로 구분한다 — 자동으로 만들어진 행의 id는 직원명부의 사원 id다.
+const MANUAL_ID_PREFIX = "manual-";
+const isManualRow = (row: { employeeId: string }) => row.employeeId.startsWith(MANUAL_ID_PREFIX);
+
+/** 두 번 눌러도 같은 순간이면 id가 겹친다. 겹치면 React 키·수정·삭제가 두 행을 한 행으로 본다. */
+const newManualId = () =>
+  `${MANUAL_ID_PREFIX}${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`;
+
+/**
+ * 새로 받아온 목록으로 갈아치우되, 그 안에 없는 수기 행은 지켜서 얹는다.
+ *
+ * 목록을 통째로 setSalaries 하는 자리가 여럿인데(조립·저장본 로드·원격 병합), 그때마다 수기 행이 지워진다.
+ * 특히 저장본을 불러오는 중에 "수기 추가"를 누르면, 뒤늦게 도착한 옛 응답이 방금 만든 행을 삼킨다.
+ */
+const mergeKeepingManualRows = (
+  incoming: PartTimeSalaryRow[],
+  current: PartTimeSalaryRow[],
+  excluded: Set<string>
+): PartTimeSalaryRow[] => {
+  const incomingIds = new Set(incoming.map((row) => row.employeeId));
+  const keptManualRows = current.filter(
+    (row) => isManualRow(row) && !incomingIds.has(row.employeeId) && !excluded.has(row.employeeId)
+  );
+  return [...incoming, ...keptManualRows];
+};
+
+/**
+ * 이름이 적힌 행인가.
+ *
+ * 이름 없는 행은 마감 엑셀에서 빠진다(monthlyCloseWorkbook.ts에서 걸러 낸다).
+ * 돈이 나가는 표라 이름 없는 사람을 올릴 수는 없기 때문이다. 다만 그 사실을 조용히 두면
+ * 적어 뒀다고 믿고 마감해 버리므로, 이 함수로 세어 화면에 경고를 띄운다.
+ *
+ * 저장은 막지 않는다. 이름을 적기 전에 은행·계좌부터 적어 두는 사람이 있는데,
+ * 저장에서 빼 버리면 그렇게 적은 값이 새로고침 한 번에 사라진다.
+ */
+const hasName = (row: PartTimeSalaryRow) => row.name.trim() !== "";
 
 interface PartTimeSalaryRow {
   employeeId: string;
@@ -239,7 +283,7 @@ export function MonthlyPartTimeSalarySubTab({
     };
 
     // E. Assemble all pieces
-    const excluded = new Set(excludedEmployeeIds);
+    const excluded = new Set<string>(excludedEmployeeIds);
     const assembledRows: PartTimeSalaryRow[] = rosterPartTimers
       .filter((pt) => !excluded.has(pt.id))
       .map((pt) => {
@@ -283,7 +327,11 @@ export function MonthlyPartTimeSalarySubTab({
       };
       });
 
-    setSalaries(assembledRows);
+    // 수기 행은 직원명부에도 일일마감에도 없으니 위에서 다시 만들어지지 않는다. 그대로 물려준다.
+    setSalaries((current) => [
+      ...assembledRows,
+      ...current.filter((row) => isManualRow(row) && !excluded.has(row.employeeId))
+    ]);
   }, [branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey]);
 
   useEffect(() => {
@@ -293,12 +341,12 @@ export function MonthlyPartTimeSalarySubTab({
         if (localStorage.getItem(salaryPendingKey) === "1" && local) {
           const localRows = JSON.parse(local);
           if (Array.isArray(localRows)) {
-            const excluded = new Set(excludedEmployeeIds);
+            const excluded = new Set<string>(excludedEmployeeIds);
             const restoredRows = localRows.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
               ...salary,
               tipsEtcAmount: salary.tipsEtcAmount || "0"
             }));
-            setSalaries(restoredRows);
+            setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
             await gasClient.saveSharedData(salaryDataKey, localRows);
             localStorage.removeItem(salaryPendingKey);
             return;
@@ -307,11 +355,14 @@ export function MonthlyPartTimeSalarySubTab({
         const remote = await gasClient.getSharedData<PartTimeSalaryRow[]>(salaryDataKey);
         // 빈 배열은 아직 저장된 급여대장이 없다는 뜻이므로, 일일마감에서 계산한 행을 유지합니다.
         if (Array.isArray(remote) && remote.length > 0) {
-          const excluded = new Set(excludedEmployeeIds);
-          setSalaries(remote.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
+          const excluded = new Set<string>(excludedEmployeeIds);
+          const loadedRows = remote.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
             ...salary,
             tipsEtcAmount: salary.tipsEtcAmount || "0"
-          })));
+          }));
+          // 통째로 갈아치우면 안 된다 — 이 요청이 오가는 사이에 "수기 추가"를 눌렀다면,
+          // 뒤늦게 도착한 옛 응답이 방금 만든 행을 지워 버린다. 여기에 없는 수기 행은 지키고 얹는다.
+          setSalaries((current) => mergeKeepingManualRows(loadedRows, current, excluded));
         }
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
@@ -387,8 +438,10 @@ export function MonthlyPartTimeSalarySubTab({
 
         setSalaries((current) => {
           const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
-          const excluded = new Set(excludedEmployeeIds);
-          return allPartTimers.filter((employee) => !excluded.has(employee.id)).map((employee) => {
+          const excluded = new Set<string>(excludedEmployeeIds);
+          // 수기 행은 명부에도 마감에도 없어 여기서 다시 만들어지지 않는다. 뒤에 그대로 붙여 살린다.
+          const manualRows = current.filter((row) => isManualRow(row) && !excluded.has(row.employeeId));
+          const rebuiltRows = allPartTimers.filter((employee) => !excluded.has(employee.id)).map((employee) => {
             const existing = byEmployeeId.get(employee.id);
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
             const attendanceDates = work.dates.sort((a, b) => Number(a) - Number(b)).slice(0, 7).map((day) => String(Number(day))).join(",");
@@ -429,6 +482,7 @@ export function MonthlyPartTimeSalarySubTab({
               memo: ""
             } as PartTimeSalaryRow;
           });
+          return [...rebuiltRows, ...manualRows];
         });
       } catch (error) {
         console.warn("공통 파트타이머 명단을 불러오지 못했습니다.", error);
@@ -455,21 +509,67 @@ export function MonthlyPartTimeSalarySubTab({
     persistPartTimeSalaries(nextSalaries);
   };
 
-  const handleExcludeEmployee = (employee: PartTimeSalaryRow) => {
-    if (!window.confirm(`${employee.name} 님을 이번 달 파트타이머 급여대장에서 제외할까요?\n직원현황과 일일마감 근무기록은 삭제되지 않습니다.`)) return;
+  /**
+   * 행을 지운다.
+   *
+   * 자동으로 만들어진 행은 지워도 직원명부·일일마감에서 다시 만들어진다. 그래서 "제외" 목록에 넣어 막는다.
+   * 수기 행은 다시 만들어질 곳이 없으니 목록에서 빼는 것으로 끝이다 — 그쪽에는 "삭제"라고 말해야 맞다.
+   */
+  const handleRemoveRow = (employee: PartTimeSalaryRow) => {
+    const manual = isManualRow(employee);
+    const who = employee.name.trim() || "이름 없는 행";
+    const question = manual
+      ? `${who}을(를) 급여대장에서 삭제할까요?`
+      : `${who} 님을 이번 달 파트타이머 급여대장에서 제외할까요?\n직원현황과 일일마감 근무기록은 삭제되지 않습니다.`;
+    if (!window.confirm(question)) return;
 
     const nextSalaries = salaries.filter((salary) => salary.employeeId !== employee.employeeId);
-    const nextExcluded = excludedEmployeeIds.includes(employee.employeeId)
+    const nextExcluded = manual || excludedEmployeeIds.includes(employee.employeeId)
       ? excludedEmployeeIds
       : [...excludedEmployeeIds, employee.employeeId];
     setExcludedEmployeeIds(nextExcluded);
     persistPartTimeSalaries(nextSalaries, nextExcluded, true);
-    triggerToast(`${employee.name} 님을 이번 달 급여대장에서 제외했습니다.`);
+    triggerToast(manual ? `${who}을(를) 삭제했습니다.` : `${who} 님을 이번 달 급여대장에서 제외했습니다.`);
+  };
+
+  /**
+   * 직원명부에도 일일마감에도 없는 사람을 직접 넣는다.
+   *
+   * 성명을 먼저 받는다. 빈 행부터 만들어 두면 이름을 안 적은 채로 남기 쉬운데, 그 행은 급여 엑셀에서
+   * 빠지므로(이름 없는 사람을 이체 리스트에 올릴 수 없다) 실제로 일한 사람의 급여가 누락된다.
+   */
+  const handleAddManualRow = () => {
+    const typedName = window.prompt("추가할 파트타이머의 성명을 입력해 주세요.\n(직원명부에 없는 일용직 등)")?.trim();
+    if (!typedName) return;
+
+    const newRow: PartTimeSalaryRow = {
+      employeeId: newManualId(),
+      name: typedName,
+      residentNumber: "",
+      entryDate: "",
+      contractStatus: "미작성",
+      bank: "",
+      accountNumber: "",
+      hourlyRate: "15000",
+      accumulatedHours: "0",
+      tipsEtcAmount: "0",
+      calculatedSalary: "0",
+      attendanceDates: "",
+      actualPaidAmount: "",
+      payoutBranch: branchName,
+      memo: ""
+    };
+    // 저장 완료 토스트는 띄우지 않는다 — 바로 아래 안내와 두 개가 겹친다.
+    const nextSalaries = [...salaries, newRow];
+    persistPartTimeSalaries(nextSalaries, excludedEmployeeIds, false);
+    triggerToast(`${typedName} 님을 추가했습니다. 은행·계좌·시급을 채워 주세요.`);
   };
 
   // Grand totals
   // 실제 근무시간이 없는 인원은 이번 달 급여대장에 표시하지 않습니다.
-  const visibleSalaries = salaries.filter((salary) => Number(salary.accumulatedHours) > 0);
+  // 수기 행은 예외다 — 방금 만든 빈 행(0시간)이 곧바로 사라지면 아무것도 적을 수 없다.
+  const visibleSalaries = salaries.filter((salary) => Number(salary.accumulatedHours) > 0 || isManualRow(salary));
+  const unnamedManualCount = salaries.filter((salary) => !hasName(salary)).length;
   const totalHours = visibleSalaries.reduce((acc, s) => acc + (Number(s.accumulatedHours) || 0), 0);
   const totalSalary = visibleSalaries.reduce((acc, s) => acc + (Number(s.calculatedSalary) || 0), 0);
 
@@ -501,9 +601,22 @@ export function MonthlyPartTimeSalarySubTab({
           </p>
         </div>
 
-        <div className="w-full sm:w-auto px-5 py-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-black flex items-center justify-center gap-2 shadow-sm">
-          <Check className="w-4 h-4" />
-          자동저장
+        <div className="flex w-full sm:w-auto items-center gap-2">
+          {/* 직원명부에도 일일마감에도 없는 사람을 넣는 길. 이 표는 그 두 곳에서만 행을 만들기 때문에
+              이 버튼이 없으면 일용직처럼 명부에 없는 사람에게 급여를 줄 방법이 없다. */}
+          <button
+            type="button"
+            onClick={handleAddManualRow}
+            className="flex-1 sm:flex-none px-4 py-3 rounded-xl bg-[#2E6DB4] text-white text-sm font-black flex items-center justify-center gap-2 shadow-sm transition-colors hover:bg-[#255A96] focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2"
+            title="직원명부에 없는 사람을 직접 추가합니다"
+          >
+            <Plus className="w-4 h-4" />
+            수기 추가
+          </button>
+          <div className="flex-1 sm:flex-none px-5 py-3 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-black flex items-center justify-center gap-2 shadow-sm">
+            <Check className="w-4 h-4" />
+            자동저장
+          </div>
         </div>
       </div>
 
@@ -518,7 +631,14 @@ export function MonthlyPartTimeSalarySubTab({
         <span className="text-[11px] font-black text-zinc-500">
           인원 <b className="ml-1 font-mono text-sm text-zinc-800">{visibleSalaries.length} 명</b>
         </span>
-        <span className="ml-auto text-[10px] font-bold text-zinc-400">100% 자동 산정</span>
+        {/* 이름 없는 행은 마감 엑셀에서 빠진다. 조용히 빠지면 적어 뒀다고 믿고 마감해 버리므로 눈에 띄게 알린다. */}
+        {unnamedManualCount > 0 ? (
+          <span className="ml-auto text-[10px] font-black text-rose-600">
+            성명 미입력 {unnamedManualCount}행 — 이름을 적어야 마감 엑셀에 포함됩니다
+          </span>
+        ) : (
+          <span className="ml-auto text-[10px] font-bold text-zinc-400">100% 자동 산정</span>
+        )}
       </div>
 
       {/* Ledger Table */}
@@ -529,7 +649,7 @@ export function MonthlyPartTimeSalarySubTab({
         <table className="w-full text-left text-xs border-collapse font-medium min-w-[1330px]">
           <thead>
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
-              <th className="py-3 px-3 w-20 whitespace-nowrap">성명 (사원)</th>
+              <th className="py-3 px-3 w-28 whitespace-nowrap">성명 (사원)</th>
               <th className="py-3 px-3 w-32 whitespace-nowrap">주민등록번호</th>
               <th className="py-3 px-2 w-28 whitespace-nowrap">입사일자</th>
               <th className="py-3 px-3 w-20 whitespace-nowrap">은행</th>
@@ -540,21 +660,48 @@ export function MonthlyPartTimeSalarySubTab({
               <th className="py-3 px-3 w-24 text-right whitespace-nowrap">기본급여</th>
               <th className="py-3 px-3 w-28 whitespace-nowrap">근무일정 (출근일)</th>
               <th className="py-3 px-3 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
-              <th className="py-3 px-3 w-20 text-center whitespace-nowrap">제외</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
             {visibleSalaries.length === 0 ? (
               <tr>
-                <td colSpan={12} className="py-16 text-center text-gray-400 font-bold">
+                <td colSpan={PARTTIME_COL_COUNT} className="py-16 text-center text-gray-400 font-bold">
                   이번 달 근무시간이 기록된 파트타이머가 없습니다.
                 </td>
               </tr>
             ) : (
               visibleSalaries.map((sal, rowIndex) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
-                  <td className="border-r border-b border-black/10 py-3 px-3 font-extrabold text-zinc-900 text-xs whitespace-nowrap">
-                    {sal.name}
+                  {/* 성명. 자동으로 만들어진 행은 이름이 직원명부에서 오므로 여기서 고치지 못한다 —
+                      명부와 어긋나면 다음 재생성 때 다른 사람으로 갈라진다. 수기 행만 직접 적는다.
+                      지우기는 이 칸에 둔다. 표가 가로로 길어 오른쪽 끝에 두면 스크롤해야 닿는다.
+                      마우스를 올려야 보이게 숨기지 않는다 — 태블릿에는 hover가 없어 지울 길이 사라진다. */}
+                  <td className="border-r border-b border-black/10 py-3 px-3 text-xs">
+                    <div className="flex items-center gap-1">
+                      {isManualRow(sal) ? (
+                        <input
+                          {...cellProps(rowIndex, COL_NAME)}
+                          aria-label="성명"
+                          type="text"
+                          value={sal.name}
+                          onChange={(e) => handleUpdate(sal.employeeId, "name", e.target.value)}
+                          placeholder="성명 입력"
+                          className="w-full min-w-0 bg-transparent font-extrabold text-zinc-900 placeholder-rose-300 focus:outline-none"
+                        />
+                      ) : (
+                        <span className="block flex-1 truncate font-extrabold text-zinc-900" title={sal.name}>{sal.name}</span>
+                      )}
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => handleRemoveRow(sal)}
+                        aria-label={`${sal.name || "이름 없는 행"} ${isManualRow(sal) ? "삭제" : "제외"}`}
+                        title={isManualRow(sal) ? "이 행을 삭제합니다" : "이번 달 급여대장에서만 제외합니다"}
+                        className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-rose-50 hover:text-rose-600 focus:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                   <td className={cellTd(rowIndex, COL_RESIDENT)}>
                     <input
@@ -651,18 +798,6 @@ export function MonthlyPartTimeSalarySubTab({
                       onChange={(e) => handleUpdate(sal.employeeId, "memo", e.target.value)}
                       className={`${cellInput} font-medium placeholder-gray-300`}
                     />
-                  </td>
-                  <td className="border-b border-black/10 py-2.5 px-2 text-center">
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      onClick={() => handleExcludeEmployee(sal)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[10px] font-bold text-rose-600 transition-colors hover:bg-rose-100"
-                      title="이번 달 파트타이머 급여대장에서만 제외"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      제외
-                    </button>
                   </td>
                 </tr>
               ))

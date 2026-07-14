@@ -75,6 +75,48 @@ export function purchaseRowHasExportableAmount(r: any): boolean {
  * 5개 시트(매입매출·파트타이머급여·현금지출·카드지출·현금관리)의 헤더/행/열폭 스펙을 계산.
  * XLSX에 의존하지 않는 순수 함수 — 동일 입력이면 동일 출력.
  */
+/** 급여 행에 적힌 사람 이름. 어느 칸에 적혔든 찾아 준다. */
+const partTimeSalaryName = (row: any) => String(row?.name || row?.staffName || row?.employeeName || "").trim();
+
+/**
+ * 이름을 몰라 워크북에서 빠질 파트타이머 급여 행.
+ *
+ * 이름이 비면 예전에는 내부 id를 이름 대신 썼다. 그러면 급여대장에 수기로 행만 만들고 성명을 적지 않은 채
+ * 마감했을 때 은행 이체 리스트에 "manual-1768…"이 수취인으로 찍힌다. 그래서 지금은 그런 행을 빼고 만든다.
+ *
+ * 그런데 조용히 빼면 실제로 일한 사람의 급여가 누락된 채 '정상 파일'처럼 보인다. 그래서 관리자 화면은
+ * 내려받기 전에 이 함수로 먼저 확인하고, 한 건이라도 있으면 다운로드를 멈춘다.
+ *
+ * 판단 기준을 여기 한 곳에 둔 이유: 관문과 빌더가 각자 판단하면 언제든 어긋난다.
+ * 한쪽은 막는데 다른 쪽은 내보내거나(무의미한 차단), 한쪽은 통과시키는데 다른 쪽이 빼 버린다(조용한 누락).
+ *
+ * 직원명부에 있는 사람은 여기서 세지 않는다 — 그 이름은 명부에서 오므로 급여 행이 비어 있어도 정상 출력된다.
+ */
+export function unnamedPartTimeSalaryRows({
+  salaries,
+  roster,
+  exclusions
+}: {
+  salaries: any[] | null | undefined;
+  roster: any[] | null | undefined;
+  exclusions: string[] | null | undefined;
+}): any[] {
+  const rosterPartTimerIds = new Set(
+    (Array.isArray(roster) ? roster : [])
+      .filter((emp: any) => emp?.division === "파트타이머" && !isSampleEmployee(emp))
+      .map((emp: any) => emp.id)
+  );
+  const excluded = new Set(Array.isArray(exclusions) ? exclusions : []);
+
+  return (Array.isArray(salaries) ? salaries : []).filter(
+    (row: any) =>
+      row?.employeeId &&
+      !excluded.has(row.employeeId) &&
+      !rosterPartTimerIds.has(row.employeeId) &&
+      !partTimeSalaryName(row)
+  );
+}
+
 export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[] {
   const { branchName, month } = data;
   const purchases = Array.isArray(data.purchases) ? data.purchases : [];
@@ -138,14 +180,14 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   // 로스터에 없지만 급여/텔레메트리에만 존재하는 파트타이머도 누락 없이 포함
   const knownPartTimerIds = new Set(rosterPartTimers.map((pt) => pt.id));
   Object.values(savedSalaryMap).forEach((salary: any) => {
-    if (salary?.employeeId && !knownPartTimerIds.has(salary.employeeId)) {
-      rosterPartTimers.push({
-        id: salary.employeeId,
-        name: salary.name || salary.staffName || salary.employeeName || salary.employeeId,
-        division: "파트타이머",
-      });
-      knownPartTimerIds.add(salary.employeeId);
-    }
+    if (!salary?.employeeId || knownPartTimerIds.has(salary.employeeId)) return;
+
+    // 이름을 모르면 내보내지 않는다. 이유는 partTimeSalaryName 위의 설명 참고.
+    const name = partTimeSalaryName(salary);
+    if (!name) return;
+
+    rosterPartTimers.push({ id: salary.employeeId, name, division: "파트타이머" });
+    knownPartTimerIds.add(salary.employeeId);
   });
   Object.keys(ptTelemetry).forEach((name) => {
     if (!rosterPartTimers.some((pt) => pt.name === name)) {
