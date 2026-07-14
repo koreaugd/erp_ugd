@@ -9,7 +9,7 @@ import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -2510,6 +2510,18 @@ function AdminMonthlyClosingStatusSection() {
           `${branchName} · ${selectedMonth} 월말마감(매입매출) 상세 데이터가 서버에 없습니다.\n\n` +
           `'확정' 표시는 있으나 실제 내역이 서버에 저장돼 있지 않습니다.\n` +
           `해당 지점에서 [월말마감 → 매입매출] 탭을 연 뒤 저장하고 다시 '확정'하면 다운로드됩니다.`
+        );
+        return;
+      }
+      // 성명을 몰라 워크북에서 빠질 파트타이머 급여 행이 있으면 내려받지 않는다.
+      // 조용히 빠지면 실제로 일한 사람의 급여가 누락된 채 '정상 파일'처럼 보인다.
+      // 판단 기준은 워크북 빌더와 같은 함수를 쓴다 — 각자 판단하면 어긋나서 구멍이 생긴다.
+      const unnamedSalaryRows = unnamedPartTimeSalaryRows({ salaries, roster, exclusions });
+      if (unnamedSalaryRows.length > 0) {
+        window.alert(
+          `${branchName} · ${selectedMonth} 파트타이머 급여대장에 성명이 비어 있는 행이 ${unnamedSalaryRows.length}건 있습니다.\n\n` +
+          `이름 없는 행은 급여 엑셀에 넣을 수 없어 다운로드를 중단했습니다.\n` +
+          `해당 지점에서 [월말마감 → 파트타이머 급여대장] 탭을 열어 성명을 채우거나, 필요 없는 행이면 삭제(X)한 뒤 다시 받아주세요.`
         );
         return;
       }
