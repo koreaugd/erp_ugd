@@ -250,6 +250,9 @@ export async function firebaseGetSharedData(dataKey: string) {
   const recordRef = doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey));
   let snapshot;
   try {
+    // 로그인(인증) 복원을 먼저 기다린다. shared_data는 인증이 없으면 읽기가 거부(permission-denied)되는데,
+    // 그걸 "서버에 값 없음(null)"으로 오해하면 다른 노트북에서 화면이 비어 버린다. 준비되면 읽는다.
+    await waitForFirebaseUser();
     snapshot = await getDocFromServer(recordRef);
   } catch (error) {
     console.warn("[Firebase Direct] Server read failed for shared_data; falling back to cached doc.", error);
@@ -261,6 +264,7 @@ export async function firebaseGetSharedData(dataKey: string) {
 // 마감 검증처럼 캐시로 승인되면 안 되는 경우 전용: 서버 문서만 읽는다.
 // 오프라인/서버 도달 실패 시 캐시로 폴백하지 않고 그대로 throw하여 호출부가 마감을 막을 수 있게 한다.
 export async function firebaseGetSharedDataFromServer(dataKey: string) {
+  await waitForFirebaseUser(); // 인증 전 거부를 "값 없음"으로 오해하지 않도록 로그인 복원을 기다린다.
   const recordRef = doc(getDirectDb(), "shared_data", encodeURIComponent(dataKey));
   const snapshot = await getDocFromServer(recordRef);
   return snapshot.exists() ? snapshot.data().value ?? null : null;
@@ -282,6 +286,7 @@ export async function firebaseGetDailyList(settleDate: string): Promise<DailyLis
 }
 
 export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
+  await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부된다 — 준비될 때까지 기다렸다 저장한다.
   const db = getDirectDb();
   const encodedKey = encodeURIComponent(dataKey);
   const recordRef = doc(db, "shared_data", encodedKey);
@@ -322,6 +327,7 @@ export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
  * 오프라인이면 트랜잭션이 서버에 못 닿아 throw된다 — 호출부(healSharedIfServerMissing)가 건너뛴다.
  */
 export async function firebaseCreateSharedDataIfMissing(dataKey: string, value: unknown) {
+  await waitForFirebaseUser(); // 자가복구 쓰기도 인증이 준비된 뒤 실행해야 거부되지 않는다.
   const db = getDirectDb();
   const recordRef = doc(db, "shared_data", encodeURIComponent(dataKey));
   const nowIso = new Date().toISOString();
@@ -337,6 +343,7 @@ export async function firebaseCreateSharedDataIfMissing(dataKey: string, value: 
 }
 
 export async function firebaseGetAllManualOvertimes() {
+  await waitForFirebaseUser(); // 인증 전 거부를 빈 목록으로 오해하지 않도록 로그인 복원을 기다린다.
   const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
   const allOvertimes: any[] = [];
   snapshot.forEach((doc) => {
@@ -358,6 +365,7 @@ export async function firebaseGetAllManualOvertimes() {
 }
 
 export async function firebaseGetAllLaborContracts() {
+  await waitForFirebaseUser(); // 인증 전 거부를 빈 목록으로 오해하지 않도록 로그인 복원을 기다린다.
   const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
   const allContracts: any[] = [];
   snapshot.forEach((doc) => {
