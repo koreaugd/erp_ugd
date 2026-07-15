@@ -11,7 +11,7 @@ import { cleanNumeric, addMonthsToMonthInputValue, formatWithCommas, toLocalDate
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { LIQUOR_CATEGORIES, VENDOR_HINT, getLiquorCategoryClass, monthDays } from "../helpers/orderHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
-import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave } from "../helpers/sharedSaveSlot";
+import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, type SaveStatus } from "../helpers/sharedSaveSlot";
 
 // 왼쪽에 고정되는 칸들(분류·상품명·입고가·판매가·마진률·월초)의 너비.
 // 고정 위치(left)를 앞 칸들의 합으로 계산하므로 px로 못박는다. 하나 바꾸면 뒤 칸들이 전부 따라 밀린다.
@@ -64,6 +64,16 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
   // 재고 시트가 보고 있는 달. 기본은 이번 달이고, 전월 버튼으로 거슬러 올라간다.
   const [sheetMonth, setSheetMonth] = useState(() => toLocalMonthInputValue());
   const sheetScrollRef = useRef<HTMLDivElement | null>(null);
+  // 두 저장 슬롯(상품·입출고)의 상태를 합쳐 하나의 배지로 보여준다.
+  // 어느 하나라도 실패면 "동기화 실패", 하나라도 저장 중이면 "저장 중", 둘 다 끝나면 "자동저장됨".
+  const productStatusRef = useRef<SaveStatus>("idle");
+  const movementStatusRef = useRef<SaveStatus>("idle");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const recomputeSaveStatus = useCallback(() => {
+    const a = productStatusRef.current;
+    const b = movementStatusRef.current;
+    setSaveStatus(a === "error" || b === "error" ? "error" : a === "saving" || b === "saving" ? "saving" : "idle");
+  }, []);
 
   useEffect(() => {
     try {
@@ -92,8 +102,26 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     // 불러오기를 시작할 때마다 다시 잠그고, 저장 슬롯도 새 지점 것으로 갈아끼운다
     // (슬롯을 물려받으면 이전 지점의 gen이 남아 pending 재전송이 건너뛰어진다).
     setLoaded(false);
-    productSaveSlot.current = createSharedSaveSlot();
-    movementSaveSlot.current = createSharedSaveSlot();
+    const productSlot = createSharedSaveSlot();
+    const movementSlot = createSharedSaveSlot();
+    productSaveSlot.current = productSlot;
+    movementSaveSlot.current = movementSlot;
+    // 슬롯을 새로 만들 때마다 상태 구독을 다시 붙인다(지점 전환 시 옛 슬롯의 구독은 사라진다).
+    productStatusRef.current = "idle";
+    movementStatusRef.current = "idle";
+    setSaveStatus("idle");
+    // 옛 지점 슬롯의 늦게 도착한 저장 콜백이 새 지점 배지를 덮어쓰지 않도록,
+    // 이 콜백이 여전히 현재 슬롯의 것인지 확인하고서야 상태를 반영한다.
+    setSharedSaveStatusListener(productSlot, (status) => {
+      if (productSaveSlot.current !== productSlot) return;
+      productStatusRef.current = status;
+      recomputeSaveStatus();
+    });
+    setSharedSaveStatusListener(movementSlot, (status) => {
+      if (movementSaveSlot.current !== movementSlot) return;
+      movementStatusRef.current = status;
+      recomputeSaveStatus();
+    });
     let cancelled = false;
     const localProductsJson = localStorage.getItem(productKey);
     const localMovementsJson = localStorage.getItem(movementKey);
@@ -142,18 +170,36 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       flushSharedSave(productSaveSlot.current, "liquor_products");
       flushSharedSave(movementSaveSlot.current, "liquor_movements");
     };
-  }, [movementKey, movementPendingKey, parseLiquorJsonArray, productKey, productPendingKey, sharedMovementKey, sharedProductKey]);
+  }, [movementKey, movementPendingKey, parseLiquorJsonArray, productKey, productPendingKey, recomputeSaveStatus, sharedMovementKey, sharedProductKey]);
 
   useEffect(() => {
     (window as any).__ugdLiquorInventoryDirty = false;
+    // 예약만 되고 아직 클라우드로 못 나간 저장을, 화면을 떠나는 순간·온라인 복귀 순간에 즉시 내보낸다.
+    // 이게 없으면 값을 적고 0.6초 안에 새로고침/탭닫기 시 그 저장이 사라져(메모리 전용)
+    // 다른 노트북에서는 영영 보이지 않는다.
+    const flushAll = () => {
+      flushSharedSave(productSaveSlot.current, "liquor_products");
+      flushSharedSave(movementSaveSlot.current, "liquor_movements");
+    };
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      flushAll();
       if (!(window as any).__ugdLiquorInventoryDirty) return;
       event.preventDefault();
       event.returnValue = "";
     };
+    // visibilitychange(hidden)는 탭 닫기·새로고침·모바일 백그라운드 전환에서 가장 안정적으로 발동한다.
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") flushAll();
+    };
     window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", flushAll);
+    window.addEventListener("online", flushAll); // 인터넷이 끊겼다 돌아오면 밀린 저장을 즉시 재전송한다.
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("online", flushAll);
     };
   }, []);
 
@@ -418,10 +464,17 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
             >
               이번달
             </button>
-            {loaded ? (
-              <div className="h-[38px] px-4 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장</div>
-            ) : (
+            {!loaded ? (
               <div className="h-[38px] px-4 rounded-xl bg-amber-50 text-amber-700 text-xs font-black flex items-center">불러오는 중…</div>
+            ) : saveStatus === "error" ? (
+              // 클라우드에 못 올라간 값이 있다는 뜻 — 초록 배지로 "저장됨"이라 안심시키면 안 된다.
+              <div className="h-[38px] px-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-black flex items-center whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">
+                동기화 실패 · 재시도 중
+              </div>
+            ) : saveStatus === "saving" ? (
+              <div className="h-[38px] px-4 rounded-xl bg-amber-50 text-amber-700 text-xs font-black flex items-center">저장 중…</div>
+            ) : (
+              <div className="h-[38px] px-4 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장됨</div>
             )}
           </div>
         </div>
