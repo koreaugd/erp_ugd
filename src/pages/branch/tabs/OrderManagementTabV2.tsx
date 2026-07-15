@@ -214,6 +214,29 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     };
   }, [dedupeOrders, normalizeRemoteOrderVendors, orderPendingKey, parseJsonArray, parseVendorJson, sharedOrderKey, sharedVendorKey, storageKey, vendorKey, vendorPendingKey]);
 
+  useEffect(() => {
+    // 예약만 되고 아직 클라우드로 못 나간 저장을, 화면을 떠나는 순간·온라인 복귀 순간에 즉시 내보낸다.
+    // 이게 없으면 값을 적고 0.6초 안에 새로고침/탭닫기 시 그 저장이 사라져(메모리 전용)
+    // 다른 노트북에서는 영영 보이지 않는다.
+    const flushAll = () => {
+      flushSharedSave(orderSaveSlot.current, "orders");
+      flushSharedSave(vendorSaveSlot.current, "order_vendors");
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") flushAll();
+    };
+    window.addEventListener("beforeunload", flushAll);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", flushAll);
+    window.addEventListener("online", flushAll);
+    return () => {
+      window.removeEventListener("beforeunload", flushAll);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", flushAll);
+      window.removeEventListener("online", flushAll);
+    };
+  }, []);
+
   const reportVendors = useMemo(() => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     const names = [
