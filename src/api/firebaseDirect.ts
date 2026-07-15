@@ -10,7 +10,8 @@ import {
   setDoc,
   deleteDoc,
   getDoc,
-  getDocFromServer
+  getDocFromServer,
+  runTransaction
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, MasterDaily, ExpenseDetail, StaffRecord, DailyListRow } from "./gasClient";
@@ -310,6 +311,29 @@ export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
 
   await setDoc(recordRef, { value, updatedAt: nowIso });
   return { success: true };
+}
+
+/**
+ * 자가복구 전용: 서버에 문서가 없을 때만 원자적으로 만든다(create-only).
+ *
+ * 트랜잭션 안에서 서버 문서를 다시 읽어, 여전히 없을 때만 쓴다. 그 사이 다른 기기가 값을 올렸으면
+ * 트랜잭션이 자동 재시도되며 이번엔 "값 있음"을 보고 아무것도 쓰지 않는다 → 남의 최신 값을 덮어쓸 수 없다.
+ * (일반 저장 firebaseSaveSharedData는 last-write-wins 그대로 두고, 자가복구만 이 no-overwrite 계약을 쓴다.)
+ * 오프라인이면 트랜잭션이 서버에 못 닿아 throw된다 — 호출부(healSharedIfServerMissing)가 건너뛴다.
+ */
+export async function firebaseCreateSharedDataIfMissing(dataKey: string, value: unknown) {
+  const db = getDirectDb();
+  const recordRef = doc(db, "shared_data", encodeURIComponent(dataKey));
+  const nowIso = new Date().toISOString();
+  const created = await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const existing = snapshot.exists() ? snapshot.data().value : undefined;
+    // 이미 값이 있으면(빈 배열 [] 포함) 건드리지 않는다 — 의도적으로 비운 것도 덮지 않는다.
+    if (existing !== null && existing !== undefined) return false;
+    tx.set(recordRef, { value, updatedAt: nowIso });
+    return true;
+  });
+  return { created };
 }
 
 export async function firebaseGetAllManualOvertimes() {

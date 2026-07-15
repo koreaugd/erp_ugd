@@ -6,7 +6,8 @@
   1. **떠날 때 강제 전송(flush).** 디바운스 저장은 화면을 떠나는 순간 사라질 수 있으므로, `visibilitychange`(hidden)·`pagehide`·컴포넌트 unmount에서 밀린 저장을 즉시 내보낸다. Firestore는 오프라인 지속성이 없어 못 보낸 저장은 메모리에서 소멸한다.
   2. **실패 시 값을 버리지 말고 재시도.** 클라우드 저장이 실패하면 값을 유지한 채 백오프로 재시도하고, `online` 복귀 시 즉시 재전송한다. pending 표시를 남겨 다음 로드 때 replay로도 재전송되게 한다. (`sharedSaveSlot.ts` 참고)
   3. **실패를 화면에 표시.** 저장이 클라우드에 반영되지 않았으면 "동기화 실패" 등으로 눈에 띄게 알린다. 항상 초록 "자동저장"만 띄워 저장된 것처럼 속이지 않는다.
-  - 공용 저장 엔진 `src/pages/branch/helpers/sharedSaveSlot.ts`가 위 1~3을 담당한다. 새 자동저장 화면은 이 엔진을 쓰고, 탭에서 flush-on-hide 리스너와 상태 배지를 배선한다(주류재고·발주관리 탭이 표준 예시).
+  4. **자가복구(server-missing heal).** 과거에 한쪽만 안 올라간 데이터로 다른 노트북에서 표가 비는 것을 막는다. 로드 시 서버 문서가 없고(null) 로컬에만 값이 있으면, 캐시 없이 서버로 재확인(`getSharedDataFromServer`) 후 서버가 정말 비었을 때만 로컬 값을 올린다(`healSharedIfServerMissing`). 오프라인이면 건너뛰어 오래된 로컬로 진짜 서버값을 덮지 않는다.
+  - 공용 저장 엔진 `src/pages/branch/helpers/sharedSaveSlot.ts`가 위 1~4를 담당한다. 새 자동저장 화면은 이 엔진을 쓰고, 탭에서 flush-on-hide 리스너·상태 배지·자가복구를 배선한다(주류재고·발주관리 탭이 표준 예시).
 
 - 모든 업무 데이터는 Google Sheets/GAS 공통 저장소를 기준으로 한다. 브라우저 `localStorage`는 세션·캐시·개인 편의 설정에만 사용한다.
 - 코드 수정 후에는 `npm run lint`와 `npm run build`를 통과시킨다.

@@ -11,7 +11,7 @@ import { cleanNumeric, addMonthsToMonthInputValue, formatWithCommas, toLocalDate
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { LIQUOR_CATEGORIES, VENDOR_HINT, getLiquorCategoryClass, monthDays } from "../helpers/orderHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
-import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, type SaveStatus } from "../helpers/sharedSaveSlot";
+import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, healSharedIfServerMissing, type SaveStatus } from "../helpers/sharedSaveSlot";
 
 // 왼쪽에 고정되는 칸들(분류·상품명·입고가·판매가·마진률·월초)의 너비.
 // 고정 위치(left)를 앞 칸들의 합으로 계산하므로 px로 못박는다. 하나 바꾸면 뒤 칸들이 전부 따라 밀린다.
@@ -142,6 +142,9 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         if (hasPendingProducts) {
           // 재전송도 슬롯을 타야 한다 — 직접 보내면 방금 고친 값의 저장과 경쟁해 옛 값이 남을 수 있다.
           replayPendingSave(productSaveSlot.current, sharedProductKey, nextProducts, productPendingKey, "liquor_products");
+        } else if (remoteProductItems === null && localProducts.length > 0) {
+          // 서버엔 상품 문서가 아예 없고 로컬에만 있음(과거에 상품만 안 올라간 케이스) → 서버로 자가복구.
+          void healSharedIfServerMissing(sharedProductKey, nextProducts, "liquor_products");
         }
       }
 
@@ -154,6 +157,8 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         localStorage.setItem(movementKey, JSON.stringify(nextMovements));
         if (hasPendingMovements) {
           replayPendingSave(movementSaveSlot.current, sharedMovementKey, nextMovements, movementPendingKey, "liquor_movements");
+        } else if (remoteMovementItems === null && localMovements.length > 0) {
+          void healSharedIfServerMissing(sharedMovementKey, nextMovements, "liquor_movements");
         }
       }
     }).catch((error) => {
