@@ -8,11 +8,15 @@ import { toLocalDateInputValue } from "../helpers/formatters";
 export function AnnualLeaveTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
-  // loadedBranch = 지금 화면에 든 데이터가 어느 지점 것인가. 현재 branchName과 다르면 아직 이 지점 값을 못 받은 것.
-  // 파생값 isLoaded로 판단하므로, 지점 전환 직후(setState가 반영되기 전 한 프레임)에도 곧바로 false가 되어
-  // 저장이 막힌다 — 옛/빈 지점 entries로 새 지점 연차를 덮어쓰는 사고를 타이밍 창 없이 원천 차단한다.
+  // loadedBranch = 지금 화면에 든 데이터가 어느 지점 것인가. isLoaded = 그게 현재 지점과 일치하는가.
+  // 지점이 바뀌면(예전에 불러왔던 지점으로 되돌아온 경우까지 포함) 아래 렌더-단계 리셋이 loadedBranch를
+  // 즉시 null로 만든다 → 새 지점 값을 다시 받기 전까지 isLoaded=false로 저장이 막힌다.
+  // (async load 안에서 리셋하면 지점 전환~이펙트 실행 사이 한 프레임의 창이 남아 stale 저장이 가능하므로,
+  //  React "prop 바뀔 때 state 조정" 패턴으로 렌더 중 동기적으로 무효화한다.)
   const [loadedBranch, setLoadedBranch] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [trackedBranch, setTrackedBranch] = useState(branchName);
+  if (trackedBranch !== branchName) { setTrackedBranch(branchName); setLoadedBranch(null); setLoadFailed(false); }
   const isLoaded = loadedBranch === branchName;
   const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(toLocalDateInputValue()); const [endDate, setEndDate] = useState(toLocalDateInputValue()); const [reason, setReason] = useState("");
   const load = useCallback(async () => { setLoadFailed(false); try { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees((roster as Employee[]).map((employee) => ({ ...employee, entryDate: employee.entryDate ? employee.entryDate.slice(2).replace(/-/g, ".") : "" }))); setEntries(saved || []); setLoadedBranch(branchName); } catch (err) { console.warn("연차관리 데이터를 불러오지 못했습니다(로그인 복원 대기 실패 등).", err); setLoadFailed(true); } }, [branchName]);
