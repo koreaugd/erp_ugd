@@ -281,6 +281,7 @@ export default function AdminPage() {
     if (grouped.size === 0) return triggerToast("지점과 직원명을 입력해 주세요.", "error");
     const invalidResident = registrationRows.find((row) => row.branchName && row.name.trim() && formatResidentNumber(row.residentNumber).replace(/\D/g, "").length !== 13);
     if (invalidResident) return triggerToast("주민등록번호 13자리를 모두 입력해 주세요.", "error");
+    try {
     await Promise.all(Array.from(grouped.entries()).map(async ([branchName, rows]) => {
       const current = await gasClient.getStaffRoster(branchName);
       const next = [...current, ...rows.map((row) => {
@@ -310,6 +311,11 @@ export default function AdminPage() {
     setShowEmployeeRegistration(false);
     await loadEmployeeDirectory();
     triggerToast("직원명부를 등록했습니다.");
+    } catch (error) {
+      // 인증 복원 대기 실패 등으로 저장이 거부되면 조용히 넘어가지 않는다 — 입력 행을 남겨두고 재시도를 안내한다.
+      console.error("직원명부 등록 저장 실패", error);
+      triggerToast("직원 등록 저장에 실패했습니다. 로그인 상태를 확인한 뒤 다시 시도해 주세요.", "error");
+    }
   };
 
   const handlePayrollUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {

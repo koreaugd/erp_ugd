@@ -9,7 +9,7 @@ export function AnnualLeaveTab({ branchName, isAdmin = false }: { branchName: st
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [entries, setEntries] = useState<any[]>([]);
   const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(toLocalDateInputValue()); const [endDate, setEndDate] = useState(toLocalDateInputValue()); const [reason, setReason] = useState("");
-  const load = useCallback(async () => { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees((roster as Employee[]).map((employee) => ({ ...employee, entryDate: employee.entryDate ? employee.entryDate.slice(2).replace(/-/g, ".") : "" }))); setEntries(saved || []); }, [branchName]);
+  const load = useCallback(async () => { try { const [roster, saved] = await Promise.all([gasClient.getBranchOwnRoster(branchName), gasClient.getSharedData<any[]>(`annual_leave:${branchName}`)]); setEmployees((roster as Employee[]).map((employee) => ({ ...employee, entryDate: employee.entryDate ? employee.entryDate.slice(2).replace(/-/g, ".") : "" }))); setEntries(saved || []); } catch (err) { console.warn("연차관리 데이터를 불러오지 못했습니다(로그인 복원 대기 실패 등).", err); } }, [branchName]);
   useEffect(() => { void load(); }, [load]);
   if (!isAdmin) return (
     <div className="space-y-5" id="annual-leave-maintenance">

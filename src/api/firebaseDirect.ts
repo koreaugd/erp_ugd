@@ -88,6 +88,9 @@ export async function firebaseGetDailyFormBootstrap(branchName: string, settleDa
 }
 
 export async function firebaseSubmitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]) {
+  // 로그인 인증이 준비된 뒤 제출한다. 인증 없이 쓰면 거부(permission-denied)돼 마감이 조용히 유실된다
+  // (유휴 자동 로그아웃 뒤 제출하는 경우가 특히 위험 — 화면엔 남아 있는데 서버엔 안 올라간다).
+  await waitForFirebaseUser();
   const recordId = firebaseRecordId(master.branchName, master.settleDate);
   const recordRef = doc(getDirectDb(), "daily_settles", recordId);
   let existing;
@@ -143,12 +146,14 @@ export async function firebaseGetBranchHistoryFromServer(branchName: string, mon
 }
 
 export async function firebaseGetEditLogs() {
+  await waitForFirebaseUser(); // 인증 전 거부를 "이력 없음"으로 오해하지 않도록 로그인 복원을 기다린다.
   const snapshot = await getDocs(collection(getDirectDb(), "edit_logs"));
   return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as any) }))
     .sort((a: any, b: any) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
 export async function firebaseDeleteEditLog(logId: string) {
+  await waitForFirebaseUser(); // 인증 준비 후 삭제(인증 없으면 거부).
   await deleteDoc(doc(getDirectDb(), "edit_logs", logId));
   return { success: true };
 }
@@ -205,11 +210,13 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
 }
 
 export async function firebaseDeleteDaily(recordId: string) {
+  await waitForFirebaseUser(); // 인증 준비 후 삭제(인증 없으면 거부).
   await deleteDoc(doc(getDirectDb(), "daily_settles", recordId));
   return { success: true };
 }
 
 export async function firebaseGetStaffRoster(branchName: string) {
+  await waitForFirebaseUser(); // 인증 전 거부를 "명단 없음"으로 오해하지 않도록 로그인 복원을 기다린다.
   const directDoc = await getDocFromServer(doc(getDirectDb(), "staff_rosters", encodeURIComponent(branchName)));
   if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocs(collection(getDirectDb(), "staff_rosters"));
@@ -218,12 +225,14 @@ export async function firebaseGetStaffRoster(branchName: string) {
 }
 
 export async function firebaseSaveStaffRoster(branchName: string, employees: any[]) {
+  await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부돼 명단 수정이 유실될 수 있다 — 기다렸다 저장한다.
   await setDoc(doc(getDirectDb(), "staff_rosters", encodeURIComponent(branchName)), { branchName, employees, updatedAt: new Date().toISOString() });
   return { success: true, employees };
 }
 
 // 지점이 직접 등록·관리하는 직원 명단 (관리자 직원명부와 분리된 컬렉션)
 export async function firebaseGetBranchOwnRoster(branchName: string) {
+  await waitForFirebaseUser(); // 인증 전 거부를 "명단 없음"으로 오해하지 않도록 로그인 복원을 기다린다.
   const directDoc = await getDocFromServer(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)));
   if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocs(collection(getDirectDb(), "branch_own_rosters"));
@@ -234,6 +243,7 @@ export async function firebaseGetBranchOwnRoster(branchName: string) {
 // 서버 문서만 읽는 지점 자체 명단 조회(직접 문서·레거시 컬렉션 폴백 모두 서버 전용, 캐시 폴백 없음).
 // 실패 시 throw. 월말마감 엑셀처럼 오래된 로스터로 급여시트를 만들면 안 되는 fail-closed 산출물 전용.
 export async function firebaseGetBranchOwnRosterFromServer(branchName: string) {
+  await waitForFirebaseUser(); // 인증 전 거부를 "명단 없음"으로 오해하지 않도록 로그인 복원을 기다린다.
   const directDoc = await getDocFromServer(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)));
   if (directDoc.exists()) return (directDoc.data() as any)?.employees || [];
   const snapshot = await getDocsFromServer(collection(getDirectDb(), "branch_own_rosters"));
@@ -242,6 +252,7 @@ export async function firebaseGetBranchOwnRosterFromServer(branchName: string) {
 }
 
 export async function firebaseSaveBranchOwnRoster(branchName: string, employees: any[]) {
+  await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부돼 명단이 유실될 수 있다 — 기다렸다 저장한다.
   await setDoc(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)), { branchName, employees, updatedAt: new Date().toISOString() });
   return { success: true, employees };
 }
