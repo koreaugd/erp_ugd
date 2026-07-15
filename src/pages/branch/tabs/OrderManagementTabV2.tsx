@@ -12,7 +12,7 @@ import { cleanNumeric, formatWithCommas, toLocalMonthInputValue } from "../helpe
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { ORDER_CATEGORIES, ORDER_DEFAULT_VENDORS, VENDOR_HINT, ALL_ORDER_CATEGORIES, getOrderCategoryHeaderClass, monthDays } from "../helpers/orderHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
-import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, type SaveStatus } from "../helpers/sharedSaveSlot";
+import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, healSharedIfServerMissing, type SaveStatus } from "../helpers/sharedSaveSlot";
 
 const MEMO_POPUP_WIDTH = 288;
 const MEMO_POPUP_HEIGHT = 208;
@@ -211,6 +211,9 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
         if (hasPendingOrders) {
           // 재전송도 슬롯을 타야 한다 — 직접 보내면 방금 고친 값의 저장과 경쟁해 옛 값이 남을 수 있다.
           replayPendingSave(orderSaveSlot.current, sharedOrderKey, nextOrders, orderPendingKey, "orders");
+        } else if (remoteOrderItems === null && localOrders.length > 0) {
+          // 서버엔 발주 문서가 아예 없고 로컬에만 있음 → 서버로 자가복구(다른 노트북에서도 보이도록).
+          void healSharedIfServerMissing(sharedOrderKey, nextOrders, "orders");
         }
       }
 
