@@ -12,7 +12,7 @@ import { cleanNumeric, formatWithCommas, toLocalMonthInputValue } from "../helpe
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { ORDER_CATEGORIES, ORDER_DEFAULT_VENDORS, VENDOR_HINT, ALL_ORDER_CATEGORIES, getOrderCategoryHeaderClass, monthDays } from "../helpers/orderHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
-import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave } from "../helpers/sharedSaveSlot";
+import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, type SaveStatus } from "../helpers/sharedSaveSlot";
 
 const MEMO_POPUP_WIDTH = 288;
 const MEMO_POPUP_HEIGHT = 208;
@@ -54,6 +54,16 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   // 원격 데이터를 다 불러왔는가.
   // 불러오기 전에 편집을 허용하면 안 된다 — 빈 상태에서 저장하는 순간 원격의 기존 발주가 통째로 지워진다.
   const [loaded, setLoaded] = useState(false);
+  // 두 저장 슬롯(발주·거래처)의 상태를 합쳐 하나의 배지로 보여준다.
+  // 어느 하나라도 실패면 "동기화 실패", 하나라도 저장 중이면 "저장 중", 둘 다 끝나면 "자동저장됨".
+  const orderStatusRef = useRef<SaveStatus>("idle");
+  const vendorStatusRef = useRef<SaveStatus>("idle");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const recomputeSaveStatus = useCallback(() => {
+    const a = orderStatusRef.current;
+    const b = vendorStatusRef.current;
+    setSaveStatus(a === "error" || b === "error" ? "error" : a === "saving" || b === "saving" ? "saving" : "idle");
+  }, []);
 
   /**
    * 한 칸(대분류·거래처·날짜)에 발주 건이 두 개 이상 쌓인 데이터를 하나로 합친다.
@@ -161,8 +171,25 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     // 불러오기를 시작할 때마다 다시 잠그고, 저장 슬롯도 새 지점 것으로 갈아끼운다
     // (슬롯을 물려받으면 이전 지점의 gen이 남아 pending 재전송이 건너뛰어진다).
     setLoaded(false);
-    orderSaveSlot.current = createSharedSaveSlot();
-    vendorSaveSlot.current = createSharedSaveSlot();
+    const orderSlot = createSharedSaveSlot();
+    const vendorSlot = createSharedSaveSlot();
+    orderSaveSlot.current = orderSlot;
+    vendorSaveSlot.current = vendorSlot;
+    // 슬롯을 새로 만들 때마다 상태 구독을 다시 붙인다. 옛 지점 슬롯의 늦게 도착한 저장 콜백이
+    // 새 지점 배지를 덮어쓰지 않도록, 이 콜백이 여전히 현재 슬롯의 것인지 확인하고서야 반영한다.
+    orderStatusRef.current = "idle";
+    vendorStatusRef.current = "idle";
+    setSaveStatus("idle");
+    setSharedSaveStatusListener(orderSlot, (status) => {
+      if (orderSaveSlot.current !== orderSlot) return;
+      orderStatusRef.current = status;
+      recomputeSaveStatus();
+    });
+    setSharedSaveStatusListener(vendorSlot, (status) => {
+      if (vendorSaveSlot.current !== vendorSlot) return;
+      vendorStatusRef.current = status;
+      recomputeSaveStatus();
+    });
     let cancelled = false;
     const localOrdersJson = localStorage.getItem(storageKey);
     const localVendorsJson = localStorage.getItem(vendorKey);
@@ -212,7 +239,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
       flushSharedSave(orderSaveSlot.current, "orders");
       flushSharedSave(vendorSaveSlot.current, "order_vendors");
     };
-  }, [dedupeOrders, normalizeRemoteOrderVendors, orderPendingKey, parseJsonArray, parseVendorJson, sharedOrderKey, sharedVendorKey, storageKey, vendorKey, vendorPendingKey]);
+  }, [dedupeOrders, normalizeRemoteOrderVendors, orderPendingKey, parseJsonArray, parseVendorJson, recomputeSaveStatus, sharedOrderKey, sharedVendorKey, storageKey, vendorKey, vendorPendingKey]);
 
   useEffect(() => {
     // 예약만 되고 아직 클라우드로 못 나간 저장을, 화면을 떠나는 순간·온라인 복귀 순간에 즉시 내보낸다.
@@ -567,11 +594,16 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <div className="flex h-8 items-center rounded-lg bg-[#2E6DB4]/10 px-2.5 text-[11px] font-black text-[#1A3C6E]">월 합계 {formatNumber(monthTotal)}원</div>
-              {/* 불러오는 동안 칸이 잠긴다. 이유를 안 알려주면 고장으로 보인다. */}
-              {loaded ? (
-                <div className="flex h-8 items-center rounded-lg bg-emerald-50 px-2.5 text-[11px] font-black text-emerald-700">자동저장</div>
-              ) : (
+              {/* 불러오는 동안 칸이 잠긴다. 이유를 안 알려주면 고장으로 보인다.
+                  저장이 클라우드에 못 올라갔으면 초록 "저장됨"으로 안심시키면 안 된다 — 빨갛게 알린다. */}
+              {!loaded ? (
                 <div className="flex h-8 items-center rounded-lg bg-amber-50 px-2.5 text-[11px] font-black text-amber-700">불러오는 중…</div>
+              ) : saveStatus === "error" ? (
+                <div className="flex h-8 items-center rounded-lg bg-rose-50 px-2.5 text-[11px] font-black text-rose-700 whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">동기화 실패 · 재시도 중</div>
+              ) : saveStatus === "saving" ? (
+                <div className="flex h-8 items-center rounded-lg bg-amber-50 px-2.5 text-[11px] font-black text-amber-700">저장 중…</div>
+              ) : (
+                <div className="flex h-8 items-center rounded-lg bg-emerald-50 px-2.5 text-[11px] font-black text-emerald-700">자동저장됨</div>
               )}
             </div>
           </div>
