@@ -196,3 +196,25 @@ export const replayPendingSave = (slot: SharedSaveSlot, key: string, value: unkn
   slot.waiting = markPending(slot, key, value, pendingKey);
   pump(slot, label);
 };
+
+/**
+ * 과거에 한쪽만 안 올라간 데이터를 자가복구한다.
+ * 서버에 문서가 아예 없는데(로드 시 null) 로컬에만 값이 있으면, 그 값을 서버에 올려 다른 기기도 보게 한다.
+ * (예: 상품은 옛 버전에서 로컬에만 저장되고 재고 입출고만 서버에 올라간 지점 — 다른 노트북에서 표가 통째로 빈다.)
+ *
+ * 충돌 방지가 핵심이다 — 원자적 create-only(트랜잭션)로만 쓴다:
+ *  - 트랜잭션이 서버에서 다시 읽어 여전히 비어 있을 때만 쓴다. 그 사이 다른 기기가 올렸으면
+ *    자동 재시도 후 "값 있음"을 보고 아무것도 쓰지 않는다 → 남의 최신 값을 덮어쓸 수 없다.
+ *  - 오프라인이면 트랜잭션이 서버에 못 닿아 throw → 건너뛴다(오래된 로컬로 진짜 서버값을 덮는 사고 방지).
+ *  - 빈 배열은 올리지 않는다(누군가 의도적으로 비운 것을 되살리지 않는다).
+ *  - 일반 사용자 저장(last-write-wins)과 분리된 별도 계약이라, 정상 저장 동작에는 영향이 없다.
+ */
+export const healSharedIfServerMissing = async (key: string, localItems: unknown, label: string) => {
+  if (!Array.isArray(localItems) || localItems.length === 0) return;
+  try {
+    await gasClient.createSharedDataIfMissing(key, localItems);
+  } catch (error) {
+    // 오프라인/트랜잭션 실패 — 다음에 탭을 다시 열 때(서버가 여전히 비어 있으면) 재시도된다.
+    console.warn(`Self-heal skipped (${label})`, error);
+  }
+};

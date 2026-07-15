@@ -533,6 +533,15 @@ export const gasClient = {
     return result;
   },
 
+  // 자가복구 전용: 서버에 문서가 없을 때만 원자적으로 만든다(트랜잭션 create-only).
+  // 이미 값이 있으면 덮지 않고 { created: false } 반환. 다른 기기의 최신 값을 덮어쓰지 않는다.
+  async createSharedDataIfMissing(dataKey: string, value: unknown): Promise<{ created: boolean }> {
+    const { firebaseCreateSharedDataIfMissing } = await loadFirebaseDirect();
+    const result = await firebaseCreateSharedDataIfMissing(dataKey, value);
+    clearReadCache();
+    return result;
+  },
+
   async getAllManualOvertimes(): Promise<any[]> {
     const { firebaseGetAllManualOvertimes } = await loadFirebaseDirect();
     return await firebaseGetAllManualOvertimes();
