@@ -237,6 +237,12 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     saveProducts(products.map((product) => (product.id === productId ? { ...product, [field]: nextValue } : product)));
   };
 
+  /** 분류 변경. 상품 정보라 products에 저장된다(날짜와 무관). 고르는 즉시 저장·동기화된다. */
+  const updateProductClassification = (productId: string, value: string) => {
+    if (!loaded) return;
+    saveProducts(products.map((product) => (product.id === productId ? { ...product, classification: value } : product)));
+  };
+
   const addProduct = (event: React.FormEvent) => {
     event.preventDefault();
     if (!loaded) return; // 아직 안 불러온 데이터를 고치면, 저장할 때 원격의 기존 상품이 지워진다.
@@ -575,7 +581,20 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                     style={{ left: 0, width: COL_CATEGORY_W, minWidth: COL_CATEGORY_W }}
                     className="sticky z-20 bg-white p-1 whitespace-nowrap border-r border-b border-black/10"
                   >
-                    <span className={`inline-flex min-w-[52px] justify-center rounded-lg border px-1.5 py-0.5 text-[11px] font-black ${getLiquorCategoryClass(product.classification)}`}>{product.classification}</span>
+                    {/* 분류는 드롭다운에서 바로 고쳐 저장한다. 선택 즉시 saveProducts로 동기화된다.
+                        저장된 분류가 목록에 없는 옛 값이면(방어) 그 값도 옵션에 넣어 빈칸으로 사라지지 않게 한다. */}
+                    <select
+                      value={product.classification}
+                      onChange={(e) => updateProductClassification(product.id, e.target.value)}
+                      disabled={!loaded}
+                      aria-label={product.itemName + " 분류"}
+                      title="분류를 고르면 바로 저장됩니다."
+                      className={`w-full min-w-[52px] rounded-lg border px-1 py-0.5 text-[11px] font-black text-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] disabled:cursor-not-allowed ${getLiquorCategoryClass(product.classification)}`}
+                    >
+                      {(LIQUOR_CATEGORIES.includes(product.classification) ? LIQUOR_CATEGORIES : [product.classification, ...LIQUOR_CATEGORIES]).map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
                   </td>
                   {/* 상품 삭제는 이제 여기서만 한다("당일 입력" 화면을 없애면서 그쪽 관리 열도 함께 사라졌다).
                       유일한 삭제 경로이므로 마우스를 올려야 보이게 숨기면 안 된다 —
