@@ -390,6 +390,25 @@ export const orderGuideSteps: GuideStep[] = [
             ]}
           />
         </div>
+        {/* 이름 고치기 안내를 여기 붙인 이유: 고치는 자리가 이 표의 머리글이다.
+            위 '대분류별 거래처 보기·지우기' 말풍선에 넣으면, 그 말풍선은 above라 줄이 늘수록 더 높이 올라가
+            바로 위 '거래처 추가' 말풍선에 닿는다(그 주석에 적혀 있는 제약). */}
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+          <p className="font-black text-zinc-900">거래처 이름은 표에서 바로 고칩니다</p>
+          <Bullets
+            items={[
+              <span className="lg:whitespace-nowrap">
+                맨 윗줄 <b className="font-black text-rose-700">거래처 이름을 더블클릭</b>하거나 <b className="font-black text-rose-700">연필</b>을 누르면 고쳐집니다.
+              </span>,
+              <span className="lg:whitespace-nowrap">
+                고치면 <b className="font-black text-rose-700">거래처 목록과 이미 적은 발주금액이 함께 바뀝니다.</b>
+              </span>,
+              <span className="lg:whitespace-nowrap">
+                <b className="font-black text-rose-700">발주내역이 있는 다른 거래처 이름</b>으로는 바꿀 수 없습니다.
+              </span>
+            ]}
+          />
+        </div>
       </>
     ),
   },

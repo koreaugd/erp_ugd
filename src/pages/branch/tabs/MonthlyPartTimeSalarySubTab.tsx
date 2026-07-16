@@ -67,6 +67,19 @@ const hasName = (row: PartTimeSalaryRow) => row.name.trim() !== "";
 interface PartTimeSalaryRow {
   employeeId: string;
   name: string;
+  /**
+   * 급여대장에서만 쓰는 이름. 사용자가 이 표에서 이름을 직접 고쳤을 때만 담긴다.
+   *
+   * 이 표의 행은 직원명부에서 매번 다시 만들어지므로, 고친 이름을 name에만 넣어두면
+   * 다음 재생성 때 명부 이름으로 소리 없이 되돌아간다. 그래서 "직접 고쳤다"는 사실을 따로 남긴다.
+   *
+   * 명부 이름을 바꾸지는 않는다 — 누적근무시간·출근일 집계가 명부 이름으로 일일마감 기록을 찾기 때문에
+   * 명부 이름을 바꾸면 과거 기록과 안 맞아 그 사람 집계가 0이 된다.
+   * (통장 예금주 실명이 명부의 이름과 다를 때 이 칸을 쓴다.)
+   *
+   * 비우면 다시 명부 이름을 따라간다.
+   */
+  nameOverride?: string;
   residentNumber: string;
   entryDate: string;
   contractStatus: "완료" | "미작성";
@@ -310,7 +323,10 @@ export function MonthlyPartTimeSalarySubTab({
 
       return {
         employeeId: pt.id,
-        name: pt.name,
+        // 이 표에서 직접 고친 이름이 있으면 그것을 쓴다. 없으면 명부 이름을 따라간다
+        // (명부에서 이름을 고치면 손대지 않은 행은 그대로 따라오게 하려는 것이다).
+        name: saved.nameOverride || pt.name,
+        nameOverride: saved.nameOverride,
         residentNumber: saved.residentNumber || profile.residentNumber || pt.residentNumber || "",
         entryDate: saved.entryDate || profile.entryDate || pt.entryDate || "",
         contractStatus: saved.contractStatus || profile.contractStatus || "미작성",
@@ -454,6 +470,9 @@ export function MonthlyPartTimeSalarySubTab({
                 : String(((Number(existing.hourlyRate) || 0) * Number(accumulatedHours || 0)) + (Number(existing.tipsEtcAmount) || 0));
               return {
                 ...existing,
+                // 위 조립 효과와 같은 규칙 — 고친 이름이 있으면 그것, 없으면 명부 이름.
+                // 두 곳이 규칙이 다르면 어느 쪽이 마지막에 도느냐에 따라 이름이 오락가락한다.
+                name: existing.nameOverride || employee.name,
                 residentNumber: existing.residentNumber || employee.residentNumber || "",
                 entryDate: existing.entryDate || employee.entryDate || "",
                 contractStatus: existing.contractStatus || (employee as any).contractStatus || existing.contractStatus,
@@ -496,6 +515,10 @@ export function MonthlyPartTimeSalarySubTab({
       if (item.employeeId !== empId) return item;
       const nextValue = field === "tipsEtcAmount" ? cleanNumeric(String(value || "")) : value;
       const updated = { ...item, [field]: nextValue };
+      // 이름을 직접 고쳤다는 사실을 함께 남긴다. 이게 없으면 명부에서 행을 다시 만들 때 옛 이름으로 되돌아간다.
+      // 수기 행은 명부에 없어 되돌아갈 일이 없지만, 같은 규칙으로 남겨 두면 분기가 하나 줄어든다.
+      // 비우면 override도 비워져 다시 명부 이름을 따라간다.
+      if (field === "name") updated.nameOverride = String(nextValue || "").trim();
       // Recalculate salary if wage or code changes
       if (field === "hourlyRate" || field === "accumulatedHours" || field === "tipsEtcAmount") {
         const wage = Number(updated.hourlyRate) || 0;
@@ -672,25 +695,30 @@ export function MonthlyPartTimeSalarySubTab({
             ) : (
               visibleSalaries.map((sal, rowIndex) => (
                 <tr key={sal.employeeId} className="hover:bg-zinc-50/40">
-                  {/* 성명. 자동으로 만들어진 행은 이름이 직원명부에서 오므로 여기서 고치지 못한다 —
-                      명부와 어긋나면 다음 재생성 때 다른 사람으로 갈라진다. 수기 행만 직접 적는다.
+                  {/* 성명. 이 표에서 직접 고칠 수 있다 — 통장 예금주 실명이 직원명부의 이름과 다를 때 쓴다.
+                      고친 이름은 이 급여대장(과 마감 엑셀·이체 리스트)에만 쓰이고 직원명부는 그대로 둔다.
+                      명부 이름을 바꾸면 누적근무시간 집계가 옛 일일마감 기록과 안 맞아 0이 되기 때문이다.
+                      비우면 다시 명부 이름을 따라간다(수기 행은 따라갈 명부가 없어 빈 채로 남는다).
                       지우기는 이 칸에 둔다. 표가 가로로 길어 오른쪽 끝에 두면 스크롤해야 닿는다.
                       마우스를 올려야 보이게 숨기지 않는다 — 태블릿에는 hover가 없어 지울 길이 사라진다. */}
                   <td className="border-r border-b border-black/10 py-3 px-3 text-xs">
                     <div className="flex items-center gap-1">
-                      {isManualRow(sal) ? (
-                        <input
-                          {...cellProps(rowIndex, COL_NAME)}
-                          aria-label="성명"
-                          type="text"
-                          value={sal.name}
-                          onChange={(e) => handleUpdate(sal.employeeId, "name", e.target.value)}
-                          placeholder="성명 입력"
-                          className="w-full min-w-0 bg-transparent font-extrabold text-zinc-900 placeholder-rose-300 focus:outline-none"
-                        />
-                      ) : (
-                        <span className="block flex-1 truncate font-extrabold text-zinc-900" title={sal.name}>{sal.name}</span>
-                      )}
+                      <input
+                        {...cellProps(rowIndex, COL_NAME)}
+                        aria-label="성명"
+                        type="text"
+                        value={sal.name}
+                        onChange={(e) => handleUpdate(sal.employeeId, "name", e.target.value)}
+                        placeholder="성명 입력"
+                        title={
+                          sal.nameOverride
+                            ? "급여대장에서 고친 이름입니다. 직원현황의 이름은 그대로입니다. 비우면 직원현황 이름을 따라갑니다."
+                            : "통장 예금주명이 다르면 여기서 고칠 수 있습니다. 직원현황의 이름은 바뀌지 않습니다."
+                        }
+                        className={`w-full min-w-0 bg-transparent font-extrabold focus:outline-none placeholder-rose-300 ${
+                          sal.nameOverride ? "text-[#2E6DB4]" : "text-zinc-900"
+                        }`}
+                      />
                       <button
                         type="button"
                         tabIndex={-1}

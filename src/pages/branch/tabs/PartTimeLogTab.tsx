@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/PartTimeLogTab.tsx
 // 파트타이머일지 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
-import { useState, useEffect, useCallback } from "react";
-import { ClipboardList, RefreshCw } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { ClipboardList, RefreshCw, Search, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
@@ -12,6 +12,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
+  const [nameFilter, setNameFilter] = useState("");
   const [editPartTime, setEditPartTime] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
   // States for manual part-timer entry
@@ -151,6 +152,16 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
     loadData();
   }, [loadData]);
 
+  const normalizedNameFilter = nameFilter.trim().toLowerCase();
+  const filteredRecords = useMemo(() => {
+    if (!normalizedNameFilter) return records;
+    return records.filter((record) => String(record.staffName || "").toLowerCase().includes(normalizedNameFilter));
+  }, [normalizedNameFilter, records]);
+  const filteredSummaryList = useMemo(() => {
+    if (!normalizedNameFilter) return summaryList;
+    return summaryList.filter((item) => String(item.name || "").toLowerCase().includes(normalizedNameFilter));
+  }, [normalizedNameFilter, summaryList]);
+
   const saveManualPartTime = async () => {
     if (manualClockInError || manualClockOutError) {
       alert("출퇴근 시간 형식을 올바르게 입력해주세요 (예: 09:00).");
@@ -271,7 +282,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
       )}
       {/* List Table Left */}
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-        <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+        <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
               <ClipboardList className="w-4 h-4 text-[#2E6DB4]" />
@@ -279,7 +290,29 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
             </h3>
             <p className="text-[10px] text-gray-400 mt-0.5 font-bold">지점에 출근하여 실근무한 아르바이트 직원 출퇴근 로그입니다.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-40">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+                placeholder="이름 검색"
+                aria-label="파트타이머 직원명 검색"
+                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-7 text-xs font-bold text-gray-700 outline-none transition focus:border-[#2E6DB4]"
+              />
+              {nameFilter && (
+                <button
+                  type="button"
+                  onClick={() => setNameFilter("")}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  title="검색어 지우기"
+                  aria-label="검색어 지우기"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
             <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
             <button
               onClick={() => void loadData(true)}
@@ -371,17 +404,17 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {records.length === 0 ? (
+                {filteredRecords.length === 0 ? (
                   <tr>
                     <td colSpan={(isAdmin ? 7 : 6) + (branchName === "본사" ? 1 : 0)} className="py-16 text-center text-gray-400">
-                      해당 지점에 기록된 파트타이머 출근 기록이 없습니다.
+                      {normalizedNameFilter ? "검색된 파트타이머 근무 기록이 없습니다." : "해당 지점에 기록된 파트타이머 출근 기록이 없습니다."}
                     </td>
                   </tr>
                 ) : (
-                  records.map((r, idx) => {
+                  filteredRecords.map((r, idx) => {
                     // 같은 날짜가 이어지면 날짜를 한 번만 적고, 날짜가 바뀌는 자리에만 굵은 선을 긋는다.
                     // 날짜가 매 행 반복되면 눈이 그걸 다 읽느라 정작 사람·시간을 못 훑는다.
-                    const newDate = idx === 0 || records[idx - 1].settleDate !== r.settleDate;
+                    const newDate = idx === 0 || filteredRecords[idx - 1].settleDate !== r.settleDate;
                     return (
                       <tr key={idx} className={`hover:bg-gray-50/50 ${newDate && idx > 0 ? "border-t-2 border-t-gray-200" : ""}`}>
                         <td className="py-2 px-2 font-mono text-[11px] text-gray-400">{newDate ? r.settleDate : ""}</td>
@@ -421,10 +454,12 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
         </div>
 
         <div className="divide-y divide-gray-50 font-bold text-xs">
-          {summaryList.length === 0 ? (
-            <p className="py-8 text-center text-gray-400">집계 정보가 존재하지 않습니다.</p>
+          {filteredSummaryList.length === 0 ? (
+            <p className="py-8 text-center text-gray-400">
+              {normalizedNameFilter ? "검색된 집계 대상자가 없습니다." : "집계 정보가 존재하지 않습니다."}
+            </p>
           ) : (
-            summaryList.map((item, idx) => (
+            filteredSummaryList.map((item, idx) => (
               <div key={idx} className="py-2.5 flex justify-between items-center">
                 <span className="text-gray-800 font-extrabold">{item.name}</span>
                 <div className="flex gap-3 text-right">

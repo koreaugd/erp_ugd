@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/OrderManagementTabV2.tsx
 // 발주관리 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { BookOpen, Plus, StickyNote, X } from "lucide-react";
+import { BookOpen, Pencil, Plus, StickyNote, X } from "lucide-react";
 import { GuideCallouts } from "../../../components/GuideCallouts";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { orderGuideSteps } from "../helpers/guideSteps";
@@ -46,6 +46,10 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const [reportCategory, setReportCategory] = useState<OrderReportCategory>(ALL_ORDER_CATEGORIES);
   const [reportVendor, setReportVendor] = useState("전체");
   const [orderDraftCells, setOrderDraftCells] = useState<Record<string, string>>({});
+  // 표 머리글에서 이름을 고치는 중인 거래처.
+  // original은 고치기 전 이름, category는 그 머리글에 적혀 있던 대분류다(둘을 함께 봐야 발주 건을 찾는다 —
+  // 대분류가 다른 같은 이름은 서로 다른 거래처라 이름만으로 찾으면 남의 발주까지 끌려온다).
+  const [vendorRename, setVendorRename] = useState<{ original: string; category: OrderCategory; value: string } | null>(null);
   // 메모 팝업. 표가 스크롤 상자 안에 있어 칸 안에 그리면 잘리므로, 화면 좌표를 재서 표 바깥에 띄운다.
   const [memoEditor, setMemoEditor] = useState<MemoEditorState | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
@@ -325,6 +329,90 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     saveVendors(next);
   };
 
+  /**
+   * 거래처 이름 바꾸기. 표 머리글에서 고치면 거래처 칩과 발주내역이 함께 따라간다.
+   *
+   * 이름은 두 곳에 각각 적혀 있다 — 거래처 목록(vendorsByCategory)과 발주 건 하나하나(order.vendorName).
+   * 둘 중 하나만 고치면 옛 이름의 발주가 주인 없이 남아, 표에 옛 이름 열이 그대로 하나 더 생긴다.
+   * (표의 열은 이름으로 묶이고, reportVendors가 발주 건의 이름까지 열로 올리기 때문이다.)
+   *
+   * **반드시 한 대분류 안에서만 바꾼다.** 이름만 보고 바꾸면 안 된다 —
+   * 발주 건의 진짜 신원은 대분류+이름+날짜이고(dedupeOrders가 그 기준으로 합친다),
+   * 대분류가 다른 같은 이름은 서로 다른 거래처다(식자재 "쿠팡"과 주류 "쿠팡"은 남남).
+   * 이름만 보고 바꾸면 지금 화면에 보이지도 않는 다른 대분류의 거래처와 그 발주까지 말없이 끌려온다.
+   * 그래서 머리글에 적힌 그 대분류(vendorRename.category)의 칩과 발주만 옮긴다.
+   */
+  const commitVendorRename = (mode: "enter" | "blur" = "enter") => {
+    if (!vendorRename) return;
+    if (!loaded) return; // 아직 안 불러온 상태에서 저장하면 원격의 기존 값을 지운다.
+    const { original, category: scope } = vendorRename;
+    const nextName = vendorRename.value.trim();
+    // 이름을 비우거나 그대로면 바꿀 것이 없다 — 조용히 닫는다(빈 이름은 열을 잃는 것이라 반영하지 않는다).
+    if (!nextName || nextName === original) {
+      setVendorRename(null);
+      return;
+    }
+    // 다른 대분류가 그 이름을 이미 쓰고 있으면 막는다.
+    // 열은 이름으로 접히므로(reportVendors가 Set으로 합친다) 두 대분류의 거래처가 한 열이 되고,
+    // 그 칸은 합계로 잠겨(isAggregateCell) 더는 고칠 수 없다 — 열에서 풀 방법이 없으니 미리 막는다.
+    const usedInOtherCategory = ORDER_CATEGORIES.some((category) =>
+      category !== scope && (
+        (vendorsByCategory[category] || []).includes(nextName) ||
+        orders.some((order) => order.category === category && order.vendorName === nextName)
+      ));
+    if (usedInOtherCategory) {
+      window.alert(`"${nextName}"는 다른 대분류에서 이미 쓰고 있는 이름입니다.\n같은 이름이 두 대분류에 있으면 표에서 한 열로 겹쳐 금액을 고칠 수 없게 됩니다.\n\n대분류가 드러나는 다른 이름을 써 주세요. (예: ${nextName}(${scope}))`);
+      if (mode === "blur") setVendorRename(null);
+      return;
+    }
+    // 같은 대분류 안에서 막아야 하는 것은 "이름이 같은 것"이 아니라 "발주내역끼리 겹치는 것"이다.
+    // 발주가 있는 두 거래처를 한 이름으로 만들면 같은 날짜 칸에 발주가 겹쳐
+    // 금액이 합계로 잠기고(isAggregateCell) 다시 열 때 dedupeOrders가 금액을 더해버린다 — 되돌릴 수 없다.
+    //
+    // 반대로 상대가 "이름만 있고 발주는 없는" 거래처라면 겹칠 발주가 없어 합쳐도 안전하다.
+    // 이 경우를 함께 막으면 안 된다 — 그러면 빠져나올 수 없는 상태가 생긴다:
+    // 이름 변경은 두 문서(거래처 목록·발주내역)에 나뉘어 저장되므로 한쪽만 올라갈 수 있는데,
+    // 그때 다른 노트북에는 "칩은 새 이름, 발주는 옛 이름"으로 어긋나 보인다.
+    // 그 노트북에서 옛 이름을 새 이름으로 고쳐 맞추려 해도, 이름만 겹친다고 막으면 영영 복구할 수 없다.
+    const targetHasOrders = orders.some((order) => order.category === scope && order.vendorName === nextName);
+    if (targetHasOrders) {
+      window.alert(`"${nextName}" 거래처에는 이미 발주내역이 있습니다.\n두 거래처를 한 이름으로 합치면 같은 날짜 칸에서 금액이 뭉쳐 되돌릴 수 없습니다.\n\n다른 이름을 쓰거나, 발주내역을 옮긴 뒤 지워 주세요.`);
+      // Enter로 저장하려던 것이면 고칠 기회를 남긴다.
+      // 다른 곳을 눌러 떠나는 중이면 닫는다 — 열어 두면 바깥을 누를 때마다 같은 경고가 다시 떠
+      // 빠져나갈 길이 Esc뿐인 덫이 된다(저장된 것은 없으니 닫아도 잃는 값은 없다).
+      if (mode === "blur") setVendorRename(null);
+      return;
+    }
+    // 발주 없는 같은 이름과 합쳐지는 경우 — 안전하지만 실수로 그럴 수도 있으니 한 번 묻는다.
+    const targetHasChip = (vendorsByCategory[scope] || []).includes(nextName);
+    if (targetHasChip && !window.confirm(`"${nextName}" 거래처가 이미 ${scope} 목록에 있습니다.\n두 이름을 하나로 합치고 "${original}"의 발주내역을 "${nextName}"으로 옮길까요?`)) {
+      if (mode === "blur") setVendorRename(null);
+      return;
+    }
+    saveVendors({
+      ...vendorsByCategory,
+      // 합칠 때 같은 분류 안에 같은 이름이 둘 남을 수 있다([A, B]에서 A를 B로 → [B, B]).
+      // 칩은 분류+이름을 key로 그리므로 그대로 두면 React key가 겹치고 목록에도 같은 칩이 두 번 뜬다.
+      [scope]: Array.from(new Set((vendorsByCategory[scope] || []).map((vendor) => (vendor === original ? nextName : vendor))))
+    });
+    saveOrders(orders.map((order) =>
+      (order.category === scope && order.vendorName === original) ? { ...order, vendorName: nextName } : order));
+    // 이름은 두 문서(거래처 목록·발주내역)에 나뉘어 저장된다 — 하나만 올라가면 다른 노트북에서
+    // 옛 이름 열과 새 이름 열이 함께 보인다(값이 사라지진 않지만 헷갈린다).
+    // 그래서 0.6초 지연을 기다리지 않고 둘 다 지금 곧바로 내보낸다. 이름을 고치자마자 탭을 닫아도
+    // 한쪽만 남는 일이 없다 — 떠날 때의 flush는 예약이 아직 살아 있을 때만 구해주기 때문이다.
+    // 한쪽이 실패해도 값은 버리지 않는다: 슬롯이 재시도하고, pending 표시가 남아 다음에 열 때 다시 올라가며,
+    // 실패하는 동안엔 위쪽 "동기화 실패" 배지가 빨갛게 뜬다.
+    flushSharedSave(vendorSaveSlot.current, "order_vendors");
+    flushSharedSave(orderSaveSlot.current, "orders");
+    // 편집 중이던 임시 입력값과 메모 팝업은 옛 이름으로 묶여 있다 — 그대로 두면 엉뚱한 칸에 값이 남는다.
+    setOrderDraftCells({});
+    setMemoEditor(null);
+    // 그 거래처만 보고 있었다면 새 이름으로 따라간다(안 그러면 필터가 풀려 전체보기로 튄다).
+    if (reportVendor === original) setReportVendor(nextName);
+    setVendorRename(null);
+  };
+
   const cellAmount = (dateKey: string, vendor: string) => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
     return orders
@@ -494,8 +582,20 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
       || orders.find((order) => order.vendorName === vendor)?.category
       || "식자재";
   };
+  /**
+   * 지금 화면에서 이 열이 실제로 가리키는 대분류.
+   *
+   * 대분류를 하나 고른 화면에서는 그 대분류가 곧 이 열의 정체다 — 표에 올라온 거래처와 금액이
+   * 모두 그 대분류의 것이기 때문이다(reportVendors·cellAmount가 그렇게 거른다).
+   * vendorCategoryOf를 그대로 쓰면 안 된다: 그건 이름만 보고 "첫 번째로 그 이름이 있는 대분류"를 준다.
+   * 같은 이름이 다른 대분류에도 있으면, 주류 화면을 보고 있는데 식자재라고 답한다 —
+   * 머리글 색도 틀리고, 이름 수정이 엉뚱한 대분류의 거래처와 발주를 고친다.
+   * (칸에 금액을 적을 때 쓰는 resolveOrderCategory도 같은 규칙으로 reportCategory를 먼저 본다.)
+   */
+  const columnCategoryOf = (vendor: string): OrderCategory =>
+    reportCategory === ALL_ORDER_CATEGORIES ? vendorCategoryOf(vendor) : reportCategory;
   const categoryHeaderGroups = matrixVendors.reduce<Array<{ category: OrderCategory; span: number }>>((groups, vendor) => {
-    const category = vendorCategoryOf(vendor);
+    const category = columnCategoryOf(vendor);
     const last = groups[groups.length - 1];
     if (last && last.category === category) {
       last.span += 1;
@@ -637,17 +737,66 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
               </tr>
               <tr>
                 {matrixVendors.map((vendor, colIndex) => {
-                  const category = vendorCategoryOf(vendor);
+                  const category = columnCategoryOf(vendor);
                   // 분류별 색은 그대로 두고, 지금 편집 중인 열만 안쪽 테두리로 짚어준다.
                   const columnActive = activeCell?.col === colIndex;
+                  const renaming = vendorRename?.original === vendor;
                   return (
                     <th
                       key={vendor}
-                      className={`p-1.5 min-w-[78px] text-center border-r border-b ${getOrderCategoryHeaderClass(category)} ${
+                      className={`group relative p-1.5 min-w-[78px] text-center border-r border-b ${getOrderCategoryHeaderClass(category)} ${
                         columnActive ? "ring-2 ring-inset ring-[#2E6DB4]" : ""
                       }`}
                     >
-                      {vendor}
+                      {renaming ? (
+                        <input
+                          autoFocus
+                          value={vendorRename.value}
+                          onChange={(e) => setVendorRename({ original: vendor, category, value: e.target.value })}
+                          // 다른 곳을 눌러도 친 이름은 저장한다 — 애써 고친 값을 말없이 버리지 않는다.
+                          onBlur={() => commitVendorRename("blur")}
+                          onKeyDown={(e) => {
+                            // 한글은 조합 중에도 Enter가 들어온다 — 조합이 끝나기 전에 저장하면 글자가 잘린다.
+                            if (e.nativeEvent.isComposing) return;
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitVendorRename("enter");
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setVendorRename(null);
+                            }
+                          }}
+                          maxLength={30}
+                          aria-label={vendor + " 거래처명 수정"}
+                          className="h-6 w-full min-w-0 rounded border border-[#2E6DB4] bg-white px-1 text-center text-[11px] font-black text-gray-800 focus:outline-none"
+                        />
+                      ) : (
+                        <>
+                          {/* 더블클릭으로도 열린다 — 엑셀에서 머리글을 고치던 손버릇 그대로. */}
+                          <span
+                            className="block pr-3"
+                            onDoubleClick={() => { if (loaded) setVendorRename({ original: vendor, category, value: vendor }); }}
+                            title={vendor + " — 더블클릭하거나 연필을 눌러 이름을 고칠 수 있습니다. (칸에서 F2)"}
+                          >
+                            {vendor}
+                          </span>
+                          {/* 늘 떠 있으면 좁은 머리글에서 이름보다 먼저 눈에 띈다 — 마우스를 올렸을 때만 보인다.
+                              tabIndex=-1: 이 표의 Tab은 칸 사이 이동에 쓴다(useSheetKeyboardNav가 DOM 순서에 맡긴다).
+                              머리글 버튼을 순서에 넣으면 거래처 수만큼 Tab을 눌러야 첫 칸에 닿는다.
+                              아래 메모 버튼도 같은 이유로 순서에서 빼 두었다 — 이름 고치기는 더블클릭으로 연다. */}
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            disabled={!loaded}
+                            onClick={() => setVendorRename({ original: vendor, category, value: vendor })}
+                            aria-label={vendor + " 거래처명 수정"}
+                            className="absolute right-0.5 top-0.5 rounded p-0.5 text-current opacity-0 transition hover:bg-white/60 group-hover:opacity-100 disabled:cursor-not-allowed"
+                          >
+                            <Pencil className="h-2.5 w-2.5" />
+                          </button>
+                        </>
+                      )}
                     </th>
                   );
                 })}
@@ -685,6 +834,9 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                       const memo = cellMemoDisplay(dateKey, vendor);
                       // 아래쪽 행은 말풍선이 표 밖으로 잘리므로 위로 뒤집는다.
                       const memoFlipUp = rowIndex >= matrixDays.length - 6;
+                      // 한 번만 만든다 — F2를 가로채려면 훅이 준 onKeyDown을 다시 불러야 하는데,
+                      // 핸들러 안에서 cellProps를 또 부르면 키를 칠 때마다 ref 콜백까지 새로 만들어진다.
+                      const sheetCell = cellProps(rowIndex, colIndex);
                       return (
                         <td
                           key={vendor}
@@ -697,9 +849,20 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                           }`}
                         >
                           <input
-                            {...cellProps(rowIndex, colIndex)}
+                            {...sheetCell}
                             value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")}
                             onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)}
+                            // F2 = 이 열의 거래처명 고치기. 머리글의 연필은 Tab 순서에서 빼 두었으므로(칸 이동이 우선)
+                            // 키보드만 쓰는 사람에게는 이 키가 유일한 입구다. 칸은 늘 편집 상태라 F2는 비어 있다.
+                            // 조합키(Ctrl/Alt/Cmd+F2)는 브라우저·OS 단축키다 — 가로채지 않고 그대로 흘려보낸다.
+                            onKeyDown={(e) => {
+                              if (e.key === "F2" && loaded && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                setVendorRename({ original: vendor, category: columnCategoryOf(vendor), value: vendor });
+                                return;
+                              }
+                              sheetCell.onKeyDown(e);
+                            }}
                             disabled={aggregate || !loaded}
                             title={aggregate ? AGGREGATE_CELL_HINT : undefined}
                             aria-label={`${Number(day)}일 ${vendor} 발주금액${aggregate ? " (합계 · 잠김)" : ""}${memo ? " (메모: " + memo + ")" : ""}`}

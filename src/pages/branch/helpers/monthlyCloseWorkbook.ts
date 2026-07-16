@@ -189,19 +189,35 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     rosterPartTimers.push({ id: salary.employeeId, name, division: "파트타이머" });
     knownPartTimerIds.add(salary.employeeId);
   });
+  // 이름이 아니라 id로 걸러야 한다. 급여대장에서 이름을 고친 행(nameOverride)은 위에서 고친 이름으로 들어오는데,
+  // 여기서 이름만 비교하면 "일일마감의 옛 이름"과 안 맞아 같은 사람이 한 번 더 들어온다 —
+  // 그 사람의 급여 행이 엑셀에 두 줄이 되고, 두 줄 다 같은 금액이라 그대로 두 번 이체된다.
   Object.keys(ptTelemetry).forEach((name) => {
-    if (!rosterPartTimers.some((pt) => pt.name === name)) {
-      rosterPartTimers.push({ id: `legacy-${branchName}-${name}`, name, division: "파트타이머" });
-    }
+    const legacyId = `legacy-${branchName}-${name}`;
+    if (knownPartTimerIds.has(legacyId)) return;
+    if (rosterPartTimers.some((pt) => pt.name === name)) return;
+    rosterPartTimers.push({ id: legacyId, name, division: "파트타이머" });
+    knownPartTimerIds.add(legacyId);
   });
 
   const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "팁/기타", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
   const partTimeRows: (string | number)[][] = rosterPartTimers
     .filter((pt) => !excludedSetForExcel.has(pt.id))
     .map((pt) => {
+      // 근무시간·출근일은 반드시 **명부 이름**으로 찾는다 — 일일마감 기록에 그 이름으로 적혀 있다.
+      // (급여대장에서 고친 이름으로 찾으면 옛 기록과 안 맞아 그 사람 집계가 0이 된다.)
       const tel = ptTelemetry[pt.name] || { hours: 0, dates: [] };
       const saved = savedSalaryMap[pt.id] || {};
       const profile = getStoredProfile(pt.id);
+
+      /**
+       * 엑셀·이체 리스트에 나갈 이름.
+       *
+       * 명부 이름(pt.name)을 그대로 쓰면 안 된다. 급여대장에서 고친 이름은 통장 예금주명을 맞추려고
+       * 적은 것이라, 정작 돈이 나가는 이체 리스트에 반영되지 않으면 그 기능이 아무 소용이 없다.
+       * (화면에는 고친 이름, 엑셀에는 옛 이름 — 어느 쪽이 맞는지 알 수 없는 상태가 된다.)
+       */
+      const payoutName = saved.nameOverride || pt.name;
 
       const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
       const accumulatedHours = saved.accumulatedHours !== undefined ? saved.accumulatedHours : String(tel.hours);
@@ -215,7 +231,7 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
         : tel.dates.slice().sort((a, b) => Number(a) - Number(b)).slice(0, 7).join(",");
 
       return [
-        pt.name,
+        payoutName,
         saved.residentNumber || profile.residentNumber || "",
         saved.entryDate || profile.entryDate || "",
         saved.contractStatus || profile.contractStatus || "미작성",

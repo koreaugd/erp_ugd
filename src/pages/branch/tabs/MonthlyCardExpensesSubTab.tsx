@@ -81,6 +81,20 @@ export function MonthlyCardExpensesSubTab({
   );
   const totalSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
 
+  /**
+   * 쿠팡·네이버 이 달 결제액.
+   *
+   * 필터와 무관하게 **이 달 전체**를 센다. filteredItems로 세면 사용처를 "네이버"로 거르는 순간
+   * 쿠팡이 0원으로 보인다 — 두 곳을 나란히 비교하려고 두는 숫자인데 그러면 쓸모가 없다.
+   * 사용처는 고정 항목(쿠팡/네이버/인근매장/그외기타/현금입금)이라 정확히 맞춰 센다.
+   * 관리자 수정창에서 사용처를 자유롭게 고칠 수 있어 앞뒤 공백이 섞일 수 있으므로 다듬어서 비교한다.
+   */
+  const usageTotals = useMemo(() => {
+    const sumOf = (target: string) =>
+      items.filter((item) => String(item.usage || "").trim() === target).reduce((acc, item) => acc + item.amount, 0);
+    return { 쿠팡: sumOf("쿠팡"), 네이버: sumOf("네이버") };
+  }, [items]);
+
   const handleEditCardExpense = (item: any) => {
     if (!item.recordId) return;
     setEditCardExpense({ item, fields: { amount: toNumberPromptValue(item.amount), usage: item.usage || "", classification: item.classification || "", detail: item.detail || "" } });
@@ -169,6 +183,20 @@ export function MonthlyCardExpensesSubTab({
             </option>
           ))}
         </select>
+
+        {/* 쿠팡·네이버 이 달 결제액. 위 필터를 따라가지 않는다(그러면 한쪽이 0원이 되어 비교가 안 된다).
+            ml-auto로 필터 줄 오른쪽 끝에 붙인다. */}
+        <div
+          className="ml-auto flex items-center gap-2"
+          title="필터와 상관없이 이 달 전체 카드지출에서 사용처가 쿠팡·네이버인 금액입니다."
+        >
+          <span className="monthly-expense-chip monthly-chip-vanilla text-[11px] font-black">
+            쿠팡: <b className="font-mono">{formatNumber(usageTotals.쿠팡)}</b>원
+          </span>
+          <span className="monthly-expense-chip monthly-chip-honey text-[11px] font-black">
+            네이버: <b className="font-mono">{formatNumber(usageTotals.네이버)}</b>원
+          </span>
+        </div>
       </div>
 
       {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
