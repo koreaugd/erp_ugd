@@ -5,9 +5,17 @@ import { gasClient } from "../../../api/gasClient";
 import type { DailySettleDetail } from "../../../api/gasClient";
 import { splitDailyMemoMetadata, joinDailyMemoMetadata } from "./memoMetadata";
 
+/**
+ * @param actor 이 수정을 실제로 한 사람. 수정이력(edit_logs)에 그대로 남는다.
+ *
+ * 기본값이 "관리자"인 이유는 예전에 관리자만 이 함수를 쓸 수 있었기 때문이다.
+ * 지점도 고칠 수 있게 된 화면은 반드시 지점명을 넘겨야 한다 —
+ * 안 넘기면 지점이 지운 기록이 "관리자가 지웠다"고 남아 이력이 거짓이 된다.
+ */
 export const updateDailyMetadata = async (
   recordId: string,
-  updater: (metadata: any, detail: DailySettleDetail) => { metadata: any; staff?: any[]; expenses?: any[]; masterPatch?: any } | void
+  updater: (metadata: any, detail: DailySettleDetail) => { metadata: any; staff?: any[]; expenses?: any[]; masterPatch?: any } | void,
+  actor: string = "관리자"
 ) => {
   const detail = await gasClient.getDailyDetail(recordId);
   const { visibleMemo, metadata } = splitDailyMemoMetadata(detail.master?.memo);
@@ -23,6 +31,6 @@ export const updateDailyMetadata = async (
     masterPatch,
     result.expenses || detail.expenses,
     result.staff || detail.staff,
-    "관리자"
+    actor
   );
 };
