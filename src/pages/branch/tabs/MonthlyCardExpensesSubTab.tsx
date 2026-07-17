@@ -79,7 +79,12 @@ export function MonthlyCardExpensesSubTab({
       }),
     [items, usageFilter, classificationFilter]
   );
-  const totalSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
+  // 지금 표에 보이는 것(필터 적용)의 합. 필터를 걸면 이 숫자가 따라 움직인다.
+  const filteredSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
+  // 이 달 전체 합. 필터와 무관하다 — 위 머리글의 "월 카드지출 총계"는 이 숫자여야 말이 맞는다.
+  // (예전에는 여기에 필터 합계를 넣어 두고 "월 총계"라고 적어, 필터를 걸면 라벨과 숫자가 서로 다른 말을 했다.)
+  const monthSum = useMemo(() => items.reduce((acc, i) => acc + i.amount, 0), [items]);
+  const filterActive = usageFilter !== "전체" || classificationFilter !== "전체";
 
   /**
    * 쿠팡·네이버 이 달 결제액.
@@ -156,7 +161,7 @@ export function MonthlyCardExpensesSubTab({
 
         <div className="bg-blue-50/50 p-2.5 px-4 rounded-xl border border-blue-100 text-right">
           <span className="text-[9px] text-[#2E6DB4] font-black block leading-none">월 카드지출 총계</span>
-          <span className="text-sm font-black text-zinc-850 font-mono mt-1 block">{formatNumber(totalSum)} 원</span>
+          <span className="text-sm font-black text-zinc-850 font-mono mt-1 block">{formatNumber(monthSum)} 원</span>
         </div>
       </div>
 
@@ -184,16 +189,27 @@ export function MonthlyCardExpensesSubTab({
           ))}
         </select>
 
-        {/* 쿠팡·네이버 이 달 결제액. 위 필터를 따라가지 않는다(그러면 한쪽이 0원이 되어 비교가 안 된다).
-            ml-auto로 필터 줄 오른쪽 끝에 붙인다. */}
-        <div
-          className="ml-auto flex items-center gap-2"
-          title="필터와 상관없이 이 달 전체 카드지출에서 사용처가 쿠팡·네이버인 금액입니다."
-        >
-          <span className="monthly-expense-chip monthly-chip-vanilla text-[11px] font-black">
+        {/* 필터 합계 + 쿠팡·네이버 결제액. ml-auto로 필터 줄 오른쪽 끝에 붙인다. */}
+        <div className="ml-auto flex items-center gap-2.5">
+          {/* 지금 고른 조건의 합. 필터를 걸면 위 "월 카드지출 총계"와 나란히 놓여 전체 대비 얼마인지 보인다. */}
+          <span
+            className="text-[11px] font-black text-zinc-500"
+            title={filterActive ? "지금 필터로 걸러진 내역의 합계입니다." : "필터를 걸지 않아 이 달 전체와 같습니다."}
+          >
+            {filterActive ? "필터 합계" : "표시 합계"}
+            <b className="ml-1 font-mono text-sm text-zinc-900">{formatNumber(filteredSum)}</b>원
+            <span className="ml-1 font-mono text-zinc-400">({filteredItems.length}건)</span>
+          </span>
+          <span
+            className="monthly-expense-chip monthly-chip-vanilla text-[11px] font-black"
+            title="필터와 상관없이 이 달 전체에서 사용처가 쿠팡인 금액입니다."
+          >
             쿠팡: <b className="font-mono">{formatNumber(usageTotals.쿠팡)}</b>원
           </span>
-          <span className="monthly-expense-chip monthly-chip-honey text-[11px] font-black">
+          <span
+            className="monthly-expense-chip monthly-chip-honey text-[11px] font-black"
+            title="필터와 상관없이 이 달 전체에서 사용처가 네이버인 금액입니다."
+          >
             네이버: <b className="font-mono">{formatNumber(usageTotals.네이버)}</b>원
           </span>
         </div>

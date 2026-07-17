@@ -3290,12 +3290,16 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   color: var(--branch-ghost) !important;
 }
 
-.branch-redesign #cash-expenses-subtab > div.flex > div:last-child {
+/* 카드지출과 같은 이유로 필터 줄을 뺀다(그 줄도 div.flex이다). */
+.branch-redesign #cash-expenses-subtab > div.flex:not(.monthly-expense-filter-bar) > div:last-child {
   background: var(--branch-vanilla) !important;
   border-color: var(--branch-black) !important;
 }
 
-.branch-redesign #card-expenses-subtab > div.flex > div:last-child {
+/* 머리글 줄의 "월 카드지출 총계" 카드만 칠한다.
+   :not(.monthly-expense-filter-bar)가 없으면 안 된다 — 아래 필터 줄도 div.flex이라,
+   거기 마지막에 무엇이든 div를 하나 넣는 순간 그 div가 총계 카드 색(연한 파랑)을 뒤집어쓴다. */
+.branch-redesign #card-expenses-subtab > div.flex:not(.monthly-expense-filter-bar) > div:last-child {
   background: var(--branch-alice) !important;
   border-color: var(--branch-black) !important;
 }
