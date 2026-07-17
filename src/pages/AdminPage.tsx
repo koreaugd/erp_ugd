@@ -1354,6 +1354,15 @@ function AdminNoticeManager() {
   const [saving, setSaving] = useState(false);
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   const noticeStorageKey = noticeTab === "admin" ? "admin_dashboard_notices" : "admin_notices";
+  // 지금 화면이 어느 공지함인지. 저장이 실패해 되돌릴 때, 그 사이 탭이 바뀌지 않았는지 확인하는 데 쓴다
+  // (관리자 공지 화면에 지점 공지 목록을 되돌려 놓으면, 다음 저장 때 그 목록이 엉뚱한 키로 저장된다).
+  //
+  // **렌더 단계에서 갱신한다. useEffect로 미루면 안 된다** — effect는 그려진 뒤에 도는데,
+  // 탭을 바꾼 직후 effect가 아직 돌지 않은 그 틈에 옛 탭의 저장이 실패하면 이 값이 아직 옛 키라
+  // 가드를 그대로 통과해 새 탭 화면에 옛 목록을 덮어쓴다.
+  // (연차관리도 같은 이유로 지점 전환 감지를 effect가 아닌 렌더 단계에서 한다 — 커밋 1246795)
+  const noticeKeyRef = useRef(noticeStorageKey);
+  noticeKeyRef.current = noticeStorageKey;
 
   const load = useCallback(async () => {
     const [saved, branchList] = await Promise.all([
@@ -1371,20 +1380,57 @@ function AdminNoticeManager() {
     setBody("");
   }, [load]);
 
+  /**
+   * 공지 저장.
+   *
+   * 저장 한 번은 클라우드를 세 번 오간다(기존 값 읽기 → 백업 쓰기 → 실제 쓰기).
+   * 그걸 다 기다린 뒤에 화면을 바꾸면 등록 버튼이 한참 멈춘 것처럼 보인다.
+   * 그래서 화면은 먼저 바꾸고 저장은 뒤에서 돌린다 — 백업 단계는 손대지 않는다.
+   * (백업은 덮어쓰기 전의 옛 값을 읽어야 하므로 기다리지 않게 만들면 새 값이 백업될 수 있다.)
+   *
+   * 실패하면 목록을 되돌리고 **쓰던 글을 그대로 되살린다.** 예전에는 catch가 아예 없어서
+   * 저장이 실패해도 아무 말이 없었다 — 등록된 줄 알고 지나가면 그 공지는 어디에도 없다.
+   */
   const saveNotice = async () => {
     if (!title.trim() && !body.trim()) return;
+    const now = new Date().toISOString();
+    const next = editingNoticeId
+      ? notices.map((notice) => notice.id === editingNoticeId ? { ...notice, targetBranch, title: title.trim() || "공지사항", body: body.trim(), updatedAt: now } : notice)
+      : [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: now }, ...notices].slice(0, 20);
+    // 실패했을 때 되살릴 것들
+    const previousNotices = notices;
+    const draft = { editingNoticeId, targetBranch, title, body };
+
+    const keyAtStart = noticeStorageKey;
+
+    setNotices(next);
+    setEditingNoticeId(null);
+    setTitle("");
+    setBody("");
+    setSaving(true);
     try {
-      setSaving(true);
-      const now = new Date().toISOString();
-      const next = editingNoticeId
-        ? notices.map((notice) => notice.id === editingNoticeId ? { ...notice, targetBranch, title: title.trim() || "공지사항", body: body.trim(), updatedAt: now } : notice)
-        : [{ id: `notice-${Date.now()}`, targetBranch, title: title.trim() || "공지사항", body: body.trim(), createdAt: now }, ...notices].slice(0, 20);
-      await gasClient.saveSharedData(noticeStorageKey, next);
-      setNotices(next);
-      if (noticeTab === "admin") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
-      setEditingNoticeId(null);
-      setTitle("");
-      setBody("");
+      await gasClient.saveSharedData(keyAtStart, next);
+      // 대시보드 갱신은 저장이 끝난 뒤에 알린다. 먼저 알리면 대시보드가 아직 옛 값이 든
+      // 서버를 다시 읽어 새 공지가 없는 것처럼 보인다.
+      if (keyAtStart === "admin_dashboard_notices") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
+    } catch (error) {
+      console.error("공지 저장 실패:", error);
+      // 저장하는 사이 다른 공지함으로 옮겨갔다면 화면을 건드리지 않는다 —
+      // 지금 보이는 목록은 다른 공지함의 것이라, 되돌리면 남의 목록을 덮어쓴다.
+      // (탭을 옮기면 입력창은 이미 비워지므로 되살릴 초안도 없다.)
+      const restored = noticeKeyRef.current === keyAtStart;
+      if (restored) {
+        setNotices(previousNotices);
+        setEditingNoticeId(draft.editingNoticeId);
+        setTargetBranch(draft.targetBranch);
+        setTitle(draft.title);
+        setBody(draft.body);
+      }
+      // 되살리지 못했으면 되살렸다고 말하지 않는다. 저장 중 탭 전환은 위에서 막았으므로
+      // 여기 걸릴 일은 거의 없지만, 안내가 사실과 달라지는 쪽으로는 절대 두지 않는다.
+      window.alert(restored
+        ? "공지 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 등록해 주세요.\n\n작성하신 내용은 그대로 두었습니다."
+        : `공지 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 등록해 주세요.\n\n[작성하신 내용]\n제목: ${draft.title}\n내용: ${draft.body}`);
     } finally {
       setSaving(false);
     }
@@ -1404,12 +1450,25 @@ function AdminNoticeManager() {
     setTargetBranch("전체");
   };
 
+  /** 저장과 같은 규칙 — 화면에서 먼저 지우고, 실패하면 되돌리고 알린다. */
   const deleteNotice = async (id: string) => {
     if (!window.confirm("공지사항을 삭제할까요?")) return;
+    const previousNotices = notices;
     const next = notices.filter((notice) => notice.id !== id);
-    await gasClient.saveSharedData(noticeStorageKey, next);
+    const keyAtStart = noticeStorageKey;
     setNotices(next);
-    if (noticeTab === "admin") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
+    setSaving(true);
+    try {
+      await gasClient.saveSharedData(keyAtStart, next);
+      if (keyAtStart === "admin_dashboard_notices") window.dispatchEvent(new Event("admin_dashboard_notices_updated"));
+    } catch (error) {
+      console.error("공지 삭제 실패:", error);
+      // 저장과 같은 이유 — 그 사이 공지함을 옮겼으면 지금 화면을 건드리지 않는다.
+      if (noticeKeyRef.current === keyAtStart) setNotices(previousNotices);
+      window.alert("공지 삭제에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1419,8 +1478,12 @@ function AdminNoticeManager() {
         <p className="text-xs text-gray-400 mt-1">여기에 작성한 공지는 각 지점 대시보드 첫 화면에 표시됩니다.</p>
       </div>
       <div className="flex rounded-xl bg-slate-100 p-1 w-fit">
-        <button onClick={() => setNoticeTab("admin")} className={`admin-notice-tab admin-notice-tab-admin px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "admin" ? "is-active shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
-        <button onClick={() => setNoticeTab("branch")} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>공지사항</button>
+        {/* 저장하는 동안은 공지함을 옮기지 못하게 막는다.
+            옮겨 버리면 탭 전환이 입력창을 비우는데, 그 사이 저장이 실패해도 되살릴 곳이 없어
+            애써 쓴 글이 사라진다(그러면서 "그대로 두었다"고 알리게 된다 — 거짓말이 된다).
+            저장은 1초 안쪽이라 잠깐 잠기는 것이 글을 잃는 것보다 낫다. */}
+        <button onClick={() => setNoticeTab("admin")} disabled={saving} className={`admin-notice-tab admin-notice-tab-admin px-3 py-1.5 rounded-lg text-xs font-black disabled:opacity-50 disabled:cursor-not-allowed ${noticeTab === "admin" ? "is-active shadow-sm" : "text-gray-500"}`}>관리자 공지</button>
+        <button onClick={() => setNoticeTab("branch")} disabled={saving} className={`admin-notice-tab admin-notice-tab-branch px-3 py-1.5 rounded-lg text-xs font-black disabled:opacity-50 disabled:cursor-not-allowed ${noticeTab === "branch" ? "is-active shadow-sm" : "text-gray-500"}`}>공지사항</button>
       </div>
       <div className="admin-notice-form space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
         <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3">
@@ -1448,9 +1511,13 @@ function AdminNoticeManager() {
                 <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
                 <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{notice.body}</p>
               </div>
+              {/* 저장이 도는 동안은 잠근다.
+                  공지 저장은 목록 "전체"를 한 덩어리로 덮어쓴다. 화면이 즉시 반응하니 연달아 누르기 쉬운데,
+                  그러면 두 요청이 동시에 날아가고 늦게 도착한 쪽이 옛 목록으로 덮어써서
+                  지운 공지가 다른 노트북에 되살아난다. 한 번에 하나씩만 보낸다. */}
               <div className="flex shrink-0 items-center gap-2">
-                <button onClick={() => startEditNotice(notice)} className="text-xs font-black text-[#2E6DB4]">수정</button>
-                <button onClick={() => void deleteNotice(notice.id)} className="text-xs font-black text-rose-600">삭제</button>
+                <button onClick={() => startEditNotice(notice)} disabled={saving} className="text-xs font-black text-[#2E6DB4] disabled:opacity-40 disabled:cursor-not-allowed">수정</button>
+                <button onClick={() => void deleteNotice(notice.id)} disabled={saving} className="text-xs font-black text-rose-600 disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
               </div>
             </div>
           ))}
