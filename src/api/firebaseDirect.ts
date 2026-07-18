@@ -127,6 +127,16 @@ export async function firebaseGetDailyDetail(recordId: string) {
   return { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
 }
 
+// 서버 문서만 읽는 상세(캐시 폴백 없음, 실패 시 throw).
+// 급여대장 초과근무 집계처럼 부분/스테일 데이터가 '정상 집계'로 둔갑하면 위험한 화면 전용.
+export async function firebaseGetDailyDetailFromServer(recordId: string) {
+  await waitForFirebaseUser();
+  const snapshot = await getDocFromServer(doc(getDirectDb(), "daily_settles", recordId));
+  if (!snapshot.exists()) throw new Error("해당 마감 데이터를 찾을 수 없습니다.");
+  const data: any = snapshot.data();
+  return { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
+}
+
 export async function firebaseGetBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
   return (await findDailyDocs(branchName)).map((item: any) => toMaster(item.master))
     .filter((master) => !month || master.settleDate.startsWith(month))

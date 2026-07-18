@@ -4,7 +4,7 @@ import { AlertTriangle, BookOpen, CheckCircle2, Pencil, Trash2, X } from "lucide
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
-import { purchaseSalesGuideSteps } from "../helpers/guideSteps";
+import { fullTimeSalaryGuideSteps, purchaseSalesGuideSteps } from "../helpers/guideSteps";
 import { addMonthsToMonthInputValue } from "../helpers/formatters";
 import { MonthlyFullTimeSalarySubTab, flushFullTimeSalaryForClose } from "./MonthlyFullTimeSalarySubTab";
 import { MonthlyPurchaseSalesSubTab, flushMonthlyPurchasesForClose } from "./MonthlyPurchaseSalesSubTab";
@@ -401,9 +401,10 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           켜둔 채로 작성할 수 있게 배경을 어둡게 하지 않고, 말풍선 바깥 클릭은 화면으로 통과시킨다.
           마감 확정으로 화면이 잠겨도 버튼은 살아있다(잠긴 뒤 규칙을 찾아보는 경우가 많다).
           단, 로딩 중에는 거래처 표가 아직 없어 그 말풍선이 통째로 빠지므로 버튼을 잠근다. */}
-      {activeSubTab === "purchaseSales" && (
+      {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") && (
         <>
-          {/* 일일마감 탭과 같은 자리 — 탭 최상단 가운데. */}
+          {/* 일일마감 탭과 같은 자리 — 탭 최상단 가운데. 매입매출·정직원급여 둘 다 여기서 연다(하위 컴포넌트가 아니라
+              탭 레벨이어야 다른 탭들과 버튼 위치가 같다). */}
           <div className="flex justify-center">
             <button
               onClick={() => setGuideOpen((prev) => !prev)}
@@ -417,7 +418,11 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               <BookOpen className="w-3.5 h-3.5" /> {guideOpen ? "작성방법 닫기" : "작성방법 보기"}
             </button>
           </div>
-          <GuideCallouts open={guideOpen} steps={purchaseSalesGuideSteps} onClose={() => setGuideOpen(false)} />
+          <GuideCallouts
+            open={guideOpen}
+            steps={activeSubTab === "purchaseSales" ? purchaseSalesGuideSteps : fullTimeSalaryGuideSteps}
+            onClose={() => setGuideOpen(false)}
+          />
         </>
       )}
 

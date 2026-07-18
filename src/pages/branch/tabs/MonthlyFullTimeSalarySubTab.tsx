@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/MonthlyFullTimeSalarySubTab.tsx
 // 월말마감정산 - 정직원 급여대장 탭 (비밀번호 잠금 + 직원현황 자동연동, 전 컬럼 수정 가능)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Users, Plus, Lock, Check, ShieldCheck, X } from "lucide-react";
+import { Plus, Lock, Check, ShieldCheck, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -216,6 +216,10 @@ export function MonthlyFullTimeSalarySubTab({
 
   // ---- 데이터 상태 ----
   const [rows, setRows] = useState<FullTimeSalaryRow[]>([]);
+  // 초과근무일지 집계(읽기 전용 참고용). null=불러오는 중.
+  // (작성방법 버튼·말풍선은 MonthlySettleTab이 탭 최상단에서 연다 — 다른 탭들과 버튼 위치를 맞추기 위해서다)
+  const [otSummary, setOtSummary] = useState<Array<{ name: string; hours: number }> | null>(null);
+  const [otError, setOtError] = useState(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   // 저장 세대 카운터: 저장 요청 후 더 최신 편집이 있으면(gen 불일치) pending 플래그를 지우지 않는다.
   const autoSaveGenRef = useRef(0);
@@ -354,6 +358,58 @@ export function MonthlyFullTimeSalarySubTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchName, selectedMonth]);
 
+  // 초과근무일지(자동 기록 + 수기 대장)에서 이번 달 직원별 초과시간을 읽어와 참고용으로만 보여준다.
+  // 급여 행에 자동으로 넣지 않는다 — 초과근무를 당월 급여 대신 휴무로 받는 직원이 있어,
+  // 지급 대상만 지점이 직접 연장근무 '근무시간' 칸에 옮겨 적는다(읽기 전용이라 저장 경로도 오염되지 않는다).
+  useEffect(() => {
+    let cancelled = false;
+    setOtSummary(null);
+    setOtError(false);
+    (async () => {
+      try {
+        // 급여 입력의 참고값이므로 캐시 폴백을 쓰지 않는다 — 서버 실패가 오래된 캐시로 둔갑해
+        // '정상 집계'처럼 보이면 stale 숫자를 보고 급여를 적게 된다. 실패는 아래 catch에서 실패라고 말한다.
+        const [otLog, otManual] = await Promise.all([
+          gasClient.getAttendanceLog(branchName, "overtime", selectedMonth, true, true) as Promise<any>, // serverOnly — 캐시 폴백 금지
+          gasClient.getSharedDataFromServer<any[]>(`manual_overtime:${branchName}`),
+        ]);
+        // sum과 별개로 '0이 아닌 기록이 있었는가'를 남긴다 — 전월 +5h·이번달 -5h처럼 누적이 0으로 상쇄된
+        // 직원도 일지 탭 집계에는 '총 0h'로 보이므로, 칩에서도 숨기지 않아야 두 화면이 일치한다.
+        const perName = new Map<string, { sum: number; hadNonzero: boolean }>();
+        const add = (nm: unknown, h: unknown) => {
+          const key = String(nm ?? "").trim();
+          if (!key) return;
+          const v = Number(h) || 0;
+          const cur = perName.get(key) || { sum: 0, hadNonzero: false };
+          cur.sum += v;
+          if (v !== 0) cur.hadNonzero = true;
+          perName.set(key, cur);
+        };
+        // 일지 탭 '초과 근무 인원 집계'의 굵은 숫자(총 = 전월누적 + 이번달)와 같은 값을 보여준다(사용자 선택).
+        // 필드 우선순위도 일지 탭(OvertimeLogTab)과 글자까지 같아야 한다 — 다르면 두 화면의 숫자가 어긋난다.
+        // 선택월 '이하' 전체를 합산한다(YYYY-MM 문자열 비교). records는 getAttendanceLog가 이미 선택월 이하만 주지만 명시적으로 한 번 더 거른다.
+        (otLog?.records || []).forEach((r: any) => {
+          if (String(r.settleDate || "").slice(0, 7) <= selectedMonth) add(r.staffName, r.overtime ?? r.overtimeHours ?? r.hours ?? r.totalOvertime ?? 0);
+        });
+        (Array.isArray(otManual) ? otManual : []).forEach((m: any) => {
+          if (String(m.settleDate || "").slice(0, 7) <= selectedMonth) add(m.staffName, m.overtime ?? m.overtimeHours ?? m.hours ?? m.totalOvertime ?? 0);
+        });
+        if (!cancelled) {
+          setOtSummary(
+            Array.from(perName, ([name, v]) => ({ name, hours: Math.round(v.sum * 100) / 100, hadNonzero: v.hadNonzero }))
+              .filter((x) => x.hadNonzero) // 누적 0이어도 기록이 있으면 표시(일지 탭과 동일 규칙)
+              .map(({ name, hours }) => ({ name, hours }))
+              .sort((a, b) => b.hours - a.hours)
+          );
+        }
+      } catch {
+        // 실패를 빈 목록으로 보여주면 "초과근무 없음"으로 오해한다 — 실패라고 말한다.
+        if (!cancelled) { setOtSummary([]); setOtError(true); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [branchName, selectedMonth]);
+
   const persist = useCallback((next: FullTimeSalaryRow[]) => {
     setRows(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
@@ -437,7 +493,10 @@ export function MonthlyFullTimeSalarySubTab({
   const devUnlockBypass = Boolean((import.meta as any).env?.DEV);
   if (!unlocked && !devUnlockBypass) {
     return (
-      <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6">
+      // data-guide: 작성방법 말풍선(fulltime-salary-table)의 앵커는 잠금 해제 후의 표에 있다.
+      // 잠금 화면에도 같은 앵커를 달아, 잠긴 상태에서 '작성방법 보기'를 눌러도 말풍선이 여기 위에 뜨게 한다
+      // (앵커가 없으면 GuideCallouts가 조용히 건너뛰어 버튼이 무반응처럼 보인다).
+      <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6" data-guide="fulltime-salary-table">
         <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-4">
           <Lock className="w-7 h-7" />
         </div>
@@ -499,12 +558,50 @@ export function MonthlyFullTimeSalarySubTab({
 
   return (
     <div className="space-y-5 animate-fade-in" id="fulltime-salary-subtab">
+      {/* 초과근무일지 집계 — 월말마감 헤더 바로 아래, 급여대장 제목 위. 읽기 전용 참고.
+          급여에 자동 반영하지 않는다(휴무로 대체하는 인원이 있어 지급 대상만 지점이 직접 연장근무 '근무시간' 칸에 옮겨 적는다).
+          색은 이 탭의 디자인 토큰(--branch-vanilla/honey + 검정 테두리)을 따른다 — 옛 인디고 팔레트 금지. */}
+      <div className="rounded-2xl border border-zinc-900 bg-white px-4 py-3 space-y-2" data-guide="fulltime-overtime-summary">
+        <div className="text-xs font-black text-zinc-900 w-fit">
+          초과근무 누적 <span className="font-bold text-zinc-400">(초과근무일지의 '총'과 동일 · 전월누적 포함 · 참고용)</span>
+        </div>
+        {otSummary === null ? (
+          <p className="text-[11px] font-bold text-zinc-400">불러오는 중…</p>
+        ) : otError ? (
+          <p className="text-[11px] font-bold text-rose-600">초과근무일지를 불러오지 못했습니다. 초과근무일지 탭에서 직접 확인해 주세요.</p>
+        ) : otSummary.length === 0 ? (
+          <p className="text-[11px] font-bold text-zinc-400">집계된 초과근무가 없습니다.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {otSummary.map((x) => {
+              // 초과근무 기록 원천(일일마감·수기대장)에는 직원 id가 없어 집계가 '이름' 기준이다.
+              // 급여대장 명단에 같은 이름이 둘 이상이면 두 사람의 시간이 한 칩에 합산된 것일 수 있어 경고를 단다.
+              const dup = rows.filter((r) => r.name.trim() === x.name).length > 1;
+              return (
+                <span
+                  key={x.name}
+                  title={dup ? "급여대장에 같은 이름이 2명 이상 있습니다. 이 시간은 동명이인의 합산일 수 있으니 초과근무일지에서 개별 확인해 주세요." : undefined}
+                  className={`inline-flex items-center gap-1 rounded-full border border-zinc-900 px-2.5 py-1 text-[11px] font-black text-zinc-900 ${
+                    dup ? "bg-rose-100 text-rose-700"
+                    : x.hours < 0 ? "bg-[var(--branch-honey)]"
+                    : "bg-[var(--branch-vanilla)]"
+                  }`}
+                >
+                  {dup ? "⚠ " : ""}{x.name} <b className="font-mono">{x.hours > 0 ? `+${x.hours}h` : `${x.hours}h`}</b>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[10px] font-semibold text-zinc-400">
+          당월 급여로 지급할 인원만 아래 연장근무 '근무시간' 칸에 직접 입력하세요. 휴무로 대체하는 인원은 입력하지 않습니다.
+          동명이인은 한 이름으로 합산 표시되니(⚠) 해당 시 초과근무일지에서 개별 확인해 주세요.
+        </p>
+      </div>
+
       <div className="flex justify-between items-center pb-3 border-b border-gray-50">
         <div>
-          <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
-            <Users className="w-4 h-4 text-indigo-600" />
-            정직원 급여대장
-          </h3>
+          <h3 className="text-sm font-black text-zinc-900 w-fit">정직원 급여대장</h3>
           <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
             직원현황의 정직원 이름이 자동으로 채워집니다. 모든 칸은 직접 수정할 수 있고, 명단에 없으면 '직원 추가'로 넣으세요.
           </p>
@@ -534,7 +631,7 @@ export function MonthlyFullTimeSalarySubTab({
       <SheetKeyHint />
       {/* 발주관리처럼 스크롤 래퍼엔 테두리·둥근 모서리를 두지 않는다 — rounded가 표의 직각 검정 모서리를 잘라내고
           border-gray-100 회색 선이 검정 격자 바깥에 겹쳐 보인다. 표 테두리는 표(헤더 CSS)가 직접 그린다. */}
-      <div className="max-h-[70vh] overflow-auto">
+      <div className="max-h-[70vh] overflow-auto" data-guide="fulltime-salary-table">
         {/* border-separate 필수 — collapse에서는 sticky 헤더/고정열의 테두리가 스크롤을 따라오지 않아 선이 깨진다(index.css 참고). */}
         <table className="text-left text-[11px] border-separate font-medium" style={{ minWidth: 1750, borderSpacing: 0 }}>
           <thead className="sticky top-0 z-20">
