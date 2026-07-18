@@ -72,10 +72,11 @@ const CHECKBOX_RULES: Array<{ situation: string; prepaid: ReactNode; transferNee
 
 export const purchaseSalesGuideSteps: GuideStep[] = [
   {
-    // 자릿값 입력칸에 직접 붙인다(작은 앵커 → 아래에 배치해 칸을 가리지 않는다).
+    // 자릿값 입력칸에 붙인다. below로 두면 아래 매입매출 표의 말풍선과 같은 자리로 떨어져 가려지므로
+    // above(상단)로 띄운다(사용자 요청 2026-07-18).
     anchor: "sales-summary-seat-charge",
     title: "자릿값(예약정산금)",
-    placement: "below",
+    placement: "above",
     width: 400,
     body: (
       <Bullets

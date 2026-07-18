@@ -240,14 +240,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       { id: "orders", label: "발주관리", icon: ShoppingCart },
       { id: "liquorInventory", label: "주류 재고", icon: Database }
     ] : []),
-    { id: "roster", label: "직원현황", icon: User },
     ...(isHeadOfficeBranch
       ? [
           { id: "officeWorkLog", label: "근무내역", icon: ClipboardList },
           { id: "overtimeLog", label: "초과근무일지", icon: Clock }
         ]
       : [{ id: "overtimeLog", label: "초과근무일지", icon: Clock }]),
-    { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList }
+    { id: "partTimeLog", label: "파트타이머일지", icon: ClipboardList },
+    // 직원현황은 자주 안 보는 참고 화면이라 맨 밑으로 내린다(사용자 요청 2026-07-18).
+    { id: "roster", label: "직원현황", icon: User }
   ] as Array<{ id: BranchDailyTab; label: string; icon: typeof CircleDollarSign }>;
 
   const monthlySubTabs = [
