@@ -1389,7 +1389,8 @@ input[type=number] {
    → data-cat 행 색상과 같은 전략으로, ID 특이성(1,2,0 > 0,1,1)으로 이겨서 되돌린다.
    격자선과 현재 셀 강조는 감싸는 td가 그린다. */
 .branch-redesign #purchase-sales-subtab .sheet-cell-input,
-.branch-redesign #parttime-salaries-subtab .sheet-cell-input {
+.branch-redesign #parttime-salaries-subtab .sheet-cell-input,
+.branch-redesign #fulltime-salary-subtab .sheet-cell-input {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -1406,10 +1407,38 @@ input[type=number] {
 
 /* 쓸 수 없는 칸은 회색으로 잠근다(선입금 미체크 행의 충전금액 칸 등). */
 .branch-redesign #purchase-sales-subtab .sheet-cell-input:disabled,
-.branch-redesign #parttime-salaries-subtab .sheet-cell-input:disabled {
+.branch-redesign #parttime-salaries-subtab .sheet-cell-input:disabled,
+.branch-redesign #fulltime-salary-subtab .sheet-cell-input:disabled {
   background: rgba(33, 33, 33, 0.06) !important;
   color: rgba(33, 33, 33, 0.35) !important;
   cursor: not-allowed;
+}
+
+/* 정직원 급여대장 헤더: 발주내역 리포트처럼 검정 격자 + 바닐라 배경.
+   표는 반드시 border-separate(spacing 0)여야 한다 — border-collapse에서는 sticky 헤더/고정열이
+   스크롤될 때 테두리가 셀을 따라오지 않아(크롬 렌더링 한계) 헤더 선이 깨진다.
+   separate에서는 각 칸이 자기 테두리를 갖고 함께 움직인다. */
+.branch-redesign #fulltime-salary-subtab table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+.branch-redesign #fulltime-salary-subtab thead th {
+  background: var(--branch-vanilla) !important;
+  border: 0 !important;
+  border-right: 1px solid var(--branch-black) !important;
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+/* 바깥 모서리: 첫 줄엔 위 테두리, 표의 첫 칸(성명)엔 왼쪽 테두리.
+   (둘째 줄의 첫 칸은 표 중간의 '근무시간'이라 왼쪽 테두리를 주면 안 된다) */
+.branch-redesign #fulltime-salary-subtab thead tr:first-child th {
+  border-top: 1px solid var(--branch-black) !important;
+}
+.branch-redesign #fulltime-salary-subtab thead tr:first-child th:first-child {
+  border-left: 1px solid var(--branch-black) !important;
+}
+/* separate 모드에서는 tr의 border-top이 그려지지 않으므로 합계줄 구분선은 칸에 직접 긋는다. */
+.branch-redesign #fulltime-salary-subtab tfoot td {
+  border-top: 2px solid #e0e7ff !important;
 }
 
 .branch-redesign aside nav button:not(.text-white):not([style]),

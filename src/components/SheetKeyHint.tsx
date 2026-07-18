@@ -9,7 +9,7 @@
 // 섹션 자체가 overflow-hidden이면 섹션을 relative 래퍼로 감싸고 그 래퍼에 이 칩을 둔다.
 export function SheetKeyHint() {
   return (
-    <span className="absolute -top-2.5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
+    <span className="absolute -top-2.5 left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-full border border-zinc-900 bg-[#EFF0A3] px-2.5 py-0.5 text-[10px] font-black text-zinc-900 shadow-sm">
       ↑ ↓ ← → · Tab · Enter 로 칸 이동
     </span>
   );

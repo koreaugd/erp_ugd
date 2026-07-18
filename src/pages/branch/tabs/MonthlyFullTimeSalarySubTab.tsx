@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/MonthlyFullTimeSalarySubTab.tsx
 // 월말마감정산 - 정직원 급여대장 탭 (비밀번호 잠금 + 직원현황 자동연동, 전 컬럼 수정 가능)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Users, Plus, Trash2, Lock, Check, ShieldCheck } from "lucide-react";
+import { Users, Plus, Lock, Check, ShieldCheck, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -17,23 +17,56 @@ interface FullTimeSalaryRow {
   residentNumber: string;
   entryDate: string;
   contractType: string;
-  accountNumber: string;
+  bank: string;           // 은행명(국민은행 등)
+  accountNumber: string;  // 계좌번호(숫자만 저장)
   prevSalary: string;
   thisSalary: string;
   taxiEtc: string;
   bonusTip: string;
-  overtimePay: string;
+  overtimePay: string;   // 옛 '추가근무' 금액(레거시). 신규는 시간×시급으로 계산하며 이 필드에 저장하지 않는다.
+  overtimeHours: string; // 연장 근무시간(소수 허용)
+  overtimeRate: string;  // 연장 시급(원)
   remitBranch: string;
   memo: string;
   isManual?: boolean;
 }
 
-// 세션(페이지 로드) 단위 잠금 해제 상태 — 탭을 나갔다 와도 유지, 새로고침 시 재입력.
+// 잠금 해제 상태(모듈 전역). 급여대장 탭을 떠나면(언마운트) / 화면이 오래 숨겨졌다 열리면 아래 effect가 false로 되돌려 재잠금한다.
 let fullTimeSalaryUnlocked = false;
 
 
 const num = (v: string) => Number(cleanNumeric(String(v || ""))) || 0;
-const rowTotal = (r: FullTimeSalaryRow) => num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + num(r.overtimePay);
+// 연장근무 '시간'은 소수(예: 2.5)를 허용하므로 cleanNumeric(정수화) 대신 소수점 하나만 남긴다.
+const otNum = (v: string) => Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
+const cleanHours = (v: string) => {
+  const s = String(v ?? "").replace(/[^0-9.]/g, "");
+  const i = s.indexOf(".");
+  return i === -1 ? s : s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "");
+};
+// 드롭다운 표준 목록. 목록에 없는 레거시 값은 각 행에서 옵션으로 함께 넣어(정규화하지 않음) 값이 사라지지 않게 한다.
+// 근로계약도 같은 규칙 — 옛 자유입력값("프리랜서" 등)을 강제로 4대보험으로 바꾸면 실제와 다른 값이 급여 엑셀에 나간다.
+const RANK_OPTIONS = ["사원", "대리", "과장", "차장", "실장", "부장", "이사"];
+const CONTRACT_OPTIONS = ["4대보험", "3.3%"];
+
+// 레거시 '입금계좌' 한 칸에 은행명+계좌가 함께 적힌 값("국민 123-456")을 은행/계좌 두 칸으로 분리한다.
+// 로드·병합 시 한 번 실행돼 화면·저장·엑셀이 같은 값을 본다. 은행 칸에 이미 값이 있으면 건드리지 않는다.
+// 분리하지 않고 두면, 계좌번호 칸을 한 글자만 수정해도 입력 필터(숫자·하이픈만)가 은행명을 지워 영구 소실된다.
+const splitLegacyAccount = (r: FullTimeSalaryRow): FullTimeSalaryRow => {
+  const acc = String(r.accountNumber || "");
+  if (r.bank || !/[^\d\- ]/.test(acc)) return r; // 은행이 이미 있거나, 계좌에 문자가 없으면 그대로
+  const bank = acc.replace(/[0-9\-./() ]/g, "").trim();
+  const number = acc.replace(/[^0-9-]/g, "");
+  return bank ? { ...r, bank, accountNumber: number } : r;
+};
+// 연장근무 계 = 근무시간 × 시급(원, 반올림). 이 값이 총금액에 합산된다.
+// 반드시 시간·시급이 '둘 다' 있을 때만 계산값을 쓴다. 한쪽만 입력됐을 땐 옛 '추가근무' 금액(overtimePay)을 보존한다
+//   → 개편 전에 적어둔 초과근무수당이, 시간/시급 한쪽만 건드리는 순간 0으로 덮여 사라지는 사고를 막는다.
+// 계는 어디서도 overtimePay에 동기화 저장하지 않는다(화면·합계·엑셀 모두 이 함수로 그때그때 계산).
+const rowOvertimePay = (r: FullTimeSalaryRow) =>
+  (otNum(r.overtimeHours) > 0 && num(r.overtimeRate) > 0)
+    ? Math.round(otNum(r.overtimeHours) * num(r.overtimeRate))
+    : num(r.overtimePay);
+const rowTotal = (r: FullTimeSalaryRow) => num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + rowOvertimePay(r);
 
 const rosterToRow = (emp: any): FullTimeSalaryRow => ({
   id: `ft_${emp.id || emp.name}`,
@@ -43,12 +76,15 @@ const rosterToRow = (emp: any): FullTimeSalaryRow => ({
   residentNumber: emp.residentNumber || "",
   entryDate: emp.entryDate || emp.hireDate || "",
   contractType: emp.contractType || "4대보험",
+  bank: emp.bank || "",
   accountNumber: "",
   prevSalary: "",
   thisSalary: "",
   taxiEtc: "",
   bonusTip: "",
   overtimePay: "",
+  overtimeHours: "",
+  overtimeRate: "",
   remitBranch: "",
   memo: "",
 });
@@ -65,10 +101,16 @@ export async function flushFullTimeSalaryForClose(branchName: string, selectedMo
     try { const raw = localStorage.getItem(storageKey); return raw ? JSON.parse(raw) : null; } catch { return null; }
   };
   const money = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
+  // 연장근무 계 = 시간×시급(둘 다 있을 때). 없으면 옛 '추가근무' 금액. 화면 rowOvertimePay와 같은 규칙.
+  const otPay = (r: FullTimeSalaryRow) => {
+    const h = Number(String(r.overtimeHours ?? "").replace(/[^0-9.]/g, "")) || 0;
+    const rate = money(r.overtimeRate);
+    return (h > 0 && rate > 0) ? Math.round(h * rate) : money(r.overtimePay);
+  };
   // 실 데이터 판정: 실제 급여 금액이 입력된 행이 하나라도 있어야 한다.
   // (로스터 자동생성 행은 이름만 있고 금액이 0이므로 제외된다)
   const hasMeaningful = (rows: FullTimeSalaryRow[] | null) =>
-    Array.isArray(rows) && rows.some((r) => money(r.thisSalary) + money(r.taxiEtc) + money(r.bonusTip) + money(r.overtimePay) > 0);
+    Array.isArray(rows) && rows.some((r) => money(r.thisSalary) + money(r.taxiEtc) + money(r.bonusTip) + otPay(r) > 0);
   const local = readLocal();
 
   // 0) 미저장 편집(pending)이 있으면 실 데이터 여부와 무관하게 로컬 최신본(추가·수정·삭제·0원 편집 모두)을 서버로 반영한다.
@@ -135,6 +177,25 @@ export function MonthlyFullTimeSalarySubTab({
 
   useEffect(() => { loadPasscode(); }, [loadPasscode]);
 
+  // 보안 재잠금: (1) 급여대장 탭을 떠나면(언마운트) 다시 잠근다. (2) 화면이 1분 이상 숨겨졌다 다시 열리면
+  //   (노트북을 닫았다 다른 사람이 여는 경우 등) 다시 잠근다. 잠깐 alt-tab에는 잠기지 않는다.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 60000) {
+        fullTimeSalaryUnlocked = false;
+        setUnlocked(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      fullTimeSalaryUnlocked = false; // 탭을 떠나면 재잠금
+    };
+  }, []);
+
   const tryUnlock = () => {
     if (passStatus !== "ready") {
       setPassError(
@@ -186,27 +247,37 @@ export function MonthlyFullTimeSalarySubTab({
       if (prior) {
         consumed.add(prior);
         // 저장값(사용자 수정)이 우선, 비어 있으면 로스터 기본값으로 채운다.
-        return {
+        return splitLegacyAccount({
           ...base,
           name: prior.name || base.name,
           rank: prior.rank || base.rank,
           residentNumber: prior.residentNumber || base.residentNumber,
           entryDate: prior.entryDate || base.entryDate,
           contractType: prior.contractType || base.contractType,
+          bank: prior.bank || "",
           accountNumber: prior.accountNumber || "",
           prevSalary: prior.prevSalary || "",
           thisSalary: prior.thisSalary || "",
           taxiEtc: prior.taxiEtc || "",
           bonusTip: prior.bonusTip || "",
           overtimePay: prior.overtimePay || "",
+          overtimeHours: prior.overtimeHours || "",
+          overtimeRate: prior.overtimeRate || "",
           remitBranch: prior.remitBranch || "",
           memo: prior.memo || "",
-        };
+        });
       }
       return base;
     });
     // 로스터가 비었거나 불완전해도 저장된 급여 행은 모두 보존한다.
-    const leftover = saved.filter((r) => !consumed.has(r));
+    // 개편 전 저장분에는 연장근무 시간/시급 필드가 없으므로 기본값("")을 채워 controlled input을 보장한다.
+    const leftover = saved.filter((r) => !consumed.has(r)).map((r) => splitLegacyAccount({
+      ...r,
+      bank: r.bank || "",
+      overtimePay: r.overtimePay || "",
+      overtimeHours: r.overtimeHours || "",
+      overtimeRate: r.overtimeRate || "",
+    }));
     return [...rosterRows, ...leftover];
   }, []);
 
@@ -290,18 +361,36 @@ export function MonthlyFullTimeSalarySubTab({
     const gen = ++autoSaveGenRef.current;
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
-      gasClient.saveSharedData(sharedKey, next)
+      // Firestore는 undefined 값이 든 필드가 하나라도 있으면 문서 전체 저장을 거부한다.
+      // 명부에 id가 없는 직원은 employeeId가 undefined로 들어오므로(rosterToRow), JSON 왕복으로 걷어내고 보낸다.
+      const safe = JSON.parse(JSON.stringify(next)) as FullTimeSalaryRow[];
+      gasClient.saveSharedData(sharedKey, safe)
         .then(() => { if (autoSaveGenRef.current === gen) localStorage.removeItem(pendingKey); })
-        .catch(() => triggerToast("저장 중 부득이한 에러발생", "error"));
+        .catch((e) => {
+          console.error("정직원 급여대장 자동저장 실패:", e); // 개발자도구에서 실제 원인 확인용
+          // 로그인 세션이 풀린 경우는 지점에서 실제로 겪는 상황(1시간 유휴 자동 로그아웃 등)이라
+          // "부득이한 에러"가 아니라 해야 할 일을 알려준다. 입력값은 로컬(pending)에 보관돼 재로그인 후 재전송된다.
+          const authIssue = String((e as any)?.message ?? e).includes("로그인");
+          triggerToast(
+            authIssue
+              ? "로그인이 풀려 저장하지 못했습니다. 다시 로그인해 주세요. 입력값은 이 노트북에 보관됩니다."
+              : "저장 중 부득이한 에러발생",
+            "error"
+          );
+        });
     }, 450);
   }, [pendingKey, sharedKey, storageKey, triggerToast]);
 
   const updateRow = (id: string, field: keyof FullTimeSalaryRow, value: string) => {
     if (isLocked) return;
-    const moneyFields = ["prevSalary", "thisSalary", "taxiEtc", "bonusTip", "overtimePay"];
+    const moneyFields = ["prevSalary", "thisSalary", "overtimeRate", "taxiEtc", "bonusTip"];
     let nextVal = value;
     if (moneyFields.includes(String(field))) nextVal = cleanNumeric(value);
+    else if (field === "overtimeHours") nextVal = cleanHours(value); // 소수 허용(예: 2.5)
+    else if (field === "accountNumber") nextVal = value.replace(/[^0-9-]/g, ""); // 계좌번호는 숫자와 하이픈만(엑셀 다운로드 땐 숫자만 — AdminPage)
     else if (field === "residentNumber") nextVal = formatResidentNumber(value); // 13자리 제한 + 하이픈 자동
+    // '계'는 overtimePay에 동기화하지 않는다 — 옛 금액만 있는 행에서 시간/시급 한쪽만 입력하면
+    // 계산값 0이 기존 금액을 덮어써 급여가 사라지는 사고가 난다(rowOvertimePay가 둘 다 있을 때만 계산).
     persist(rows.map((r) => (r.id === id ? { ...r, [field]: nextVal } : r)));
   };
 
@@ -310,13 +399,17 @@ export function MonthlyFullTimeSalarySubTab({
     persist([...rows, {
       id: `ft_manual_${Date.now()}`,
       name: "", rank: "", residentNumber: "", entryDate: "", contractType: "4대보험",
-      accountNumber: "", prevSalary: "", thisSalary: "", taxiEtc: "", bonusTip: "", overtimePay: "",
+      bank: "", accountNumber: "", prevSalary: "", thisSalary: "", taxiEtc: "", bonusTip: "", overtimePay: "",
+      overtimeHours: "", overtimeRate: "",
       remitBranch: "", memo: "", isManual: true,
     }]);
   };
 
   const deleteRow = (id: string) => {
     if (isLocked) return;
+    // 급여(금전) 행이라 오클릭 삭제를 막기 위해 한 번 확인한다.
+    const who = rows.find((r) => r.id === id)?.name?.trim() || "이름 없는 행";
+    if (!window.confirm(`${who} 님을 이번 달 급여대장에서 삭제할까요?`)) return;
     persist(rows.filter((r) => r.id !== id));
   };
 
@@ -325,7 +418,8 @@ export function MonthlyFullTimeSalarySubTab({
   const totThis = sum((r) => num(r.thisSalary));
   const totTaxi = sum((r) => num(r.taxiEtc));
   const totBonus = sum((r) => num(r.bonusTip));
-  const totOt = sum((r) => num(r.overtimePay));
+  const totHours = sum((r) => otNum(r.overtimeHours));
+  const totOt = sum(rowOvertimePay);
   const totAll = sum(rowTotal);
 
   // 엑셀식 칸 이동. 행은 직원명부에서 오므로 행 추가는 없다(onAppendRow 없음).
@@ -334,10 +428,14 @@ export function MonthlyFullTimeSalarySubTab({
   // 반드시 아래 잠금 화면 return보다 위에 있어야 한다.
   // 아래에 두면 잠겨 있을 때는 이 훅이 호출되지 않다가 잠금을 풀면 갑자기 호출되어
   // 훅 순서가 바뀌고 React가 터진다.
-  const { cellProps } = useSheetKeyboardNav({ rowCount: rows.length, colCount: 11 });
+  const { cellProps, isActive } = useSheetKeyboardNav({ rowCount: rows.length, colCount: 14 });
 
   // ---- 잠금 화면 ----
-  if (!unlocked) {
+  // 개발 서버(localhost:3000, npm run dev)에서는 비밀번호 없이 열람한다 — 테스트 편의.
+  // import.meta.env.DEV는 vite build(배포본)에서 자동으로 false가 되므로, 배포하면 다시 비밀번호를 요구한다.
+  // (hostname 판별을 쓰면 안 된다 — 이 프로젝트의 hostname 목록엔 운영(run.app)도 들어 있다.)
+  const devUnlockBypass = Boolean((import.meta as any).env?.DEV);
+  if (!unlocked && !devUnlockBypass) {
     return (
       <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6">
         <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-4">
@@ -383,14 +481,21 @@ export function MonthlyFullTimeSalarySubTab({
     );
   }
 
-  // ---- 급여대장 표 ----
-  const cellNum = "w-full p-1.5 border border-gray-200 rounded-lg text-[11px] font-mono font-black text-right focus:outline-none focus:border-indigo-500 disabled:bg-zinc-100 disabled:text-gray-400 disabled:cursor-not-allowed";
-  const cellText = "w-full p-1.5 border border-gray-200 rounded-lg text-[11px] font-bold placeholder-gray-300 focus:outline-none focus:border-indigo-500 disabled:bg-zinc-100 disabled:text-gray-400 disabled:cursor-not-allowed";
+  // ---- 급여대장 표 (엑셀형 격자, 파트타이머 급여대장과 동일 규칙) ----
+  // sheet-cell-input: index.css에서 전역 input 배경/테두리 !important를 ID 특이성(#fulltime-salary-subtab)으로
+  // 되돌려 셀을 투명하게 만드는 클래스. 격자선·현재 칸 강조는 감싸는 td(cellTd)가 그린다.
+  const cellNum = "sheet-cell-input w-full h-9 px-2 text-[11px] font-mono font-black text-right focus:outline-none";
+  const cellText = "sheet-cell-input w-full h-9 px-2 text-[11px] font-bold placeholder-gray-300 focus:outline-none";
+  // 엑셀 셀: 격자선은 td가 긋고, 현재 칸은 굵은 테두리로 짚어준다.
+  const cellTd = (rowIndex: number, col: number, extra = "") =>
+    [
+      "border-r border-b border-black/10 p-0 relative",
+      isActive(rowIndex, col) ? "outline outline-2 -outline-offset-2 outline-indigo-500 z-10" : "",
+      extra,
+    ].join(" ");
   const th = "py-3 px-2 text-center font-black";
-  // 분류·근로계약·실제송금지점은 화면에서 항상 숨김(엑셀 다운로드에만 포함) — 관리자도 지점과 동일 화면.
-  const labelColSpan = 6;
-  const trailingColSpan = 2;
-  const emptyColSpan = 13;
+  // 분류·실제송금지점은 화면에서 숨김(엑셀 다운로드에만 포함). 근로계약·은행은 화면에도 노출한다.
+  const emptyColSpan = 16; // 전체 열 수(연장근무 3열 포함, 삭제는 이름칸 ×로 통합)
 
   return (
     <div className="space-y-5 animate-fade-in" id="fulltime-salary-subtab">
@@ -427,23 +532,33 @@ export function MonthlyFullTimeSalarySubTab({
       {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
       <div className="relative">
       <SheetKeyHint />
-      <div className="overflow-x-auto rounded-2xl border border-gray-100">
-        <table className="text-left text-[11px] border-collapse font-medium" style={{ minWidth: 1200 }}>
-          <thead>
+      {/* 발주관리처럼 스크롤 래퍼엔 테두리·둥근 모서리를 두지 않는다 — rounded가 표의 직각 검정 모서리를 잘라내고
+          border-gray-100 회색 선이 검정 격자 바깥에 겹쳐 보인다. 표 테두리는 표(헤더 CSS)가 직접 그린다. */}
+      <div className="max-h-[70vh] overflow-auto">
+        {/* border-separate 필수 — collapse에서는 sticky 헤더/고정열의 테두리가 스크롤을 따라오지 않아 선이 깨진다(index.css 참고). */}
+        <table className="text-left text-[11px] border-separate font-medium" style={{ minWidth: 1750, borderSpacing: 0 }}>
+          <thead className="sticky top-0 z-20">
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 text-[10px] tracking-wider">
-              <th className={`${th} w-24`}>성명</th>
-              <th className={`${th} w-20`}>직급</th>
-              <th className={`${th} w-32`}>주민등록번호</th>
-              <th className={`${th} w-28`}>입사일</th>
-              <th className={`${th} w-44`}>입금계좌</th>
-              <th className={`${th} w-28`}>전월급여</th>
-              <th className={`${th} w-28`}>이달급여</th>
-              <th className={`${th} w-20`}>택시비 및<br/>기타지출</th>
-              <th className={`${th} w-24`}>상여금(팁)</th>
-              <th className={`${th} w-24`}>추가근무</th>
-              <th className={`${th} w-28 text-indigo-700`}>총 금액</th>
-              <th className={`${th} w-40`}>기타내용</th>
-              <th className={`${th} w-10`}></th>
+              {/* 성명만 왼쪽 고정(발주관리 '일' 컬럼과 같은 패턴). 다른 열은 고정하지 않는다 — 여러 열 sticky는 오프셋이 어긋나 표가 깨졌다. */}
+              <th rowSpan={2} className={`${th} w-24 sticky left-0 z-30`}>성명</th>
+              <th rowSpan={2} className={`${th} w-20`}>직급</th>
+              <th rowSpan={2} className={`${th} w-36 whitespace-nowrap`}>주민등록번호</th>
+              <th rowSpan={2} className={`${th} w-32`}>입사일</th>
+              <th rowSpan={2} className={`${th} w-28 whitespace-nowrap`}>근로계약</th>
+              <th rowSpan={2} className={`${th} w-28`}>은행</th>
+              <th rowSpan={2} className={`${th} w-40`}>계좌번호</th>
+              <th rowSpan={2} className={`${th} w-28`}>전월급여</th>
+              <th rowSpan={2} className={`${th} w-28 whitespace-nowrap`}>이달 급여</th>
+              <th colSpan={3} className={`${th}`}>연장근무</th>
+              <th rowSpan={2} className={`${th} w-28`}>택시비 및<br/>기타지출</th>
+              <th rowSpan={2} className={`${th} w-24`}>상여금</th>
+              <th rowSpan={2} className={`${th} w-28 text-indigo-700 whitespace-nowrap`}>총 금액</th>
+              <th rowSpan={2} className={`${th} w-96 whitespace-nowrap`}>기타내용 (퇴사일 및 퇴직금 등)</th>
+            </tr>
+            <tr className="bg-zinc-50 text-zinc-500 text-[10px] tracking-wider">
+              <th className={`${th} w-20 whitespace-nowrap`}>근무시간</th>
+              <th className={`${th} w-24`}>시급</th>
+              <th className={`${th} w-28`}>계</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -456,38 +571,77 @@ export function MonthlyFullTimeSalarySubTab({
             ) : (
               rows.map((row, rowIndex) => (
                 <tr key={row.id} className="hover:bg-indigo-50/20">
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 0)} type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className={cellText} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 1)} type="text" value={row.rank} disabled={isLocked} onChange={(e) => updateRow(row.id, "rank", e.target.value)} placeholder="직급" className={cellText} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 2)} type="text" value={row.residentNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "residentNumber", e.target.value)} placeholder="주민번호" className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 3)} type="date" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 4)} type="text" value={row.accountNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "accountNumber", e.target.value)} placeholder="은행/계좌번호" className={`${cellText} font-mono`} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 5)} type="text" inputMode="numeric" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 6)} type="text" inputMode="numeric" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 7)} type="text" inputMode="numeric" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 8)} type="text" inputMode="numeric" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 9)} type="text" inputMode="numeric" value={formatWithCommas(row.overtimePay)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimePay", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className="px-2 py-1.5 text-right font-mono font-black text-indigo-700">{formatNumber(rowTotal(row))}</td>
-                  <td className="px-2 py-1.5"><input {...cellProps(rowIndex, 10)} type="text" value={row.memo} disabled={isLocked} onChange={(e) => updateRow(row.id, "memo", e.target.value)} placeholder="비고" className={cellText} /></td>
-                  <td className="px-2 py-1.5 text-center">
-                    {/* Tab은 칸 사이 이동에 쓴다 — 순서에 끼면 마지막 칸에서 Tab이 다음 행이 아니라 여기로 온다. */}
-                    <button onClick={() => deleteRow(row.id)} disabled={isLocked} tabIndex={-1} className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors cursor-pointer disabled:text-gray-200 disabled:cursor-not-allowed" title="행 삭제">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  {/* 성명 칸은 왼쪽 고정 — sticky와 relative(cellTd)는 함께 못 쓰므로 클래스를 직접 적는다. bg-white로 밑에 깔리는 칸을 가린다.
+                      z는 활성 셀(z-10)과 헤더(z-20) '사이'여야 한다 — z-10이면 활성 셀이 가로 스크롤 때 이 칸을 덮고,
+                      z-20이면 DOM 뒤쪽인 이 칸이 세로 스크롤 때 헤더를 덮는다. */}
+                  <td className={`sticky left-0 z-[15] bg-white border-l border-r border-b border-black/10 p-0 ${isActive(rowIndex, 0) ? "outline outline-2 -outline-offset-2 outline-indigo-500" : ""}`}>
+                    {/* 성명 + 행 삭제(×). 표가 가로로 길어 오른쪽 끝 삭제칸은 스크롤해야 닿으므로 이름 옆에 둔다(파트타이머 급여대장과 동일). */}
+                    <div className="flex items-center gap-1 pl-1 pr-0.5">
+                      <input {...cellProps(rowIndex, 0)} type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className="sheet-cell-input w-full min-w-0 h-9 px-1 text-[11px] font-bold placeholder-gray-300 focus:outline-none" />
+                      <button type="button" tabIndex={-1} onClick={() => deleteRow(row.id)} disabled={isLocked} aria-label={`${row.name || "이름 없는 행"} 삭제`} title="이 행을 삭제합니다" className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-rose-50 hover:text-rose-600 focus:text-rose-600 focus:outline-none disabled:text-gray-200 disabled:cursor-not-allowed">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
+                  <td className={cellTd(rowIndex, 1)}>
+                    <select {...cellProps(rowIndex, 1)} value={row.rank} disabled={isLocked} onChange={(e) => updateRow(row.id, "rank", e.target.value)} className={`${cellText} cursor-pointer`}>
+                      <option value="">직급</option>
+                      {RANK_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {row.rank && !RANK_OPTIONS.includes(row.rank) && <option value={row.rank}>{row.rank}</option>}
+                    </select>
+                  </td>
+                  <td className={cellTd(rowIndex, 2)}><input {...cellProps(rowIndex, 2)} type="text" value={row.residentNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "residentNumber", e.target.value)} placeholder="주민번호" className={`${cellText} font-mono`} /></td>
+                  <td className={cellTd(rowIndex, 3)}><input {...cellProps(rowIndex, 3)} type="date" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
+                  <td className={cellTd(rowIndex, 4)}>
+                    <select {...cellProps(rowIndex, 4)} value={row.contractType || "4대보험"} disabled={isLocked} onChange={(e) => updateRow(row.id, "contractType", e.target.value)} className={`${cellText} cursor-pointer`}>
+                      {CONTRACT_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {/* 레거시 자유입력값은 그대로 보여준다 — 말없이 4대보험으로 둔갑시키면 급여 엑셀이 실제와 달라진다. */}
+                      {row.contractType && !CONTRACT_OPTIONS.includes(row.contractType) && <option value={row.contractType}>{row.contractType}</option>}
+                    </select>
+                  </td>
+                  <td className={cellTd(rowIndex, 5)}><input {...cellProps(rowIndex, 5)} type="text" value={row.bank} disabled={isLocked} onChange={(e) => updateRow(row.id, "bank", e.target.value)} placeholder="은행명" className={cellText} /></td>
+                  <td className={cellTd(rowIndex, 6)}><input {...cellProps(rowIndex, 6)} type="text" value={row.accountNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "accountNumber", e.target.value)} placeholder="계좌번호" className={`${cellText} font-mono`} /></td>
+                  <td className={cellTd(rowIndex, 7)}><input {...cellProps(rowIndex, 7)} type="text" inputMode="numeric" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
+                  <td className={cellTd(rowIndex, 8)}><input {...cellProps(rowIndex, 8)} type="text" inputMode="numeric" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  {/* 연장근무: 근무시간(시간) · 시급(원) · 계(= 시간×시급, 총금액에 합산) */}
+                  <td className={cellTd(rowIndex, 9, "border-l border-gray-200")}><input {...cellProps(rowIndex, 9)} type="text" inputMode="decimal" value={row.overtimeHours} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeHours", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 10)}><input {...cellProps(rowIndex, 10)} type="text" inputMode="numeric" value={formatWithCommas(row.overtimeRate)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeRate", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="group/ot relative border-r border-b border-black/10 px-2 py-1.5 text-right font-mono font-black text-gray-600">
+                    {formatNumber(rowOvertimePay(row))}
+                    {/* 옛 '추가근무' 금액만 있는 행(시간·시급 없음)은 계가 그 금액이라 시간/시급으로 지울 수 없다.
+                        → 명시적 지우기(×)를 제공. 시간·시급으로 새로 입력하려면 두 칸을 채우면 계산값이 우선한다. */}
+                    {!isLocked && !(otNum(row.overtimeHours) > 0 && num(row.overtimeRate) > 0) && num(row.overtimePay) > 0 && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => updateRow(row.id, "overtimePay", "")}
+                        title="옛 추가근무 금액을 지웁니다."
+                        className="absolute left-0.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-300 opacity-0 transition hover:text-rose-600 group-hover/ot:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </td>
+                  <td className={cellTd(rowIndex, 11)}><input {...cellProps(rowIndex, 11)} type="text" inputMode="numeric" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 12)}><input {...cellProps(rowIndex, 12)} type="text" inputMode="numeric" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className="border-r border-b border-black/10 px-2 py-1.5 text-right font-mono font-black text-indigo-700">{formatNumber(rowTotal(row))}</td>
+                  <td className={cellTd(rowIndex, 13)}><input {...cellProps(rowIndex, 13)} type="text" value={row.memo} disabled={isLocked} onChange={(e) => updateRow(row.id, "memo", e.target.value)} placeholder="비고" className={cellText} /></td>
                 </tr>
               ))
             )}
           </tbody>
           {rows.length > 0 && (
             <tfoot>
-              <tr className="bg-indigo-50/60 border-t-2 border-indigo-100 font-black text-indigo-900">
-                <td className="px-2 py-2.5 text-center" colSpan={labelColSpan}>합계</td>
-                <td className="px-2 py-2.5 text-right font-mono">{formatNumber(totThis)}</td>
-                <td className="px-2 py-2.5 text-right font-mono">{formatNumber(totTaxi)}</td>
-                <td className="px-2 py-2.5 text-right font-mono">{formatNumber(totBonus)}</td>
-                <td className="px-2 py-2.5 text-right font-mono">{formatNumber(totOt)}</td>
-                <td className="px-2 py-2.5 text-right font-mono text-indigo-700">{formatNumber(totAll)}</td>
-                <td className="px-2 py-2.5" colSpan={trailingColSpan}></td>
+              <tr className="sticky bottom-0 z-20 border-t-2 border-indigo-100 font-black text-indigo-900">
+                <td className="bg-indigo-50 px-2 py-2.5 text-center" colSpan={8}>합계</td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono">{formatNumber(totThis)}</td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono border-l border-gray-200">{totHours ? `${totHours}h` : ""}</td>
+                <td className="bg-indigo-50 px-2 py-2.5"></td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono">{formatNumber(totOt)}</td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono">{formatNumber(totTaxi)}</td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono">{formatNumber(totBonus)}</td>
+                <td className="bg-indigo-50 px-2 py-2.5 text-right font-mono text-indigo-700">{formatNumber(totAll)}</td>
+                <td className="bg-indigo-50 px-2 py-2.5"></td>
               </tr>
             </tfoot>
           )}
