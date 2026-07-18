@@ -397,6 +397,33 @@ export async function firebaseGetAllLaborContracts() {
   return allContracts;
 }
 
+// 파트타이머 근로계약서 양식(전 지점 공통 1개).
+// 메타와 파일 본문을 나눠 저장한다 — 한 문서에 몰면 지점이 탭을 열 때마다,
+// 버튼 하나 그리자고 1MB짜리 파일을 통째로 내려받게 된다.
+const TEMPLATE_META_KEY = "labor_contract_template_parttime_meta";
+// 파일은 업로드마다 새 fileId로 따로 저장한다. 한 키를 덮어쓰면 메타 쓰기가 실패했을 때
+// "옛 파일명·옛 형식 정보로 새 파일 내용을 받는" 어긋난 상태가 된다.
+const templateFileKey = (fileId: string) => `labor_contract_template_parttime_file_${fileId}`;
+
+export async function firebaseGetLaborContractTemplateMeta() {
+  return await firebaseGetSharedData(TEMPLATE_META_KEY);
+}
+
+export async function firebaseGetLaborContractTemplateFile(fileId: string) {
+  if (!fileId) return null;
+  const value = await firebaseGetSharedData(templateFileKey(fileId));
+  return value ? (value as { dataBase64?: string }).dataBase64 ?? null : null;
+}
+
+export async function firebaseSaveLaborContractTemplate(meta: { fileId: string }, dataBase64: string) {
+  // 새 fileId에 파일을 먼저 쓴다 — 기존 파일을 건드리지 않으므로, 아래 메타 쓰기가 실패해도
+  // 지점은 옛 메타로 옛 파일을 그대로 받는다(어긋나지 않는다). 실패한 새 파일은 고아로 남을 뿐이다.
+  // 메타 쓰기가 성공하는 순간에만 지점이 새 파일을 보게 된다 — 이 한 번의 쓰기가 곧 전환점이다.
+  await firebaseSaveSharedData(templateFileKey(meta.fileId), { dataBase64 });
+  await firebaseSaveSharedData(TEMPLATE_META_KEY, meta);
+  return { success: true };
+}
+
 export enum OperationType {
   CREATE = "create",
   UPDATE = "update",
