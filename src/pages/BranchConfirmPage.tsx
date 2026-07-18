@@ -230,8 +230,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     { id: "dashboard", label: "대시보드", icon: ClipboardList },
     { id: "daily", label: "일일마감정산", icon: Calendar },
     { id: "monthly", label: "월말마감정산", icon: Coins },
-    { id: "annualLeave", label: "연차관리", icon: Calendar },
-    { id: "laborContract", label: "근로계약서", icon: Briefcase }
+    { id: "laborContract", label: "근로계약서", icon: Briefcase },
+    { id: "annualLeave", label: "연차관리", icon: Calendar }
   ];
 
   const dailySubTabs = [
