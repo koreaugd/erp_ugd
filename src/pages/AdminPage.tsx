@@ -2542,14 +2542,26 @@ function AdminMonthlyClosingStatusSection() {
         // 매입매출(purchase) 섹션은 downloadBranchMonthlyClose(5시트 통합)로 처리하므로 여기서는 정직원 급여만 담당한다.
         const salary: any = await gasClient.getSharedDataFromServer<any[]>(`monthly_fulltime_salary:${branchName}:${selectedMonth}`);
         if (!Array.isArray(salary) || !salary.length) { window.alert(emptyMsg("정직원 급여", "정직원 급여대장")); return; }
-        const salRows = salary.map((r: any) => ({
-          분류: "정직원", 성명: r.name, 직급: r.rank, 주민등록번호: r.residentNumber,
-          입사일: r.entryDate, 근로계약: r.contractType, 입금계좌: r.accountNumber,
-          전월급여: num(r.prevSalary), 이달급여: num(r.thisSalary),
-          "택시비및기타지출": num(r.taxiEtc), "상여금(팁)": num(r.bonusTip), 추가근무: num(r.overtimePay),
-          총금액: num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + num(r.overtimePay),
-          "실제 송금지점": r.remitBranch, 기타내용: r.memo,
-        }));
+        const salRows = salary.map((r: any) => {
+          const otHours = Number(String(r.overtimeHours ?? "").replace(/[^0-9.]/g, "")) || 0;
+          const otRate = num(r.overtimeRate);
+          // 화면(rowOvertimePay)과 같은 규칙: 시간·시급 둘 다 있으면 계산값, 아니면 옛 '추가근무' 금액.
+          const otPay = (otHours > 0 && otRate > 0) ? Math.round(otHours * otRate) : num(r.overtimePay);
+          // 레거시 행은 옛 '입금계좌' 한 칸에 은행명+계좌가 함께 적혀 있었다("국민 123-456").
+          // 계좌번호를 숫자만 남기면 은행명이 통째로 사라지므로, 은행 칸이 비어 있으면 문자 부분을 은행명으로 살려 낸다.
+          const rawAcc = String(r.accountNumber ?? "");
+          const legacyBank = rawAcc.replace(/[0-9\-./() ]/g, "").trim();
+          return {
+            분류: "정직원", 성명: r.name, 직급: r.rank, 주민등록번호: r.residentNumber,
+            입사일: r.entryDate, 근로계약: r.contractType || "4대보험", 은행: r.bank || legacyBank,
+            계좌번호: rawAcc.replace(/\D/g, ""), // 하이픈·문자를 지우고 숫자만 내보낸다
+            전월급여: num(r.prevSalary), 이달급여: num(r.thisSalary),
+            "연장근무시간": otHours, "연장시급": otRate, "연장근무계": otPay,
+            "택시비및기타지출": num(r.taxiEtc), "상여금(팁)": num(r.bonusTip),
+            총금액: num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + otPay,
+            "실제 송금지점": r.remitBranch, 기타내용: r.memo,
+          };
+        });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salRows), "정직원 급여대장");
         filename = `${branchName}_${selectedMonth}_정직원급여.xlsx`;
       }
