@@ -10,6 +10,7 @@ import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import {
+  CASH_USAGES,
   EXPENSE_CLASSIFICATIONS,
   EXPENSE_USAGES,
   MAX_AMOUNT_DIGITS,
@@ -79,6 +80,13 @@ export function ExpenseGrid({
 }: ExpenseGridProps) {
   const style = VARIANT_STYLE[variant];
   const errorRows = new Set(errorRowIndexes);
+
+  // 현금지출 사용처에서는 쿠팡·네이버를 뺀다 — 온라인 결제라 카드에서만 쓰는 항목이다.
+  const usageOptions = variant === "cash" ? CASH_USAGES : EXPENSE_USAGES;
+  // 저장된 값이 목록에 없으면(옛 현금 기록의 쿠팡/네이버 등) 그 값도 넣어 실제 값이 보이게 한다.
+  // 안 그러면 select가 엉뚱한 항목을 보여줘 과거 기록이 잘못 분류된 것처럼 읽힌다.
+  const usageOptionsFor = (current: ExpenseRow["usage"]) =>
+    usageOptions.includes(current) ? usageOptions : [current, ...usageOptions];
 
   /**
    * 금액 칸에 숫자가 아닌 글자를 친 행. 입력이 조용히 무시되면 키보드가 고장 난 줄 알기 쉬우므로 이유를 알려준다.
@@ -242,7 +250,7 @@ export function ExpenseGrid({
                         onChange={(e) => updateCell(rowIndex, "usage", e.target.value)}
                         className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer`}
                       >
-                        {EXPENSE_USAGES.map((item) => (
+                        {usageOptionsFor(row.usage).map((item) => (
                           <option key={item} value={item}>
                             {item}
                           </option>
@@ -254,12 +262,15 @@ export function ExpenseGrid({
 
                   {/* 금액 */}
                   <div className={cellWrap(rowIndex, COL_AMOUNT)}>
+                    {/* inputMode="numeric"를 두면 이 칸에 들어갈 때 윈도우 IME가 영문으로 전환되고
+                        그 상태가 전역으로 남아, 다음 지출상세내용 칸에서 한글이 안 쳐진다.
+                        데스크톱 시트는 물리 키보드라 숫자키가 IME와 무관하게 들어오므로 inputMode를 뺀다.
+                        (숫자만 남기는 필터는 handleAmountInput이 그대로 담당) */}
                     <input
                       {...cellProps(rowIndex, COL_AMOUNT)}
                       id={`daily-${variant}-expense-amount-${rowIndex}`}
                       aria-label={cellLabel(rowIndex, COL_AMOUNT)}
                       type="text"
-                      inputMode="numeric"
                       value={formatWithCommas(row.amount)}
                       onChange={(e) => handleAmountInput(rowIndex, e.target.value)}
                       onCompositionEnd={(e) => handleAmountInput(rowIndex, e.currentTarget.value)}
@@ -365,7 +376,7 @@ export function ExpenseGrid({
                       onChange={(e) => updateCell(rowIndex, "usage", e.target.value)}
                       className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
                     >
-                      {EXPENSE_USAGES.map((item) => (
+                      {usageOptionsFor(row.usage).map((item) => (
                         <option key={item} value={item}>
                           {item}
                         </option>

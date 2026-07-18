@@ -18,14 +18,21 @@ export const EXPENSE_USAGES: ExpenseRow["usage"][] = [
   "현금입금"
 ];
 
+/** 현금지출 사용처 — 쿠팡·네이버(온라인 결제)는 카드에서만 쓰므로 뺀다. 일일·월말 현금 화면이 공유. */
+export const CASH_USAGES: ExpenseRow["usage"][] = EXPENSE_USAGES.filter(
+  (usage) => usage !== "쿠팡" && usage !== "네이버"
+);
+
 /** 시트에 항상 깔아두는 빈 행 수. 마지막 행을 채우면 그 아래로 한 줄씩 늘어난다. */
 export const MIN_EXPENSE_ROWS = 7;
 /** 자동 증식이 폭주하지 않도록 하는 상한. */
 export const MAX_EXPENSE_ROWS = 50;
 
+// 기본 사용처는 중립값 "그외기타" — 현금지출 사용처에서 쿠팡/네이버를 빼도(현금엔 안 맞음)
+// 기본값이 목록에 없어 빈 칸으로 보이는 일이 없게 한다. 카드는 필요 시 쿠팡/네이버를 직접 고른다.
 export const createEmptyExpenseRow = (): ExpenseRow => ({
   classification: "식재료",
-  usage: "쿠팡",
+  usage: "그외기타",
   detail: "",
   amount: ""
 });
