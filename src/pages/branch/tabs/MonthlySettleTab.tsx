@@ -76,15 +76,22 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  const fetchHistory = useCallback(async () => {
+  // silent=true면 전체 로딩 스피너(setLoading)를 켜지 않는다 — 지출 수정 후 조용히 재조회할 때 쓴다.
+  // 스피너를 켜면 서브탭이 통째로 언마운트돼 낙관적 갱신이 버려지고, 재조회 실패 시 옛 값으로 되돌아간다.
+  const fetchHistory = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      const h = await gasClient.getBranchHistory(branchName, selectedMonth);
+      if (!silent) setLoading(true);
+      // silent 재조회는 실패를 []로 삼키면 안 된다 — 그러면 setHistory([])로 화면이 통째로 비워져
+      // 방금 저장한 수정이 사라진다. 실패 시 throw하는 fail-closed 조회를 써서 catch로 흘려 옛 history를 유지한다.
+      const h = silent
+        ? await gasClient.getBranchHistoryFromServer(branchName, selectedMonth)
+        : await gasClient.getBranchHistory(branchName, selectedMonth);
       setHistory(h || []);
     } catch (e) {
       console.error("월말 정산용 이력 가져오기 실패:", e);
+      // silent 실패면 history를 건드리지 않는다 → 화면(낙관적 patch 포함)이 그대로 유지된다.
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [branchName, selectedMonth]);
 
@@ -462,13 +469,13 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
                 <MonthlyPartTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} history={history} triggerToast={triggerToast} />
               )}
               {activeSubTab === "cashExpenses" && (
-                <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
+                <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} />
               )}
               {activeSubTab === "cashManagement" && (
                 <MonthlyCashManagementSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
               )}
               {activeSubTab === "cardExpenses" && (
-                <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
+                <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} />
               )}
             </div>
           )}
