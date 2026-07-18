@@ -89,6 +89,11 @@ export interface LaborContract {
   name: string;
   phone: string;
   salary: number;
+  // 신규입사/지점이동 구분과 입사·이동일. 지점이동일 때만 previousBranch(이전 지점명)가 채워진다.
+  // 옛 레코드에는 없을 수 있어 전부 선택 필드로 둔다(표시 시 없으면 "-").
+  contractType?: "신규입사" | "지점이동";
+  effectiveDate?: string;
+  previousBranch?: string;
   status?: string;
   createdAt?: string;
   editRequestedAt?: string;
