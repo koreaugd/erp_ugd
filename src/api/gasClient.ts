@@ -403,16 +403,22 @@ export const gasClient = {
     return await callApi("getBranchListAll");
   },
 
-  async getAttendanceLog(branchName: string, logType: "overtime" | "partTime", month?: string, forceRefresh = false): Promise<{ records: any[]; summaryList: any[] }> {
-    const cacheKey = `${branchName}:${logType}:${month || "all"}`;
+  // serverOnly: 서버 문서만 읽는다(캐시 폴백 없음, 실패 시 throw). 급여대장 초과근무 집계처럼
+  // 오래된 캐시가 '정상 집계'로 둔갑하면 위험한 참고값 화면 전용.
+  async getAttendanceLog(branchName: string, logType: "overtime" | "partTime", month?: string, forceRefresh = false, serverOnly = false): Promise<{ records: any[]; summaryList: any[] }> {
+    // serverOnly는 캐시/pending 키를 일반 요청과 분리한다 — 키를 공유하면 동시에 뜬 일반 호출이
+    // server-only promise(상세 실패 시 reject)를 재사용해, '일부 실패는 건너뛰고 집계'하던 기존 동작이 깨진다.
+    const cacheKey = `${branchName}:${logType}:${month || "all"}:${serverOnly ? "server" : "std"}`;
     const cached = attendanceLogCache.get(cacheKey);
-    if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+    if (!forceRefresh && !serverOnly && cached && cached.expiresAt > Date.now()) return cached.value;
     const pending = pendingAttendanceRequests.get(cacheKey);
-    if (!forceRefresh && pending) return pending;
+    if (!forceRefresh && !serverOnly && pending) return pending;
 
-    const { firebaseGetBranchHistory, firebaseGetDailyDetail } = await loadFirebaseDirect();
+    const { firebaseGetBranchHistory, firebaseGetBranchHistoryFromServer, firebaseGetDailyDetail, firebaseGetDailyDetailFromServer } = await loadFirebaseDirect();
     const request = (async () => {
-      const allHistory = await firebaseGetBranchHistory(branchName);
+      const allHistory = serverOnly
+        ? await firebaseGetBranchHistoryFromServer(branchName)
+        : await firebaseGetBranchHistory(branchName);
       const history = allHistory.filter((item) => {
         const settleMonth = String(item.settleDate || "").slice(0, 7);
         if (!month) return true;
@@ -425,6 +431,9 @@ export const gasClient = {
         const metadataText = String(item.memo || "").split("\n---\nMETADATA:")[1];
         if (metadataText) return null;
         if (!item.recordId) return null;
+        // serverOnly: 캐시 폴백 없는 서버 전용 읽기, 실패도 삼키지 않는다 —
+        // 하루치가 빠진 '부분 집계'가 정상처럼 보이면 그 숫자로 급여를 적게 된다.
+        if (serverOnly) return await firebaseGetDailyDetailFromServer(item.recordId);
         try {
           return await firebaseGetDailyDetail(item.recordId);
         } catch (error) {
