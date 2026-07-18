@@ -82,6 +82,31 @@ export interface RosterEmployee {
   salary?: number;
 }
 
+// 지점이 등록하고 관리자가 확인하는 근로계약서 발송 대상 레코드.
+// 지점·관리자가 labor_contracts_<지점> / labor_contracts:<지점> 두 키를 공유한다.
+export interface LaborContract {
+  id: string;
+  name: string;
+  phone: string;
+  salary: number;
+  status?: string;
+  createdAt?: string;
+  editRequestedAt?: string;
+  deleteRequested?: boolean;
+  deleteRequestedAt?: string;
+  statusUpdatedAt?: string;
+}
+
+// 파트타이머 근로계약서 양식(전 지점 공통 1개)의 파일 정보.
+// 파일 본문(base64)은 별도 문서에 둔다 — 아래 getLaborContractTemplateFile 참고.
+export interface LaborContractTemplateMeta {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}
+
 export interface DailySettleDetail {
   master: MasterDaily;
   expenses: ExpenseDetail[];
@@ -550,6 +575,25 @@ export const gasClient = {
   async getAllLaborContracts(): Promise<any[]> {
     const { firebaseGetAllLaborContracts } = await loadFirebaseDirect();
     return await firebaseGetAllLaborContracts();
+  },
+
+  // 양식은 메타(가벼움)와 파일 본문(최대 ~930KB)이 따로 저장돼 있다.
+  // 화면을 그릴 땐 메타만 읽고, 파일은 다운로드를 누른 순간에만 읽는다.
+  async getLaborContractTemplateMeta(): Promise<LaborContractTemplateMeta | null> {
+    const { firebaseGetLaborContractTemplateMeta } = await loadFirebaseDirect();
+    return (await firebaseGetLaborContractTemplateMeta()) as LaborContractTemplateMeta | null;
+  },
+
+  async getLaborContractTemplateFile(fileId: string): Promise<string | null> {
+    const { firebaseGetLaborContractTemplateFile } = await loadFirebaseDirect();
+    return await firebaseGetLaborContractTemplateFile(fileId);
+  },
+
+  async saveLaborContractTemplate(meta: LaborContractTemplateMeta, dataBase64: string): Promise<{ success: boolean }> {
+    const { firebaseSaveLaborContractTemplate } = await loadFirebaseDirect();
+    const result = await firebaseSaveLaborContractTemplate(meta, dataBase64);
+    clearReadCache();
+    return result;
   },
 
   /**

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient, DailyListRow, DailySettleDetail } from "../api/gasClient";
-import type { RosterEmployee } from "../api/gasClient";
+import type { RosterEmployee, LaborContractTemplateMeta } from "../api/gasClient";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
@@ -3050,15 +3050,19 @@ function AdminLaborContractsSection() {
   const [searchBranch, setSearchBranch] = useState("");
   const [searchName, setSearchName] = useState("");
   const [candidateFilter, setCandidateFilter] = useState<ContractCandidateFilter>("전체");
+  const [templateMeta, setTemplateMeta] = useState<LaborContractTemplateMeta | null>(null);
+  const [uploadingTemplate, setUploadingTemplate] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [contractData, branchData] = await Promise.all([
+      const [contractData, branchData, meta] = await Promise.all([
         gasClient.getAllLaborContracts().catch(() => []),
-        gasClient.getBranchList().catch(() => [])
+        gasClient.getBranchList().catch(() => []),
+        gasClient.getLaborContractTemplateMeta().catch(() => null)
       ]);
       setContracts(contractData || []);
+      setTemplateMeta(meta);
       const branches = (branchData || []).filter((branch) => branch?.role === "branch" && branch.branchName);
       const rosterResults = await Promise.all(branches.map(async (branch) => {
         const roster = await gasClient.getBranchOwnRoster(branch.branchName).catch(() => []);
@@ -3104,6 +3108,48 @@ function AdminLaborContractsSection() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [loadData]);
+
+  // Firestore 문서 1개는 약 1MB가 상한이고 base64는 원본보다 약 33% 커진다.
+  // 700KB를 넘으면 저장 자체가 실패하므로 업로드 시점에 막고 이유를 알린다.
+  const TEMPLATE_MAX_BYTES = 700 * 1024;
+
+  const handleTemplateUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // 같은 파일을 다시 골라도 onChange가 뜨도록 초기화
+    if (!file) return;
+    if (file.size > TEMPLATE_MAX_BYTES) {
+      window.alert(`파일이 너무 큽니다. 최대 700KB까지 등록할 수 있습니다.\n선택한 파일: ${Math.round(file.size / 1024)}KB`);
+      return;
+    }
+    setUploadingTemplate(true);
+    try {
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const comma = result.indexOf(",");
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const meta: LaborContractTemplateMeta = {
+        fileId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        uploadedAt: new Date().toISOString()
+      };
+      await gasClient.saveLaborContractTemplate(meta, dataBase64);
+      setTemplateMeta(meta);
+      window.alert("파트타이머 근로계약서 양식을 등록했습니다.");
+    } catch (err) {
+      console.error("양식 등록 실패", err);
+      window.alert("양식 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setUploadingTemplate(false);
+    }
+  };
 
   const saveBranchContracts = async (branchName: string, next: any[]) => {
     await gasClient.saveSharedData("labor_contracts:" + branchName, next);
@@ -3157,8 +3203,19 @@ function AdminLaborContractsSection() {
               전 지점 근로계약서 관리
             </h3>
             <p className="text-xs text-gray-400 mt-1">지점 직원현황의 신규입사·지점이동·기타 등록 인원을 함께 확인합니다.</p>
+            <p className="text-xs font-bold text-gray-500 mt-1">
+              파트타이머 양식: {templateMeta
+                ? `${templateMeta.fileName} (${Math.round(templateMeta.size / 1024)}KB · ${templateMeta.uploadedAt.slice(0, 10)} 등록)`
+                : "등록 전 — 지점에서 내려받을 수 없습니다."}
+            </p>
           </div>
-          <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className={`px-4 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-bold ${uploadingTemplate ? "opacity-40" : "cursor-pointer"}`}>
+              {uploadingTemplate ? "등록 중…" : templateMeta ? "파트타이머 양식 교체" : "파트타이머 양식 등록"}
+              <input type="file" className="hidden" disabled={uploadingTemplate} onChange={handleTemplateUpload} />
+            </label>
+            <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mt-5 border-b border-gray-100">
