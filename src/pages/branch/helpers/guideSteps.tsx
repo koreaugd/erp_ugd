@@ -415,6 +415,47 @@ export const orderGuideSteps: GuideStep[] = [
   },
 ];
 
+// 정직원 급여대장 탭 — 본사 급여 담당의 제출 규칙을 말풍선 하나에 세 단락(기본·증빙·기타내용)으로 담는다.
+export const fullTimeSalaryGuideSteps: GuideStep[] = [
+  {
+    anchor: "fulltime-salary-table",
+    title: "정직원 급여대장 작성방법",
+    placement: "inside-top-right",
+    width: 620,
+    body: (
+      <>
+        <Bullets
+          items={[
+            <>직원현황의 정직원이 자동으로 채워집니다. 명단에 없으면 <b className="font-black">직원 추가</b>로 넣으세요.</>,
+            <>연장근무는 <b className="font-black">근무시간 × 시급 = 계</b>로 자동 계산되어 총 금액에 합산됩니다.</>,
+            <>추가근무분은 <b className="font-black text-rose-700">급여대장과 초과근무일지 모두</b> 작성해야 합니다.</>,
+          ]}
+        />
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+          <p className="font-black text-zinc-900">개인지출 증빙 (최대한 자제해주세요)</p>
+          <Bullets
+            items={[
+              <>교통비 — <b className="font-black text-rose-700">카카오비즈니스 이용내역은 제외</b>하고, 입금받아야 할 것만 추려서 보내주세요.</>,
+              <>개인지출 — <b className="font-black text-rose-700">영수증을 첨부</b>해서 보내주세요.</>,
+            ]}
+          />
+        </div>
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-200 space-y-1.5">
+          <p className="font-black text-zinc-900">기타내용 기재 규칙 (근무지 이동 · 퇴사 · 급여변동)</p>
+          <Bullets
+            items={[
+              <>근무지 이동 — <b className="font-black text-rose-700">이동 전후 근무지 + 출근일자</b>를 기재하세요.</>,
+              <>퇴사예정자 — <b className="font-black text-rose-700">마지막 근무일 기준</b>으로 표기하고, <b className="font-black text-rose-700">사유와 퇴직금 정산여부</b>도 같이 적어주세요.</>,
+              <>대장 제출 후 갑자기 당월 퇴사자가 생기면 <b className="font-black text-rose-700">톡으로 바로</b> 알려주세요.</>,
+              <><b className="font-black text-rose-700">급여 변동 이유와 상여금 종류</b>도 함께 기재하세요.</>,
+            ]}
+          />
+        </div>
+      </>
+    ),
+  },
+];
+
 export const liquorGuideSteps: GuideStep[] = [
   {
     anchor: "liquor-product-add",
