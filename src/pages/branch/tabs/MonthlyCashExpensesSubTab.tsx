@@ -5,7 +5,12 @@ import { formatNumber } from "../../../utils/formatNumber";
 import { toNumberPromptValue } from "../helpers/formatters";
 import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "../helpers/chipClasses";
 import { updateDailyMetadata } from "../helpers/dailyOps";
+import { CASH_USAGES, EXPENSE_CLASSIFICATIONS } from "../helpers/expenseRows";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
+
+// 드롭다운 목록에 현재 값이 없으면(레거시 표기 등) 그 값을 앞에 끼워 빈 칸으로 보이지 않게 한다.
+const withCurrent = (list: readonly string[], value: string): string[] =>
+  value && !list.includes(value) ? [value, ...list] : [...list];
 
 export function MonthlyCashExpensesSubTab({
   branchName,
@@ -95,13 +100,44 @@ export function MonthlyCashExpensesSubTab({
       alert("금액은 숫자로 입력해주세요.");
       return;
     }
-    await updateDailyMetadata(item.recordId, (metadata) => {
-      const cashExpenses = Array.isArray(metadata.cashExpenses) ? [...metadata.cashExpenses] : [];
-      cashExpenses[item.metaIndex] = { ...(cashExpenses[item.metaIndex] || {}), amount: String(amount), usage: fields.usage.trim(), classification: fields.classification.trim(), detail: fields.detail.trim() };
-      return { metadata: { ...metadata, cashExpenses } };
-    });
+    const patch = { amount, usage: fields.usage.trim(), classification: fields.classification.trim(), detail: fields.detail.trim() };
+    try {
+      // 지점이 고치면 이력에 지점명을 남긴다 — 안 넘기면 "관리자가 고침"으로 거짓 기록된다.
+      await updateDailyMetadata(item.recordId, (metadata) => {
+        const cashExpenses = Array.isArray(metadata.cashExpenses) ? [...metadata.cashExpenses] : [];
+        const current = cashExpenses[item.metaIndex];
+        // 로드 이후 다른 사람이 이 기록의 앞 지출을 삭제하면 인덱스가 밀려 다른 행을 덮어쓸 수 있다.
+        // 금액·상세뿐 아니라 사용처·분류까지 로드 당시 값(같은 fallback)과 대조한다 —
+        // 두 행이 금액·상세만 같고 사용처/분류가 다를 수 있기 때문. 네 값이 다 같으면 사실상 동일 행이라 안전.
+        if (
+          !current ||
+          Number(current.amount) !== item.amount ||
+          String(current.detail || "") !== String(item.detail || "") ||
+          String(current.usage || "공란") !== String(item.usage) ||
+          String(current.classification || "미분류") !== String(item.classification)
+        ) {
+          throw new Error("STALE_METAINDEX");
+        }
+        cashExpenses[item.metaIndex] = { ...current, amount: String(amount), usage: patch.usage, classification: patch.classification, detail: patch.detail };
+        return { metadata: { ...metadata, cashExpenses } };
+      }, isAdmin ? "관리자" : branchName);
+    } catch (err) {
+      console.error("현금지출 수정 실패", err);
+      if (err instanceof Error && err.message === "STALE_METAINDEX") {
+        alert("그 사이 목록이 바뀌어 저장을 취소했습니다. 새로고침 후 다시 시도해 주세요.");
+        void refreshHistory?.();
+      } else {
+        alert("수정 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+      return;
+    }
+    // 저장 성공 → 그 행만 즉시 반영하고 모달을 닫는다(전체 재조회를 기다리지 않아 체감이 빠르다).
+    // 전체 히스토리 재조회는 백그라운드로 — 완료되면 서버 값으로 자연스럽게 재정렬된다.
+    setItems((prev) => prev.map((row) =>
+      row.recordId === item.recordId && row.metaIndex === item.metaIndex ? { ...row, ...patch } : row
+    ));
     setEditExpense(null);
-    await refreshHistory?.();
+    void refreshHistory?.();
   };
 
   const handleDeleteExpense = async (item: any) => {
@@ -121,8 +157,8 @@ export function MonthlyCashExpensesSubTab({
           title="현금지출 수정"
           fields={[
             { key: "amount", label: "지출 금액", value: editExpense.fields.amount, type: "number" },
-            { key: "usage", label: "거래처/사용처", value: editExpense.fields.usage },
-            { key: "classification", label: "분류 항목", value: editExpense.fields.classification },
+            { key: "usage", label: "거래처/사용처", value: editExpense.fields.usage, options: withCurrent(CASH_USAGES, editExpense.fields.usage) },
+            { key: "classification", label: "분류 항목", value: editExpense.fields.classification, options: withCurrent(EXPENSE_CLASSIFICATIONS, editExpense.fields.classification) },
             { key: "detail", label: "지출내용", value: editExpense.fields.detail }
           ]}
           onChange={(key, value) => setEditExpense((current) => current ? { ...current, fields: { ...current.fields, [key]: value } } : current)}
@@ -186,13 +222,13 @@ export function MonthlyCashExpensesSubTab({
               <th className="py-2 px-2.5">비고</th>
               <th className="py-2 px-2.5">작성자</th>
               <th className="py-2 px-2.5">입력 시각</th>
-              {isAdmin && <th className="py-2 px-2.5 text-center">관리</th>}
+              <th className="py-2 px-2.5 text-center">관리</th>
             </tr>
           </thead>
           <tbody className="sheet-rows-soft divide-y text-[11px] font-sans">
             {filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={isAdmin ? 10 : 9} className="py-20 text-center text-gray-400 font-bold">
+                <td colSpan={10} className="py-20 text-center text-gray-400 font-bold">
                   선택한 월에 일일마감 시 접수된 현금지출 전표가 한 건도 존재하지 않습니다.
                 </td>
               </tr>
@@ -222,14 +258,12 @@ export function MonthlyCashExpensesSubTab({
                   <td className="py-2 px-2.5 text-gray-400 font-bold">확인완료</td>
                   <td className="py-2 px-2.5 text-zinc-600 font-bold">{it.author}</td>
                   <td className="py-2 px-2.5 font-mono text-gray-400">{it.timestamp}</td>
-                  {isAdmin && (
-                    <td className="py-2 px-2.5">
-                      <div className="flex justify-center gap-1">
-                        <button onClick={() => void handleEditExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
-                        <button onClick={() => void handleDeleteExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
-                      </div>
-                    </td>
-                  )}
+                  <td className="py-2 px-2.5">
+                    <div className="flex justify-center gap-1">
+                      <button onClick={() => void handleEditExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
+                      {isAdmin && <button onClick={() => void handleDeleteExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>}
+                    </div>
+                  </td>
                 </tr>
                 );
               })
