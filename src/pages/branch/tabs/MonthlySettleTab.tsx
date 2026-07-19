@@ -345,11 +345,13 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   // 월말마감 헤더(제목 pill + 결산월 선택 + 마감버튼 + 제출상태). 카드 안/밖 어디서든 재사용.
   const renderPortalHeader = () => (
-    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    // 위쪽 기준선 정렬(items-start) — md:items-center로 두면 왼쪽 설명문이 짧거나 비었을 때
+    // 제목 필이 오른쪽 2줄(결산월+제출상태)의 세로 중앙으로 내려앉아 결산월 선택과 어긋나 보인다.
+    <div className="flex flex-col md:flex-row justify-between items-start gap-4">
       <div className="space-y-2">
-        {/* 매입매출 탭에서는 위쪽 '매출집계'와 짝이 되도록 '매입집계'로 부른다. */}
+        {/* 매입매출 탭에서는 위쪽 '매출집계'와 짝이 되도록 '매입집계'로, 정직원급여 탭에서는 탭 이름 그대로 부른다. */}
         <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
-          {activeSubTab === "purchaseSales" ? "매입집계" : "월말마감"}
+          {activeSubTab === "purchaseSales" ? "매입집계" : "정직원 급여대장"}
         </div>
         <p className="text-[10px] text-gray-400 font-bold max-w-md">
           {adminSettings.monthlyReportDesc}
