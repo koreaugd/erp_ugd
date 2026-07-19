@@ -745,7 +745,7 @@ export default function AdminPage() {
           </button>
           {adminSection === "monthlyClosing" && (
             <div className="ml-3 pl-3 border-l border-white/15 space-y-1 py-1">
-              {[{ id: "status", label: "월말마감 제출현황" }, { id: "cashManagement", label: "현금관리" }, { id: "cashExpenses", label: "현금지출" }].map((sub) => (
+              {[{ id: "status", label: "제출현황" }, { id: "cashManagement", label: "현금관리" }, { id: "cashExpenses", label: "현금지출" }].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setMonthlyClosingTab(sub.id as "status" | "cashManagement" | "cashExpenses")}
@@ -970,7 +970,7 @@ export default function AdminPage() {
           {adminSection === "monthlyClosing" && (
             <section className="space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
-                <button onClick={() => setMonthlyClosingTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>월말마감 제출현황</button>
+                <button onClick={() => setMonthlyClosingTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>제출현황</button>
                 <button onClick={() => setMonthlyClosingTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
                 <button onClick={() => setMonthlyClosingTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
               </div>
@@ -2648,6 +2648,21 @@ const MONTHLY_CLOSE_SECTIONS: Array<{ key: "salesSummary" | "purchase" | "salary
   { key: "salary", label: "정직원 급여" },
 ];
 
+// 법인 분류 — 지점명 키워드로 3개 법인으로 나눈다. 실제 지점명 표기가 다양해(연하동 대학로점/연하동 연남본점/
+// 강남대골뼈국/카라멘야/마음죽) 정확 일치가 아닌 '키워드 포함'으로 매칭한다. 목록에 없는 나머지는 전부 UGD.
+const CORP_GROUPS: Array<{ key: string; label: string }> = [
+  { key: "ugd", label: "UGD" },
+  { key: "karamenya", label: "카라멘야" },
+  { key: "yeonhadong", label: "연하동" },
+];
+const corpOfBranch = (branchName: string): string => {
+  const n = String(branchName || "");
+  if (n.includes("카라멘야") || n.includes("마음죽")) return "karamenya";
+  if (n.includes("연하동") || n.includes("대골뼈국")) return "yeonhadong";
+  return "ugd";
+};
+const corpLabel = (key: string): string => CORP_GROUPS.find((c) => c.key === key)?.label || key;
+
 const monthlyCloseBadge = (status: string | null) => {
   const label = status === "confirmed" ? "확정" : status === "editing" ? "수정중" : "미제출";
   const cls = status === "confirmed" ? "admin-monthly-status-confirmed" : status === "editing" ? "admin-monthly-status-editing" : "admin-monthly-status-pending";
@@ -2906,7 +2921,8 @@ function AdminMonthlyClosingStatusSection() {
   };
 
   // 전지점 정직원 급여를 하나의 엑셀로 — 지점마다 시트를 나눈다(본사 표준 양식 그대로).
-  const downloadAllFullTimeSalary = async () => {
+  // 정직원급여 통합 다운로드(법인/전지점 공용). branchFilter로 대상 지점을 좁히고, label로 파일명/안내문을 정한다.
+  const downloadFullTimeSalary = async (branchFilter: (name: string) => boolean, label: string) => {
     try {
       const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
       // '확정(제출)'한 지점만 포함한다 — 지점별 다운로드 버튼과 같은 기준. 미제출·수정중 지점(예: 한남점)이 섞여 나가지 않게 한다.
@@ -2924,8 +2940,8 @@ function AdminMonthlyClosingStatusSection() {
       const confirmedSalary = new Set(
         freshRecords.filter((r) => r.month === selectedMonth && (r.section || "purchase") === "salary" && r.status === "confirmed").map((r) => r.branchName)
       );
-      const targets = branchList.filter((b: any) => confirmedSalary.has(b.branchName));
-      if (targets.length === 0) { window.alert(`${selectedMonth} 정직원 급여를 '확정(제출)'한 지점이 없습니다.`); return; }
+      const targets = branchList.filter((b: any) => confirmedSalary.has(b.branchName) && branchFilter(b.branchName));
+      if (targets.length === 0) { window.alert(`${label} 중 ${selectedMonth} 정직원 급여를 '확정(제출)'한 지점이 없습니다.`); return; }
       const loaded = await Promise.all(targets.map(async (b: any) => {
         try {
           const s = await gasClient.getSharedDataFromServer<any[]>(`monthly_fulltime_salary:${b.branchName}:${selectedMonth}`);
@@ -2965,19 +2981,22 @@ function AdminMonthlyClosingStatusSection() {
         usedNames.add(n);
         XLSXS.utils.book_append_sheet(wb, buildFullTimeSalarySheet(XLSXS, branch.branchName, selectedMonth, salary), n);
       });
-      XLSXS.writeFile(wb, `전지점_정직원급여_${selectedMonth}.xlsx`);
+      XLSXS.writeFile(wb, `${label}_정직원급여_${selectedMonth}.xlsx`);
       // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각'을 기록한다(중간 취소/실패 시에는 기록하지 않음).
       withData.forEach(({ branch }) => markDownloaded(branch.branchName, "salary"));
     } catch (error) {
-      console.error("전지점 정직원급여 다운로드 실패:", error);
-      window.alert("전지점 정직원 급여 데이터를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+      console.error("정직원급여 통합 다운로드 실패:", error);
+      window.alert("정직원 급여 데이터를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
     }
   };
+  // 정직원급여는 법인별로만 받는다(전지점 통합 버튼은 UI에서 삭제됨). 매출집계는 전지점 통합만 유지.
+  const downloadCorpFullTimeSalary = (corpKey: string) => downloadFullTimeSalary((name) => corpOfBranch(name) === corpKey, `${corpLabel(corpKey)}법인`);
 
   // 확정 후 수정 여부: 지점이 확정된 섹션을 '수정'으로 다시 연 순간 기록되는 플래그(재확정해도 유지, 오탐 없음).
   // 버튼을 누르면 말풍선으로 (내 다운로드 시각 + 수정 이력)을 보여준다.
+  // 취소되어 '미제출(pending)'인 섹션은 표시하지 않는다 — 초기화 정리 저장이 실패해 표식이 찌꺼기로 남아도 무해하게 한다.
   const modifiedButton = (rec: any, branchName: string, section: "salary" | "purchase" | "salesSummary") => {
-    if (!rec?.editedAfterConfirm) return null;
+    if (!rec?.editedAfterConfirm || rec?.status === "pending") return null;
     return (
       <button
         type="button"
@@ -3022,102 +3041,111 @@ function AdminMonthlyClosingStatusSection() {
   }, [modPopup?.branch, modPopup?.section, computeModPos]);
 
   return (
-    <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      {/* 헤더: 제목 + 전지점 매출집계 + 월 선택 + 새로고침 (컴팩트 h-8 컨트롤) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <h2 className="text-xl font-black text-[#2C3E50]">월말마감 제출 현황</h2>
-          <p className="text-xs text-gray-400 mt-1">선택한 월 기준으로 지점별 3개 마감(매출집계·매입매출·정직원 급여) 상태를 각각 확인합니다.</p>
+          <h2 className="text-sm font-black text-gray-900">제출현황</h2>
+          <p className="text-[11px] text-gray-400 mt-0.5">선택한 월 기준 지점별 3개 마감(매출집계·매입매출·정직원 급여) 상태</p>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black"
-          />
-          <button onClick={() => void loadData()} className="px-3 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">
-            새로고침
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* 정직원급여는 법인별로 받으므로 '전지점 정직원급여' 버튼은 두지 않는다. 매출집계는 법인 분리가 없어 전지점 버튼만 유지. */}
+          <button type="button" onClick={() => void downloadAllSalesSummary()} className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#1A3C6E]/25 bg-white px-2.5 text-[11px] font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/10 cursor-pointer">
+            <Download className="w-3.5 h-3.5" /> 전지점 매출집계
           </button>
+          <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold" />
+          <button onClick={() => void loadData()} className="h-8 rounded-lg bg-[#2E6DB4] text-white px-3 text-[11px] font-black cursor-pointer">새로고침</button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">정직원 급여 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.salary}</p></div>
-        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">매입매출 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.purchase}</p></div>
-        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">매출집계 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.salesSummary}</p></div>
-        {/* 전지점 통합 다운로드 두 개(정직원급여·매출집계)를 한 칸에 담는다. */}
-        <div className="rounded-xl bg-white border border-gray-200 p-3 flex flex-col gap-2 justify-center">
-          <button type="button" onClick={() => void downloadAllFullTimeSalary()} className="flex items-center gap-1.5 text-sm font-black text-[#1A3C6E] hover:underline cursor-pointer">
-            <Download className="w-4 h-4" /> 전지점 정직원급여 받기
-          </button>
-          <button type="button" onClick={() => void downloadAllSalesSummary()} className="flex items-center gap-1.5 text-sm font-black text-[#1A3C6E] hover:underline cursor-pointer">
-            <Download className="w-4 h-4" /> 전지점 매출집계 받기
-          </button>
-        </div>
+      {/* 미제출 요약 카드 3개 — 섹션과 구분되는 배경색 + 검정 테두리 */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">정직원 급여<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.salary}</span></div>
+        <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">매입매출<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.purchase}</span></div>
+        <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">매출집계<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.salesSummary}</span></div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-100">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black">
-            <tr>
-              <th className="py-3 px-4">월</th>
-              <th className="py-3 px-4">지점</th>
-              <th className="py-3 px-4 text-center">정직원급여</th>
-              <th className="py-3 px-4 text-center">월말마감</th>
-              <th className="py-3 px-4 text-center">매출집계</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading ? (
-              <tr><td colSpan={5} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={5} className="py-10 text-center text-gray-400 font-bold">등록된 지점이 없습니다.</td></tr>
-            ) : rows.map(({ branch, bySection }) => {
-              const dlBtn = (section: "salesSummary" | "purchase" | "salary") => {
-                const ok = bySection[section]?.status === "confirmed";
-                return (
-                  <button
-                    type="button"
-                    disabled={!ok}
-                    onClick={() => { void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section)); }}
-                    title={ok ? "엑셀 다운로드 (기본 양식)" : "확정된 마감만 다운로드할 수 있습니다"}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1A3C6E] text-white text-[11px] font-black transition-colors hover:bg-[#15325c] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <Download className="w-3 h-3" /> 엑셀
+      {/* 법인별 3개 섹션 — 각 법인을 제목 + 테두리로 묶고, 제목 옆에 그 법인 정직원급여 다운로드 버튼 */}
+      {loading ? (
+        <div className="py-10 text-center"><LoadingSpinner size="sm" /></div>
+      ) : rows.length === 0 ? (
+        <p className="py-10 text-center text-gray-400 font-bold text-xs">등록된 지점이 없습니다.</p>
+      ) : (
+        <div className="space-y-3">
+          {CORP_GROUPS.map((corp) => {
+            const items = rows.filter(({ branch }) => corpOfBranch(branch.branchName) === corp.key);
+            if (items.length === 0) return null;
+            return (
+              <div key={corp.key} className="rounded-2xl border border-[#212121] bg-white overflow-hidden">
+                {/* 법인 제목 밴드 + 그 법인 정직원급여 다운로드 */}
+                <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-b border-[#212121] bg-[#EFF0A3]/45">
+                  <h3 className="text-sm font-black text-gray-900">{corp.label} 법인 <span className="text-gray-500 font-bold text-[11px]">· {items.length}개 지점</span></h3>
+                  <button type="button" onClick={() => void downloadCorpFullTimeSalary(corp.key)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#1A3C6E] text-white px-3 text-[11px] font-black hover:bg-[#15325c] cursor-pointer">
+                    <Download className="w-3.5 h-3.5" /> 정직원급여 받기
                   </button>
-                );
-              };
-              return (
-                <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">
-                  <td className="py-3 px-4 font-mono text-xs font-bold">{selectedMonth}</td>
-                  <td className="py-3 px-4 font-black text-gray-800">{branch.branchName}</td>
-                  {/* 상태 캡 바로 오른쪽에 다운로드 버튼 + (있으면) 확정후수정 표시를 붙인다 — 별도 '엑셀' 컬럼을 두지 않는다(사용자 지정). */}
-                  <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
-                      {monthlyCloseBadge(bySection.salary?.status || null)}
-                      {dlBtn("salary")}
-                      {modifiedButton(bySection.salary, branch.branchName, "salary")}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
-                      {monthlyCloseBadge(bySection.purchase?.status || null)}
-                      {dlBtn("purchase")}
-                      {modifiedButton(bySection.purchase, branch.branchName, "purchase")}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
-                      {monthlyCloseBadge(bySection.salesSummary?.status || null)}
-                      {modifiedButton(bySection.salesSummary, branch.branchName, "salesSummary")}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                </div>
+                {/* 그 법인 지점 표 */}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-xs">
+                    <thead className="text-left text-[11px] text-gray-500 font-black border-b bg-gray-50">
+                      <tr>
+                        <th className="py-2 px-3">지점</th>
+                        <th className="py-2 px-3 text-center">정직원급여</th>
+                        <th className="py-2 px-3 text-center">월말마감</th>
+                        <th className="py-2 px-3 text-center">매출집계</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {items.map(({ branch, bySection }) => {
+                        const dlBtn = (section: "salesSummary" | "purchase" | "salary") => {
+                          const ok = bySection[section]?.status === "confirmed";
+                          return (
+                            <button
+                              type="button"
+                              disabled={!ok}
+                              onClick={() => { void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section)); }}
+                              title={ok ? "엑셀 다운로드 (기본 양식)" : "확정된 마감만 다운로드할 수 있습니다"}
+                              className="inline-flex h-7 items-center gap-1 px-2 rounded-md bg-[#1A3C6E] text-white text-[11px] font-black transition-colors hover:bg-[#15325c] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                              <Download className="w-3 h-3" /> 엑셀
+                            </button>
+                          );
+                        };
+                        return (
+                          <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">
+                            <td className="py-2 px-3 font-black text-gray-800 whitespace-nowrap">{branch.branchName}</td>
+                            {/* 상태 캡 바로 오른쪽에 다운로드 버튼 + (있으면) 확정후수정 표시를 붙인다 — 별도 '엑셀' 컬럼을 두지 않는다(사용자 지정). */}
+                            <td className="py-2 px-3 text-center">
+                              <span className="inline-flex items-center justify-center gap-1 flex-wrap">
+                                {monthlyCloseBadge(bySection.salary?.status || null)}
+                                {dlBtn("salary")}
+                                {modifiedButton(bySection.salary, branch.branchName, "salary")}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <span className="inline-flex items-center justify-center gap-1 flex-wrap">
+                                {monthlyCloseBadge(bySection.purchase?.status || null)}
+                                {dlBtn("purchase")}
+                                {modifiedButton(bySection.purchase, branch.branchName, "purchase")}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <span className="inline-flex items-center justify-center gap-1 flex-wrap">
+                                {monthlyCloseBadge(bySection.salesSummary?.status || null)}
+                                {modifiedButton(bySection.salesSummary, branch.branchName, "salesSummary")}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {modPopup && (
         <>
