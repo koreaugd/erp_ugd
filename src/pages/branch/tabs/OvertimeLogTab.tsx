@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/OvertimeLogTab.tsx
 // 초과근무일지 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Clock, RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
@@ -231,15 +231,14 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
         <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-[#2E6DB4]" />
-              초과 근무 내역
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-black text-gray-800 w-fit">초과 근무 내역</h3>
               {saving && (
-                <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
                   <RefreshCw className="w-3 h-3 animate-spin" /> 저장 중…
                 </span>
               )}
-            </h3>
+            </div>
             <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -334,7 +333,7 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                       <td className="py-2 px-2 font-extrabold text-gray-800">{r.staffName}</td>
                       <td className="py-2 px-2 font-mono text-gray-500">{r.clockIn}</td>
                       <td className="py-2 px-2 font-mono text-gray-500">{r.clockOut}</td>
-                      <td className="py-2 px-2 text-center font-bold text-gray-650">{r.workHours}h</td>
+                      <td className="py-2 px-2 text-center font-bold text-gray-600">{r.workHours}h</td>
                       <td className="py-2 px-2 text-center text-gray-400">{r.standardHours}h</td>
                       <td className="py-2 px-2 text-center">
                         {r.overtime < 0 ? (
