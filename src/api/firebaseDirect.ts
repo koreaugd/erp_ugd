@@ -11,7 +11,11 @@ import {
   deleteDoc,
   getDoc,
   getDocFromServer,
-  runTransaction
+  runTransaction,
+  query,
+  where,
+  or,
+  getCountFromServer
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, MasterDaily, ExpenseDetail, StaffRecord, DailyListRow } from "./gasClient";
@@ -62,19 +66,52 @@ function toMaster(data: any): MasterDaily {
   } as MasterDaily;
 }
 
-async function findDailyDocs(branchName?: string) {
-  await waitForFirebaseUser();
-  let snapshot;
-  try {
-    snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
-  } catch (error) {
-    console.warn("[Firebase Direct] Server read failed for daily_settles; falling back to cached docs.", error);
-    snapshot = await getDocs(collection(getDirectDb(), "daily_settles"));
-  }
-  return snapshot.docs.map((item) => {
+// master 안의 필드는 현행(camelCase)과 레거시/미러백업(snake_case)이 섞여 있다(toMaster가 둘 다 정규화).
+// 그래서 타깃 쿼리는 두 표기를 or 로 모두 잡아야 "전체 스캔 + toMaster 필터"와 동일한 문서 집합이 된다.
+// (한 문서는 두 표기 중 하나에만 값을 담으므로 or 로 정확히 같은 집합을 얻는다.)
+function dailyDocsQuery(branchName: string) {
+  const coll = collection(getDirectDb(), "daily_settles");
+  return query(coll, or(where("master.branchName", "==", branchName), where("master.branch_name", "==", branchName)));
+}
+function dailyDateQuery(settleDate: string) {
+  const coll = collection(getDirectDb(), "daily_settles");
+  return query(coll, or(where("master.settleDate", "==", settleDate), where("master.settle_date", "==", settleDate)));
+}
+
+// 타깃 쿼리(primary)를 서버에서 읽되, 인덱스 미비 등(quota 아님)으로 실패하면 전체 컬렉션으로 폴백한다.
+// 핵심: 인덱스 실패일 때는 캐시 폴백도 fullColl 로 한다 — 같은 인덱스 오류를 낼 타깃 쿼리로 재시도하지 않는다(Codex 지적 반영).
+// quota 초과·오프라인 등 "서버 도달 실패"는 인덱스 문제가 아니므로 타깃 쿼리 그대로 캐시에서 읽는다.
+async function readDailyDocs(primary: any, fullColl: any, postFilter: (item: any) => boolean) {
+  const mapDocs = (snapshot: any) => snapshot.docs.map((item: any) => {
     const data: any = item.data();
     return { id: item.id, ...data, master: toMaster(data.master || {}) };
-  }).filter((item: any) => !branchName || item.master.branchName === branchName);
+  }).filter(postFilter);
+
+  try {
+    return mapDocs(await getDocsFromServer(primary));
+  } catch (error) {
+    const code = (error as any)?.code;
+    if (primary !== fullColl && code !== "resource-exhausted") {
+      console.warn("[Firebase Direct] Targeted daily query failed; falling back to full scan.", error);
+      try {
+        return mapDocs(await getDocsFromServer(fullColl));
+      } catch (serverError) {
+        console.warn("[Firebase Direct] Full server scan also failed; using cached full collection.", serverError);
+        return mapDocs(await getDocs(fullColl));
+      }
+    }
+    console.warn("[Firebase Direct] Server read failed for daily_settles; falling back to cached docs.", error);
+    return mapDocs(await getDocs(primary));
+  }
+}
+
+async function findDailyDocs(branchName?: string) {
+  await waitForFirebaseUser();
+  const fullColl = collection(getDirectDb(), "daily_settles");
+  // 지점을 지정하면 전 지점·전 기간을 통째로 읽지 않고 그 지점 문서만 읽는다.
+  // 이것이 무료 등급 하루 읽기 한도(5만)를 소진해 전 지점이 "빈 화면"으로 보이던 사고의 핵심 수정이다.
+  const primary = branchName ? dailyDocsQuery(branchName) : fullColl;
+  return readDailyDocs(primary, fullColl, (item: any) => !branchName || item.master.branchName === branchName);
 }
 
 export async function firebaseGetDailyFormBootstrap(branchName: string, settleDate: string) {
@@ -147,7 +184,17 @@ export async function firebaseGetBranchHistory(branchName: string, month?: strin
 // 월말마감 엑셀처럼 "빈/오래된 데이터로 조용히 채우면 위험한" 경우 전용 — 호출부가 실패를 감지해 다운로드를 취소할 수 있게 한다.
 export async function firebaseGetBranchHistoryFromServer(branchName: string, month?: string): Promise<MasterDaily[]> {
   await waitForFirebaseUser();
-  const snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
+  let snapshot;
+  try {
+    // 전체 스캔 대신 지점 문서만 서버에서 읽는다(관리자 전지점 루프가 매 지점 전체 스캔하던 최악 증폭원 제거).
+    snapshot = await getDocsFromServer(dailyDocsQuery(branchName));
+  } catch (error) {
+    // serverOnly 는 "신선한 서버 값"이 계약이라 캐시로는 폴백하지 않는다. 한도 초과면 그대로 throw.
+    // 타깃 쿼리가 인덱스 미비로 실패한 경우에만 전체 스캔(여전히 서버·신선)으로 폴백한다.
+    if ((error as any)?.code === "resource-exhausted") throw error;
+    console.warn("[Firebase Direct] Targeted server-only daily query failed; full scan fallback.", error);
+    snapshot = await getDocsFromServer(collection(getDirectDb(), "daily_settles"));
+  }
   return snapshot.docs
     .map((item) => toMaster((item.data() as any).master || {}))
     .filter((master) => master.branchName === branchName)
@@ -297,7 +344,13 @@ export async function firebaseGetBranchList() {
 }
 
 export async function firebaseGetDailyList(settleDate: string): Promise<DailyListRow[]> {
-  const [branches, settlements] = await Promise.all([firebaseGetBranchList(), findDailyDocs()]);
+  await waitForFirebaseUser();
+  const fullColl = collection(getDirectDb(), "daily_settles");
+  // 전 지점·전 기간을 통째로 읽지 않고, 그 날짜의 마감 문서만 읽는다(관리자 제출현황이 매번 전체 스캔하던 문제 수정).
+  const [branches, settlements] = await Promise.all([
+    firebaseGetBranchList(),
+    readDailyDocs(dailyDateQuery(settleDate), fullColl, (item: any) => item.master?.settleDate === settleDate)
+  ]);
   const byBranch = new Map<string, MasterDaily>(
     settlements
       .filter((item: any) => item.master?.settleDate === settleDate)
@@ -525,15 +578,19 @@ export async function getDirectFirebaseStatus() {
 
   try {
     const db = getDirectDb();
-    const settleSnap = await getDocs(collection(db, "daily_settles"));
-    const settingSnap = await getDocs(collection(db, "settings"));
+    // 개수만 필요하므로 문서를 전부 읽지 않고 count 집계를 쓴다(전체 스캔이 읽기 한도를 태우던 문제 수정).
+    // count 집계는 1000건당 1 read 로 과금돼 전체 문서 읽기보다 훨씬 싸다.
+    const [settleCount, settingCount] = await Promise.all([
+      getCountFromServer(collection(db, "daily_settles")),
+      getCountFromServer(collection(db, "settings"))
+    ]);
 
     return {
       success: true,
       connected: true,
       projectId: firebaseConfig.projectId,
-      totalSettles: settleSnap.size,
-      totalSettings: settingSnap.size
+      totalSettles: settleCount.data().count,
+      totalSettings: settingCount.data().count
     };
   } catch (err: any) {
     return {
