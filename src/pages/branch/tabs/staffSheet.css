@@ -1,0 +1,29 @@
+/* 근무자 표(일일마감정산)를 정직원 급여대장과 같은 엑셀 형식으로 만든다.
+   - 헤더: 바닐라 배경 + 검정 테두리 (정직원 급여대장 #fulltime-salary-subtab 규칙 복제)
+   - 셀: .sheet-cell-input 으로 납작 투명 (전역 input 배경/테두리 !important 를
+     #staff-attendance-section ID 특이성으로 이겨 되돌린다)
+   - 격자선: 감싸는 td 가 border-black/10 으로 긋는다(컴포넌트 마크업)
+   index.css 를 건드리지 않도록(다른 세션이 편집 중) 이 파일을 DailySettleTab 에서 import 한다. */
+.branch-redesign #staff-attendance-section .sheet-cell-input,
+.branch-redesign #staff-attendance-section .sheet-cell-input:focus {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.branch-redesign #staff-attendance-section .sheet-cell-input:disabled {
+  background: rgba(33, 33, 33, 0.05) !important;
+  color: rgba(33, 33, 33, 0.35) !important;
+  cursor: not-allowed;
+}
+.branch-redesign #staff-attendance-section .staff-sheet thead th {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  border: 0 !important;
+  border-top: 1px solid var(--branch-black) !important;
+  border-right: 1px solid var(--branch-black) !important;
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+.branch-redesign #staff-attendance-section .staff-sheet thead th:first-child {
+  border-left: 1px solid var(--branch-black) !important;
+}

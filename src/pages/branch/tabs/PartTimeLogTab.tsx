@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/PartTimeLogTab.tsx
 // 파트타이머일지 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ClipboardList, RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
@@ -578,15 +578,14 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
       <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
         <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-              <ClipboardList className="w-4 h-4 text-[#2E6DB4]" />
-              파트타이머 근무 일지
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-black text-gray-800 w-fit">파트타이머 근무 일지</h3>
               {saving && (
-                <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-600">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
                   <RefreshCw className="w-3 h-3 animate-spin" /> 저장 중…
                 </span>
               )}
-            </h3>
+            </div>
             <p className="text-[10px] text-gray-400 mt-0.5 font-bold">지점에 출근하여 실근무한 아르바이트 직원 출퇴근 로그입니다.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -642,7 +641,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
               onBlur={() => handleClockBlur("in")}
               placeholder="출근 (09:00)"
               className={`w-20 px-2 py-1 border rounded text-xs bg-white font-mono focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
-                manualClockInError ? "border-rose-500 ring-1 ring-rose-300" : "focus:border-[#2E6DB4]"
+                manualClockInError ? "branch-validation-error" : "focus:border-[#2E6DB4]"
               }`}
             />
             {manualClockInError && (
@@ -660,7 +659,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
               onBlur={() => handleClockBlur("out")}
               placeholder="퇴근 (18:00)"
               className={`w-20 px-2 py-1 border rounded text-xs bg-white font-mono focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
-                manualClockOutError ? "border-rose-500 ring-1 ring-rose-300" : "focus:border-[#2E6DB4]"
+                manualClockOutError ? "branch-validation-error" : "focus:border-[#2E6DB4]"
               }`}
             />
             {manualClockOutError && (
@@ -687,7 +686,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
 
           <input value={manualReason} disabled={saving} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4] disabled:opacity-50 disabled:cursor-not-allowed" />
           {/* 등록도 수정·삭제와 같은 목록을 덮어쓴다 — 저장이 도는 동안은 함께 잠근다. */}
-          <button disabled={saving} onClick={() => void saveManualPartTime()} className="px-3 py-1 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">등록</button>
+          <button disabled={saving} onClick={() => void saveManualPartTime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">등록</button>
         </div>
 
         {loading ? (
@@ -731,10 +730,10 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
                         <td className="py-2 px-2 font-mono text-[11px] text-gray-400">{newDate ? r.settleDate : ""}</td>
                         <td className="py-2 px-2 font-extrabold text-gray-800">{r.staffName}</td>
                         {branchName === "본사" && <td className="py-2 px-2 font-bold text-gray-600">{r.officeWorkplace || "본사"}</td>}
-                        <td className="py-2 px-2 font-mono text-gray-650">{r.clockIn}</td>
-                        <td className="py-2 px-2 font-mono text-gray-650">{r.clockOut}</td>
+                        <td className="py-2 px-2 font-mono text-gray-600">{r.clockIn}</td>
+                        <td className="py-2 px-2 font-mono text-gray-600">{r.clockOut}</td>
                         <td className="py-2 px-2 text-center">
-                          <span className="bg-blue-50 text-[#2E6DB4] font-black font-mono text-xs px-2 py-0.5 rounded-lg">
+                          <span className="bg-blue-50 text-blue-700 font-black font-mono text-xs px-2 py-0.5 rounded-lg">
                             {r.workHours} 시간
                           </span>
                         </td>
@@ -775,7 +774,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
                   <span className="text-gray-400 font-medium" title={item.workedDaysList}>
                     ({item.daysCount}일 출근 · {item.workedDaysList})
                   </span>
-                  <span className="text-[#2E6DB4] font-black font-mono">{item.totalHours} hr</span>
+                  <span className="text-blue-700 font-black font-mono">{item.totalHours} hr</span>
                 </div>
               </div>
             ))
