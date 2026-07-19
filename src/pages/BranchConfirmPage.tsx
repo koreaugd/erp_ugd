@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient } from "../api/gasClient";
-import { Calendar, Store, ArrowRight, RefreshCw, LogOut, CircleDollarSign, Plus, Trash2, Clock, User, FileText, ShoppingCart, Lock, Users, ClipboardList, Coins, Briefcase, Settings, X, Cloud, Database, UploadCloud, AlertCircle } from "lucide-react";
+import { Store, ArrowRight, RefreshCw, LogOut, CircleDollarSign, Plus, Trash2, Clock, User, FileText, ShoppingCart, Lock, Users, ClipboardList, Coins, Settings, X, Cloud, Database, UploadCloud, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { hashPin } from "../utils/hashPin";
@@ -222,17 +222,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   };
 
   const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract">("dashboard");
-  // 열려 있는 탭을 다시 누르면 하위 목록을 접는다. 다른 탭으로 옮기면 다시 펼쳐진다.
-  const [subNavOpen, setSubNavOpen] = useState(true);
   const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
-
-  const mainTabs = [
-    { id: "dashboard", label: "대시보드", icon: ClipboardList },
-    { id: "daily", label: "일일마감정산", icon: Calendar },
-    { id: "monthly", label: "월말마감정산", icon: Coins },
-    { id: "laborContract", label: "근로계약서", icon: Briefcase },
-    { id: "annualLeave", label: "연차관리", icon: Calendar }
-  ];
 
   const dailySubTabs = [
     { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
@@ -539,178 +529,133 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     <div className="branch-redesign min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
       {/* Sidebar Layout */}
       <aside
-        className={`w-full md:w-[220px] shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40 text-zinc-150 border-zinc-850`}
-        style={{
-          backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily
-        }}
+        className="w-full md:w-[236px] shrink-0 md:sticky md:top-0 md:h-screen flex flex-col border-b md:border-b-0 transition-all duration-300 z-40"
       >
         {/* Branch Info Top */}
-        <div
-          className={`p-5 border-b flex md:flex-col items-center md:items-start justify-between md:justify-start gap-4 transition-colors duration-300`}
-          style={{
-            backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily,
-            borderBottomColor: "#ffffff11"
-          }}
-        >
+        <div className="p-5 border-b flex md:flex-col items-center md:items-start justify-between md:justify-start gap-4">
           <div className="min-w-0 w-full">
-            <div className="min-w-0">
-              <h1 className="branch-sidebar-branch-name text-base font-black tracking-tight text-white">
-                {activeBranchName}
-              </h1>
-            </div>
+            <h1 className="branch-sidebar-branch-name text-base font-black tracking-tight">
+              {activeBranchName}
+            </h1>
+            <p className="branch-sidebar-brand-sub">지점 마감 포탈</p>
           </div>
-
         </div>
 
         {/* Categories Navigation */}
-        <nav className="p-3 md:p-4 flex md:flex-col gap-1.5 grow overflow-x-auto no-scrollbar md:overflow-y-auto">
-          {mainTabs.map((mt) => {
-            const IconComp = mt.icon;
-            const active = mainCategory === mt.id;
+        <nav className="py-2 flex md:flex-col gap-0 grow overflow-x-auto no-scrollbar md:overflow-y-auto">
+          {/* 메인 */}
+          <p className="ugd-nav-group">메인</p>
+          <button
+            type="button"
+            onClick={() => { setMainCategory("dashboard"); setActiveTab("dashboard"); }}
+            aria-current={mainCategory === "dashboard" ? "page" : undefined}
+            className={`ugd-nav-item shrink-0${mainCategory === "dashboard" ? " is-active" : ""}`}
+          >
+            <span>대시보드</span>
+          </button>
+
+          {/* 일일 업무 */}
+          <p className="ugd-nav-group">일일 업무</p>
+          {dailySubTabs.map((tab) => {
+            const subActive = mainCategory === "daily" && activeTab === tab.id;
             return (
-              <div key={mt.id} className="w-full">
               <button
-                onClick={() => {
-                  // 이미 열려 있는 탭을 다시 누르면 하위 목록만 접는다(화면은 그대로 둔다).
-                  if (active) {
-                    setSubNavOpen((prev) => !prev);
-                    return;
-                  }
-                  setSubNavOpen(true);
-                  setMainCategory(mt.id as any);
-                  if (mt.id === "dashboard") {
-                    setActiveTab("dashboard");
-                  } else if (mt.id === "daily") {
-                    setActiveTab("settle");
-                  } else if (mt.id === "annualLeave") {
-                    setActiveTab("annualLeave");
-                  }
-                }}
-                className={`branch-main-nav-button ${active ? "branch-main-nav-active" : "branch-main-nav-idle"} flex items-center gap-2.5 py-2.5 px-4 font-black text-xs rounded-xl transition-all cursor-pointer whitespace-nowrap w-full text-left justify-center md:justify-start ${
-                  active
-                    ? "text-white"
-                    : mainCategory === "monthly"
-                      ? "text-indigo-300 hover:text-white hover:bg-white/5"
-                      : "text-zinc-400 hover:text-white hover:bg-zinc-900/50"
-                }`}
-                style={active ? {
-                  backgroundColor: mainCategory === "monthly" ? adminSettings.monthlyAccentColor : adminSettings.dailyAccentColor,
-                  boxShadow: `0 4px 6px -1px ${mainCategory === "monthly" ? adminSettings.monthlyAccentColor : adminSettings.dailyAccentColor}33`
-                } : {}}
+                key={`daily-${tab.id}`}
+                type="button"
+                onClick={() => openDailySubTab(tab.id)}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}`}
               >
-                <IconComp className="w-4 h-4" />
-                <span>{mt.label}</span>
+                <span>{tab.label}</span>
               </button>
-              {active && subNavOpen && mt.id === "daily" && (
-                <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
-                  {dailySubTabs.map((tab) => {
-                    const IconSub = tab.icon;
-                    const subActive = activeTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => openDailySubTab(tab.id)}
-                        className={`branch-sidebar-subtab ${subActive ? "branch-sidebar-subtab-active" : "branch-sidebar-subtab-idle"} flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
-                          subActive ? "bg-white/95 text-[#1A3C6E] shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
-                        }`}
-                      >
-                        <IconSub className="w-3.5 h-3.5" />
-                        <span>{tab.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {active && subNavOpen && mt.id === "monthly" && (
-                <div className="mt-1.5 mb-2 ml-0 md:ml-5 border-l border-white/10 pl-2 flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
-                  {monthlySubTabs.map((tab) => {
-                    const IconSub = tab.icon;
-                    const subActive = monthlyTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => {
-                          setMainCategory("monthly");
-                          setMonthlyTab(tab.id);
-                        }}
-                        className={`branch-sidebar-subtab ${subActive ? "branch-sidebar-subtab-active" : "branch-sidebar-subtab-idle"} flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-black transition-all ${
-                          subActive ? "bg-white/95 text-indigo-900 shadow-sm" : "text-white/45 hover:bg-white/8 hover:text-white/80"
-                        }`}
-                      >
-                        <IconSub className="w-3.5 h-3.5" />
-                        <span>{tab.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              </div>
             );
           })}
+
+          {/* 월말 업무 */}
+          <p className="ugd-nav-group">월말 업무</p>
+          {monthlySubTabs.map((tab) => {
+            const subActive = mainCategory === "monthly" && monthlyTab === tab.id;
+            return (
+              <button
+                key={`monthly-${tab.id}`}
+                type="button"
+                onClick={() => { setMainCategory("monthly"); setMonthlyTab(tab.id); }}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}`}
+              >
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+
+          {/* 인사 · 기타 */}
+          <p className="ugd-nav-group">인사 · 기타</p>
+          <button
+            type="button"
+            onClick={() => setMainCategory("laborContract")}
+            aria-current={mainCategory === "laborContract" ? "page" : undefined}
+            className={`ugd-nav-item shrink-0${mainCategory === "laborContract" ? " is-active" : ""}`}
+          >
+            <span>근로계약서</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMainCategory("annualLeave"); setActiveTab("annualLeave"); }}
+            aria-current={mainCategory === "annualLeave" ? "page" : undefined}
+            className={`ugd-nav-item shrink-0${mainCategory === "annualLeave" ? " is-active" : ""}`}
+          >
+            <span>연차관리</span>
+          </button>
         </nav>
 
 
         {/* Change Branch / Signout Section Bottom */}
-        <div className={`p-4 border-t hidden md:block space-y-2 transition-colors duration-300`}
-          style={{
-            backgroundColor: mainCategory === "monthly" ? `${adminSettings.sidebarBgMonthly}cc` : `${adminSettings.sidebarBgDaily}cc`,
-            borderTopColor: "#ffffff11"
-          }}
-        >
+        <div className="p-4 border-t border-[rgba(33,33,33,0.1)] hidden md:block space-y-2">
           {/* 어드민 설정 버튼 */}
           <button
             onClick={handleOpenAdmin}
-            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
+            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border border-[rgba(33,33,33,0.16)] text-[#212121] hover:bg-[rgba(33,33,33,0.05)] transition-all text-xs font-bold cursor-pointer`}
           >
-            <Settings className="w-3.5 h-3.5" />
             어드민 설정
           </button>
 
-          <button onClick={() => navigate("/admin")} className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}>
-            <Settings className="w-3.5 h-3.5" /> 관리자페이지
+          <button onClick={() => navigate("/admin")} className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border border-[rgba(33,33,33,0.16)] text-[#212121] hover:bg-[rgba(33,33,33,0.05)] transition-all text-xs font-bold cursor-pointer`}>
+            관리자페이지
           </button>
 
           <button
             onClick={() => selectBranch(null)}
-            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border transition-all text-xs font-bold cursor-pointer bg-white/5 hover:bg-white/10 text-white/80 border-white/10`}
+            className={`w-full ${isAdmin ? "flex" : "hidden"} items-center justify-center gap-2 py-2 rounded-xl border border-[rgba(33,33,33,0.16)] text-[#212121] hover:bg-[rgba(33,33,33,0.05)] transition-all text-xs font-bold cursor-pointer`}
           >
-            <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
             지점 변경하기
           </button>
           <button
             onClick={logout}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-rose-650 hover:bg-rose-600 text-white rounded-xl transition-all text-xs font-black cursor-pointer shadow-sm border border-transparent"
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#212121] hover:bg-black text-[#F6F5FA] rounded-xl transition-all text-xs font-black cursor-pointer border border-transparent"
           >
-            <LogOut className="w-3.5 h-3.5" />
             마감 보안 로그아웃
           </button>
         </div>
 
         {/* Mobile quick header bar right align for logout */}
-        <div className={`md:hidden flex px-4 pb-3 justify-between items-center border-t pt-2 gap-2 transition-colors duration-300 border-white/5`}
-          style={{
-            backgroundColor: mainCategory === "monthly" ? adminSettings.sidebarBgMonthly : adminSettings.sidebarBgDaily
-          }}
-        >
+        <div className="md:hidden flex px-4 pb-3 justify-between items-center border-t border-[rgba(33,33,33,0.1)] pt-2 gap-2">
           <button
             onClick={handleOpenAdmin}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border bg-white/5 text-white/80 border-white/10 transition-all`}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-[rgba(33,33,33,0.16)] text-[#212121]"
           >
-            <Settings className="w-3 h-3" /> 어드민
+            어드민
           </button>
           <button
             onClick={() => selectBranch(null)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border bg-white/5 text-white/80 border-white/10 transition-all`}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-[rgba(33,33,33,0.16)] text-[#212121]"
           >
-            <RefreshCw className="w-3 h-3" /> 지점변경
+            지점변경
           </button>
           <button
             onClick={logout}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-650 text-xs font-black text-white rounded-lg border border-transparent"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#212121] text-xs font-black text-[#F6F5FA] rounded-lg border border-transparent"
           >
-            <LogOut className="w-3 h-3" /> 로그아웃
+            로그아웃
           </button>
         </div>
       </aside>

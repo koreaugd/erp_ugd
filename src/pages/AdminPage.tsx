@@ -708,28 +708,30 @@ export default function AdminPage() {
           <p className="text-[10px] text-white/60 mt-1 uppercase font-semibold">UGD 주식회사 마감 총괄 시스템</p>
         </div>
 
-        <nav className="grow space-y-2">
+        <nav className="grow space-y-0">
+          <p className="ugd-nav-group">정산</p>
           <button
             onClick={() => setAdminSection("dashboard")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "dashboard" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "dashboard" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "dashboard" ? " is-active" : ""}`}
           >
-            <TrendingUp className="w-5 h-5" />
             대시보드
           </button>
           <button
             onClick={() => setAdminSection("dailySettlement")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "dailySettlement" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "dailySettlement" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "dailySettlement" ? " is-active" : ""}`}
           >
-            <FileSpreadsheet className="w-5 h-5" />
             일일 정산현황
           </button>
           {adminSection === "dailySettlement" && (
-            <div className="ml-3 pl-3 border-l border-white/15 space-y-1 py-1">
+            <div className="ml-4 pl-3 border-l border-[rgba(33,33,33,0.12)] space-y-1 py-1">
               {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "변경이력 & 수기대장" }].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setDailySettlementTab(sub.id as "status" | "logs")}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-colors ${dailySettlementTab === sub.id ? "bg-white text-[#1A3C6E] shadow-sm" : "text-white/60 hover:bg-white/10 hover:text-white"}`}
+                  aria-current={dailySettlementTab === sub.id ? "page" : undefined}
+                  className={`ugd-subnav-item w-full text-left${dailySettlementTab === sub.id ? " is-active" : ""}`}
                 >
                   {sub.label}
                 </button>
@@ -738,57 +740,60 @@ export default function AdminPage() {
           )}
           <button
             onClick={() => setAdminSection("monthlyClosing")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "monthlyClosing" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "monthlyClosing" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "monthlyClosing" ? " is-active" : ""}`}
           >
-            <Coins className="w-5 h-5" />
             월말마감
           </button>
           {adminSection === "monthlyClosing" && (
-            <div className="ml-3 pl-3 border-l border-white/15 space-y-1 py-1">
+            <div className="ml-4 pl-3 border-l border-[rgba(33,33,33,0.12)] space-y-1 py-1">
               {[{ id: "status", label: "제출현황" }, { id: "cashManagement", label: "현금관리" }, { id: "cashExpenses", label: "현금지출" }].map((sub) => (
                 <button
                   key={sub.id}
                   onClick={() => setMonthlyClosingTab(sub.id as "status" | "cashManagement" | "cashExpenses")}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-colors ${monthlyClosingTab === sub.id ? "bg-white text-[#1A3C6E] shadow-sm" : "text-white/60 hover:bg-white/10 hover:text-white"}`}
+                  aria-current={monthlyClosingTab === sub.id ? "page" : undefined}
+                  className={`ugd-subnav-item w-full text-left${monthlyClosingTab === sub.id ? " is-active" : ""}`}
                 >
                   {sub.label}
                 </button>
               ))}
             </div>
           )}
+
+          <p className="ugd-nav-group">인사</p>
           <button
             onClick={() => setAdminSection("laborContracts")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "laborContracts" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "laborContracts" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "laborContracts" ? " is-active" : ""}`}
           >
-            <Briefcase className="w-5 h-5" />
             근로계약서 발송 현황
           </button>
           <button
             onClick={() => setAdminSection("annualLeave")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "annualLeave" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "annualLeave" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "annualLeave" ? " is-active" : ""}`}
           >
-            <Calendar className="w-5 h-5" />
             연차관리
-          </button>
-          <button
-            onClick={() => navigate("/branch-confirm")}
-            className="w-full flex items-center gap-3 px-4 py-3 mt-8 pt-5 border-t border-white/10 rounded-xl font-bold text-sm transition-colors text-white/80 hover:bg-white/10 hover:text-white"
-          >
-            <ClipboardList className="w-5 h-5" />
-            지점 대시보드
           </button>
           {employeeDirectoryEnabled && <button
             onClick={() => setAdminSection("employeeDirectory")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${adminSection === "employeeDirectory" ? "bg-[#2E6DB4] text-white" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+            aria-current={adminSection === "employeeDirectory" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "employeeDirectory" ? " is-active" : ""}`}
           >
-            <Users className="w-5 h-5" />
             직원명부
           </button>}
+
+          <p className="ugd-nav-group">이동</p>
+          <button
+            onClick={() => navigate("/branch-confirm")}
+            className="ugd-nav-item"
+          >
+            지점 대시보드
+          </button>
           <button
             onClick={logout}
-            className="admin-logout-link w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-white/80 hover:text-white font-semibold text-sm cursor-pointer transition-all"
+            className="admin-logout-link ugd-nav-item"
           >
-            <LogOut className="w-5 h-5" />
             보안 로그아웃
           </button>
         </nav>
@@ -2866,12 +2871,39 @@ function AdminMonthlyClosingStatusSection() {
     }
   };
 
-  // 전지점 매출집계 엑셀 (첨부 양식: POS 매출집계 컬럼 구성, 한 지점당 한 행).
-  const downloadAllSalesSummary = async () => {
+  // 매출집계 엑셀 (첨부 양식: POS 매출집계 컬럼 구성, 한 지점당 한 행).
+  // branchFilter로 대상 지점을 좁히고 label로 파일명을 정한다(전지점/법인별 공용 — 정직원급여 통합과 같은 패턴).
+  const downloadSalesSummary = async (branchFilter: (name: string) => boolean, label: string, confirmedOnly = false) => {
     const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
     try {
       const XLSX = await import("xlsx");
-      const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
+      const allBranches = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
+      // 법인별 배치(confirmedOnly): 정직원급여 통합과 동일 기준 — '확정(제출)'한 지점만 내보낸다.
+      // 확정 상태는 서버에서 '신선하게' 읽어 fail-closed로 거른다. 화면 캐시(records)로만 거르면 방금 다른 기기에서
+      // '수정중/미제출'로 바뀐 지점을 못 걸러, 미확정 매출집계가 최종본처럼 섞여 나갈 수 있다.
+      // (헤더의 '전지점 매출집계'는 수집현황 덤프라 confirmedOnly=false로 전체를 유지한다.)
+      let confirmedSet: Set<string> | null = null;
+      if (confirmedOnly) {
+        let freshRecords: any[];
+        try {
+          const fr = await gasClient.getSharedDataFromServer<any[]>("monthly_closings");
+          if (!Array.isArray(fr)) throw new Error("invalid monthly_closings");
+          freshRecords = fr;
+        } catch {
+          window.alert("마감 확정 상태를 서버에서 확인하지 못해 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+          return;
+        }
+        confirmedSet = new Set(
+          freshRecords
+            .filter((r) => r.month === selectedMonth && (r.section || "purchase") === "salesSummary" && r.status === "confirmed")
+            .map((r) => r.branchName)
+        );
+      }
+      const branchList = allBranches.filter((b: any) => branchFilter(b.branchName) && (!confirmedSet || confirmedSet.has(b.branchName)));
+      if (branchList.length === 0) {
+        window.alert(confirmedOnly ? `${label} 중 ${selectedMonth} 매출집계를 '확정(제출)'한 지점이 없습니다.` : `${label}에 해당하는 지점이 없습니다.`);
+        return;
+      }
       const summaries = await Promise.all(branchList.map(async (b: any) => {
         try {
           const s = await gasClient.getSharedDataFromServer<any>(`monthly_sales_summary:${b.branchName}:${selectedMonth}`);
@@ -2884,7 +2916,24 @@ function AdminMonthlyClosingStatusSection() {
         window.alert(`다음 지점의 매출집계를 서버에서 불러오지 못해 다운로드를 취소했습니다:\n${failedBranches.join(", ")}\n네트워크 상태를 확인한 뒤 다시 시도해주세요. (불완전한 파일은 생성하지 않았습니다.)`);
         return;
       }
-      const excelRows = summaries.map(({ branch, s }) => {
+      // 법인별 배치(confirmedOnly): '확정'인데 매출집계 상세가 서버에 비어 있는(문서 없음) 지점은
+      // 0/미입력 행으로 최종본에 섞이지 않게 — 정직원급여 통합의 confirmedButEmpty와 동일하게 — 명시적으로 알리고
+      // 빼고 받을지 관리자가 정한다. 전지점 수집덤프(confirmedOnly=false)는 미입력 지점을 '미입력'으로 담는 게 목적이라 제외.
+      let rowsSource = summaries;
+      if (confirmedOnly) {
+        const confirmedButEmpty = summaries.filter((r) => !r.s).map((r) => r.branch.branchName);
+        if (confirmedButEmpty.length > 0) {
+          const proceed = window.confirm(
+            `다음 지점은 '확정' 표시가 있으나 매출집계 내역이 서버에 비어 있습니다:\n${confirmedButEmpty.join(", ")}\n\n` +
+            `이 지점들은 통합 파일에서 빠집니다. 빼고 나머지만 받으시겠습니까?\n` +
+            `(취소하면 다운로드를 멈춥니다 — 해당 지점에서 [월말마감 → 매출집계]를 연 뒤 저장하고 다시 '확정'하면 포함됩니다.)`
+          );
+          if (!proceed) return;
+        }
+        rowsSource = summaries.filter((r) => r.s);
+        if (rowsSource.length === 0) { window.alert(`${selectedMonth} 매출집계가 저장된 지점이 없습니다.`); return; }
+      }
+      const excelRows = rowsSource.map(({ branch, s }) => {
         const d: any = s || {};
         const net = num(d.netSales);
         const cnt = num(d.receiptCount);
@@ -2913,12 +2962,15 @@ function AdminMonthlyClosingStatusSection() {
       });
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(excelRows), "매출집계");
-      XLSX.writeFile(wb, `전지점_매출집계_${selectedMonth}.xlsx`);
+      XLSX.writeFile(wb, `${label}_매출집계_${selectedMonth}.xlsx`);
     } catch (error) {
-      console.error("전지점 매출집계 다운로드 실패:", error);
-      window.alert("전지점 매출집계 데이터를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+      console.error("매출집계 다운로드 실패:", error);
+      window.alert("매출집계 데이터를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
     }
   };
+  // 매출집계는 전지점 통합(헤더 버튼, 수집현황 덤프 = 전체)과 법인별 통합(법인 밴드 버튼, 확정 지점만) 둘 다 제공한다.
+  const downloadAllSalesSummary = () => downloadSalesSummary(() => true, "전지점");
+  const downloadCorpSalesSummary = (corpKey: string) => downloadSalesSummary((name) => corpOfBranch(name) === corpKey, `${corpLabel(corpKey)}법인`, true);
 
   // 전지점 정직원 급여를 하나의 엑셀로 — 지점마다 시트를 나눈다(본사 표준 양식 그대로).
   // 정직원급여 통합 다운로드(법인/전지점 공용). branchFilter로 대상 지점을 좁히고, label로 파일명/안내문을 정한다.
@@ -2995,19 +3047,23 @@ function AdminMonthlyClosingStatusSection() {
   // 확정 후 수정 여부: 지점이 확정된 섹션을 '수정'으로 다시 연 순간 기록되는 플래그(재확정해도 유지, 오탐 없음).
   // 버튼을 누르면 말풍선으로 (내 다운로드 시각 + 수정 이력)을 보여준다.
   // 취소되어 '미제출(pending)'인 섹션은 표시하지 않는다 — 초기화 정리 저장이 실패해 표식이 찌꺼기로 남아도 무해하게 한다.
+  // 수정기록 버튼 — 엑셀 다운로드 버튼처럼 항상 자리에 있고, '확정 후 수정' 기록이 있을 때만 색이 켜져(검정) 클릭할 수 있다.
+  // 기록이 없으면 회색 비활성. 클릭하면 말풍선으로 (내 다운로드 시각 + 수정 이력)을 보여준다. 스타일·크기는 엑셀 버튼과 통일.
   const modifiedButton = (rec: any, branchName: string, section: "salary" | "purchase" | "salesSummary") => {
-    if (!rec?.editedAfterConfirm || rec?.status === "pending") return null;
+    const has = !!rec?.editedAfterConfirm && rec?.status !== "pending";
     return (
       <button
         type="button"
-        onClick={(e) => {
+        disabled={!has}
+        onClick={has ? (e) => {
           modAnchorRef.current = e.currentTarget;
           const pos = computeModPos(e.currentTarget);
           setModPopup({ ...pos, branch: branchName, section, rec });
-        }}
-        className="inline-flex items-center gap-0.5 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-black text-amber-800 whitespace-nowrap hover:bg-amber-200 cursor-pointer"
+        } : undefined}
+        title={has ? "확정 후 수정한 기록 보기" : "수정 기록 없음"}
+        className={`inline-flex h-7 w-[76px] items-center justify-center gap-1 rounded-md text-[11px] font-black transition-colors ${has ? "bg-[#212121] text-white hover:bg-black cursor-pointer" : "bg-[#E5E7EB] text-[#6B7280] cursor-not-allowed"}`}
       >
-        <Edit3 className="w-2.5 h-2.5" /> 확정후수정
+        <Edit3 className="w-3 h-3" /> 수정기록
       </button>
     );
   };
@@ -3044,12 +3100,14 @@ function AdminMonthlyClosingStatusSection() {
     <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
       {/* 헤더: 제목 + 전지점 매출집계 + 월 선택 + 새로고침 (컴팩트 h-8 컨트롤) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-black text-gray-900">제출현황</h2>
-          <p className="text-[11px] text-gray-400 mt-0.5">선택한 월 기준 지점별 3개 마감(매출집계·매입매출·정직원 급여) 상태</p>
+        <div className="space-y-1.5">
+          {/* 섹션 제목 = 바닐라 알약(지점 DESIGN.md §6, 색만 연한 관리자 바닐라). bg-amber-50 → var(--admin-vanilla) */}
+          <h2 className="inline-flex w-fit items-center rounded-full border border-[#212121] bg-amber-50 px-3 py-1.5 text-[11px] font-black text-gray-900">제출현황</h2>
+          <p className="text-[11px] text-gray-400">선택한 월 기준 지점별 3개 마감(매출집계·매입매출·정직원 급여) 상태</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* 정직원급여는 법인별로 받으므로 '전지점 정직원급여' 버튼은 두지 않는다. 매출집계는 법인 분리가 없어 전지점 버튼만 유지. */}
+          {/* 정직원급여·매출집계 '법인별' 배치 다운로드는 각 법인 밴드(제목 행)에 있다.
+              여기 '전지점 매출집계'는 모든 법인을 한 번에 받는 전체용으로 유지한다. */}
           <button type="button" onClick={() => void downloadAllSalesSummary()} className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#1A3C6E]/25 bg-white px-2.5 text-[11px] font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/10 cursor-pointer">
             <Download className="w-3.5 h-3.5" /> 전지점 매출집계
           </button>
@@ -3077,22 +3135,33 @@ function AdminMonthlyClosingStatusSection() {
             if (items.length === 0) return null;
             return (
               <div key={corp.key} className="rounded-2xl border border-[#212121] bg-white overflow-hidden">
-                {/* 법인 제목 밴드 + 그 법인 정직원급여 다운로드 */}
-                <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-b border-[#212121] bg-[#EFF0A3]/45">
+                {/* 법인 제목 밴드 + 그 법인 배치 다운로드 버튼(정직원급여 받기 · 매출집계 전체).
+                    bg-amber-50 → var(--admin-vanilla)(연한 바닐라). 버튼은 검정 알약(지점 DESIGN.md §10). */}
+                <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-b border-[#212121] bg-amber-50">
                   <h3 className="text-sm font-black text-gray-900">{corp.label} 법인 <span className="text-gray-500 font-bold text-[11px]">· {items.length}개 지점</span></h3>
-                  <button type="button" onClick={() => void downloadCorpFullTimeSalary(corp.key)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#1A3C6E] text-white px-3 text-[11px] font-black hover:bg-[#15325c] cursor-pointer">
-                    <Download className="w-3.5 h-3.5" /> 정직원급여 받기
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button type="button" onClick={() => void downloadCorpFullTimeSalary(corp.key)} title={`${corp.label} 법인의 확정 지점 정직원급여를 한 파일로 받습니다`} className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#212121] text-white px-3 text-[11px] font-black hover:bg-black cursor-pointer whitespace-nowrap">
+                      <Download className="w-3.5 h-3.5" /> 정직원급여 받기
+                    </button>
+                    <button type="button" onClick={() => void downloadCorpSalesSummary(corp.key)} title={`${corp.label} 법인 매출집계를 한 파일로 받습니다`} className="inline-flex h-8 items-center gap-1 rounded-lg bg-[#212121] text-white px-3 text-[11px] font-black hover:bg-black cursor-pointer whitespace-nowrap">
+                      <Download className="w-3.5 h-3.5" /> 매출집계 전체
+                    </button>
+                  </div>
                 </div>
                 {/* 그 법인 지점 표 */}
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-xs">
-                    <thead className="text-left text-[11px] text-gray-500 font-black border-b bg-gray-50">
+                  <table className="w-full min-w-[760px] text-xs table-fixed">
+                    {/* 표 헤더 = 엘리스(admin-redesign thead tr, 연한 엘리스블루). 라벨은 text-[#212121]로 100% 검정
+                        (text-gray-*는 68% 회색으로 치환돼 흐려짐 — DESIGN.md §9-1).
+                        법인별 배치 다운로드 버튼은 위 법인 밴드에 있다. 여기 헤더는 라벨만.
+                        table-fixed + 각 th 고정폭 → 법인 표가 여러 개라도 컬럼 x위치가 항상 같게 정렬된다
+                        (auto 레이아웃이면 법인마다 지점명 길이로 '지점' 폭이 달라져 뒤 컬럼이 어긋난다). */}
+                    <thead className="text-left text-[11px] font-black border-b bg-gray-50">
                       <tr>
-                        <th className="py-2 px-3">지점</th>
-                        <th className="py-2 px-3 text-center">정직원급여</th>
-                        <th className="py-2 px-3 text-center">월말마감</th>
-                        <th className="py-2 px-3 text-center">매출집계</th>
+                        <th className="w-[160px] py-2 px-3 text-[#212121]">지점</th>
+                        <th className="w-[220px] py-2 px-3 text-center text-[#212121]">정직원급여</th>
+                        <th className="w-[220px] py-2 px-3 text-center text-[#212121]">월말마감</th>
+                        <th className="w-[160px] py-2 px-3 text-center text-[#212121]">매출집계</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -3105,7 +3174,9 @@ function AdminMonthlyClosingStatusSection() {
                               disabled={!ok}
                               onClick={() => { void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section)); }}
                               title={ok ? "엑셀 다운로드 (기본 양식)" : "확정된 마감만 다운로드할 수 있습니다"}
-                              className="inline-flex h-7 items-center gap-1 px-2 rounded-md bg-[#1A3C6E] text-white text-[11px] font-black transition-colors hover:bg-[#15325c] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
+                              // 확정/미확정 버튼 크기·모양을 동일하게: 두 상태 모두 같은 고정폭(w-[60px]) + 중앙정렬 + 솔리드 채움 박스.
+                              // 확정=검정 솔리드/흰 글자, 미확정=회색 솔리드/옅은 글자 — 채움 '방식'이 같아 크기가 동일하게 읽힌다(꽉 찬 검정만 커 보이던 착시 제거).
+                              className={`inline-flex h-7 w-[60px] items-center justify-center gap-1 rounded-md text-[11px] font-black transition-colors ${ok ? "bg-[#212121] text-white hover:bg-black cursor-pointer" : "bg-[#E5E7EB] text-[#6B7280] cursor-not-allowed"}`}
                             >
                               <Download className="w-3 h-3" /> 엑셀
                             </button>
@@ -3113,7 +3184,7 @@ function AdminMonthlyClosingStatusSection() {
                         };
                         return (
                           <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">
-                            <td className="py-2 px-3 font-black text-gray-800 whitespace-nowrap">{branch.branchName}</td>
+                            <td className="py-2 px-3 font-black text-gray-800 truncate" title={branch.branchName}>{branch.branchName}</td>
                             {/* 상태 캡 바로 오른쪽에 다운로드 버튼 + (있으면) 확정후수정 표시를 붙인다 — 별도 '엑셀' 컬럼을 두지 않는다(사용자 지정). */}
                             <td className="py-2 px-3 text-center">
                               <span className="inline-flex items-center justify-center gap-1 flex-wrap">
