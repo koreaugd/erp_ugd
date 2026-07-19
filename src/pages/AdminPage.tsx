@@ -1585,6 +1585,88 @@ function AdminDashboardAlertHub({
   );
 }
 
+// 이번 달에 일일마감을 빠뜨린(기록 없는) 날짜를 지점별로 보여준다.
+// 기대 일수: 지난달이면 말일까지, 이번달이면 '어제'까지(오늘치는 아직 마감 전일 수 있어 제외).
+function AdminMonthlyMissingDaysPanel({ month }: { month: string }) {
+  const [rows, setRows] = useState<Array<{ branchName: string; missing: number[]; error?: boolean }> | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setLoadError(false);
+    (async () => {
+      try {
+        const branchList = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+        const [y, m] = month.split("-").map(Number);
+        if (!y || !m) { if (!cancelled) setRows([]); return; }
+        const daysInMonth = new Date(y, m, 0).getDate();
+        const today = new Date();
+        const isCurrentMonth = today.getFullYear() === y && today.getMonth() + 1 === m;
+        const cutoff = isCurrentMonth ? Math.max(0, today.getDate() - 1) : daysInMonth;
+        const result = await Promise.all(branchList.map(async (b: any) => {
+          // 읽기 실패를 '빈 이력=전부 빠짐'으로 오해하면 안 된다(fail-closed):
+          // 반드시 서버 전용 조회를 쓴다 — getBranchHistory는 실패를 []로 삼켜(gasClient) 이 센티넬이 무력화된다.
+          // 실패는 throw → null 센티넬로 잡아 '확인 불가'로 표시한다.
+          const history = await gasClient.getBranchHistoryFromServer(b.branchName, month).catch(() => null);
+          if (history === null) return { branchName: b.branchName, missing: [], error: true };
+          const submitted = new Set<number>();
+          (Array.isArray(history) ? history : []).forEach((r: any) => {
+            const d = String(r.settleDate || "");
+            if (d.slice(0, 7) === month) { const day = Number(d.split("-")[2]); if (day) submitted.add(day); }
+          });
+          const missing: number[] = [];
+          for (let d = 1; d <= cutoff; d++) if (!submitted.has(d)) missing.push(d);
+          return { branchName: b.branchName, missing };
+        }));
+        // 확인 불가(에러) 지점을 위로, 그다음 빠진 일수 많은 순.
+        if (!cancelled) setRows(
+          result
+            .filter((r) => r.error || r.missing.length > 0)
+            .sort((a, b) => Number(!!b.error) - Number(!!a.error) || b.missing.length - a.missing.length)
+        );
+      } catch {
+        // 지점 목록 자체를 못 불러온 경우 — 초록 '이상 없음'으로 오도하지 않도록 별도 에러 표시.
+        if (!cancelled) { setRows([]); setLoadError(true); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [month]);
+
+  return (
+    <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4 text-[#F39C12]" />
+        <h3 className="text-sm font-black text-[#2C3E50]">이번 달 미작성 지점 <span className="font-bold text-gray-400">({month} · 기록 없는 날짜 · 어제까지 기준)</span></h3>
+      </div>
+      {rows === null ? (
+        <p className="text-xs font-bold text-gray-400">불러오는 중…</p>
+      ) : loadError ? (
+        <p className="text-xs font-bold text-rose-600">지점 목록을 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요. (미작성 여부를 확인하지 못했습니다.)</p>
+      ) : rows.length === 0 ? (
+        <p className="text-xs font-bold text-emerald-600">모든 지점이 이번 달 일일마감을 빠짐없이 작성했습니다.</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.branchName} className="flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-3 border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+              <span className="shrink-0 inline-flex items-center gap-1.5 min-w-36">
+                <span className="font-black text-[#2C3E50] text-sm">{r.branchName}</span>
+                {r.error ? (
+                  <span className="inline-flex px-1.5 py-0.5 rounded-md bg-gray-200 text-gray-600 text-[10px] font-black">확인 불가</span>
+                ) : (
+                  <span className="inline-flex px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-black">{r.missing.length}일 빠짐</span>
+                )}
+              </span>
+              <span className="text-xs font-bold text-gray-500 leading-relaxed">
+                {r.error ? "서버 응답이 없어 작성 여부를 확인하지 못했습니다." : r.missing.map((d) => `${d}일`).join(", ")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminDailySettlementStatusSection({
   selectedDate,
   setSelectedDate,
@@ -1645,6 +1727,9 @@ function AdminDailySettlementStatusSection({
           <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl"><TrendingUp className="w-6 h-6" /></div>
         </div>
       </div>
+
+      {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점·날짜를 한눈에. */}
+      <AdminMonthlyMissingDaysPanel month={selectedDate.slice(0, 7)} />
 
       <div className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center gap-2"><Filter className="w-4 h-4 text-gray-400 shrink-0" /><span className="text-xs font-bold text-gray-500">브랜드 필터</span></div>
@@ -2164,7 +2249,7 @@ function AdminAnnualLeaveSection() {
 }
 
 function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTab?: "logs" | "manualOvertimes" } = {}) {
-  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes">(defaultSubTab);
+  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes" | "cashDiff">(defaultSubTab);
   const [logs, setLogs] = useState<any[]>([]);
   const [reviewedLogIds, setReviewedLogIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2309,6 +2394,12 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
         >
           지점 수기 초과근무 대장
         </button>
+        <button
+          onClick={() => setSubTab("cashDiff")}
+          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "cashDiff" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+        >
+          현금차이 이력
+        </button>
       </div>
 
       {subTab === "logs" ? (
@@ -2438,9 +2529,115 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
             </div>
           </div>
         </>
+      ) : subTab === "cashDiff" ? (
+        <AdminCashDiffHistorySection />
       ) : (
         <AdminManualOvertimesSection />
       )}
+    </div>
+  );
+}
+
+// 현금차이 이력 — 선택한 달에 각 지점이 기록한 현금 차이(실사현금 − 장부)를 날짜별로 모아 보여준다.
+// 대시보드 '전일 정산'은 어제치만 보이므로, 지난 기록을 지점·날짜별로 되짚어 볼 수 있게 한다.
+function AdminCashDiffHistorySection() {
+  const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [rows, setRows] = useState<Array<{ date: string; branchName: string; cashDifference: number; reason: string }> | null>(null);
+  const [partialError, setPartialError] = useState(false);
+
+  const load = useCallback(async () => {
+    setRows(null);
+    setPartialError(false);
+    try {
+      const branchList = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+      let anyFail = false;
+      const perBranch = await Promise.all(branchList.map(async (b: any) => {
+        // 읽기 실패는 '차이 없음'과 구분한다(fail-closed): null이면 배너로 '일부 누락'을 알린다.
+        // 서버 전용 조회 필수 — getBranchHistory는 실패를 []로 삼켜(gasClient) 실패 지점이 조용히 사라진다.
+        const history = await gasClient.getBranchHistoryFromServer(b.branchName, month).catch(() => null);
+        if (history === null) { anyFail = true; return []; }
+        return (Array.isArray(history) ? history : []).flatMap((record: any) => {
+          try {
+            const memoText = String(record.memo || "");
+            const meta = JSON.parse(memoText.split("\n---\nMETADATA:")[1] || "{}");
+            const expenses = (meta.cashExpenses || []).reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0);
+            // 대시보드 전일정산과 동일 산식: 실사현금 − (전일현금 + 현금매출 − 현금지출)
+            const cashDifference = (Number(meta.cashBalance) || 0) - ((Number(meta.prevDayCash) || 0) + (Number(record.cashSales) || 0) - expenses);
+            const d = String(record.settleDate || "");
+            if (!cashDifference || d.slice(0, 7) !== month) return [];
+            return [{ date: d, branchName: b.branchName, cashDifference, reason: meta.cashDiffReason || "" }];
+          } catch { return []; }
+        });
+      }));
+      setPartialError(anyFail);
+      const flat = perBranch.flat();
+      setRows(flat.sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.branchName.localeCompare(b.branchName, "ko")));
+    } catch {
+      setPartialError(true);
+      setRows([]);
+    }
+  }, [month]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const totalDiff = (rows || []).reduce((s, r) => s + r.cashDifference, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-rose-500" /> 현금차이 이력
+          </h3>
+          <p className="text-xs text-gray-400 mt-1">선택한 달에 각 지점이 기록한 현금 차이(실사현금 − 장부)를 날짜별로 모았습니다.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black" />
+          <button onClick={() => void load()} className="px-3 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">새로고침</button>
+        </div>
+      </div>
+
+      {partialError && (
+        <p className="text-xs font-bold text-rose-600">일부 지점의 이력을 서버에서 불러오지 못했습니다. 아래 목록이 일부 누락됐을 수 있습니다 — 새로고침 후 다시 확인해주세요.</p>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs font-bold text-rose-600">현금차이 발생</p><p className="text-2xl font-black text-rose-700">{rows === null ? "…" : `${rows.length}건`}</p></div>
+        <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">차이 합계</p><p className="text-2xl font-black text-slate-700">{rows === null ? "…" : `${formatNumber(totalDiff)}원`}</p></div>
+      </div>
+
+      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b">
+              <tr>
+                <th className="p-4 w-32">마감일자</th>
+                <th className="py-4 px-3 w-32">지점</th>
+                <th className="py-4 px-3 w-32 text-right">현금차이</th>
+                <th className="py-4 px-3">사유</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows === null ? (
+                <tr><td colSpan={4} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={4} className="p-12 text-center text-gray-400 font-bold">{month}에 기록된 현금차이가 없습니다.</td></tr>
+              ) : (
+                rows.map((r, i) => (
+                  <tr key={`${r.branchName}-${r.date}-${i}`} className="hover:bg-slate-50/60">
+                    <td className="p-4 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">{r.date}</td>
+                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{r.branchName}</td>
+                    <td className={`py-4 px-3 text-right font-mono font-black whitespace-nowrap ${r.cashDifference < 0 ? "text-rose-600" : "text-amber-600"}`}>
+                      {r.cashDifference > 0 ? "+" : ""}{formatNumber(r.cashDifference)}원
+                    </td>
+                    <td className="py-4 px-3 text-gray-600 font-bold">{r.reason || <span className="text-gray-300">사유 미입력</span>}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2462,6 +2659,27 @@ function AdminMonthlyClosingStatusSection() {
   const [branches, setBranches] = useState<any[]>([]);
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  // '확정후수정' 버튼을 누르면 뜨는 말풍선. 표가 가로 스크롤 상자 안이라 화면(fixed) 좌표로 띄운다.
+  const [modPopup, setModPopup] = useState<{ left: number; top?: number; bottom?: number; branch: string; section: "salary" | "purchase" | "salesSummary"; rec: any } | null>(null);
+  // 말풍선을 띄운 버튼(앵커)을 기억해 스크롤 시 위치를 따라가게 한다(닫지 않는다).
+  const modAnchorRef = useRef<HTMLElement | null>(null);
+  // 버튼 좌표로부터 말풍선 위치를 계산한다: 아래 공간이 부족하면 위로 뒤집어 하단 잘림을 막는다.
+  const computeModPos = useCallback((el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const POPUP_W = 320, MARGIN = 8, EST_H = 240;
+    const left = Math.max(MARGIN, Math.min(r.left, window.innerWidth - POPUP_W - MARGIN));
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < EST_H && r.top > spaceBelow;
+    return openUp
+      ? { left, top: undefined as number | undefined, bottom: Math.max(MARGIN, window.innerHeight - r.top + 6) }
+      : { left, top: r.bottom + 6, bottom: undefined as number | undefined };
+  }, []);
+  const sectionLabel = (s: string) => (s === "salary" ? "정직원 급여대장" : s === "purchase" ? "매입매출" : "매출집계");
+  // 관리자가 이 지점·섹션 엑셀을 마지막으로 다운로드한 시각(브라우저에 기록).
+  const dlTimeKey = (branch: string, section: string) => `admin_section_dl_${branch}_${selectedMonth}_${section}`;
+  const markDownloaded = (branch: string, section: string) => {
+    try { localStorage.setItem(dlTimeKey(branch, section), new Date().toISOString()); } catch {}
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -2542,30 +2760,21 @@ function AdminMonthlyClosingStatusSection() {
         // 매입매출(purchase) 섹션은 downloadBranchMonthlyClose(5시트 통합)로 처리하므로 여기서는 정직원 급여만 담당한다.
         const salary: any = await gasClient.getSharedDataFromServer<any[]>(`monthly_fulltime_salary:${branchName}:${selectedMonth}`);
         if (!Array.isArray(salary) || !salary.length) { window.alert(emptyMsg("정직원 급여", "정직원 급여대장")); return; }
-        const salRows = salary.map((r: any) => {
-          const otHours = Number(String(r.overtimeHours ?? "").replace(/[^0-9.]/g, "")) || 0;
-          const otRate = num(r.overtimeRate);
-          // 화면(rowOvertimePay)과 같은 규칙: 시간·시급 둘 다 있으면 계산값, 아니면 옛 '추가근무' 금액.
-          const otPay = (otHours > 0 && otRate > 0) ? Math.round(otHours * otRate) : num(r.overtimePay);
-          // 레거시 행은 옛 '입금계좌' 한 칸에 은행명+계좌가 함께 적혀 있었다("국민 123-456").
-          // 계좌번호를 숫자만 남기면 은행명이 통째로 사라지므로, 은행 칸이 비어 있으면 문자 부분을 은행명으로 살려 낸다.
-          const rawAcc = String(r.accountNumber ?? "");
-          const legacyBank = rawAcc.replace(/[0-9\-./() ]/g, "").trim();
-          return {
-            분류: "정직원", 성명: r.name, 직급: r.rank, 주민등록번호: r.residentNumber,
-            입사일: r.entryDate, 근로계약: r.contractType || "4대보험", 은행: r.bank || legacyBank,
-            계좌번호: rawAcc.replace(/\D/g, ""), // 하이픈·문자를 지우고 숫자만 내보낸다
-            전월급여: num(r.prevSalary), 이달급여: num(r.thisSalary),
-            "연장근무시간": otHours, "연장시급": otRate, "연장근무계": otPay,
-            "택시비및기타지출": num(r.taxiEtc), "상여금(팁)": num(r.bonusTip),
-            총금액: num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + otPay,
-            "실제 송금지점": r.remitBranch, 기타내용: r.memo,
-          };
-        });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salRows), "정직원 급여대장");
-        filename = `${branchName}_${selectedMonth}_정직원급여.xlsx`;
+        // 본사 표준 양식(2026.06 대학로고래 급여내역)과 동일한 모양(색·테두리·병합·수식·열너비)으로 만든다.
+        // 일반 xlsx 모듈은 셀 스타일을 버리므로, 조립부터 저장까지 xlsx-js-style로 해야 서식이 살아남는다.
+        const XLSXSMod: any = await import("xlsx-js-style");
+        // 동적 import 상호운용: 번들러/런타임에 따라 utils가 최상위 또는 default에 위치할 수 있어 정규화한다
+        // (assembleMonthlyCloseWorkbook:485와 동일 규칙 — 정규화 없이 쓰면 런타임에서 utils undefined로 터질 수 있다).
+        const XLSXS: any = XLSXSMod && XLSXSMod.utils ? XLSXSMod : (XLSXSMod && XLSXSMod.default) ? XLSXSMod.default : XLSXSMod;
+        const { buildFullTimeSalarySheet, fullTimeSalarySheetName } = await import("./branch/helpers/fullTimeSalaryWorkbook");
+        const wbStyled = XLSXS.utils.book_new();
+        XLSXS.utils.book_append_sheet(wbStyled, buildFullTimeSalarySheet(XLSXS, branchName, selectedMonth, salary), fullTimeSalarySheetName(selectedMonth));
+        XLSXS.writeFile(wbStyled, `${branchName}_${selectedMonth}_정직원급여.xlsx`);
+        markDownloaded(branchName, "salary"); // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각' 기록(빈데이터/실패 시 기록 안 함)
+        return;
       }
       XLSX.writeFile(wb, filename);
+      markDownloaded(branchName, section); // 저장 성공 뒤에만 기록(여기 도달하면 section === "salesSummary")
     } catch (error) {
       console.error("마감 엑셀 다운로드 실패:", error);
       window.alert("마감 데이터를 서버에서 불러오지 못해 엑셀 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
@@ -2635,6 +2844,7 @@ function AdminMonthlyClosingStatusSection() {
       const wb = assembleMonthlyCloseWorkbook(XLSX, data);
       const monthNumber = Number(selectedMonth.split("-")[1]) || 0;
       XLSX.writeFile(wb, `월말정산_${branchName}${monthNumber}월_결산자료.xlsx`);
+      markDownloaded(branchName, "purchase"); // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각' 기록
     } catch (error) {
       console.error("월말마감 엑셀 다운로드 실패:", error);
       window.alert("월말마감 데이터를 서버에서 불러오지 못해 엑셀 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
@@ -2695,6 +2905,122 @@ function AdminMonthlyClosingStatusSection() {
     }
   };
 
+  // 전지점 정직원 급여를 하나의 엑셀로 — 지점마다 시트를 나눈다(본사 표준 양식 그대로).
+  const downloadAllFullTimeSalary = async () => {
+    try {
+      const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
+      // '확정(제출)'한 지점만 포함한다 — 지점별 다운로드 버튼과 같은 기준. 미제출·수정중 지점(예: 한남점)이 섞여 나가지 않게 한다.
+      // 확정 판정은 화면 캐시(records)가 아니라 '서버에서 신선하게' 읽는다: 관리자가 새로고침 전이면
+      // 방금 다른 기기에서 '수정중/미제출'로 바뀐 지점을 못 걸러 잘못된 통합본이 나갈 수 있다(fail-closed — 못 읽으면 취소).
+      let freshRecords: any[];
+      try {
+        const fr = await gasClient.getSharedDataFromServer<any[]>("monthly_closings");
+        if (!Array.isArray(fr)) throw new Error("invalid monthly_closings");
+        freshRecords = fr;
+      } catch {
+        window.alert("마감 확정 상태를 서버에서 확인하지 못해 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+        return;
+      }
+      const confirmedSalary = new Set(
+        freshRecords.filter((r) => r.month === selectedMonth && (r.section || "purchase") === "salary" && r.status === "confirmed").map((r) => r.branchName)
+      );
+      const targets = branchList.filter((b: any) => confirmedSalary.has(b.branchName));
+      if (targets.length === 0) { window.alert(`${selectedMonth} 정직원 급여를 '확정(제출)'한 지점이 없습니다.`); return; }
+      const loaded = await Promise.all(targets.map(async (b: any) => {
+        try {
+          const s = await gasClient.getSharedDataFromServer<any[]>(`monthly_fulltime_salary:${b.branchName}:${selectedMonth}`);
+          return { branch: b, salary: Array.isArray(s) ? s : [], failed: false };
+        } catch { return { branch: b, salary: [] as any[], failed: true }; }
+      }));
+      // 읽기 실패를 삼키면 그 지점이 '데이터 없음'처럼 빠져 불완전한 통합 파일이 나간다 → 하나라도 실패하면 전체 취소.
+      const failed = loaded.filter((r) => r.failed).map((r) => r.branch.branchName);
+      if (failed.length > 0) {
+        window.alert(`다음 지점의 정직원 급여를 서버에서 불러오지 못해 다운로드를 취소했습니다:\n${failed.join(", ")}\n네트워크 확인 후 다시 시도해주세요. (불완전한 파일은 만들지 않았습니다.)`);
+        return;
+      }
+      // 확정했는데 급여 내역이 비어 있는 지점 — 뭔가 잘못된 상태다('확정'하려면 내역이 있어야 함).
+      // 조용히 빼고 완성본처럼 저장하면 관리자가 누락을 모른 채 급여를 지급할 수 있어 위험하다 → 반드시 알리고 관리자가 결정한다.
+      const confirmedButEmpty = loaded.filter((r) => !r.failed && r.salary.length === 0).map((r) => r.branch.branchName);
+      const withData = loaded.filter((r) => r.salary.length > 0);
+      if (confirmedButEmpty.length > 0) {
+        const proceed = window.confirm(
+          `다음 지점은 '확정' 표시가 있으나 급여 내역이 서버에 비어 있습니다:\n${confirmedButEmpty.join(", ")}\n\n` +
+          `이 지점들은 통합 파일에서 빠집니다. 빼고 나머지만 받으시겠습니까?\n` +
+          `(취소하면 다운로드를 멈춥니다 — 해당 지점에서 [월말마감 → 정직원 급여대장]을 연 뒤 저장하고 다시 '확정'하면 포함됩니다.)`
+        );
+        if (!proceed) return;
+      }
+      if (withData.length === 0) { window.alert(`${selectedMonth} 정직원 급여대장이 저장된 지점이 없습니다.`); return; }
+
+      const XLSXSMod: any = await import("xlsx-js-style");
+      const XLSXS: any = XLSXSMod && XLSXSMod.utils ? XLSXSMod : (XLSXSMod && XLSXSMod.default) ? XLSXSMod.default : XLSXSMod;
+      const { buildFullTimeSalarySheet } = await import("./branch/helpers/fullTimeSalaryWorkbook");
+      const wb = XLSXS.utils.book_new();
+      const usedNames = new Set<string>();
+      withData.forEach(({ branch, salary }) => {
+        // 엑셀 시트명 제약: 31자 이하 + \/?*[]: 금지 + 중복 불가.
+        let name = String(branch.branchName).replace(/[\\/?*[\]:]/g, " ").slice(0, 31).trim() || "지점";
+        let n = name, i = 2;
+        while (usedNames.has(n)) { const suffix = `(${i++})`; n = `${name.slice(0, 31 - suffix.length)}${suffix}`; }
+        usedNames.add(n);
+        XLSXS.utils.book_append_sheet(wb, buildFullTimeSalarySheet(XLSXS, branch.branchName, selectedMonth, salary), n);
+      });
+      XLSXS.writeFile(wb, `전지점_정직원급여_${selectedMonth}.xlsx`);
+      // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각'을 기록한다(중간 취소/실패 시에는 기록하지 않음).
+      withData.forEach(({ branch }) => markDownloaded(branch.branchName, "salary"));
+    } catch (error) {
+      console.error("전지점 정직원급여 다운로드 실패:", error);
+      window.alert("전지점 정직원 급여 데이터를 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
+    }
+  };
+
+  // 확정 후 수정 여부: 지점이 확정된 섹션을 '수정'으로 다시 연 순간 기록되는 플래그(재확정해도 유지, 오탐 없음).
+  // 버튼을 누르면 말풍선으로 (내 다운로드 시각 + 수정 이력)을 보여준다.
+  const modifiedButton = (rec: any, branchName: string, section: "salary" | "purchase" | "salesSummary") => {
+    if (!rec?.editedAfterConfirm) return null;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          modAnchorRef.current = e.currentTarget;
+          const pos = computeModPos(e.currentTarget);
+          setModPopup({ ...pos, branch: branchName, section, rec });
+        }}
+        className="inline-flex items-center gap-0.5 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-black text-amber-800 whitespace-nowrap hover:bg-amber-200 cursor-pointer"
+      >
+        <Edit3 className="w-2.5 h-2.5" /> 확정후수정
+      </button>
+    );
+  };
+
+  // 말풍선은 화면 좌표로 고정해 띄운다. 스크롤/리사이즈 때 '닫지 말고' 앵커 버튼을 따라 위치만 갱신한다
+  // (예전엔 스크롤=닫기라 내용을 읽으려 스크롤하면 바로 꺼졌다). 버튼이 화면 밖으로 사라지면 그때만 닫는다.
+  useEffect(() => {
+    if (!modPopup) return;
+    let raf = 0;
+    const reposition = () => {
+      const el = modAnchorRef.current;
+      if (!el) { setModPopup(null); return; }
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) { setModPopup(null); return; }
+      const pos = computeModPos(el);
+      setModPopup((prev) => (prev ? { ...prev, ...pos } : prev));
+    };
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(reposition); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setModPopup(null); };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("keydown", onKey);
+    };
+    // 대상(지점·섹션)이 바뀔 때만 재장착 — 위치 갱신(setModPopup)마다 재장착되지 않게 한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modPopup?.branch, modPopup?.section, computeModPos]);
+
   return (
     <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -2719,10 +3045,15 @@ function AdminMonthlyClosingStatusSection() {
         <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">정직원 급여 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.salary}</p></div>
         <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">매입매출 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.purchase}</p></div>
         <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs text-rose-600 font-bold">매출집계 미제출</p><p className="text-2xl font-black text-rose-700">{sectionStats.salesSummary}</p></div>
-        <button type="button" onClick={() => void downloadAllSalesSummary()} className="rounded-xl bg-white border border-gray-200 p-4 text-left hover:bg-gray-50 transition-colors cursor-pointer flex flex-col justify-center">
-          <p className="text-xs text-gray-500 font-bold">매출집계 엑셀 다운로드</p>
-          <p className="text-sm font-black text-[#1A3C6E] mt-0.5 flex items-center gap-1.5"><Download className="w-4 h-4" /> 전지점 매출집계 받기</p>
-        </button>
+        {/* 전지점 통합 다운로드 두 개(정직원급여·매출집계)를 한 칸에 담는다. */}
+        <div className="rounded-xl bg-white border border-gray-200 p-3 flex flex-col gap-2 justify-center">
+          <button type="button" onClick={() => void downloadAllFullTimeSalary()} className="flex items-center gap-1.5 text-sm font-black text-[#1A3C6E] hover:underline cursor-pointer">
+            <Download className="w-4 h-4" /> 전지점 정직원급여 받기
+          </button>
+          <button type="button" onClick={() => void downloadAllSalesSummary()} className="flex items-center gap-1.5 text-sm font-black text-[#1A3C6E] hover:underline cursor-pointer">
+            <Download className="w-4 h-4" /> 전지점 매출집계 받기
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-100">
@@ -2732,17 +3063,15 @@ function AdminMonthlyClosingStatusSection() {
               <th className="py-3 px-4">월</th>
               <th className="py-3 px-4">지점</th>
               <th className="py-3 px-4 text-center">정직원급여</th>
-              <th className="py-3 px-4 text-center">급여 엑셀</th>
               <th className="py-3 px-4 text-center">월말마감</th>
-              <th className="py-3 px-4 text-center">월말마감 엑셀</th>
               <th className="py-3 px-4 text-center">매출집계</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={7} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
+              <tr><td colSpan={5} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="py-10 text-center text-gray-400 font-bold">등록된 지점이 없습니다.</td></tr>
+              <tr><td colSpan={5} className="py-10 text-center text-gray-400 font-bold">등록된 지점이 없습니다.</td></tr>
             ) : rows.map(({ branch, bySection }) => {
               const dlBtn = (section: "salesSummary" | "purchase" | "salary") => {
                 const ok = bySection[section]?.status === "confirmed";
@@ -2750,7 +3079,7 @@ function AdminMonthlyClosingStatusSection() {
                   <button
                     type="button"
                     disabled={!ok}
-                    onClick={() => void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section))}
+                    onClick={() => { void (section === "purchase" ? downloadBranchMonthlyClose(branch.branchName) : downloadBranchSection(branch.branchName, section)); }}
                     title={ok ? "엑셀 다운로드 (기본 양식)" : "확정된 마감만 다운로드할 수 있습니다"}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1A3C6E] text-white text-[11px] font-black transition-colors hover:bg-[#15325c] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
                   >
@@ -2762,17 +3091,70 @@ function AdminMonthlyClosingStatusSection() {
                 <tr key={`${branch.branchName}-${selectedMonth}`} className="hover:bg-slate-50/60">
                   <td className="py-3 px-4 font-mono text-xs font-bold">{selectedMonth}</td>
                   <td className="py-3 px-4 font-black text-gray-800">{branch.branchName}</td>
-                  <td className="py-3 px-4 text-center">{monthlyCloseBadge(bySection.salary?.status || null)}</td>
-                  <td className="py-3 px-4 text-center">{dlBtn("salary")}</td>
-                  <td className="py-3 px-4 text-center">{monthlyCloseBadge(bySection.purchase?.status || null)}</td>
-                  <td className="py-3 px-4 text-center">{dlBtn("purchase")}</td>
-                  <td className="py-3 px-4 text-center">{monthlyCloseBadge(bySection.salesSummary?.status || null)}</td>
+                  {/* 상태 캡 바로 오른쪽에 다운로드 버튼 + (있으면) 확정후수정 표시를 붙인다 — 별도 '엑셀' 컬럼을 두지 않는다(사용자 지정). */}
+                  <td className="py-3 px-4 text-center">
+                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
+                      {monthlyCloseBadge(bySection.salary?.status || null)}
+                      {dlBtn("salary")}
+                      {modifiedButton(bySection.salary, branch.branchName, "salary")}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
+                      {monthlyCloseBadge(bySection.purchase?.status || null)}
+                      {dlBtn("purchase")}
+                      {modifiedButton(bySection.purchase, branch.branchName, "purchase")}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <span className="inline-flex items-center justify-center gap-1.5 flex-wrap">
+                      {monthlyCloseBadge(bySection.salesSummary?.status || null)}
+                      {modifiedButton(bySection.salesSummary, branch.branchName, "salesSummary")}
+                    </span>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      {modPopup && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setModPopup(null)} />
+          <div className="fixed z-50 w-[320px] rounded-2xl border border-gray-200 bg-white p-4 shadow-2xl" style={{ top: modPopup.top, bottom: modPopup.bottom, left: modPopup.left }} role="dialog">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-black text-amber-800">확정한 뒤 수정한 기록이 있습니다</p>
+              <button type="button" onClick={() => setModPopup(null)} className="text-gray-400 hover:text-gray-700"><X className="w-3.5 h-3.5" /></button>
+            </div>
+            {(() => {
+              const dl = (() => { try { return localStorage.getItem(dlTimeKey(modPopup.branch, modPopup.section)); } catch { return null; } })();
+              const events: any[] = Array.isArray(modPopup.rec?.editEvents) ? modPopup.rec.editEvents : [];
+              return (
+                <div className="mt-2 space-y-2 text-[11px] font-bold">
+                  <p className="text-gray-600">{modPopup.branch} · {sectionLabel(modPopup.section)}</p>
+                  <p className={dl ? "text-[#1A3C6E]" : "text-gray-400"}>
+                    내가 엑셀을 다운로드한 시각: {dl ? new Date(dl).toLocaleString() : "이 브라우저에서 받은 기록 없음"}
+                  </p>
+                  <div className="border-t border-gray-100 pt-2 space-y-1.5 max-h-[40vh] overflow-y-auto">
+                    <p className="text-gray-500">수정 이력 (시각 · 지점이 입력한 사유)</p>
+                    {events.length === 0 ? (
+                      <p className="text-gray-700">· 최종 수정 {modPopup.rec?.updatedAt ? new Date(modPopup.rec.updatedAt).toLocaleString() : "-"}</p>
+                    ) : (
+                      events.slice().reverse().map((ev, i) => (
+                        <div key={i} className="text-gray-700">
+                          <p>· 수정 {ev?.at ? new Date(ev.at).toLocaleString() : "-"}</p>
+                          <p className={`pl-3 ${ev?.reason ? "text-gray-600" : "text-gray-400"}`}>사유: {ev?.reason || "미입력(옛 기록)"}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </>
+      )}
     </section>
   );
 }

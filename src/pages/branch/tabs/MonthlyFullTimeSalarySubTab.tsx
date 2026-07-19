@@ -696,11 +696,11 @@ export function MonthlyFullTimeSalarySubTab({
                   </td>
                   <td className={cellTd(rowIndex, 5)}><input {...cellProps(rowIndex, 5)} type="text" value={row.bank} disabled={isLocked} onChange={(e) => updateRow(row.id, "bank", e.target.value)} placeholder="은행명" className={cellText} /></td>
                   <td className={cellTd(rowIndex, 6)}><input {...cellProps(rowIndex, 6)} type="text" value={row.accountNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "accountNumber", e.target.value)} placeholder="계좌번호" className={`${cellText} font-mono`} /></td>
-                  <td className={cellTd(rowIndex, 7)}><input {...cellProps(rowIndex, 7)} type="text" inputMode="numeric" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
-                  <td className={cellTd(rowIndex, 8)}><input {...cellProps(rowIndex, 8)} type="text" inputMode="numeric" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 7)}><input {...cellProps(rowIndex, 7)} type="text" value={formatWithCommas(row.prevSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "prevSalary", e.target.value)} placeholder="0" className={`${cellNum} text-gray-500`} /></td>
+                  <td className={cellTd(rowIndex, 8)}><input {...cellProps(rowIndex, 8)} type="text" value={formatWithCommas(row.thisSalary)} disabled={isLocked} onChange={(e) => updateRow(row.id, "thisSalary", e.target.value)} placeholder="0" className={cellNum} /></td>
                   {/* 연장근무: 근무시간(시간) · 시급(원) · 계(= 시간×시급, 총금액에 합산) */}
-                  <td className={cellTd(rowIndex, 9, "border-l border-gray-200")}><input {...cellProps(rowIndex, 9)} type="text" inputMode="decimal" value={row.overtimeHours} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeHours", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className={cellTd(rowIndex, 10)}><input {...cellProps(rowIndex, 10)} type="text" inputMode="numeric" value={formatWithCommas(row.overtimeRate)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeRate", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 9, "border-l border-gray-200")}><input {...cellProps(rowIndex, 9)} type="text" value={row.overtimeHours} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeHours", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 10)}><input {...cellProps(rowIndex, 10)} type="text" value={formatWithCommas(row.overtimeRate)} disabled={isLocked} onChange={(e) => updateRow(row.id, "overtimeRate", e.target.value)} placeholder="0" className={cellNum} /></td>
                   <td className="group/ot relative border-r border-b border-black/10 px-2 py-1.5 text-right font-mono font-black text-gray-600">
                     {formatNumber(rowOvertimePay(row))}
                     {/* 옛 '추가근무' 금액만 있는 행(시간·시급 없음)은 계가 그 금액이라 시간/시급으로 지울 수 없다.
@@ -717,8 +717,8 @@ export function MonthlyFullTimeSalarySubTab({
                       </button>
                     )}
                   </td>
-                  <td className={cellTd(rowIndex, 11)}><input {...cellProps(rowIndex, 11)} type="text" inputMode="numeric" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
-                  <td className={cellTd(rowIndex, 12)}><input {...cellProps(rowIndex, 12)} type="text" inputMode="numeric" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 11)}><input {...cellProps(rowIndex, 11)} type="text" value={formatWithCommas(row.taxiEtc)} disabled={isLocked} onChange={(e) => updateRow(row.id, "taxiEtc", e.target.value)} placeholder="0" className={cellNum} /></td>
+                  <td className={cellTd(rowIndex, 12)}><input {...cellProps(rowIndex, 12)} type="text" value={formatWithCommas(row.bonusTip)} disabled={isLocked} onChange={(e) => updateRow(row.id, "bonusTip", e.target.value)} placeholder="0" className={cellNum} /></td>
                   <td className="border-r border-b border-black/10 px-2 py-1.5 text-right font-mono font-black text-indigo-700">{formatNumber(rowTotal(row))}</td>
                   <td className={cellTd(rowIndex, 13)}><input {...cellProps(rowIndex, 13)} type="text" value={row.memo} disabled={isLocked} onChange={(e) => updateRow(row.id, "memo", e.target.value)} placeholder="비고" className={cellText} /></td>
                 </tr>
