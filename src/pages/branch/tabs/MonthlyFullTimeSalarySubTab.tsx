@@ -599,13 +599,11 @@ export function MonthlyFullTimeSalarySubTab({
         </p>
       </div>
 
+      {/* 제목은 위 월말마감 헤더 필("정직원 급여대장")이 맡는다 — 여기 또 적으면 한 화면에 같은 이름이 두 번 보인다. */}
       <div className="flex justify-between items-center pb-3 border-b border-gray-50">
-        <div>
-          <h3 className="text-sm font-black text-zinc-900 w-fit">정직원 급여대장</h3>
-          <p className="text-[10px] text-gray-400 font-semibold mt-0.5">
-            직원현황의 정직원 이름이 자동으로 채워집니다. 모든 칸은 직접 수정할 수 있고, 명단에 없으면 '직원 추가'로 넣으세요.
-          </p>
-        </div>
+        <p className="text-[10px] text-gray-400 font-semibold">
+          직원현황의 정직원 이름이 자동으로 채워집니다. 모든 칸은 직접 수정할 수 있고, 명단에 없으면 '직원 추가'로 넣으세요.
+        </p>
         <div className="flex gap-2">
           <button
             onClick={addManualRow}
