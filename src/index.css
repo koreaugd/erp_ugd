@@ -838,21 +838,9 @@ input[type=number] {
   box-shadow: 0 10px 24px rgba(33, 33, 33, 0.035) !important;
 }
 
-.admin-design-preview .admin-monthly-closing-status-section .grid > div,
-.admin-design-preview .admin-monthly-closing-status-section .overflow-x-auto {
-  border: 1px solid var(--admin-black) !important;
-  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.025) !important;
-}
-
-.admin-design-preview .admin-monthly-closing-status-section > div:nth-of-type(2) > div {
-  border: 1px solid var(--admin-black) !important;
-  outline: 1px solid var(--admin-black) !important;
-  outline-offset: -1px;
-}
-
-.admin-design-preview .admin-monthly-closing-status-section thead {
-  background: var(--admin-alice) !important;
-}
+/* 제출현황 섹션의 카드/표 테두리는 이제 컴포넌트에서 명시적으로 준다(법인 섹션·미제출 카드 각각 border-[#212121]).
+   예전의 구조 위치 기반 규칙(.grid>div / .overflow-x-auto / nth-of-type)은 재구성 후 빈 스페이서에 검정선을
+   그리는 등 오작동해 제거했다 — 구조가 바뀌어도 깨지지 않게 인라인 클래스로 관리한다. */
 
 .admin-design-preview #stats-cards div[class*="bg-emerald-50"],
 .admin-design-preview #stats-cards div[class*="bg-amber-50"],

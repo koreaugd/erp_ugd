@@ -115,7 +115,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   // monthly_closings 저장 직렬화 큐: 연속 마감의 read-modify-write가 겹치지 않도록 한다.
   const closeWriteChainRef = useRef<Promise<void>>(Promise.resolve());
 
-  const saveSectionClose = useCallback(async (section: CloseSection, status: "confirmed" | "editing" | "pending", reason = "", opts: { restore?: boolean } = {}) => {
+  const saveSectionClose = useCallback(async (section: CloseSection, status: "confirmed" | "editing" | "pending", reason = "", opts: { restore?: boolean; resetConfirm?: boolean } = {}) => {
     const now = new Date().toISOString();
     const matches = (r: any) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === section;
     // 중복 매칭 레코드가 있어도 항상 '최신'을 기준으로 판정한다(handleEdit·run() 모두 동일 기준) —
@@ -126,19 +126,31 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     const prevEvents = Array.isArray(prevRec?.editEvents) ? prevRec.editEvents : [];
     // 시스템 롤백(reset 복구 등)은 사용자의 '확정 후 수정'이 아니다 — 새 이벤트를 남기지도, 사유를 요구하지도 않는다.
     const restore = opts.restore === true;
-    // 확정된 섹션을 '수정'으로 다시 여는 것(status==="editing" & 이전에 확정됨)이 곧 '확정 후 수정'이다.
-    const isReopen = status === "editing" && !!prevConfirmedAt && !restore;
-    // 표식: 한 번 true가 되면 재확정해도 유지(깨끗한 최초 확정엔 절대 안 붙음 — 오탐 없음).
-    const editedAfterConfirm = !!(prevRec?.editedAfterConfirm || isReopen);
+    // 마감취소(제출 철회)는 확정 사이클을 초기화한다 — confirmedAt·확정후수정 표식·수정이력을 비워
+    // 깨끗한 '미제출'로 되돌린다(다음 확정은 새 제출, 관리자 '확정후수정' 버튼도 사라짐).
+    const resetConfirm = opts.resetConfirm === true;
+    // 확정된 섹션을 '수정'으로 다시 여는 것(직전 status==="confirmed" → editing)이 곧 '확정 후 수정'이다.
+    // 판정은 confirmedAt이 아니라 '직전 status'로 한다 — 마감취소(초기화) 정리 저장이 실패해 confirmedAt이 찌꺼기로
+    // 남더라도, 취소된 '미제출' 섹션을 확정후수정으로 오인하지 않는다(찌꺼기에 무해).
+    const isReopen = status === "editing" && prevRec?.status === "confirmed" && !restore;
+    // 표식은 '확정 계보(confirmed↔editing) 안에서만' 유지한다 — 직전이 pending(취소됨)이면 계보가 끊긴 것이므로
+    // 옛 표식을 이어받지 않는다. 이렇게 하면 취소 정리 저장이 실패해 표식이 찌꺼기로 남아도, 그 섹션을 다시 열 때
+    // 되살아나지 않고 자연히 false로 정리된다(초기화 시엔 항상 false).
+    const prevInLineage = prevRec?.status === "confirmed" || prevRec?.status === "editing";
+    // 롤백(restore)은 계보 규칙을 우회한다 — 취소 롤백은 '취소 직전' 값을 그대로 되살리는 것이고,
+    // 그 값은 중간 pending 레코드에 보존돼 있다. 이걸 계보 밖이라고 지워 버리면 롤백이 원래 표식/이력을 잃는다.
+    const carryPrev = restore || prevInLineage;
+    const editedAfterConfirm = resetConfirm ? false : !!((carryPrev && prevRec?.editedAfterConfirm) || isReopen);
     // 재수정 이벤트: 시각 + 지점이 입력한 사유(무엇을 바꿨는지)를 함께 남긴다(관리자 팝업 표시용).
     const reopenEvent = { at: now, reason: (reason || "").slice(0, 200) };
     const nextRecord = {
       id: `${branchName}-${selectedMonth}-${section}`,
       branchName, month: selectedMonth, section, status, writer: branchName,
-      confirmedAt: status === "confirmed" ? now : prevConfirmedAt,
+      confirmedAt: resetConfirm ? "" : (status === "confirmed" ? now : prevConfirmedAt),
       editedAfterConfirm,
-      // 수정 이력 — 확정 후 다시 열 때마다 시각+사유를 남긴다(최근 20건).
-      editEvents: isReopen ? [...prevEvents, reopenEvent].slice(-20) : prevEvents,
+      // 수정 이력도 '확정 계보' 안에서만 이어받는다(최근 20건). 초기화(취소)거나 직전이 pending(계보 끊김)이면 비운다
+      // — 안 그러면 취소 정리 저장이 실패해 남은 옛 이벤트가 다음 확정 사이클 팝업에 되살아난다.
+      editEvents: (resetConfirm || !carryPrev) ? [] : (isReopen ? [...prevEvents, reopenEvent].slice(-20) : prevEvents),
       updatedAt: now
     };
     // 낙관적 UI: 클릭 즉시 상태칩을 반영(로컬 상태 먼저 갱신) → 사용자는 지연 없이 바로 확인.
@@ -156,17 +168,26 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       const list = Array.isArray(previous) ? previous : [];
       // 표식·이력은 서버 값을 최우선으로 유지한다 — 로컬이 스테일이어도 '확정 후 수정' 사실/이력을 잃지 않는다.
       const prevServer = latest(list);
-      const serverReopen = status === "editing" && !!prevServer?.confirmedAt && !restore;
+      // 서버 기준 '확정 후 수정' 판정도 직전 status로(confirmedAt 아님) — 취소된 미제출 섹션의 찌꺼기 confirmedAt에 무해.
+      const serverReopen = status === "editing" && prevServer?.status === "confirmed" && !restore;
       // 최종 판정상 '확정 후 수정'인데 사유가 없으면(경쟁으로 handleEdit 프롬프트를 지나침) 사유 없는 재수정 이벤트를
       // 남기지 않는다 — 저장을 중단하고 재시도를 요구한다. 재시도 시 handleEdit이 확정을 보고 사유를 받는다.
       if (serverReopen && !(reason || "").trim()) {
         throw new Error("확정된 마감입니다. 수정 사유를 입력해야 수정할 수 있습니다. 다시 '마감수정'을 눌러주세요.");
       }
       const serverEvents = Array.isArray(prevServer?.editEvents) ? prevServer.editEvents : [];
-      const merged = {
+      // 서버 기준 '확정 계보'(confirmed↔editing) 여부 — 표식·이력을 이 안에서만 이어받는다. 롤백(restore)은 계보를 우회해 복원.
+      const serverInLineage = restore || prevServer?.status === "confirmed" || prevServer?.status === "editing";
+      const carryServerEvents = serverInLineage ? serverEvents : [];
+      // 초기화(취소)면 비운 상태 그대로 기록한다 — 서버의 옛 확정후수정 표식/이력을 되살리지 않는다.
+      const merged = resetConfirm ? { ...nextRecord } : {
         ...nextRecord,
-        editedAfterConfirm: !!(prevServer?.editedAfterConfirm || serverReopen),
-        editEvents: serverReopen ? [...serverEvents, reopenEvent].slice(-20) : serverEvents,
+        // confirmedAt도 '서버 기준'으로 맞춘다 — 다른 기기가 취소(초기화)해 서버에서 지워졌으면 로컬 stale 값으로 되살리지 않는다.
+        // (표식/이력은 서버 기준인데 confirmedAt만 로컬이면 'editing + 옛 confirmedAt + 표식 없음' 불일치가 남는다.)
+        confirmedAt: status === "confirmed" ? now : (prevServer?.confirmedAt || ""),
+        // 표식·이력은 서버 기준으로도 '확정 계보' 안에서만 유지 — 직전 서버 status가 pending이면 옛 것을 이어받지 않는다(찌꺼기 무해화).
+        editedAfterConfirm: !!((serverInLineage && prevServer?.editedAfterConfirm) || serverReopen),
+        editEvents: serverReopen ? [...carryServerEvents, reopenEvent].slice(-20) : carryServerEvents,
       };
       const next = [merged, ...list.filter((r) => !matches(r))];
       await gasClient.saveSharedData("monthly_closings", next);
@@ -266,10 +287,10 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         const rec = server
           .filter((r) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === section)
           .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0];
-        // confirmedAt이 있으면 '한 번이라도 확정됐던' 섹션이다(확정취소로 지금 pending이어도 유지된다).
-        // saveSectionClose의 serverReopen 판정(status==="editing" && confirmedAt)과 정확히 일치시킨다 —
-        // 안 그러면 pending-후-확정 섹션이 프롬프트를 건너뛰어 run() guard에서 막히는 데드락이 생긴다.
-        wasConfirmed = !!rec?.confirmedAt;
+        // 지금 'confirmed' 상태일 때만 사유를 받는다(=확정본을 다시 여는 것). saveSectionClose의 serverReopen 판정
+        // (status==="editing" && 직전 status==="confirmed")과 같은 기준이다. 취소되어 미제출(pending)인 섹션은
+        // confirmedAt이 찌꺼기로 남아 있어도 사유를 요구하지 않는다(마감취소=초기화 정책과 일치).
+        wasConfirmed = rec?.status === "confirmed";
       }
     } catch {
       triggerToast("마감 상태를 서버에서 확인하지 못했습니다. 네트워크 확인 후 다시 시도해주세요.", "error");
@@ -325,6 +346,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       // 초기화 실패 시 되돌릴 '취소 직전 상태'를 미리 캡처한다(하드코딩 confirmed 금지 — 실제 이전 상태로 복원).
       const prevStatus = getSectionStatus("purchase");
       try {
+        // 1) 먼저 pending으로만 전환한다(확정이력은 아직 유지) — 금액초기화 실패 시 롤백이 원래 상태를 정확히 복원할 수 있게.
         await saveSectionClose("purchase", "pending");
         try {
           await resetMonthlyPurchaseAmounts();
@@ -338,7 +360,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           }
           throw resetError;
         }
+        // 2) 금액초기화 성공 → 즉시 화면을 갱신한다(리셋 토큰). 이 갱신이 빠지면 화면은 옛 금액을 계속 보여주고,
+        //    그 상태에서 한 칸이라도 수정하면 방금 초기화한 서버 금액을 되덮을 수 있다 → 토큰은 반드시 먼저 실행한다.
         setPurchaseResetToken((value) => value + 1);
+        // 3) 확정 사이클 초기화(관리자 '확정후수정' 버튼 제거)는 부가작업 — 실패해도 취소·금액초기화는 이미 완료다.
+        //    조용히 넘어간다(다음 확정/취소 때 자연히 정리됨). 여기서 throw하면 성공한 취소가 '실패'로 잘못 보인다.
+        await saveSectionClose("purchase", "pending", "", { resetConfirm: true }).catch(() => {});
         triggerToast(`${selectedMonth} 매입매출 마감이 취소되고 거래처 금액이 초기화되었습니다.`, "success");
       } catch (error: any) {
         console.error(error);
@@ -348,7 +375,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     }
     if (!window.confirm(`${sectionLabel(section)} 마감을 취소할까요?`)) return;
     try {
-      await saveSectionClose(section, "pending");
+      // 마감취소 = 제출 철회 → 확정 사이클 초기화(확정후수정 표식·이력 제거).
+      await saveSectionClose(section, "pending", "", { resetConfirm: true });
       triggerToast(`${selectedMonth} ${sectionLabel(section)} 마감이 취소되었습니다.`, "success");
     } catch (error: any) {
       console.error(error);
