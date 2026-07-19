@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/DailySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Lock, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Lock, Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import "./staffSheet.css";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
@@ -1994,43 +1994,50 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           </div>
         </div>
 
-        {/* Inline Employee Field Addition Block */}
-        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-100 text-xs">
-          {staffAddDrafts.map((draft, draftIndex) => (
-            <div key={draft.id} className="flex flex-wrap items-center gap-2">
-              <span className="font-extrabold text-zinc-800 w-8">추가</span>
-              <input type="text" placeholder="이름" value={draft.name} onChange={(e) => updateStaffAddDraft(draft.id, { name: e.target.value })} className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:border-zinc-800 focus:outline-hidden font-bold" />
-              <select value={draft.division} onChange={(e) => updateStaffAddDraft(draft.id, { division: e.target.value as "정직원" | "파트타이머" })} className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white font-extrabold cursor-pointer">
-                <option value="정직원">정직원</option>
-                <option value="파트타이머">파트타이머</option>
-              </select>
-              {/* 이름을 적었는데 사유가 비어 있으면 등록이 막힌다 — 등록 버튼을 눌러봐야 알 게 아니라 지금 바로 짚어준다. */}
-              <select
-                value={draft.addReason}
-                onChange={(e) => updateStaffAddDraft(draft.id, { addReason: parseStaffAddReasonChoice(e.target.value) })}
-                aria-label="추가사유"
-                title={draft.name.trim() && !draft.addReason ? "추가사유를 골라야 등록됩니다." : undefined}
-                className={`w-32 px-2 py-1.5 text-xs ${getAddReasonChoiceClass(draft.addReason)} ${
-                  draft.name.trim() && !draft.addReason ? "ring-2 ring-rose-400 ring-offset-0" : ""
-                }`}
-              >
-                <option value="">선택</option>
-                <option value="신규입사">신규입사</option>
-                <option value="지점이동">지점이동</option>
-                <option value="기존직원">기존직원</option>
-                <option value="기타">기타</option>
-              </select>
-              {staffAddDrafts.length > 1 && (
-                <button type="button" onClick={() => setStaffAddDrafts((current) => current.filter((item) => item.id !== draft.id))} className="px-2 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-400 hover:text-rose-600 font-black">삭제</button>
-              )}
-              {draftIndex === staffAddDrafts.length - 1 && (
-                <button type="button" onClick={() => setStaffAddDrafts((current) => [...current, createStaffAddDraft()])} className="px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 text-zinc-700 font-black hover:bg-gray-100">행 추가</button>
-              )}
-            </div>
-          ))}
-          <div className="flex justify-end">
-            <button type="button" onClick={registerStaffAddDrafts} className="px-4 py-1.5 bg-zinc-800 hover:bg-black text-white font-black rounded-lg cursor-pointer transition-colors">입력한 행 등록</button>
-          </div>
+        {/* 근무자 추가 — 발주관리 '거래처 추가'와 같은 방식: 한 줄 입력 + Plus '추가' 버튼(즉시 추가).
+            이름을 적고 추가를 누르면 아래 표에 바로 한 명이 붙는다(여러 명은 반복 입력). */}
+        <div className="flex flex-wrap items-center gap-1.5 p-3 rounded-xl border border-gray-100">
+          <span className="text-[11px] font-black text-gray-500 mr-0.5">근무자 추가</span>
+          <input
+            type="text"
+            placeholder="이름"
+            value={staffAddDrafts[0]?.name ?? ""}
+            onChange={(e) => updateStaffAddDraft(staffAddDrafts[0].id, { name: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); registerStaffAddDrafts(); } }}
+            className="h-8 w-28 px-2 rounded-lg border border-gray-200 bg-white text-[11px] font-bold focus:border-zinc-800 focus:outline-hidden"
+          />
+          <select
+            value={staffAddDrafts[0]?.division ?? "정직원"}
+            onChange={(e) => updateStaffAddDraft(staffAddDrafts[0].id, { division: e.target.value as "정직원" | "파트타이머" })}
+            aria-label="계약 구분"
+            className="h-8 px-2 rounded-lg border border-gray-200 bg-white text-[11px] font-extrabold cursor-pointer"
+          >
+            <option value="정직원">정직원</option>
+            <option value="파트타이머">파트타이머</option>
+          </select>
+          {/* 이름을 적었는데 사유가 비어 있으면 등록이 막힌다 — 추가를 눌러봐야 알 게 아니라 지금 바로 짚어준다. */}
+          <select
+            value={staffAddDrafts[0]?.addReason ?? ""}
+            onChange={(e) => updateStaffAddDraft(staffAddDrafts[0].id, { addReason: parseStaffAddReasonChoice(e.target.value) })}
+            aria-label="추가사유"
+            title={staffAddDrafts[0]?.name.trim() && !staffAddDrafts[0]?.addReason ? "추가사유를 골라야 등록됩니다." : undefined}
+            className={`h-8 w-32 px-2 text-[11px] ${getAddReasonChoiceClass(staffAddDrafts[0]?.addReason)} ${
+              staffAddDrafts[0]?.name.trim() && !staffAddDrafts[0]?.addReason ? "ring-2 ring-rose-400 ring-offset-0" : ""
+            }`}
+          >
+            <option value="">선택</option>
+            <option value="신규입사">신규입사</option>
+            <option value="지점이동">지점이동</option>
+            <option value="기존직원">기존직원</option>
+            <option value="기타">기타</option>
+          </select>
+          <button
+            type="button"
+            onClick={registerStaffAddDrafts}
+            className="flex h-8 shrink-0 items-center gap-1 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white hover:bg-black transition-colors cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" /> 추가
+          </button>
         </div>
 
         {isHeadOffice && (
@@ -2304,9 +2311,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
               ) : (
                 staffRows.map((s, idx) => {
                   const hasOvertimeDelta = needsOvertimeReason(s);
+                  // 출근·퇴근 시간이 '모두' 적힌 행 = 오늘 근무 완료 — 행을 연한 바닐라로 물들여 한눈에 보이게.
+                  const hasWorked = Boolean(String(s.clockIn || "").trim() && String(s.clockOut || "").trim());
 
                   return (
-                    <tr key={idx} className="hover:bg-gray-50/50">
+                    <tr key={idx} className={`hover:bg-gray-50/50 ${hasWorked ? "staff-row-worked" : ""}`}>
                       {/* 성명 + 행 삭제(×) — 엑셀 셀. ×는 이름 오른쪽 검정 사각 버튼(사용자 지정 스타일). */}
                       <td className="p-0">
                         <div className="flex items-center gap-1 pl-1.5 pr-1">
