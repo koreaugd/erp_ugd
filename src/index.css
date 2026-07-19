@@ -43,10 +43,13 @@ input[type=number] {
 }
 
 /* Admin redesign inspired by the CRM dashboard reference */
+/* 관리자 화면은 지점 DESIGN.md 규칙을 그대로 따른다(알약 제목·검정 테두리·표·버튼·간격).
+   단 '색상만' 아래 연한 값으로 치환한다 — DESIGN_ADMIN.md의 색상 오버라이드 표와 동일하게 유지할 것.
+   (지점 --branch-* 토큰과는 완전히 분리돼 있어 이 값을 바꿔도 지점 화면은 영향받지 않는다.) */
 .admin-redesign {
-  --admin-alice: #D8DFE9;
-  --admin-honey: #CFDECA;
-  --admin-vanilla: #EFF0A3;
+  --admin-alice: #E6EBF3;   /* 지점 엘리스 #D8DFE9 → 연한 엘리스블루 */
+  --admin-honey: #E0EBDC;   /* 지점 허니듀 #CFDECA → 연한 허니듀 */
+  --admin-vanilla: #F4F2CC; /* 지점 바닐라 #EFF0A3 → 연한 바닐라 */
   --admin-black: #212121;
   --admin-ghost: #F6F5FA;
   background: var(--admin-ghost);
@@ -54,7 +57,7 @@ input[type=number] {
 }
 
 .admin-redesign #sidebar {
-  width: 280px;
+  width: 236px;
   background: var(--admin-ghost);
   color: var(--admin-black);
   border-right: 1px solid rgba(33, 33, 33, 0.08);
@@ -952,28 +955,7 @@ input[type=number] {
   color: var(--branch-black) !important;
 }
 
-.branch-redesign aside nav button {
-  min-height: 46px;
-  border-radius: 999px;
-  color: rgba(33, 33, 33, 0.68) !important;
-  font-weight: 900;
-}
-
-.branch-redesign aside nav button:hover {
-  background: var(--branch-honey) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav button[style] {
-  background: var(--branch-black) !important;
-  color: var(--branch-ghost) !important;
-  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.16) !important;
-}
-
-.branch-redesign aside nav button[style] span,
-.branch-redesign aside nav button[style] svg {
-  color: var(--branch-ghost) !important;
-}
+/* (구 사이드바 버튼 규칙 제거 — 현재는 .ugd-nav-item 규칙이 담당) */
 
 .branch-redesign aside .bg-white\/10,
 .branch-redesign aside .bg-white\/5 {
@@ -1250,14 +1232,7 @@ input[type=number] {
   background: transparent !important;
 }
 
-.branch-redesign aside nav button {
-  border: 1px solid transparent;
-}
-
-.branch-redesign aside nav button:hover {
-  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
-  border-color: rgba(33, 33, 33, 0.08) !important;
-}
+/* (구 사이드바 버튼 border/hover 규칙 제거 — .ugd-nav-item가 담당) */
 
 .branch-redesign aside button[class*="bg-rose"] {
   background: color-mix(in srgb, var(--branch-honey) 78%, var(--branch-alice)) !important;
@@ -1429,50 +1404,7 @@ input[type=number] {
   border-top: 2px solid #e0e7ff !important;
 }
 
-.branch-redesign aside nav button:not(.text-white):not([style]),
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]),
-.branch-redesign aside nav button[class*="hover:bg-white"]:not(.text-white):not([style]) {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  box-shadow: none !important;
-  color: rgba(33, 33, 33, 0.66) !important;
-}
-
-.branch-redesign aside nav button:not(.text-white):not([style]) span,
-.branch-redesign aside nav button:not(.text-white):not([style]) svg,
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]) span,
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]) svg {
-  color: rgba(33, 33, 33, 0.66) !important;
-}
-
-.branch-redesign aside nav button:not(.text-white):not([style]):hover,
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover {
-  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
-  border-color: rgba(33, 33, 33, 0.1) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav button:not(.text-white):not([style]):hover span,
-.branch-redesign aside nav button:not(.text-white):not([style]):hover svg,
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover span,
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]):hover svg {
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav button.text-white,
-.branch-redesign aside nav button[style] {
-  background: var(--branch-black) !important;
-  border-color: var(--branch-black) !important;
-  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.14) !important;
-  color: var(--branch-ghost) !important;
-}
-
-.branch-redesign aside nav button.text-white span,
-.branch-redesign aside nav button.text-white svg,
-.branch-redesign aside nav button[style] span,
-.branch-redesign aside nav button[style] svg {
-  color: var(--branch-ghost) !important;
-}
+/* (구 사이드바 nav 버튼 색/활성 규칙 제거 — 높은 특이성 :not 규칙이 새 .ugd-nav-item을 덮던 문제. 이제 .ugd-nav-item 규칙이 단독으로 담당) */
 
 .branch-redesign aside > div:last-child button:not([class*="bg-rose"]),
 .branch-redesign aside .md\:hidden button:not([class*="bg-rose"]) {
@@ -1620,40 +1552,11 @@ input[type=number] {
 }
 
 .branch-redesign aside nav {
-  padding: 22px 18px !important;
-  gap: 14px !important;
+  padding: 6px 0 16px !important;
+  gap: 0 !important;
 }
 
-.branch-redesign aside nav button {
-  min-height: 58px !important;
-  border-radius: 28px !important;
-  padding: 0 22px !important;
-  gap: 14px !important;
-  font-size: 15px !important;
-  font-weight: 900 !important;
-  letter-spacing: 0 !important;
-}
-
-.branch-redesign aside nav button svg {
-  width: 21px !important;
-  height: 21px !important;
-}
-
-.branch-redesign aside nav button:not(.text-white):not([style]),
-.branch-redesign aside nav button[class*="hover:bg-zinc-900"]:not(.text-white):not([style]),
-.branch-redesign aside nav button[class*="hover:bg-white"]:not(.text-white):not([style]) {
-  background: transparent !important;
-  color: rgba(33, 33, 33, 0.66) !important;
-  border-color: transparent !important;
-}
-
-.branch-redesign aside nav button.text-white,
-.branch-redesign aside nav button[style] {
-  background: var(--branch-black) !important;
-  border-color: var(--branch-black) !important;
-  color: var(--branch-ghost) !important;
-  box-shadow: 0 18px 34px rgba(33, 33, 33, 0.13) !important;
-}
+/* (구 사이드바 nav 버튼 색/활성 규칙 2차 복사본 제거 — .ugd-nav-item가 담당) */
 
 .branch-redesign aside > div:last-child {
   padding: 20px 18px 24px !important;
@@ -1830,58 +1733,7 @@ input[type=number] {
   background: var(--branch-vanilla) !important;
 }
 
-/* Branch design corrections: visual-only overrides. */
-.branch-redesign aside nav .branch-main-nav-button {
-  min-height: 48px !important;
-  border-radius: 12px !important;
-  padding: 12px 16px !important;
-  gap: 12px !important;
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0 !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-idle,
-.branch-redesign aside nav .branch-main-nav-idle[style] {
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-  color: rgba(33, 33, 33, 0.66) !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-idle span,
-.branch-redesign aside nav .branch-main-nav-idle svg,
-.branch-redesign aside nav .branch-main-nav-idle[style] span,
-.branch-redesign aside nav .branch-main-nav-idle[style] svg {
-  color: rgba(33, 33, 33, 0.66) !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-idle:hover,
-.branch-redesign aside nav .branch-main-nav-idle[style]:hover {
-  background: color-mix(in srgb, var(--branch-honey) 62%, var(--branch-ghost)) !important;
-  border-color: rgba(33, 33, 33, 0.1) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-idle:hover span,
-.branch-redesign aside nav .branch-main-nav-idle:hover svg {
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-active,
-.branch-redesign aside nav .branch-main-nav-active[style] {
-  background: var(--branch-black) !important;
-  border-color: var(--branch-black) !important;
-  box-shadow: 0 18px 34px rgba(33, 33, 33, 0.13) !important;
-  color: var(--branch-ghost) !important;
-}
-
-.branch-redesign aside nav .branch-main-nav-active span,
-.branch-redesign aside nav .branch-main-nav-active svg,
-.branch-redesign aside nav .branch-main-nav-active[style] span,
-.branch-redesign aside nav .branch-main-nav-active[style] svg {
-  color: var(--branch-ghost) !important;
-}
+/* (구 사이드바 .branch-main-nav-* 규칙 제거 — DESIGN.md §14 폐기 계약. 현재 사이드바는 .ugd-nav-item) */
 
 .branch-redesign aside > div:first-child span {
   font-size: 10px !important;
@@ -1899,12 +1751,20 @@ input[type=number] {
 
 .branch-redesign aside > div:first-child .branch-sidebar-branch-name {
   color: var(--branch-black) !important;
-  font-size: 18px !important;
+  font-size: 15px !important;
   line-height: 1.2 !important;
   max-width: 100% !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
+}
+
+.branch-redesign aside > div:first-child .branch-sidebar-brand-sub {
+  margin-top: 3px !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  color: rgba(33, 33, 33, 0.4) !important;
 }
 
 .branch-redesign .branch-dashboard-tab .branch-notice-unchecked {
@@ -2320,28 +2180,7 @@ input[type=number] {
   color: #8F1F1F !important;
 }
 
-/* Final sidebar subtab sizing override. Keep after global sidebar button rules. */
-.branch-redesign aside nav button.branch-sidebar-subtab,
-.branch-redesign aside nav button.branch-sidebar-subtab[style] {
-  gap: 4px !important;
-  padding: 5px 7px !important;
-  font-size: 11px !important;
-  line-height: 1.15 !important;
-  white-space: nowrap !important;
-}
-
-.branch-redesign aside nav button.branch-sidebar-subtab span,
-.branch-redesign aside nav button.branch-sidebar-subtab[style] span {
-  font-size: 11px !important;
-  line-height: 1.15 !important;
-  white-space: nowrap !important;
-}
-
-.branch-redesign aside nav button.branch-sidebar-subtab svg,
-.branch-redesign aside nav button.branch-sidebar-subtab[style] svg {
-  width: 14px !important;
-  height: 14px !important;
-}
+/* (구 사이드바 .branch-sidebar-subtab 사이징 규칙 제거 — §14 폐기 계약) */
 
 .branch-redesign .branch-validation-error,
 .branch-redesign input.branch-validation-error,
@@ -2426,60 +2265,138 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   color: #111111 !important;
 }
 
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active {
-  background: var(--branch-vanilla) !important;
-  background-color: var(--branch-vanilla) !important;
-  border: 1px solid rgba(46, 109, 180, 0.22) !important;
-  color: #1A3C6E !important;
-  box-shadow: 0 4px 12px rgba(46, 109, 180, 0.14) !important;
+/* (구 사이드바 subtab-active/idle · branch-main-nav-* 규칙 제거 — §14 폐기 계약) */
+
+/* =========================================================
+   셀러닷컴형 사이드바 (지점 + 관리자 공통)
+   - 밝은 배경 위에 섹션 그룹 헤더 + 큼직한 항목 + 검정 알약 활성
+   - 새 클래스(.ugd-nav-*)라 기존 사이드바 규칙과 충돌하지 않는다
+   ========================================================= */
+
+/* 섹션 그룹 헤더 (지도/쇼핑/도구 자리) — 레퍼런스 실측 반영 */
+.branch-redesign aside nav .ugd-nav-group,
+.admin-redesign #sidebar nav .ugd-nav-group {
+  padding: 14px 20px 6px !important;
+  margin: 0 !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.33px !important;
+  color: rgba(33, 33, 33, 0.55) !important;
+  text-transform: none !important;
+}
+.branch-redesign aside nav .ugd-nav-group:first-child,
+.admin-redesign #sidebar nav .ugd-nav-group:first-child {
+  padding-top: 4px !important;
 }
 
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active span,
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-active svg {
-  color: #1A3C6E !important;
-}
-
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle {
+/* 메뉴 항목 — 공통 형태 (레퍼런스: 13px/500, padding 8px 20px, gap 11px, 풀폭 사각) */
+.branch-redesign aside nav .ugd-nav-item,
+.admin-redesign #sidebar nav .ugd-nav-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 11px !important;
+  min-height: 0 !important;
+  padding: 9px 20px 9px 34px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
   background: transparent !important;
-  border: 1px solid transparent !important;
-  color: rgba(33, 33, 33, 0.58) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.45 !important;
+  text-align: left !important;
+  box-shadow: none !important;
+  transition: background 0.14s ease, color 0.14s ease !important;
+  cursor: pointer;
+}
+.branch-redesign aside nav .ugd-nav-item span,
+.admin-redesign #sidebar nav .ugd-nav-item span {
+  font-size: 12px !important;
+  font-weight: inherit !important;
+  letter-spacing: 0 !important;
+  line-height: 1.45 !important;
+  color: inherit !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-redesign aside nav .ugd-nav-item svg,
+.admin-redesign #sidebar nav .ugd-nav-item svg {
+  width: 18px !important;
+  height: 18px !important;
+  flex-shrink: 0;
+  stroke-width: 1.8;
+  color: inherit !important;
+}
+
+/* 지점: 색 (일반=회색500 / 활성=알리스 은은한 배경 + 어두운 글자 600) */
+.branch-redesign aside nav .ugd-nav-item {
+  color: rgb(91, 96, 109) !important;
+}
+.branch-redesign aside nav .ugd-nav-item:hover {
+  background: rgba(33, 33, 33, 0.04) !important;
+  color: var(--branch-black) !important;
+}
+.branch-redesign aside nav .ugd-nav-item.is-active {
+  background: #EFF0A3 !important;
+  color: var(--branch-black) !important;
+  font-weight: 600 !important;
   box-shadow: none !important;
 }
 
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle span,
-html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subtab.branch-sidebar-subtab-idle svg {
-  color: rgba(33, 33, 33, 0.58) !important;
+/* 관리자: 색 */
+.admin-redesign #sidebar nav .ugd-nav-item {
+  color: rgb(91, 96, 109) !important;
 }
-
-/* Latest branch corrections: keep only the intended rounded section borders. */
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] {
-  background: transparent !important;
-  border-color: transparent !important;
+.admin-redesign #sidebar nav .ugd-nav-item:hover {
+  background: rgba(33, 33, 33, 0.04) !important;
+  color: var(--admin-black) !important;
+}
+.admin-redesign #sidebar nav .ugd-nav-item.is-active {
+  background: #EFF0A3 !important;
+  color: var(--admin-black) !important;
+  font-weight: 600 !important;
   box-shadow: none !important;
-  color: rgba(33, 33, 33, 0.66) !important;
 }
 
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle svg,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle span,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] svg,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-idle[style] span {
-  color: rgba(33, 33, 33, 0.66) !important;
+/* 풀폭: 항목이 사이드바 좌우 끝까지 닿게(레퍼런스처럼) */
+.branch-redesign aside nav .ugd-nav-item,
+.admin-redesign #sidebar nav .ugd-nav-item {
+  width: 100% !important;
+}
+/* 관리자 nav는 aside의 p-6(24px)를 상쇄해 풀폭으로 */
+.admin-redesign #sidebar nav {
+  margin-left: -24px !important;
+  margin-right: -24px !important;
+}
+/* 모바일: 그룹 헤더 숨김, 지점 항목은 폭 자동(가로 스크롤 유지) */
+@media (max-width: 767px) {
+  .branch-redesign aside nav .ugd-nav-group {
+    display: none !important;
+  }
+  .branch-redesign aside nav .ugd-nav-item {
+    width: auto !important;
+  }
 }
 
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] {
-  background: var(--branch-black) !important;
-  border-color: var(--branch-black) !important;
-  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.14) !important;
-  color: var(--branch-ghost) !important;
+/* 관리자 사이드바 하위 탭(일일정산/월말마감 하위) */
+.admin-redesign #sidebar nav .ugd-subnav-item {
+  min-height: 0 !important;
+  border-radius: 0 !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: rgba(33, 33, 33, 0.55) !important;
+  box-shadow: none !important;
 }
-
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active svg,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active span,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] svg,
-.branch-redesign aside nav .branch-main-nav-button.branch-main-nav-active[style] span {
-  color: var(--branch-ghost) !important;
+.admin-redesign #sidebar nav .ugd-subnav-item:hover {
+  background: rgba(33, 33, 33, 0.04) !important;
+  color: var(--admin-black) !important;
+}
+.admin-redesign #sidebar nav .ugd-subnav-item.is-active {
+  background: #EFF0A3 !important;
+  color: var(--admin-black) !important;
+  font-weight: 600 !important;
 }
 
 .branch-redesign #tab-view-settle > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#existing-record-warning-box):not(#edit-mode-locked-placeholder),
@@ -2589,7 +2506,7 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
 /* Final restore pass after TSX recovery: keep branch UI aligned with admin redesign. */
 @media (min-width: 768px) {
   .branch-redesign aside {
-    width: 220px !important;
+    width: 236px !important;
   }
 }
 
@@ -2609,43 +2526,7 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   align-items: center !important;
 }
 
-.branch-redesign aside nav {
-  gap: 10px !important;
-}
-
-.branch-redesign aside nav button {
-  min-height: 46px !important;
-  border-radius: 999px !important;
-  font-size: 15px !important;
-  font-weight: 900 !important;
-  color: rgba(33, 33, 33, 0.68) !important;
-  background: transparent !important;
-}
-
-.branch-redesign aside nav button span,
-.branch-redesign aside nav button svg {
-  color: inherit !important;
-}
-
-.branch-redesign aside nav button:hover {
-  background: var(--branch-alice) !important;
-  color: var(--branch-black) !important;
-}
-
-.branch-redesign aside nav button.text-white,
-.branch-redesign aside nav button[style] {
-  background: var(--branch-black) !important;
-  color: var(--branch-ghost) !important;
-  border-color: var(--branch-black) !important;
-  box-shadow: 0 14px 28px rgba(33, 33, 33, 0.16) !important;
-}
-
-.branch-redesign aside nav button.text-white span,
-.branch-redesign aside nav button.text-white svg,
-.branch-redesign aside nav button[style] span,
-.branch-redesign aside nav button[style] svg {
-  color: var(--branch-ghost) !important;
-}
+/* (구 사이드바 nav/버튼 규칙 3차 복사본 제거 — .ugd-nav-item + 위 nav 규칙이 담당) */
 
 .branch-redesign aside > div:last-child {
   background: var(--branch-honey) !important;
