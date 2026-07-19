@@ -27,3 +27,20 @@
 .branch-redesign #staff-attendance-section .staff-sheet thead th:first-child {
   border-left: 1px solid var(--branch-black) !important;
 }
+
+/* 출퇴근 시간이 모두 입력된 근무자 행 = 오늘 근무 완료한 사람. 연한 바닐라(35%)로 물들여 한눈에 구분한다.
+   [중요] 배경은 tr 에 얹는다 — td 에 !important 로 얹으면 검증오류 셀(bg-[#FDE2E2])까지 덮어 빨간 경고가 사라진다.
+   tr 배경은 투명한 셀 뒤로 비치고, 오류 셀은 자기 빨강 배경을 그 위에 그린다. */
+.branch-redesign #staff-attendance-section .staff-sheet tbody tr.staff-row-worked {
+  background: color-mix(in srgb, var(--branch-vanilla) 35%, transparent) !important;
+}
+
+/* 커서(포커스) 있는 행 표시 — 주류재고와 같은 취지(§9-1 커서 위치 표시).
+   여기선 '바닐라 막'이 아니라 위·아래 검정 띠선으로만 짚는다: 근무 완료 행은 이미 바닐라로 차 있고
+   오류 셀은 빨강이라, 그 위에 막을 또 씌우면 상태색을 가린다. 선은 셀 배경을 가리지 않으므로
+   어떤 상태의 행이든 커서 위치를 안전하게 표시한다. */
+.branch-redesign #staff-attendance-section .staff-sheet tbody tr:focus-within > td {
+  box-shadow:
+    inset 0 1px 0 0 var(--branch-black),
+    inset 0 -1px 0 0 var(--branch-black);
+}
