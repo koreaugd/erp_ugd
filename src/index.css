@@ -3643,3 +3643,165 @@ html body .branch-redesign.branch-redesign aside nav button.branch-sidebar-subta
   border-color: #dc2626 !important;
   color: #b91c1c !important;
 }
+
+/* ── 일일마감정산 '마감정보 + 매출' 엑셀형 시트 (DESIGN.md §9-1) ─────────────
+   한 카드 안에 두 구획을 가로로 편다. 구획 제목(h3)은 §6 바닐라 알약(이 섹션은
+   pill 규칙 목록에 없으므로 여기서 직접 못 박는다), 헤더셀은 바닐라+검정 격자,
+   입력셀은 투명. 검증 오류는 셀(td) 배경을 붉게(§9). 전역 input/pill 규칙은
+   id 특이성 + !important로 이긴다(§13-7). */
+
+/* 구획 제목 — 바닐라 알약(§6) */
+.branch-redesign #sales-section h3 {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  /* 다른 정산탭 섹션 제목(지출내역 등)이 실제 렌더되는 값과 동일하게 — 11px / padding 6px 12px.
+     (2033블록의 13px는 뒤 블록들에 덮인 죽은 규칙이라 참조가 아니다. DESIGN.md §6 준수) */
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+  margin: 0 !important;
+}
+
+/* 엑셀 표 — border-separate라야 각 칸이 자기 테두리를 갖는다. 폭은 <col>로 고정. */
+.branch-redesign #sales-section .settle-sheet-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  width: auto;
+  table-layout: fixed;
+}
+
+/* 전역 표 규칙 무력화 — 이 섹션의 thead/tbody 행 배경(alice 회색 띠 · zebra 줄무늬)을 지운다.
+   제목줄·입력줄은 카드 배경이 그대로 비쳐야 하고, 배경색은 각 셀(바닐라 헤더/검증오류)이 칠한다.
+   (전역 `.branch-redesign thead tr`·`tbody tr`이 tr 배경을 !important로 칠하므로 id로 되돌린다) */
+.branch-redesign #sales-section thead tr,
+.branch-redesign #sales-section tbody tr {
+  background: transparent !important;
+}
+
+/* 구획 제목 줄 — 투명·무테두리, 바닐라 알약이 컬럼 위에 얹힌다.
+   제목↔표 간격은 지출내역 섹션(space-y-4=16px)과 동일하게 맞춘다(DESIGN.md §6-3). */
+.branch-redesign #sales-section .settle-group-th {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 0 16px 2px;
+  text-align: left;
+  vertical-align: bottom;
+}
+
+/* 컬럼 라벨셀(엑셀 헤더) — 바닐라 + 검정 격자, 볼드 12px 솔리드 검정.
+   내부 구분선은 각 셀 오른쪽 테두리가 맡고, 그룹 시작셀(is-groupstart: 마감정보 첫칸·매출 첫칸)만 왼쪽을 닫는다. */
+.branch-redesign #sales-section .settle-col-th {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  font-weight: 900;
+  /* 컬럼 헤더 폰트는 섹션 제목 알약과 동일하게 11px (DESIGN.md §6·§9-1) */
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+  padding: 6px 8px;
+  border-top: 1px solid var(--branch-black) !important;
+  border-right: 1px solid var(--branch-black) !important;
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+.branch-redesign #sales-section .settle-col-th.is-groupstart {
+  border-left: 1px solid var(--branch-black) !important;
+}
+
+/* 입력셀(엑셀 본문) — 옅은 검정 격자. 셀 높이는 근무자 표와 동일한 h-9(36px, DESIGN.md §9-1) */
+.branch-redesign #sales-section .settle-cell {
+  height: 36px;
+  padding: 0;
+  vertical-align: middle;
+  border-right: 1px solid rgba(33, 33, 33, 0.1) !important;
+  border-bottom: 1px solid rgba(33, 33, 33, 0.1) !important;
+}
+.branch-redesign #sales-section .settle-cell.is-groupstart {
+  border-left: 1px solid rgba(33, 33, 33, 0.1) !important;
+}
+
+/* 간격 컬럼 — 두 구획 사이의 '약간의 간격'. 테두리·배경 없이 비워 둔다. */
+.branch-redesign #sales-section .settle-spacer {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0;
+}
+
+/* 셀 입력칸 — 납작 투명(전역 input 규칙을 id 특이성으로 이긴다) */
+.branch-redesign #sales-section .sheet-cell-input {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  height: 36px !important;
+  padding: 0 8px !important;
+  /* 섹션 전체를 11px로 통일 — 제목·헤더·텍스트입력칸과 같은 크기(DESIGN.md §6-0). 숫자칸은 mono·우측정렬만 다르다. */
+  font-size: 11px;
+  color: var(--branch-black);
+}
+.branch-redesign #sales-section .sheet-cell-input:focus {
+  outline: 2px solid #2E6DB4 !important;
+  outline-offset: -2px;
+  box-shadow: none !important;
+  background: rgba(255, 255, 255, 0.55) !important;
+}
+
+/* 날짜 칸 버튼 — 투명 납작(엑셀 셀처럼), 클릭 시 미니달력 드롭다운 */
+.branch-redesign #sales-section .settle-date-cell-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  /* 발주 날짜 선택칸(OrderManagementTabV2 text-[11px] font-bold)과 동일하게 — 11px·볼드·시스템 폰트(모노 제거) */
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--branch-black);
+  cursor: pointer;
+  text-align: left;
+}
+.branch-redesign #sales-section .settle-date-cell-btn:hover {
+  background: rgba(33, 33, 33, 0.04) !important;
+}
+/* 화살표/Tab으로 날짜 칸에 도착했을 때 셀 입력칸과 같은 포커스 표시 */
+.branch-redesign #sales-section .settle-date-cell-btn:focus-visible {
+  outline: 2px solid #2E6DB4 !important;
+  outline-offset: -2px;
+}
+
+/* 마감 작성자 입력칸 — 날짜칸과 함께 발주 날짜 선택칸과 동일하게 11px·볼드·시스템 폰트.
+   (id 2개로 sheet-cell-input의 12px을 이긴다) */
+.branch-redesign #sales-section #settle-writer-input {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  font-family: inherit !important;
+}
+
+/* 검증 오류 — 입력칸이 아니라 셀(td) 배경을 붉게(§9) */
+.branch-redesign #sales-section td.settle-cell-error {
+  background: #fde2e2 !important;
+}
+
+/* 필수 표시 — 헤더 라벨 옆 작은 빨강 글자 */
+.branch-redesign #sales-section .settle-req {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 900;
+  color: #b91c1c;
+  vertical-align: top;
+}

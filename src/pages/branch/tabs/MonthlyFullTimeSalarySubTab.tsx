@@ -686,7 +686,8 @@ export function MonthlyFullTimeSalarySubTab({
                     </select>
                   </td>
                   <td className={cellTd(rowIndex, 2)}><input {...cellProps(rowIndex, 2)} type="text" value={row.residentNumber} disabled={isLocked} onChange={(e) => updateRow(row.id, "residentNumber", e.target.value)} placeholder="주민번호" className={`${cellText} font-mono`} /></td>
-                  <td className={cellTd(rowIndex, 3)}><input {...cellProps(rowIndex, 3)} type="date" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
+                  {/* min/max로 연도를 4자리로 제한한다 — 없으면 크롬이 연도 칸을 6자리까지 받아 202600 같은 값이 들어가고, 그 값은 무효라 저장도 안 된다(달력 선택 없이 숫자 타이핑도 이 범위 안이면 그대로 입력·저장된다). */}
+                  <td className={cellTd(rowIndex, 3)}><input {...cellProps(rowIndex, 3)} type="date" min="1970-01-01" max="2099-12-31" value={row.entryDate} disabled={isLocked} onChange={(e) => updateRow(row.id, "entryDate", e.target.value)} className={`${cellText} font-mono`} /></td>
                   <td className={cellTd(rowIndex, 4)}>
                     <select {...cellProps(rowIndex, 4)} value={row.contractType || "4대보험"} disabled={isLocked} onChange={(e) => updateRow(row.id, "contractType", e.target.value)} className={`${cellText} cursor-pointer`}>
                       {CONTRACT_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}

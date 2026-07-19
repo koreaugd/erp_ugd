@@ -1,5 +1,5 @@
 // src/pages/branch/tabs/DailySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type KeyboardEvent } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Lock, Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import "./staffSheet.css";
 import { gasClient } from "../../../api/gasClient";
@@ -708,6 +708,40 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     rowCount: staffRows.length,
     colCount: isHeadOffice ? 11 : 8
   });
+
+  // 마감정보+매출 엑셀 셀을 방향키·Enter로 오간다(§9 엑셀 형식 필수). 한 줄, 6칸:
+  // 작성자(0)·카드(1)·현금(2)·계좌이체(3)·배달(4)·금고(5). 날짜 칸은 커스텀 달력 버튼이라 이 그리드 밖이고,
+  // 버튼에서 →로 작성자(0)로 넘어오게 별도 배선한다(아래 date 버튼 onKeyDown).
+  const SETTLE_SHEET_COLS = 6;
+  const { cellProps: settleSheetCellProps, focusCell: settleSheetFocusCell } = useSheetKeyboardNav({
+    rowCount: 1,
+    colCount: SETTLE_SHEET_COLS
+  });
+  // 날짜 칸은 커스텀 달력 버튼이라 훅에 등록되지 않는다(input/select/textarea만 등록 가능). 그래서 버튼 ref를 잡아
+  // 작성자(col 0)에서 ←로 날짜로, 날짜 버튼에서 →로 작성자로 서로 오가게 손수 잇는다 — 날짜 칸도 화살표 그리드의 일원.
+  const settleDateBtnRef = useRef<HTMLButtonElement>(null);
+  // Enter는 이 한 줄 폼에선 '오른쪽 다음 칸'으로 보낸다(엑셀 Enter=아래지만 아래 행이 없다). 나머지 키는 훅에 위임.
+  const settleSheetNav = (col: number) => {
+    const base = settleSheetCellProps(0, col);
+    return {
+      ...base,
+      onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+        const mod = e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing;
+        // 맨 왼쪽 입력칸(작성자)에서 ←로 커서가 맨 앞이면 날짜 칸(달력 버튼)으로 넘어간다(글자 중간에선 평범한 커서 이동).
+        if (!mod && col === 0 && e.key === "ArrowLeft" && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+          e.preventDefault();
+          settleDateBtnRef.current?.focus();
+          return;
+        }
+        if (!mod && e.key === "Enter") {
+          e.preventDefault();
+          if (col + 1 < SETTLE_SHEET_COLS) settleSheetFocusCell(0, col + 1);
+          return;
+        }
+        base.onKeyDown(e);
+      }
+    };
+  };
 
   // 상세 내용은 적었는데 금액이 비어 있는 행. 그냥 두면 저장 시 조용히 사라지므로 제출을 막는다.
   const incompleteCashExpenseRows = useMemo(
@@ -1682,66 +1716,165 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       </div>
       <GuideCallouts open={dailyGuideOpen} steps={dailySettleGuideSteps} onClose={() => setDailyGuideOpen(false)} />
 
-      {/* Date & Writer Row */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4" id="settle-header-controls">
-        <div className="grid grid-cols-2 gap-4 grow">
-          <div className="flex flex-col space-y-1.5 relative" data-guide="daily-settle-date">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-[#1C3C6E]">마감 대상 날짜</label>
-            </div>
+      {/* 마감정보 + 매출 — 엑셀형 가로 1자형, 한 테두리(한 카드) 안에 하나의 표 (DESIGN.md §9-1)
+          두 구획(마감정보·매출)을 하나의 표로 잇고, 사이에 빈 간격 컬럼(settle-spacer) 하나로 '약간의 간격'만 준다.
+          구획 제목(h3)은 §6 바닐라 알약이 각 컬럼 그룹 위에 얹힌다. 라벨줄=바닐라+검정 격자(엑셀 헤더),
+          입력줄=투명 셀+옅은 격자. 검증 오류는 §9대로 셀(td) 배경을 붉게.
+          매출 컬럼은 지점 && 잠금해제일 때만(기존 동작 보존), 마감정보는 항상.
+          미니달력은 absolute 드롭다운이라 표를 overflow로 감싸지 않는다(달력이 잘리지 않게). */}
+      <div className="relative bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="sales-section">
+        {/* 키보드로 칸을 옮길 수 있는 섹션이므로 조작법 칩을 섹션 위 테두리에 걸쳐 붙인다(근무자·지출내역과 동일). */}
+        <SheetKeyHint />
+        {(() => {
+          // 매출 컬럼은 지점(본사 아님) && 잠금 해제일 때만. 마감정보 컬럼은 항상.
+          const salesShown = !isHeadOffice && !(hasExistingRecord && !isEditApproved);
+          const salesFields = [
+            { key: "cardSales" as const, label: "카드매출", value: cardSales, setter: setCardSales, req: true, groupStart: true },
+            { key: "cashSales" as const, label: "현금매출", value: cashSales, setter: setCashSales, req: true, groupStart: false },
+            { key: undefined, label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, groupStart: false },
+            { key: undefined, label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, groupStart: false },
+            { key: "cashBalance" as const, label: "금고 현금잔액", value: cashBalance, setter: setCashBalance, req: true, groupStart: false },
+          ];
+          return (
             <div className="relative">
-              {/* Hidden native input for compatibility */}
-              <input
-                type="date"
-                value={settleDate}
-                onChange={(e) => setSettleDate(e.target.value)}
-                onFocus={() => setShowStatusCalendar(true)}
-                className="absolute inset-0 opacity-0 pointer-events-none w-0 h-0"
-                id="settle-date-picker"
-              />
-              <button
-                type="button"
-                onClick={() => setShowStatusCalendar(prev => !prev)}
-                className="h-9 px-3 border border-gray-200 rounded-xl font-mono text-sm text-gray-700 bg-gray-50/50 hover:bg-zinc-100/50 hover:border-gray-300 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all cursor-pointer w-full text-left flex justify-between items-center"
-              >
-                <span>{settleDate || "날짜를 선택해 주세요"}</span>
-                <Calendar className="w-4 h-4 text-gray-400" />
-              </button>
+              {/* 좁은 화면에서 표가 페이지를 밀지 않도록 표만 가로 스크롤(overflow-x).
+                  미니달력은 absolute 드롭다운이라 이 스크롤 래퍼 '밖'(형제)에 두어 잘리지 않게 한다. */}
+              <div className="overflow-x-auto">
+                <table className="settle-sheet-table">
+              <colgroup>
+                <col style={{ width: 132 }} />
+                <col style={{ width: 118 }} />
+                {salesShown && <col style={{ width: 22 }} />}
+                {salesShown && salesFields.map((_, i) => <col key={i} style={{ width: 108 }} />)}
+              </colgroup>
+              <thead>
+                {/* 구획 제목 줄 — 투명·무테두리, 바닐라 알약이 컬럼 위에 얹힌다 */}
+                <tr>
+                  <th colSpan={2} className="settle-group-th">
+                    <h3 className="text-sm font-black text-gray-800 w-fit">마감정보</h3>
+                  </th>
+                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && (
+                    <th colSpan={5} className="settle-group-th">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-black text-gray-800 w-fit">매출</h3>
+                        <span className="daily-total-chip">
+                          당일 총매출 <b className="ml-1 font-mono text-base">{formatNumber(totalSales)}</b> 원
+                        </span>
+                      </div>
+                    </th>
+                  )}
+                </tr>
+                {/* 컬럼 라벨 줄 — 바닐라 헤더셀 + 검정 격자 */}
+                <tr>
+                  <th className="settle-col-th is-groupstart">마감 대상 날짜<span className="settle-req">필수</span></th>
+                  <th className="settle-col-th">마감 작성자<span className="settle-req">필수</span></th>
+                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && salesFields.map((f, i) => (
+                    <th key={i} className={`settle-col-th${f.groupStart ? " is-groupstart" : ""}`}>
+                      {f.label}{f.req && <span className="settle-req">필수</span>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* 입력 줄 — 투명 셀 입력칸, 옅은 격자 */}
+                <tr>
+                  <td className="settle-cell is-groupstart relative" data-guide="daily-settle-date">
+                    {/* Hidden native input for compatibility */}
+                    <input
+                      type="date"
+                      value={settleDate}
+                      onChange={(e) => setSettleDate(e.target.value)}
+                      onFocus={() => setShowStatusCalendar(true)}
+                      className="absolute inset-0 opacity-0 pointer-events-none w-0 h-0"
+                      id="settle-date-picker"
+                    />
+                    <button
+                      type="button"
+                      ref={settleDateBtnRef}
+                      onClick={() => setShowStatusCalendar(prev => !prev)}
+                      onKeyDown={(e) => {
+                        // →로 작성자 칸으로 넘어간다(엑셀 이동). Enter/Space는 달력 토글(버튼 기본 동작) 유지.
+                        if (e.key === "ArrowRight") {
+                          e.preventDefault();
+                          settleSheetFocusCell(0, 0);
+                        }
+                      }}
+                      className="settle-date-cell-btn"
+                    >
+                      <span>{settleDate || "날짜 선택"}</span>
+                      <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+                    </button>
+                  </td>
+                  <td className={`settle-cell${validationErrors && hasValidationField("writer") ? " settle-cell-error" : ""}`}>
+                    <input
+                      {...settleSheetNav(0)}
+                      type="text"
+                      value={writer}
+                      onChange={(e) => {
+                        setWriter(e.target.value);
+                        clearValidationField("writer");
+                      }}
+                      placeholder="작성자 성명"
+                      className="sheet-cell-input"
+                      id="settle-writer-input"
+                    />
+                  </td>
+                  {salesShown && <td className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && salesFields.map((field, idx) => {
+                    const hasError = Boolean(validationErrors && field.key && hasValidationField(field.key));
+                    return (
+                      <td
+                        key={idx}
+                        className={`settle-cell${field.groupStart ? " is-groupstart" : ""}${hasError ? " settle-cell-error" : ""}`}
+                        data-guide={field.key === "cashBalance" ? "daily-cash-balance" : undefined}
+                      >
+                        <input
+                          {...settleSheetNav(idx + 1)}
+                          type="text"
+                          value={formatWithCommas(field.value)}
+                          onChange={(e) => {
+                            field.setter(cleanNumeric(e.target.value));
+                            if (field.key) clearValidationField(field.key);
+                          }}
+                          id={field.key ? `settle-${field.key}-input` : undefined}
+                          className="sheet-cell-input text-right font-mono font-bold"
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+                </table>
+              </div>
+              {/* 미니달력: 스크롤 래퍼 '밖'에 두어 잘리지 않게(표 바로 아래에 열린다) */}
               {showStatusCalendar && renderMiniCalendar()}
             </div>
-          </div>
+          );
+        })()}
 
-          <div className="flex flex-col space-y-1.5">
-            <label className="text-xs font-extrabold text-[#1C3C6E]">마감 작성자</label>
-            <input
-              type="text"
-              value={writer}
-              onChange={(e) => {
-                setWriter(e.target.value);
-                clearValidationField("writer");
-              }}
-              placeholder="작성자 성명 기입"
-              className={`px-4 py-2.5 border rounded-xl text-sm bg-gray-50/50 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
-                validationErrors && hasValidationField("writer") ? "branch-validation-error" : "border-gray-200"
-              }`}
-              id="settle-writer-input"
-            />
+        {!hasExistingRecord ? (
+          // 큰 회색 박스로 감쌀 만한 내용이 아니다 — 한 줄 안내다.
+          <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            {settleDate} 마감을 새로 작성합니다.
+          </span>
+        ) : isEditApproved ? (
+          // 이미 승인해 수정 모드에 들어왔으면 '승인 필요'라고 하지 않는다 — 다음 할 일을 안내한다.
+          <div className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl inline-flex items-center gap-2 text-xs text-rose-800 leading-normal">
+            <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              <strong>수정 모드:</strong> 값을 고친 뒤 마감을 다시 제출하세요.
+            </span>
           </div>
-        </div>
-
-        {hasExistingRecord ? (
-          <div className="px-4 py-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2 text-xs text-rose-800 leading-normal max-w-sm md:ml-auto">
+        ) : (
+          <div className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl inline-flex items-center gap-2 text-xs text-rose-800 leading-normal">
             <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
             <span>
               <strong>기저장 정보 존재:</strong> 수정하시려면 승인이 필요합니다.
             </span>
           </div>
-        ) : (
-          // 큰 회색 박스로 감쌀 만한 내용이 아니다 — 한 줄 안내다.
-          <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 md:ml-auto">
-            <Info className="w-3.5 h-3.5 shrink-0" />
-            {settleDate} 마감을 새로 작성합니다.
-          </span>
         )}
       </div>
 
@@ -1752,9 +1885,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             ? "bg-rose-50 border-rose-200 text-rose-900 shadow-xs"
             : "bg-red-600 border-red-700 text-white shadow-md"
         } transition-all space-y-4`} id="existing-record-warning-box">
-          <div className="rounded-2xl border border-zinc-900 bg-[#EFF0A3] p-4 text-sm font-black text-zinc-950">
-            기존 마감 기록이 있는 날짜입니다. 수정하려면 아래의 [수정모드로 진행할 것을 승인함] 버튼을 눌러 주세요.
-          </div>
+          {/* 승인 전에만 안내한다 — 승인 후에는 아래 본문이 '승인되었습니다'로 바뀌므로 이 배너는 감춘다. */}
+          {!isEditApproved && (
+            <div className="rounded-2xl border border-zinc-900 bg-[#EFF0A3] p-4 text-sm font-black text-zinc-950">
+              기존 마감 기록이 있는 날짜입니다. 수정하려면 아래의 [수정모드로 진행할 것을 승인함] 버튼을 눌러 주세요.
+            </div>
+          )}
           <div className="flex items-start gap-3">
             <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
             <div className="space-y-1">
@@ -1772,16 +1908,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
           {(
             <div className="flex flex-wrap gap-2 pt-1 font-extrabold text-[11px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsEditApproved(true);
-                  triggerToast("기존 결재 수정 모드가 승인 해제되었습니다.", "success");
-                }}
-                className="px-3.5 py-2 bg-white hover:bg-gray-100 text-red-600 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-              >
-                ✏️ 수정모드로 진행할 것을 승인함
-              </button>
+              {!isEditApproved && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditApproved(true);
+                    triggerToast("수정 모드로 진입했습니다. 값을 고친 뒤 마감을 다시 제출하세요.", "success");
+                  }}
+                  className="px-3.5 py-2 bg-white hover:bg-gray-100 text-red-600 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  ✏️ 수정모드로 진행할 것을 승인함
+                </button>
+              )}
               {isEditApproved && <button
                 type="button"
                 onClick={async () => {
@@ -1844,43 +1982,6 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         <>
           {!isHeadOffice && (
             <>
-          {/* COMPACT SALES ROW (1 Line) */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm sales-section-head" id="sales-section">
-        {/* h3는 감싸지 말 것 — index.css가 `#sales-section > h3` 직계자식 선택자로 pill 모양을 입힌다.
-            합계는 형제로 나란히 두고, 줄 정렬만 부모 flex가 맡는다(지출 시트와 같은 규칙: 합계는 제목 줄에). */}
-        <h3 className="text-sm font-black text-gray-800 w-fit">매출</h3>
-        <span className="daily-total-chip">
-          당일 총매출 <b className="ml-1 font-mono text-base">{formatNumber(totalSales)}</b> 원
-        </span>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3" id="compact-sales-grid">
-          {[
-            { key: "cardSales" as const, label: "카드매출 (필수)", value: cardSales, setter: setCardSales, req: true, placeholder: "" },
-            { key: "cashSales" as const, label: "현금매출 (필수)", value: cashSales, setter: setCashSales, req: true, placeholder: "" },
-            { key: undefined, label: "계좌이체매출", value: transferSales, setter: setTransferSales, req: false, placeholder: "" },
-            { key: undefined, label: "배달매출", value: deliverySales, setter: setDeliverySales, req: false, placeholder: "" },
-            { key: "cashBalance" as const, label: "금고 현금 잔액(필수)", value: cashBalance, setter: setCashBalance, req: true, placeholder: "" }
-          ].map((field, idx) => (
-            <div key={idx} className="flex flex-col space-y-1" data-guide={field.key === "cashBalance" ? "daily-cash-balance" : undefined}>
-              <span className="text-[11px] font-bold text-gray-400">{field.label}</span>
-              <input
-                type="text"
-                value={formatWithCommas(field.value)}
-                onChange={(e) => {
-                  field.setter(cleanNumeric(e.target.value));
-                  if (field.key) clearValidationField(field.key);
-                }}
-                id={field.key ? `settle-${field.key}-input` : undefined}
-                placeholder={field.placeholder}
-                className={`w-full h-9 px-3 border text-sm text-right font-mono font-bold rounded-xl bg-gray-50/30 focus:bg-white focus:outline-hidden focus:border-[#2E6DB4] transition-all ${
-                  validationErrors && field.key && hasValidationField(field.key) ? "branch-validation-error" : "border-gray-200"
-                }`}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* EXPENSE TABLES SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="expenses-section">
         <ExpenseGrid
