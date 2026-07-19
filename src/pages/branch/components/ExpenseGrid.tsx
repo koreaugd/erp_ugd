@@ -51,20 +51,18 @@ interface ExpenseGridProps {
 
 const VARIANT_STYLE: Record<
   Variant,
-  { dot: string; sumText: string; sumBg: string; cellOutline: string; headHighlight: string }
+  { sumText: string; sumBg: string; cellOutline: string; headHighlight: string }
 > = {
   cash: {
-    dot: "bg-amber-500",
     sumText: "text-amber-600",
     sumBg: "bg-amber-50",
-    cellOutline: "outline-2 -outline-offset-2 outline-amber-500",
+    cellOutline: "outline-2 -outline-offset-2 outline-[#2E6DB4]",
     headHighlight: "bg-amber-100 text-amber-800"
   },
   card: {
-    dot: "bg-blue-500",
     sumText: "text-blue-600",
     sumBg: "bg-blue-50",
-    cellOutline: "outline-2 -outline-offset-2 outline-blue-600",
+    cellOutline: "outline-2 -outline-offset-2 outline-[#2E6DB4]",
     headHighlight: "bg-blue-100 text-blue-800"
   }
 };
@@ -155,7 +153,7 @@ export function ExpenseGrid({
   const cellBase = "w-full h-8 px-2 text-xs bg-transparent border-0 rounded-none focus:outline-none";
   const cellWrap = (rowIndex: number, col: number) =>
     [
-      "border-r border-b border-gray-300 relative min-w-0",
+      "border-r border-b border-gray-200 relative min-w-0",
       errorRows.has(rowIndex) ? "bg-rose-50" : "",
       isActive(rowIndex, col) ? `outline ${style.cellOutline} z-10 bg-white` : ""
     ].join(" ");
@@ -165,9 +163,7 @@ export function ExpenseGrid({
       {/* 조작법은 표를 보는 순간 알아야 한다 — 작성방법 버튼을 눌러야 보이면 늦다. */}
       <SheetKeyHint />
       <div className="flex flex-wrap items-center justify-between gap-2" data-guide={guideKey}>
-        <h3 className="text-sm font-black text-gray-800 flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${style.dot}`} /> {title}
-        </h3>
+        <h3 className="text-sm font-black text-gray-800 w-fit">{title}</h3>
         <span className={`text-xs font-extrabold ${style.sumText} ${style.sumBg} px-2.5 py-1 rounded-lg`}>
           합계: {formatNumber(sum)} 원
         </span>
@@ -175,21 +171,21 @@ export function ExpenseGrid({
 
       {/* ── PC: 엑셀형 시트 ─────────────────────────────────── */}
       <div className="hidden xl:block">
-        <div className="border-t border-l border-gray-300 rounded-md overflow-hidden">
+        <div className="border-t border-l border-gray-200 rounded-md overflow-hidden">
           {/* 머리글 — 지금 편집 중인 열을 함께 강조한다 */}
           <div className={`${GRID_COLS} bg-gray-100`}>
-            <span className="border-r border-b border-gray-300" />
+            <span className="border-r border-b border-gray-200" />
             {COLUMN_LABELS.map((label, col) => (
               <span
                 key={label}
-                className={`border-r border-b border-gray-300 px-2 py-1.5 text-[11px] font-bold text-center truncate transition-colors ${
+                className={`border-r border-b border-gray-200 px-2 py-1.5 text-[11px] font-bold text-center truncate transition-colors ${
                   activeCell?.col === col ? style.headHighlight : "text-gray-600"
                 }`}
               >
                 {label}
               </span>
             ))}
-            <span className="border-r border-b border-gray-300" />
+            <span className="border-r border-b border-gray-200" />
           </div>
 
           {/* 데이터 행 */}
@@ -201,7 +197,7 @@ export function ExpenseGrid({
                 <div key={rowIndex} className={`${GRID_COLS} group`}>
                   {/* 행번호 — 지금 편집 중인 행을 함께 강조한다 */}
                   <span
-                    className={`border-r border-b border-gray-300 flex items-center justify-center text-[10px] font-mono transition-colors ${
+                    className={`border-r border-b border-gray-200 flex items-center justify-center text-[10px] font-mono transition-colors ${
                       rowActive
                         ? `${style.headHighlight} font-bold`
                         : errorRows.has(rowIndex)
@@ -233,7 +229,7 @@ export function ExpenseGrid({
                   {/* 사용처 — 현금입금이면 쓰지 않는 칸이라 잠근다 */}
                   {usageDisabled ? (
                     <div
-                      className="border-r border-b border-gray-300 bg-gray-100 flex items-center justify-center"
+                      className="border-r border-b border-gray-200 bg-gray-100 flex items-center justify-center"
                       title="현금입금은 사용처를 적지 않습니다"
                     >
                       <span className="text-xs text-gray-300 select-none" aria-hidden="true">
@@ -300,7 +296,7 @@ export function ExpenseGrid({
                   </div>
 
                   {/* 행 삭제 — 모든 행에서 지울 수 있다(기본 줄은 지워도 빈 줄이 다시 채워진다). */}
-                  <div className="border-r border-b border-gray-300 flex items-center justify-center">
+                  <div className="border-r border-b border-gray-200 flex items-center justify-center">
                     <button
                       type="button"
                       tabIndex={-1}
@@ -327,7 +323,7 @@ export function ExpenseGrid({
             type="button"
             onClick={() => appendRow()}
             disabled={rows.length >= MAX_EXPENSE_ROWS}
-            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 border border-dashed border-gray-300 rounded-lg text-[11px] font-bold text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 border border-dashed border-gray-200 rounded-lg text-[11px] font-bold text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
             <Plus className="w-3 h-3" /> 행 추가
           </button>

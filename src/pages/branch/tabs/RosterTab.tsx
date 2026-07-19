@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/RosterTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { AlertTriangle, Check, Pencil, Trash2, UserPlus, X } from "lucide-react";
+import { AlertTriangle, Check, Pencil, Trash2, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { gasClient } from "../../../api/gasClient";
 import type { Employee, EmployeeEditableField, SalaryChangeChoice, StaffAddDraft, StaffAddReasonChoice } from "../types";
@@ -468,7 +468,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
             >
               <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100 text-rose-600">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
-                <h3 className="text-base font-black text-gray-850">지점 근무 인원 삭제 처리</h3>
+                <h3 className="text-base font-black text-gray-900">지점 근무 인원 삭제 처리</h3>
               </div>
 
               <p className="text-xs text-gray-500 leading-normal">
@@ -586,9 +586,9 @@ export function RosterTab({ branchName }: { branchName: string }) {
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               className="bg-white rounded-3xl p-6 max-w-sm w-full border border-gray-100 shadow-2xl space-y-4"
             >
-              <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100 text-[#2E6DB4]">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100 text-blue-700">
                 <Pencil className="w-5 h-5 shrink-0" />
-                <h3 className="text-base font-black text-gray-850">지점 근무 인원 정보 수정</h3>
+                <h3 className="text-base font-black text-gray-900">지점 근무 인원 정보 수정</h3>
               </div>
 
               <div className="space-y-3.5 text-xs">
@@ -617,7 +617,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
                         setEditCustomRank("");
                       }
                     }}
-                    className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-750 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
+                    className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
                   >
                     <option value="정직원">정직원</option>
                     <option value="파트타이머">파트타이머</option>
@@ -636,7 +636,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
                           setEditCustomRank("");
                         }
                       }}
-                      className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-750 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
+                      className="px-3.5 py-2 border border-gray-200 rounded-xl bg-white font-bold text-gray-700 focus:border-[#2E6DB4] focus:outline-hidden text-xs w-full"
                     >
                       <option value="">직급 선택</option>
                       {["사원", "대리", "과장", "차장", "실장", "부장", "이사", "대표", "부대표", "기타"].map((rk) => (
@@ -708,7 +708,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  className="px-4 py-2 bg-[#2E6DB4] text-white hover:bg-[#1A3C6E] font-extrabold cursor-pointer rounded-xl text-xs transition-colors"
+                  className="px-4 py-2 bg-[#2E6DB4] text-white font-extrabold cursor-pointer rounded-xl text-xs transition-colors"
                 >
                   저장 완료
                 </button>
@@ -720,12 +720,9 @@ export function RosterTab({ branchName }: { branchName: string }) {
 
       {/* Addition Left Form */}
       <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-        <h3 className="text-sm font-black text-gray-800 flex items-center gap-2">
-          <UserPlus className="w-4 h-4 text-[#2E6DB4]" />
-          신규 등록
-        </h3>
+        <h3 className="text-sm font-black text-gray-800 w-fit">신규 등록</h3>
 
-        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-150 text-xs">
+        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-100 text-xs">
           {rosterAddDrafts.map((draft, draftIndex) => (
             <div key={draft.id} className="flex flex-wrap items-center gap-2">
               <span className="font-extrabold text-zinc-800 w-8">추가</span>
@@ -773,7 +770,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
             </div>
           ))}
           <div className="flex justify-end">
-            <button type="button" onClick={registerRosterAddDrafts} className="px-4 py-1.5 bg-[#2E6DB4] hover:bg-[#1A3C6E] text-white font-black rounded-lg cursor-pointer transition-colors">입력한 행 등록</button>
+            <button type="button" onClick={registerRosterAddDrafts} className="px-4 py-1.5 bg-[#2E6DB4] text-white font-black rounded-lg cursor-pointer transition-colors">입력한 행 등록</button>
           </div>
         </div>
       </div>
@@ -788,7 +785,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
 
           <div className="flex gap-2 text-[10px] font-black">
             <span className="px-3 py-1 bg-amber-50 text-amber-700 rounded-lg">정직원: {regularCount}명</span>
-            <span className="px-3 py-1 bg-blue-50 text-[#2E6DB4] rounded-lg">파트타이머: {partTimeCount}명</span>
+            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg">파트타이머: {partTimeCount}명</span>
           </div>
         </div>
 
@@ -875,13 +872,13 @@ export function RosterTab({ branchName }: { branchName: string }) {
                           className={`w-full max-w-full px-1.5 py-1 rounded-lg text-[10px] font-black border focus:outline-hidden cursor-pointer ${
                             row.division === "정직원"
                               ? "bg-amber-50 text-amber-700 border-amber-200 focus:border-amber-400"
-                              : "bg-blue-50 text-[#2E6DB4] border-blue-200 focus:border-blue-400"
+                              : "bg-blue-50 text-blue-700 border-blue-200 focus:border-blue-400"
                           }`}
                         >
                           <option value="정직원">정직원</option>
                           <option value="파트타이머">파트타이머</option>
                         </select>
-                      ) : <span className={`inline-flex max-w-full px-1.5 py-1 rounded-lg text-[10px] font-black ${emp.division === "정직원" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-[#2E6DB4]"}`} title={emp.division}><span className="truncate">{emp.division}</span></span>}
+                      ) : <span className={`inline-flex max-w-full px-1.5 py-1 rounded-lg text-[10px] font-black ${emp.division === "정직원" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`} title={emp.division}><span className="truncate">{emp.division}</span></span>}
                     </td>
                     <td className="py-3 px-2">
                       {isEditing ? (
@@ -997,7 +994,7 @@ export function RosterTab({ branchName }: { branchName: string }) {
                           <button
                             type="button"
                             onClick={() => startEmployeeEdit(emp)}
-                            className="text-gray-400 hover:text-[#2E6DB4] p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                            className="text-gray-400 hover:text-blue-700 p-1.5 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                             title="정보 수정"
                             aria-label="정보 수정"
                           >
