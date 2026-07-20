@@ -12,6 +12,7 @@ import { cleanNumeric, formatWithCommas, toLocalMonthInputValue } from "../helpe
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
 import { ORDER_CATEGORIES, ORDER_DEFAULT_VENDORS, VENDOR_HINT, ALL_ORDER_CATEGORIES, getOrderCategoryHeaderClass, monthDays } from "../helpers/orderHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
+import { evaluateOrderFormula, isFormulaInput } from "../helpers/orderFormula";
 import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendingSave, setSharedSaveStatusListener, healSharedIfServerMissing, type SaveStatus } from "../helpers/sharedSaveSlot";
 
 const MEMO_POPUP_WIDTH = 288;
@@ -62,6 +63,8 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   // 어느 하나라도 실패면 "동기화 실패", 하나라도 저장 중이면 "저장 중", 둘 다 끝나면 "자동저장됨".
   const orderStatusRef = useRef<SaveStatus>("idle");
   const vendorStatusRef = useRef<SaveStatus>("idle");
+  // Enter로 수식을 계산·커밋한 직후엔 곧이어 터지는 blur가 같은 칸을 또 계산하지 않도록 표시해 둔다("dateKey|vendor").
+  const formulaJustCommitted = useRef<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const recomputeSaveStatus = useCallback(() => {
     const a = orderStatusRef.current;
@@ -100,8 +103,10 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
           .map((line) => line.trim())
           .filter(Boolean)
       ));
+      // 금액을 합치면 어느 한쪽 수식으로도 그 합을 나타낼 수 없다 — 수식은 버려 값과 어긋나지 않게 한다.
+      const { formula: _mergedFormula, ...existingWithoutFormula } = existing;
       byCell.set(key, {
-        ...existing,
+        ...existingWithoutFormula,
         amount: String(Number(existing.amount || 0) + Number(item.amount || 0)),
         memo: memos.join("\n")
       });
@@ -437,6 +442,12 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     return index >= 0 ? (orders[index].memo || "") : "";
   };
 
+  /** 그 칸을 채운 발주 건의 원본 수식("=1000+2000"). 수식으로 넣지 않았으면 빈 문자열. (cellMemo와 같은 규칙 — 한 건만 본다) */
+  const cellFormula = (dateKey: string, vendor: string) => {
+    const index = cellOrderIndex(dateKey, vendor);
+    return index >= 0 ? (orders[index].formula || "") : "";
+  };
+
   /**
    * 전체보기에서 대분류가 둘 이상 겹친 칸인가.
    *
@@ -469,7 +480,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
       .join("\n");
   };
 
-  const updateOrderDraft = (dateKey: string, vendor: string, value: string) => {
+  const updateOrderDraft = (dateKey: string, vendor: string, value: string, formula?: string) => {
     if (!loaded) return; // 아직 안 불러온 데이터를 고치면, 저장할 때 원격의 기존 발주를 지운다.
     if (isAggregateCell(dateKey, vendor)) return; // 잠긴 합계 칸. 입력칸이 disabled라 닿지 않지만 확실히 막는다.
     const nextValue = cleanNumeric(value).slice(0, 7);
@@ -510,13 +521,35 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
           amount: nextValue,
           // 금액을 고쳐도 메모는 살아남아야 한다. 예전에는 여기서 빈 값으로 덮어써 메모가 날아갔다.
           memo: existingMemo,
-          orderDate: dateKey
+          orderDate: dateKey,
+          // 수식으로 넣었을 때만 원본 수식을 함께 저장한다. 숫자로 직접 치면 필드를 아예 넣지 않아
+          // (undefined 저장은 Firestore가 거부) 이전에 있던 수식이 자연히 사라진다.
+          ...(formula ? { formula } : {})
         }, ...kept]
         : kept;
       localStorage.setItem(storageKey, JSON.stringify(nextOrders));
       scheduleSharedSave(orderSaveSlot.current, sharedOrderKey, nextOrders, orderPendingKey, "orders");
       return nextOrders;
     });
+  };
+
+  /**
+   * 엑셀식 수식 커밋. "=15000*3" 같은 글자를 계산해 그 칸에 결과 숫자를 넣는다
+   * (숫자를 직접 친 것과 똑같은 저장 경로 updateOrderDraft 를 탄다 — 결과만 저장되고 수식은 남지 않는다).
+   * 성공하면 true. 계산 실패면 alertOnError 가 켜진 경우에만 이유를 알리고, 값은 손대지 않는다(false).
+   */
+  const commitOrderFormula = (dateKey: string, vendor: string, rawText: string, alertOnError: boolean): boolean => {
+    const result = evaluateOrderFormula(rawText);
+    if (result.ok) {
+      // "=5000"처럼 계산할 게 없는 순수 숫자면 수식으로 취급하지 않는다(수식 표시·팝업이 안 붙고, 수식→일반숫자 되돌리기도 이걸로 된다).
+      const bare = rawText.trim().replace(/^=/, "").replace(/[\s,]/g, "");
+      const isPlainNumber = /^\d+$/.test(bare);
+      // 결과 숫자를 저장하되, 진짜 수식이면 원본도 함께 넘겨 나중에 다시 보고 고칠 수 있게 한다("=" 포함, 앞뒤 공백만 정리).
+      updateOrderDraft(dateKey, vendor, String(result.value), isPlainNumber ? undefined : rawText.trim());
+      return true;
+    }
+    if (alertOnError) window.alert("수식을 계산할 수 없습니다.\n\n" + result.reason + "\n\n예: =15000*3, =(1000+500)*2");
+    return false;
   };
 
   /** 메모만 갈아끼운다. 칸이 가리키는 발주 건 한 개만 바꾼다(다른 분류의 메모를 덮어쓰지 않는다). */
@@ -828,10 +861,12 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                       const vendor = matrixVendors[colIndex];
                       const draftKey = dateKey + "|" + vendor;
                       const draftValue = orderDraftCells[draftKey];
+                      const typingFormula = isFormulaInput(draftValue); // "=" 로 시작 → 지금 셀에서 수식을 치는 중
                       const cellActive = isActive(rowIndex, colIndex);
                       // 대분류가 겹쳐 합계로 보이는 칸 — 낱개처럼 고칠 수 없으므로 잠근다(단, 메모는 전부 보여준다).
                       const aggregate = isAggregateCell(dateKey, vendor);
                       const memo = cellMemoDisplay(dateKey, vendor);
+                      const cellHasFormula = !!cellFormula(dateKey, vendor); // 이 칸이 수식으로 저장돼 있나(ƒ 배지)
                       // 아래쪽 행은 말풍선이 표 밖으로 잘리므로 위로 뒤집는다.
                       const memoFlipUp = rowIndex >= matrixDays.length - 6;
                       // 한 번만 만든다 — F2를 가로채려면 훅이 준 onKeyDown을 다시 불러야 하는데,
@@ -850,8 +885,18 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                         >
                           <input
                             {...sheetCell}
-                            value={draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : "")}
-                            onChange={(e) => updateOrderDraft(dateKey, vendor, e.target.value)}
+                            // 수식 편집 중엔 친 글자("=15000*3")를 그대로 보이고, 아니면 지금처럼 콤마 숫자로 보인다.
+                            value={typingFormula ? (draftValue as string) : (draftValue !== undefined ? formatWithCommas(draftValue) : (value ? formatWithCommas(value) : ""))}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              formulaJustCommitted.current = null; // 새로 입력을 시작하면 직전 Enter 커밋 표시를 지운다(stale skip 방지)
+                              if (isFormulaInput(raw)) {
+                                // "=" 로 시작 = 수식 편집 중 — 숫자만 남기거나 저장하지 않는다. 친 그대로 두고 Enter/blur 때 계산한다.
+                                setOrderDraftCells((prev) => ({ ...prev, [draftKey]: raw }));
+                              } else {
+                                updateOrderDraft(dateKey, vendor, raw); // 기존 동작 그대로: 숫자만 남기고 즉시 자동저장
+                              }
+                            }}
                             // F2 = 이 열의 거래처명 고치기. 머리글의 연필은 Tab 순서에서 빼 두었으므로(칸 이동이 우선)
                             // 키보드만 쓰는 사람에게는 이 키가 유일한 입구다. 칸은 늘 편집 상태라 F2는 비어 있다.
                             // 조합키(Ctrl/Alt/Cmd+F2)는 브라우저·OS 단축키다 — 가로채지 않고 그대로 흘려보낸다.
@@ -861,17 +906,65 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                                 setVendorRename({ original: vendor, category: columnCategoryOf(vendor), value: vendor });
                                 return;
                               }
+                              // 수식 모드에서 Enter: 계산해 결과를 넣고, 성공하면 평소 Enter처럼 아래 칸으로 내려간다.
+                              // (한글 조합 중 Enter는 글자 확정이므로 건드리지 않는다 — sheetCell도 같은 규칙)
+                              if (e.key === "Enter" && !e.nativeEvent.isComposing && isFormulaInput(e.currentTarget.value)) {
+                                const raw = e.currentTarget.value;
+                                const stored = cellFormula(dateKey, vendor);
+                                if (stored && raw.trim() === stored.trim()) {
+                                  // 저장된 수식을 열어보기만 하고 그대로 Enter — 다시 계산·저장하지 않고 숫자 표시로 되돌린 뒤 평소처럼 아래로.
+                                  setOrderDraftCells((prev) => { const next = { ...prev }; delete next[draftKey]; return next; });
+                                } else if (!commitOrderFormula(dateKey, vendor, raw, true)) {
+                                  e.preventDefault(); // 계산 실패 → 이동을 막고 그 자리서 고치게 둔다
+                                  return;
+                                } else {
+                                  formulaJustCommitted.current = draftKey; // 뒤이어 터질 blur가 같은 칸을 또 계산하지 않게
+                                }
+                              }
                               sheetCell.onKeyDown(e);
                             }}
+                            // 다른 칸으로 옮길 때 수식이 남아 있으면 계산해 넣는다. 계산 못 하는 수식은 원래 값으로 되돌려
+                            // 잘못된 "=..." 글자가 칸에 남지 않게 한다(Enter로 이미 계산한 직후엔 건너뛴다).
+                            onBlur={(e) => {
+                              const raw = e.currentTarget.value;
+                              if (formulaJustCommitted.current === draftKey) {
+                                formulaJustCommitted.current = null;
+                              } else if (isFormulaInput(raw)) {
+                                const stored = cellFormula(dateKey, vendor);
+                                if (stored && raw.trim() === stored.trim()) {
+                                  // 저장된 수식을 열어보기만 하고 다른 칸으로 나간다 — 다시 저장하지 않고 숫자 표시로 되돌린다.
+                                  setOrderDraftCells((prev) => { const next = { ...prev }; delete next[draftKey]; return next; });
+                                } else if (!commitOrderFormula(dateKey, vendor, raw, false)) {
+                                  setOrderDraftCells((prev) => ({ ...prev, [draftKey]: String(cellAmount(dateKey, vendor) || "") }));
+                                }
+                              }
+                              sheetCell.onBlur();
+                            }}
+                            // 엑셀처럼: 수식으로 저장된 칸을 고르면(클릭·화살표) 그 칸에 수식(=12000+...)이 바로 뜬다.
+                            // 전체선택까지 다시 잡아, 곧바로 Delete로 지우거나 새 값으로 덮어쓸 수 있게 한다.
+                            onFocus={(e) => {
+                              // 수식으로 저장된 칸이면, 지금 수식을 치는 중이 아닐 때(=커밋 뒤 숫자만 보이거나 빈 초안일 때) 저장된 수식을 띄운다.
+                              // draftValue===undefined 로만 판단하면 커밋 직후 draftValue엔 결과 숫자가 남아 있어 화살표로 다시 와도 수식이 안 떴다.
+                              const stored = cellFormula(dateKey, vendor);
+                              if (stored && !isFormulaInput(draftValue)) {
+                                const input = e.currentTarget;
+                                setOrderDraftCells((prev) => ({ ...prev, [draftKey]: stored }));
+                                setTimeout(() => { try { input.select(); } catch { /* 선택 미지원 입력 */ } }, 0);
+                              }
+                              sheetCell.onFocus();
+                            }}
                             disabled={aggregate || !loaded}
-                            title={aggregate ? AGGREGATE_CELL_HINT : undefined}
-                            aria-label={`${Number(day)}일 ${vendor} 발주금액${aggregate ? " (합계 · 잠김)" : ""}${memo ? " (메모: " + memo + ")" : ""}`}
+                            title={aggregate ? AGGREGATE_CELL_HINT : (cellHasFormula ? "수식으로 입력된 칸 — 고르면 수식이 보여요. 지우려면 Delete." : undefined)}
+                            aria-label={`${Number(day)}일 ${vendor} 발주금액${aggregate ? " (합계 · 잠김)" : ""}${cellHasFormula ? " (수식 입력됨)" : ""}${memo ? " (메모: " + memo + ")" : ""}`}
                             inputMode="numeric"
-                            maxLength={9}
+                            // 수식 모드에선 여러 항목을 더할 수 있게 넉넉히(파서 상한 120과 맞춤). 숫자만일 땐 지금처럼 9(9,999,999+콤마).
+                            maxLength={typingFormula ? 120 : 9}
                             // 왼쪽에 아이콘 자리를 상시로 비워두면 안 된다 — 최대 금액(1,234,567 ≈ 65px)이 잘린다.
                             // 아이콘은 마우스를 올렸을 때만 뜨고, 숫자는 오른쪽 정렬이라 짧은 금액에선 애초에 겹치지 않는다.
-                            className={`w-full h-8 bg-transparent border-0 rounded-none px-1.5 text-right font-mono font-black focus:outline-none ${
-                              aggregate ? "text-gray-400 italic cursor-not-allowed" : ""
+                            // 수식 편집 중엔 왼쪽 정렬(수식은 왼→오로 읽으므로 앞부분이 보이게)하되, 왼쪽 패딩(pl-6)으로 메모 버튼 자리를 비워 겹침을 막는다.
+                            // 수식 값·편집 중은 파란색으로 표시(겹치는 배지 없이).
+                            className={`w-full h-8 bg-transparent border-0 rounded-none font-mono font-black focus:outline-none ${typingFormula ? "text-left pl-6 pr-1.5" : "text-right px-1.5"} ${
+                              aggregate ? "text-gray-400 italic cursor-not-allowed" : ((cellHasFormula || typingFormula) ? "text-[#2E6DB4]" : "")
                             }`}
                           />
 
@@ -902,6 +995,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                           >
                             <StickyNote className="h-3 w-3" />
                           </button>
+
 
                           {/* 읽기 전용 말풍선. 마우스를 올리거나(데스크톱) 칸을 고르면(터치) 뜬다. */}
                           {memo ? (
@@ -990,6 +1084,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
           </div>
         </>
       ) : null}
+
     </div>
   );
 }
