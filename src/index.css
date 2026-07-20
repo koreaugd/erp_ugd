@@ -68,8 +68,7 @@ input[type=number] {
   border-bottom-color: rgba(33, 33, 33, 0.08);
 }
 
-.admin-redesign #sidebar h2,
-.admin-redesign #admin-role-badge {
+.admin-redesign #sidebar h2 {
   color: var(--admin-black);
 }
 
@@ -99,10 +98,25 @@ input[type=number] {
   border-top-color: rgba(33, 33, 33, 0.08);
 }
 
-.admin-redesign #sidebar > div:last-child {
-  background: var(--admin-honey);
-  border-color: transparent;
-  border-radius: 24px;
+/* 사이드바 보안 로그아웃 — 지점 하단 로그아웃과 같은 어두운 버튼(메뉴 바로 아래) */
+.admin-redesign #sidebar .admin-sidebar-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 46px;
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+  border: 1px solid transparent !important;
+  border-radius: 14px !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  cursor: pointer;
+}
+.admin-redesign #sidebar .admin-sidebar-logout:hover {
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+  filter: brightness(0.82); /* 색 리터럴 없이 hover 시 살짝 어둡게 (토큰 게이트 준수) */
 }
 
 .admin-redesign main {
@@ -515,17 +529,6 @@ input[type=number] {
 .admin-redesign .admin-monthly-status-editing {
   background: #D8DFE9 !important; /* 앨리스(파란) = 수정중 */
   color: #1A1A1A !important;
-}
-
-.admin-redesign .admin-logout-link {
-  background: linear-gradient(90deg, var(--admin-alice), var(--admin-honey)) !important;
-  color: var(--admin-black) !important;
-  border: 1px solid rgba(33, 33, 33, 0.08);
-}
-
-.admin-redesign .admin-logout-link:hover {
-  background: linear-gradient(90deg, var(--admin-honey), var(--admin-alice)) !important;
-  color: var(--admin-black) !important;
 }
 
 .admin-redesign section button[class*="bg-amber-50"],
@@ -2281,7 +2284,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   font-size: 11px !important;
   font-weight: 800 !important;
   letter-spacing: 0.33px !important;
-  color: rgba(33, 33, 33, 0.55) !important;
+  /* 대분류는 검정 볼드로 또렷하게(지점 --branch-black·관리자 --admin-black 둘 다 #212121). */
+  color: #212121 !important;
   text-transform: none !important;
 }
 .branch-redesign aside nav .ugd-nav-group:first-child,
@@ -2377,26 +2381,6 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   .branch-redesign aside nav .ugd-nav-item {
     width: auto !important;
   }
-}
-
-/* 관리자 사이드바 하위 탭(일일정산/월말마감 하위) */
-.admin-redesign #sidebar nav .ugd-subnav-item {
-  min-height: 0 !important;
-  border-radius: 0 !important;
-  padding: 6px 12px !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  color: rgba(33, 33, 33, 0.55) !important;
-  box-shadow: none !important;
-}
-.admin-redesign #sidebar nav .ugd-subnav-item:hover {
-  background: rgba(33, 33, 33, 0.04) !important;
-  color: var(--admin-black) !important;
-}
-.admin-redesign #sidebar nav .ugd-subnav-item.is-active {
-  background: #EFF0A3 !important;
-  color: var(--admin-black) !important;
-  font-weight: 600 !important;
 }
 
 .branch-redesign #tab-view-settle > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#existing-record-warning-box):not(#edit-mode-locked-placeholder),
@@ -2545,6 +2529,22 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   background: color-mix(in srgb, var(--branch-honey) 78%, var(--branch-alice)) !important;
   border-color: rgba(33, 33, 33, 0.12) !important;
   color: var(--branch-black) !important;
+}
+
+/* 로그아웃 버튼(데스크톱 '마감 보안 로그아웃' / 모바일 '로그아웃'):
+   어두운 배경 + 밝은 글씨로 또렷하게. 전역 '.branch-redesign aside button { color:#212121 }'
+   규칙(951행)과 하단 라이트 버튼 규칙이 밝은 글씨를 덮어써 글씨가 배경에 묻히던 문제를,
+   id 특이성으로 이겨서 바로잡는다. */
+.branch-redesign aside #btn-branch-logout-desktop,
+.branch-redesign aside #btn-branch-logout-mobile {
+  background: var(--branch-black) !important;
+  color: var(--branch-ghost) !important;
+  border: 1px solid transparent !important;
+}
+.branch-redesign aside #btn-branch-logout-desktop:hover,
+.branch-redesign aside #btn-branch-logout-mobile:hover {
+  background: #000 !important;
+  color: var(--branch-ghost) !important;
 }
 
 .branch-redesign .branch-dashboard-tab > div:first-child,

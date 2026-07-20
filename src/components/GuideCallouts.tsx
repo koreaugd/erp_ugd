@@ -42,7 +42,7 @@ const ARROW_LEFT = 22; // 말풍선 왼쪽 모서리에서 화살표까지
 type Rect = { top: number; left: number; width: number; height: number };
 type Placement = NonNullable<GuideStep["placement"]>;
 // arrowX: below/above 꼬리의 가로 위치. right 꼬리는 CSS로 왼쪽면 세로 중앙에 둔다(높이 측정 불필요).
-type Spot = { id: string; top: number; left: number; width: number; placement: Placement; arrowX: number; ring: Rect };
+type Spot = { id: string; top: number; left: number; width: number; placement: Placement; arrowX: number };
 
 const stepId = (step: GuideStep) => step.id ?? step.anchor;
 
@@ -101,7 +101,7 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
         : arrowMode === "anchor" ? Math.min(Math.max(anchorCenterX - left - 6, 14), width - 26)
         : ARROW_LEFT;
 
-      next.push({ id: stepId(step), top, left, width, placement, arrowX, ring });
+      next.push({ id: stepId(step), top, left, width, placement, arrowX });
     }
 
     // 값이 그대로면 상태를 갱신하지 않는다 — ResizeObserver ↔ 리렌더 순환을 막는다.
@@ -143,11 +143,6 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
         if (!step || dismissed.includes(spot.id)) return null;
         return (
           <div key={spot.id}>
-            {/* 어느 곳의 안내인지 알 수 있게 테두리만 표시 (클릭 통과) */}
-            <div
-              className="absolute rounded-xl pointer-events-none ring-2 ring-rose-400/70"
-              style={{ top: spot.ring.top, left: spot.ring.left, width: spot.ring.width, height: spot.ring.height }}
-            />
             {/* 말풍선 몸통도 클릭을 통과시킨다(pointer-events-none).
                 말풍선이 입력칸·버튼을 덮더라도 그 아래를 그대로 쓸 수 있어야 하기 때문.
                 클릭을 받는 것은 닫기(X) 버튼 하나뿐이다. */}

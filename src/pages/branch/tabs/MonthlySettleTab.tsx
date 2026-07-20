@@ -70,6 +70,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
   // 매입매출 탭 "작성방법 보기" 투어. 수동으로만 열린다(자동 노출 없음).
   const [guideOpen, setGuideOpen] = useState(false);
+  // '확정 후 수정'한 섹션을 다시 마감제출할 때 받는 수정 사유(섹션별 초안). 사유는 이제 편집 전이 아니라 '제출 시점'에 받는다.
+  const [editReasonDrafts, setEditReasonDrafts] = useState<{ purchase: string; salary: string; salesSummary: string }>({ purchase: "", salary: "", salesSummary: "" });
+  // 사유 미입력으로 제출을 막았을 때 사유칸을 붉게 강조하는 플래그(섹션별).
+  const [reasonErrors, setReasonErrors] = useState<{ purchase: boolean; salary: boolean; salesSummary: boolean }>({ purchase: false, salary: false, salesSummary: false });
+  // 자주 쓰는 수정 사유(칩) — 클릭하면 사유칸을 채운다. 그대로 두거나 뒤에 상세를 덧붙일 수 있다.
+  const REASON_CHIPS = ["입력 오류 정정", "누락 항목 추가", "금액 정정", "지점 요청", "기타"];
 
   const triggerToast = useCallback((message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -112,10 +118,17 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     return rec?.status || null;
   }, [monthlyCloseRecords, branchName, selectedMonth]);
 
+  // 섹션별 최신 마감 레코드(상태뿐 아니라 editedAfterConfirm 등 메타까지 필요할 때). 사유칸 노출/제출 검증에 쓴다.
+  const getSectionRecord = useCallback((section: CloseSection): any | null => {
+    return monthlyCloseRecords
+      .filter((r) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === section)
+      .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0] || null;
+  }, [monthlyCloseRecords, branchName, selectedMonth]);
+
   // monthly_closings 저장 직렬화 큐: 연속 마감의 read-modify-write가 겹치지 않도록 한다.
   const closeWriteChainRef = useRef<Promise<void>>(Promise.resolve());
 
-  const saveSectionClose = useCallback(async (section: CloseSection, status: "confirmed" | "editing" | "pending", reason = "", opts: { restore?: boolean; resetConfirm?: boolean } = {}) => {
+  const saveSectionClose = useCallback(async (section: CloseSection, status: "confirmed" | "editing" | "pending", reason = "", opts: { restore?: boolean; resetConfirm?: boolean; cancelEdit?: boolean } = {}) => {
     const now = new Date().toISOString();
     const matches = (r: any) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === section;
     // 중복 매칭 레코드가 있어도 항상 '최신'을 기준으로 판정한다(handleEdit·run() 모두 동일 기준) —
@@ -129,10 +142,15 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     // 마감취소(제출 철회)는 확정 사이클을 초기화한다 — confirmedAt·확정후수정 표식·수정이력을 비워
     // 깨끗한 '미제출'로 되돌린다(다음 확정은 새 제출, 관리자 '확정후수정' 버튼도 사라짐).
     const resetConfirm = opts.resetConfirm === true;
-    // 확정된 섹션을 '수정'으로 다시 여는 것(직전 status==="confirmed" → editing)이 곧 '확정 후 수정'이다.
+    // '마감수정 취소'(editing→confirmed로 되돌림)는 사용자가 실제로 수정을 제출하는 게 아니다 —
+    // 사유를 요구하지도, 새 이벤트를 남기지도 않는다.
+    const cancelEdit = opts.cancelEdit === true;
+    // 확정된 섹션을 '수정'으로 다시 여는 것(직전 status==="confirmed" → editing)이 곧 '확정 후 수정 시작'이다.
     // 판정은 confirmedAt이 아니라 '직전 status'로 한다 — 마감취소(초기화) 정리 저장이 실패해 confirmedAt이 찌꺼기로
-    // 남더라도, 취소된 '미제출' 섹션을 확정후수정으로 오인하지 않는다(찌꺼기에 무해).
+    // 남더라도, 취소된 '미제출' 섹션을 확정후수정으로 오인하지 않는다(찌꺼기에 무해). 사유는 여기서 받지 않는다(제출 때 받는다).
     const isReopen = status === "editing" && prevRec?.status === "confirmed" && !restore;
+    // 확정본을 수정중이던 섹션을 다시 '마감제출'로 확정 = 재확정. 이때 사유 이벤트를 남긴다(관리자 표시용).
+    const isReconfirm = status === "confirmed" && prevRec?.status === "editing" && !!prevRec?.editedAfterConfirm && !restore && !cancelEdit;
     // 표식은 '확정 계보(confirmed↔editing) 안에서만' 유지한다 — 직전이 pending(취소됨)이면 계보가 끊긴 것이므로
     // 옛 표식을 이어받지 않는다. 이렇게 하면 취소 정리 저장이 실패해 표식이 찌꺼기로 남아도, 그 섹션을 다시 열 때
     // 되살아나지 않고 자연히 false로 정리된다(초기화 시엔 항상 false).
@@ -140,21 +158,32 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     // 롤백(restore)은 계보 규칙을 우회한다 — 취소 롤백은 '취소 직전' 값을 그대로 되살리는 것이고,
     // 그 값은 중간 pending 레코드에 보존돼 있다. 이걸 계보 밖이라고 지워 버리면 롤백이 원래 표식/이력을 잃는다.
     const carryPrev = restore || prevInLineage;
-    const editedAfterConfirm = resetConfirm ? false : !!((carryPrev && prevRec?.editedAfterConfirm) || isReopen);
-    // 재수정 이벤트: 시각 + 지점이 입력한 사유(무엇을 바꿨는지)를 함께 남긴다(관리자 팝업 표시용).
-    const reopenEvent = { at: now, reason: (reason || "").slice(0, 200) };
+    const carriedEvents = (resetConfirm || !carryPrev) ? [] : prevEvents;
+    // editedAfterConfirm: 초기화=false / 재오픈·재확정=true / 그 외(마감수정 취소 포함)=계보 값 유지.
+    // 마감수정 취소는 표식을 '깨끗이' 지우지 않는다 — 편집 중 자동저장으로 데이터가 이미 바뀌었을 수 있고(되돌리지 않음),
+    // 그걸 사유·흔적 없는 '깨끗한 확정'으로 만들면 관리자가 변경을 모른 채 지나친다. '확정 후 열림' 표식을 그대로 남긴다(원래 동작).
+    const editedAfterConfirm = resetConfirm ? false
+      : (isReopen || isReconfirm) ? true
+      : !!(carryPrev && prevRec?.editedAfterConfirm);
+    // 재수정 이벤트: 시각 + 지점이 입력한 사유(무엇을 왜 바꿨는지)를 함께 남긴다(관리자 팝업 표시용). 이제 '재확정' 시점에만 쌓는다.
+    const reasonEvent = { at: now, reason: (reason || "").slice(0, 200) };
     const nextRecord = {
       id: `${branchName}-${selectedMonth}-${section}`,
       branchName, month: selectedMonth, section, status, writer: branchName,
       confirmedAt: resetConfirm ? "" : (status === "confirmed" ? now : prevConfirmedAt),
       editedAfterConfirm,
-      // 수정 이력도 '확정 계보' 안에서만 이어받는다(최근 20건). 초기화(취소)거나 직전이 pending(계보 끊김)이면 비운다
-      // — 안 그러면 취소 정리 저장이 실패해 남은 옛 이벤트가 다음 확정 사이클 팝업에 되살아난다.
-      editEvents: (resetConfirm || !carryPrev) ? [] : (isReopen ? [...prevEvents, reopenEvent].slice(-20) : prevEvents),
+      // 수정 이력은 '확정 계보' 안에서만 이어받고(최근 20건), 재확정일 때만 사유 이벤트를 덧붙인다. 초기화/계보끊김이면 비운다.
+      editEvents: isReconfirm ? [...carriedEvents, reasonEvent].slice(-20) : carriedEvents,
       updatedAt: now
     };
     // 낙관적 UI: 클릭 즉시 상태칩을 반영(로컬 상태 먼저 갱신) → 사용자는 지연 없이 바로 확인.
-    setMonthlyCloseRecords((prev) => [nextRecord, ...prev.filter((r) => !matches(r))]);
+    // 단 'editing으로의 전환'(=잠금 해제)은 로컬 prevRec 상태와 무관하게 '항상' 서버 성공 후에만 반영한다.
+    // (로컬 prevRec으로 isReopen을 판정하면 스테일 로컬일 때 가드가 빠져 확정 데이터가 서버 수락 전에 열릴 수 있다.
+    //  서버 쓰기가 느리거나 실패하면 그 사이 사유·수락 없이 확정 데이터가 바뀔 위험 — 그래서 잠금 해제는 아래 run()이
+    //  '서버 성공 후'에만 반영한다.) 확정/취소처럼 '잠그는' 방향은 낙관적으로 즉시 반영해도 안전하다.
+    if (status !== "editing") {
+      setMonthlyCloseRecords((prev) => [nextRecord, ...prev.filter((r) => !matches(r))]);
+    }
     // 서버 반영(read-modify-write)을 직렬화한다: 같은 기기에서 여러 섹션을 연속 마감할 때
     // 각 저장이 직전 저장의 결과를 읽은 뒤 병합하도록 하여 서로의 섹션 레코드를 덮어쓰지 않게 한다.
     const run = async () => {
@@ -168,12 +197,14 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       const list = Array.isArray(previous) ? previous : [];
       // 표식·이력은 서버 값을 최우선으로 유지한다 — 로컬이 스테일이어도 '확정 후 수정' 사실/이력을 잃지 않는다.
       const prevServer = latest(list);
-      // 서버 기준 '확정 후 수정' 판정도 직전 status로(confirmedAt 아님) — 취소된 미제출 섹션의 찌꺼기 confirmedAt에 무해.
+      // 서버 기준 판정도 직전 status로(confirmedAt 아님) — 취소된 미제출 섹션의 찌꺼기 confirmedAt에 무해.
+      // 재오픈(확정→editing)은 사유를 받지 않는다(제출 때 받음). 재확정(editing→confirmed, 확정후수정)일 때만 사유 이벤트를 남긴다.
       const serverReopen = status === "editing" && prevServer?.status === "confirmed" && !restore;
-      // 최종 판정상 '확정 후 수정'인데 사유가 없으면(경쟁으로 handleEdit 프롬프트를 지나침) 사유 없는 재수정 이벤트를
-      // 남기지 않는다 — 저장을 중단하고 재시도를 요구한다. 재시도 시 handleEdit이 확정을 보고 사유를 받는다.
-      if (serverReopen && !(reason || "").trim()) {
-        throw new Error("확정된 마감입니다. 수정 사유를 입력해야 수정할 수 있습니다. 다시 '마감수정'을 눌러주세요.");
+      const serverReconfirm = status === "confirmed" && prevServer?.status === "editing" && !!prevServer?.editedAfterConfirm && !restore && !cancelEdit;
+      // 최종 판정상 '확정본을 수정 후 재확정'인데 사유가 없으면(인라인 사유칸 우회/경쟁) 사유 없는 확정을 남기지 않는다 —
+      // 저장을 중단하고 재입력을 요구한다(fail-closed). 정상 경로는 handleConfirm이 인라인 사유칸을 먼저 검증한다.
+      if (serverReconfirm && !(reason || "").trim()) {
+        throw new Error("확정된 마감을 수정했습니다. 수정 사유를 입력해야 마감제출할 수 있습니다.");
       }
       const serverEvents = Array.isArray(prevServer?.editEvents) ? prevServer.editEvents : [];
       // 서버 기준 '확정 계보'(confirmed↔editing) 여부 — 표식·이력을 이 안에서만 이어받는다. 롤백(restore)은 계보를 우회해 복원.
@@ -185,9 +216,11 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         // confirmedAt도 '서버 기준'으로 맞춘다 — 다른 기기가 취소(초기화)해 서버에서 지워졌으면 로컬 stale 값으로 되살리지 않는다.
         // (표식/이력은 서버 기준인데 confirmedAt만 로컬이면 'editing + 옛 confirmedAt + 표식 없음' 불일치가 남는다.)
         confirmedAt: status === "confirmed" ? now : (prevServer?.confirmedAt || ""),
-        // 표식·이력은 서버 기준으로도 '확정 계보' 안에서만 유지 — 직전 서버 status가 pending이면 옛 것을 이어받지 않는다(찌꺼기 무해화).
-        editedAfterConfirm: !!((serverInLineage && prevServer?.editedAfterConfirm) || serverReopen),
-        editEvents: serverReopen ? [...carryServerEvents, reopenEvent].slice(-20) : carryServerEvents,
+        // 표식은 서버 기준 계보 안에서만 유지: 재오픈·재확정=true / 그 외(마감수정 취소 포함)=계보 값 유지.
+        // (마감수정 취소는 표식을 지우지 않는다 — 편집 중 자동저장 변경을 되돌리지 못하므로 '확정 후 열림'을 남겨 감사한다.)
+        editedAfterConfirm: (serverReopen || serverReconfirm) ? true
+          : !!(serverInLineage && prevServer?.editedAfterConfirm),
+        editEvents: serverReconfirm ? [...carryServerEvents, reasonEvent].slice(-20) : carryServerEvents,
       };
       const next = [merged, ...list.filter((r) => !matches(r))];
       await gasClient.saveSharedData("monthly_closings", next);
@@ -263,57 +296,52 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         return;
       }
     }
+    // 확정본을 수정한 뒤 다시 제출하는 경우(재확정)에만 '무엇을 왜 바꿨는지' 사유를 받는다.
+    // 최초 확정(미제출→확정)이나 미확정 상태 편집엔 사유가 필요 없다. 사유는 편집 전이 아니라 이 제출 순간에 인라인칸으로 받는다.
+    const rec = getSectionRecord(section);
+    const needsReason = rec?.status === "editing" && !!rec?.editedAfterConfirm;
+    const reason = (editReasonDrafts[section] || "").trim();
+    if (needsReason && !reason) {
+      setReasonErrors((prev) => ({ ...prev, [section]: true }));
+      triggerToast("수정 사유를 입력해야 마감제출할 수 있습니다.", "error");
+      return;
+    }
     try {
-      if (section === "purchase") await carryMonthlyPurchasesToNextMonth();
-      await saveSectionClose(section, "confirmed");
+      // 확정을 먼저 저장한다 — 사유 게이트가 saveSectionClose 안에 있어(serverReconfirm && !reason → throw),
+      // 사유 미입력/경쟁으로 재확정이 거부되면 여기서 throw되고 아래 '다음 달 이월'은 실행되지 않는다.
+      // (이월을 앞에 두면, 거부된 확정에도 다음 달 이월 데이터가 먼저 써지는 부작용이 생긴다.)
+      await saveSectionClose(section, "confirmed", reason);
+      setEditReasonDrafts((prev) => ({ ...prev, [section]: "" }));
+      setReasonErrors((prev) => ({ ...prev, [section]: false }));
+      // 다음 달 이월은 확정 성공 뒤 부가작업 — 실패해도 이번 달 확정은 유효하다(별도 안내).
+      if (section === "purchase") {
+        try {
+          await carryMonthlyPurchasesToNextMonth();
+        } catch (carryError) {
+          console.error(carryError);
+          triggerToast(`${selectedMonth} 매입매출 마감은 완료됐지만 다음 달 이월에 실패했습니다. 다음 달 매입매출 탭에서 확인해주세요.`, "error");
+          return;
+        }
+      }
       triggerToast(`${selectedMonth} ${sectionLabel(section)} 마감제출이 완료되었습니다.`, "success");
     } catch (error: any) {
       console.error(error);
       triggerToast(error?.message || "마감 저장에 실패했습니다.", "error");
     }
-  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast]);
+  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts]);
 
   const handleEdit = useCallback(async (section: CloseSection) => {
-    // 확정된 섹션을 다시 여는 것(=확정 후 수정)이면, 무엇을 바꾸는지 사유를 한 줄 입력받아 관리자에게 남긴다.
-    // 확정 여부는 '서버 최신값'으로만 판단한다 — '마감수정' 버튼은 미제출/확정 어느 상태에서도 뜨므로
-    // 로컬 캐시(getSectionStatus)에 의존하면, 다른 기기가 방금 확정한 섹션을 사유 없이 열 수 있다.
-    // 서버 확인 자체가 실패하면 '열지 않는다'(fail-closed): 확인 못 한 채 열면 확정본을 사유 없이 수정하게 된다.
-    let wasConfirmed = false;
+    // '마감수정' = 편집을 연다. 사유는 이제 수정 전이 아니라, 수정을 마치고 '마감제출'(재확정)할 때 인라인 사유칸으로 받는다.
+    // 확정본을 여는지(=사유 필요) 여부는 saveSectionClose가 '서버 최신값' 기준으로 판정해 editedAfterConfirm에 남기고,
+    // 제출 시 그 값을 보고 인라인 사유칸이 뜬다. 확정 여부 서버 재조회는 saveSectionClose 내부(serverReopen)가 수행한다.
     try {
-      const server = await gasClient.getSharedDataFromServer<any[]>("monthly_closings");
-      // null = 문서 없음(마감 기록이 아직 없음) → 확정된 적 없음(wasConfirmed=false). 값이 있는데 배열이 아니면(형식 손상)만 실패로 본다.
-      if (server != null && !Array.isArray(server)) throw new Error("invalid monthly_closings");
-      if (Array.isArray(server)) {
-        const rec = server
-          .filter((r) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === section)
-          .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0];
-        // 지금 'confirmed' 상태일 때만 사유를 받는다(=확정본을 다시 여는 것). saveSectionClose의 serverReopen 판정
-        // (status==="editing" && 직전 status==="confirmed")과 같은 기준이다. 취소되어 미제출(pending)인 섹션은
-        // confirmedAt이 찌꺼기로 남아 있어도 사유를 요구하지 않는다(마감취소=초기화 정책과 일치).
-        wasConfirmed = rec?.status === "confirmed";
-      }
-    } catch {
-      triggerToast("마감 상태를 서버에서 확인하지 못했습니다. 네트워크 확인 후 다시 시도해주세요.", "error");
-      return;
-    }
-    let reason = "";
-    if (wasConfirmed) {
-      const input = window.prompt(
-        "확정 후 수정하는 이유를 한 줄로 입력해주세요.\n관리자에게 그대로 표시됩니다. (예: 김OO 상여금 반영, 계좌번호 정정)",
-        ""
-      );
-      if (input === null) return; // 취소하면 수정을 열지 않는다.
-      reason = input.trim();
-      if (!reason) { triggerToast("수정 사유를 입력해야 확정된 마감을 수정할 수 있습니다.", "error"); return; }
-    }
-    try {
-      await saveSectionClose(section, "editing", reason);
-      triggerToast(`${selectedMonth} ${sectionLabel(section)} 마감이 수정중으로 변경되었습니다.`, "success");
+      await saveSectionClose(section, "editing", "");
+      triggerToast(`${selectedMonth} ${sectionLabel(section)} 마감을 수정할 수 있습니다. 수정을 마친 뒤 사유를 적고 다시 마감제출해주세요.`, "success");
     } catch (error: any) {
       console.error(error);
       triggerToast(error?.message || "마감 수정 상태 저장에 실패했습니다.", "error");
     }
-  }, [branchName, saveSectionClose, selectedMonth, triggerToast]);
+  }, [saveSectionClose, selectedMonth, triggerToast]);
 
   const resetMonthlyPurchaseAmounts = useCallback(async () => {
     let purchaseRows: any[] = [];
@@ -386,7 +414,10 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   const handleCancelEdit = useCallback(async (section: CloseSection) => {
     try {
-      await saveSectionClose(section, "confirmed");
+      // 마감수정 취소 = 수정을 제출하지 않고 확정으로 되돌림 → 사유를 요구하지 않는다(cancelEdit). 입력하던 사유 초안도 비운다.
+      await saveSectionClose(section, "confirmed", "", { cancelEdit: true });
+      setEditReasonDrafts((prev) => ({ ...prev, [section]: "" }));
+      setReasonErrors((prev) => ({ ...prev, [section]: false }));
       triggerToast(`${selectedMonth} ${sectionLabel(section)} 수정이 취소되고 확정으로 돌아갔습니다.`, "success");
     } catch (error: any) {
       console.error(error);
@@ -440,11 +471,48 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     );
   };
 
+  // '확정 후 수정' 중인 섹션을 다시 제출하기 전에, 무엇을 왜 바꿨는지 사유를 인라인으로 받는다(팝업 아님).
+  // 확정본을 연 경우(editing + editedAfterConfirm)에만 뜬다. 자주 쓰는 사유 칩으로 빠르게 채울 수 있다.
+  const renderReasonBox = (section: CloseSection) => {
+    const rec = getSectionRecord(section);
+    if (!(rec?.status === "editing" && rec?.editedAfterConfirm)) return null;
+    const draft = editReasonDrafts[section] || "";
+    const err = !!reasonErrors[section];
+    return (
+      <div className="w-full rounded-2xl border border-amber-200 bg-amber-50/70 p-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-black text-amber-800">
+          <Pencil className="w-3 h-3" /> 수정 사유 — 확정본을 고쳤습니다. 무엇을 왜 바꿨는지 적어주세요(관리자에게 그대로 표시됩니다).
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {REASON_CHIPS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => { setEditReasonDrafts((prev) => ({ ...prev, [section]: c })); setReasonErrors((prev) => ({ ...prev, [section]: false })); }}
+              className="px-2 py-1 rounded-full border border-amber-300 bg-white text-[10px] font-black text-amber-800 hover:bg-amber-100 cursor-pointer"
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={draft}
+          onChange={(e) => { const v = e.target.value; setEditReasonDrafts((prev) => ({ ...prev, [section]: v })); if (v.trim()) setReasonErrors((prev) => ({ ...prev, [section]: false })); }}
+          rows={2}
+          placeholder="예: 김OO 상여금 반영 / 계좌번호 정정 / 3월 누락분 추가"
+          className={`w-full rounded-xl border px-3 py-2 text-[11px] font-bold resize-none focus:outline-none ${err ? "border-[#C93A3A] bg-[#FDE2E2] text-[#8F1F1F]" : "border-gray-200 bg-white"}`}
+        />
+        {err && <p className="text-[10px] font-black text-[#C93A3A]">수정 사유를 입력해야 마감제출할 수 있습니다.</p>}
+      </div>
+    );
+  };
+
   // 월말마감 헤더(제목 pill + 결산월 선택 + 마감버튼 + 제출상태). 카드 안/밖 어디서든 재사용.
   const renderPortalHeader = () => (
-    // 위쪽 기준선 정렬(items-start) — md:items-center로 두면 왼쪽 설명문이 짧거나 비었을 때
-    // 제목 필이 오른쪽 2줄(결산월+제출상태)의 세로 중앙으로 내려앉아 결산월 선택과 어긋나 보인다.
-    <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+    <div className="space-y-3">
+      {/* 위쪽 기준선 정렬(items-start) — md:items-center로 두면 왼쪽 설명문이 짧거나 비었을 때
+          제목 필이 오른쪽 2줄(결산월+제출상태)의 세로 중앙으로 내려앉아 결산월 선택과 어긋나 보인다. */}
+      <div className="flex flex-col md:flex-row justify-between items-start gap-4">
       <div className="space-y-2">
         {/* 매입매출 탭에서는 위쪽 '매출집계'와 짝이 되도록 '매입집계'로, 정직원급여 탭에서는 탭 이름 그대로 부른다. */}
         <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
@@ -477,6 +545,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           </div>
         </div>
       )}
+      </div>
+      {renderReasonBox(activeSubTab === "fullTimeSalary" ? "salary" : "purchase")}
     </div>
   );
 
@@ -538,6 +608,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           onCancel={() => handleCancel("salesSummary")}
           onCancelEdit={() => handleCancelEdit("salesSummary")}
           onMonthChange={setSelectedMonth}
+          reasonBox={renderReasonBox("salesSummary")}
         />
       )}
 

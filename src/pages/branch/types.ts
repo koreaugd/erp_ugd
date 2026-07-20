@@ -79,6 +79,12 @@ export interface OrderItem {
   amount: string;
   memo: string;
   orderDate: string;
+  /**
+   * 엑셀식 수식으로 입력했을 때의 원본 수식("=12000+3400"). 숫자로 직접 입력하면 없음(undefined).
+   * 표시·재편집용 메타데이터일 뿐, 합계·검증엔 항상 amount(계산된 결과)만 쓴다.
+   * 중복 병합(dedupeOrders)으로 금액이 합쳐지면 수식과 어긋나므로 그때는 버린다.
+   */
+  formula?: string;
 }
 
 export interface InventoryProduct {

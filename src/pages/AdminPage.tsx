@@ -708,8 +708,8 @@ export default function AdminPage() {
           <p className="text-[10px] text-white/60 mt-1 uppercase font-semibold">UGD 주식회사 마감 총괄 시스템</p>
         </div>
 
-        <nav className="grow space-y-0">
-          <p className="ugd-nav-group">정산</p>
+        <nav className="space-y-0">
+          <p className="ugd-nav-group">메인</p>
           <button
             onClick={() => setAdminSection("dashboard")}
             aria-current={adminSection === "dashboard" ? "page" : undefined}
@@ -717,48 +717,36 @@ export default function AdminPage() {
           >
             대시보드
           </button>
-          <button
-            onClick={() => setAdminSection("dailySettlement")}
-            aria-current={adminSection === "dailySettlement" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "dailySettlement" ? " is-active" : ""}`}
-          >
-            일일 정산현황
-          </button>
-          {adminSection === "dailySettlement" && (
-            <div className="ml-4 pl-3 border-l border-[rgba(33,33,33,0.12)] space-y-1 py-1">
-              {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "변경이력 & 수기대장" }].map((sub) => (
-                <button
-                  key={sub.id}
-                  onClick={() => setDailySettlementTab(sub.id as "status" | "logs")}
-                  aria-current={dailySettlementTab === sub.id ? "page" : undefined}
-                  className={`ugd-subnav-item w-full text-left${dailySettlementTab === sub.id ? " is-active" : ""}`}
-                >
-                  {sub.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={() => setAdminSection("monthlyClosing")}
-            aria-current={adminSection === "monthlyClosing" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "monthlyClosing" ? " is-active" : ""}`}
-          >
-            월말마감
-          </button>
-          {adminSection === "monthlyClosing" && (
-            <div className="ml-4 pl-3 border-l border-[rgba(33,33,33,0.12)] space-y-1 py-1">
-              {[{ id: "status", label: "제출현황" }, { id: "cashManagement", label: "현금관리" }, { id: "cashExpenses", label: "현금지출" }].map((sub) => (
-                <button
-                  key={sub.id}
-                  onClick={() => setMonthlyClosingTab(sub.id as "status" | "cashManagement" | "cashExpenses")}
-                  aria-current={monthlyClosingTab === sub.id ? "page" : undefined}
-                  className={`ugd-subnav-item w-full text-left${monthlyClosingTab === sub.id ? " is-active" : ""}`}
-                >
-                  {sub.label}
-                </button>
-              ))}
-            </div>
-          )}
+
+          <p className="ugd-nav-group">일일업무</p>
+          {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "변경이력 & 수기대장" }].map((sub) => {
+            const subActive = adminSection === "dailySettlement" && dailySettlementTab === sub.id;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs"); }}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
+
+          <p className="ugd-nav-group">월말업무</p>
+          {[{ id: "status", label: "제출현황" }, { id: "cashManagement", label: "현금관리" }, { id: "cashExpenses", label: "현금지출" }].map((sub) => {
+            const subActive = adminSection === "monthlyClosing" && monthlyClosingTab === sub.id;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => { setAdminSection("monthlyClosing"); setMonthlyClosingTab(sub.id as "status" | "cashManagement" | "cashExpenses"); }}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
 
           <p className="ugd-nav-group">인사</p>
           <button
@@ -790,17 +778,13 @@ export default function AdminPage() {
           >
             지점 대시보드
           </button>
-          <button
-            onClick={logout}
-            className="admin-logout-link ugd-nav-item"
-          >
-            보안 로그아웃
-          </button>
         </nav>
 
-        <div className="mt-auto bg-white/5 rounded-2xl p-4 border border-white/5 text-center space-y-2">
-          <p className="text-xs text-white/50">현재 계정 정보</p>
-          <div className="text-xs font-bold text-[#D6E4F0]" id="admin-role-badge">본사 총괄 관리자</div>
+        {/* 보안 로그아웃 — 메뉴 바로 아래(지점 하단처럼 어두운 버튼) */}
+        <div className="mt-6">
+          <button onClick={logout} className="admin-sidebar-logout w-full">
+            보안 로그아웃
+          </button>
         </div>
       </aside>
 
