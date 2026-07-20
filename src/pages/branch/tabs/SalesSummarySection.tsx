@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/SalesSummarySection.tsx
 // 월말마감 매입매출 탭 상단 - 매출집계 섹션 (자동계산 + 검증 + 경고 + 빈칸사유)
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { AlertTriangle, TrendingUp, CreditCard, Utensils, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
@@ -144,6 +144,7 @@ export function SalesSummarySection({
   onCancel,
   onCancelEdit,
   onMonthChange,
+  reasonBox,
 }: {
   branchName: string;
   selectedMonth: string;
@@ -155,6 +156,7 @@ export function SalesSummarySection({
   onCancel?: () => void;
   onCancelEdit?: () => void;
   onMonthChange?: (m: string) => void;
+  reasonBox?: ReactNode;
 }) {
   const [data, setData] = useState<SalesSummary>(EMPTY);
   const [showErrors, setShowErrors] = useState(false);
@@ -369,6 +371,9 @@ export function SalesSummarySection({
           </div>
         </div>
       </div>
+
+      {/* 확정 후 수정 시 제출 전 사유 입력(부모에서 주입) */}
+      {reasonBox}
 
       {/* 경고 */}
       {warnings.length > 0 && (

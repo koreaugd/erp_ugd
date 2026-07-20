@@ -630,6 +630,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             지점 변경하기
           </button>
           <button
+            id="btn-branch-logout-desktop"
             onClick={logout}
             className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#212121] hover:bg-black text-[#F6F5FA] rounded-xl transition-all text-xs font-black cursor-pointer border border-transparent"
           >
@@ -652,6 +653,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             지점변경
           </button>
           <button
+            id="btn-branch-logout-mobile"
             onClick={logout}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#212121] text-xs font-black text-[#F6F5FA] rounded-lg border border-transparent"
           >
