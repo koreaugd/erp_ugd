@@ -1,6 +1,7 @@
 // src/pages/branch/tabs/OrderManagementTabV2.tsx
 // 발주관리 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import { BookOpen, Pencil, Plus, StickyNote, X } from "lucide-react";
 import { GuideCallouts } from "../../../components/GuideCallouts";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
@@ -17,6 +18,9 @@ import { createSharedSaveSlot, flushSharedSave, scheduleSharedSave, replayPendin
 
 const MEMO_POPUP_WIDTH = 288;
 const MEMO_POPUP_HEIGHT = 208;
+// 수식 바: 활성 수식 칸 위에 뜨는 넓은 입력줄(입력 한 줄 + 결과 한 줄).
+const FORMULA_BAR_WIDTH = 340;
+const FORMULA_BAR_HEIGHT = 60;
 
 /** 메모를 편집 중인 칸. 화면 좌표(top/left)는 열 때 한 번 재서 들고 있는다. */
 type MemoEditorState = {
@@ -66,6 +70,15 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   // Enter로 수식을 계산·커밋한 직후엔 곧이어 터지는 blur가 같은 칸을 또 계산하지 않도록 표시해 둔다("dateKey|vendor").
   const formulaJustCommitted = useRef<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+
+  // ── 수식 바 ── 활성 수식 칸 바로 위에 떠서 수식 전체를 크게 보여주고(칸은 결과 숫자만), ↑로 들어가 편집한다.
+  const [formulaBar, setFormulaBar] = useState<{ dateKey: string; vendor: string; row: number; col: number; top: number; left: number } | null>(null);
+  const [formulaBarDraft, setFormulaBarDraft] = useState("");
+  const [barFocused, setBarFocused] = useState(false); // 바 입력에 포커스가 있는가(그동안은 activeCell이 null이어도 바를 유지)
+  const activeCellElRef = useRef<HTMLInputElement | null>(null); // 현재 활성 칸의 DOM(바 위치 계산용)
+  const formulaBarInputRef = useRef<HTMLInputElement | null>(null);
+  // 화면을 떠날 때 실행할 flush 로직 — 최신 상태(바 편집값 등)를 보도록 매 렌더 갱신하는 ref에 담는다.
+  const flushOnLeaveRef = useRef<() => void>(() => {});
   const recomputeSaveStatus = useCallback(() => {
     const a = orderStatusRef.current;
     const b = vendorStatusRef.current;
@@ -253,26 +266,50 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     };
   }, [dedupeOrders, normalizeRemoteOrderVendors, orderPendingKey, parseJsonArray, parseVendorJson, recomputeSaveStatus, sharedOrderKey, sharedVendorKey, storageKey, vendorKey, vendorPendingKey]);
 
+  // flush 로직은 최신 상태(수식 바 편집값·포커스 등)를 봐야 하므로 매 렌더 ref에 갱신해 둔다.
+  // 숫자는 키 입력마다 저장되지만 수식은 커밋(Enter/이동/적용) 때만 저장된다. 입력·바 편집 중 화면을 떠나면
+  // 초안이 유실될 수 있어, 떠나기 직전 편집 중 수식을 flushSync로 동기 커밋한다 —
+  // flushSync가 setState 업데이터(localStorage 기록 + 예약)를 즉시 돌려 flush 전에 반영되게 한다.
   useEffect(() => {
-    // 예약만 되고 아직 클라우드로 못 나간 저장을, 화면을 떠나는 순간·온라인 복귀 순간에 즉시 내보낸다.
-    // 이게 없으면 값을 적고 0.6초 안에 새로고침/탭닫기 시 그 저장이 사라져(메모리 전용)
-    // 다른 노트북에서는 영영 보이지 않는다.
-    const flushAll = () => {
+    flushOnLeaveRef.current = () => {
+      try {
+        flushSync(() => {
+          if (barFocused && formulaBar) {
+            // 수식 바에서 편집 중 — blur만으로는 커밋 안 되므로(바 onBlur는 barFocused만 끔) 여기서 직접 반영한다.
+            const draft = formulaBarDraft.trim();
+            const stored = (cellFormula(formulaBar.dateKey, formulaBar.vendor) || "").trim();
+            if (draft && draft !== "=" && draft !== stored) {
+              const expr = draft.startsWith("=") ? draft : "=" + draft;
+              commitOrderFormula(formulaBar.dateKey, formulaBar.vendor, expr, false);
+            }
+          } else {
+            // 칸에서 수식을 치던 중이면 blur → onBlur가 계산·저장한다(숫자 칸은 무해).
+            const el = document.activeElement as HTMLElement | null;
+            if (el && el !== document.body && typeof el.blur === "function") el.blur();
+          }
+        });
+      } catch { /* flushSync가 실패해도 아래 flush는 시도한다 */ }
       flushSharedSave(orderSaveSlot.current, "orders");
       flushSharedSave(vendorSaveSlot.current, "order_vendors");
     };
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") flushAll();
+  });
+
+  useEffect(() => {
+    const onLeave = () => flushOnLeaveRef.current();
+    const onVisibility = () => { if (document.visibilityState === "hidden") onLeave(); };
+    const onOnline = () => { // 온라인 복귀는 예약분만 내보낸다(입력 중 칸을 건드리지 않음)
+      flushSharedSave(orderSaveSlot.current, "orders");
+      flushSharedSave(vendorSaveSlot.current, "order_vendors");
     };
-    window.addEventListener("beforeunload", flushAll);
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("pagehide", flushAll);
-    window.addEventListener("online", flushAll);
+    window.addEventListener("beforeunload", onLeave);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onLeave);
+    window.addEventListener("online", onOnline);
     return () => {
-      window.removeEventListener("beforeunload", flushAll);
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("pagehide", flushAll);
-      window.removeEventListener("online", flushAll);
+      window.removeEventListener("beforeunload", onLeave);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onLeave);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
@@ -609,7 +646,8 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     });
   }, [orders, reportCategory, reportMonth, reportVendor]);
 
-  const matrixVendors = reportVendor === "전체" ? reportVendors : [reportVendor];
+  // useMemo로 참조를 안정화한다 — 매 렌더마다 새 배열이면 이 값을 deps로 쓰는 수식 바 effect가 매 렌더 실행돼 렌더 루프에 빠진다.
+  const matrixVendors = useMemo(() => (reportVendor === "전체" ? reportVendors : [reportVendor]), [reportVendor, reportVendors]);
   const vendorCategoryOf = (vendor: string): OrderCategory => {
     return ORDER_CATEGORIES.find((category) => (vendorsByCategory[category] || []).includes(vendor))
       || orders.find((order) => order.vendorName === vendor)?.category
@@ -641,11 +679,101 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
   const monthTotal = totals.reduce((sum, item) => sum + item, 0);
 
   // 엑셀식 칸 이동. 행=날짜, 열=거래처. 날짜 행은 달력이 정하므로 행 추가는 없다.
-  const matrixDays = monthDays(reportMonth);
-  const { cellProps, activeCell, isActive } = useSheetKeyboardNav({
+  // useMemo로 참조 안정화(위 matrixVendors와 같은 이유 — 렌더 루프 방지).
+  const matrixDays = useMemo(() => monthDays(reportMonth), [reportMonth]);
+
+  // 수식이 걸린 칸("orderDate|vendorName") 집합. 셀마다 cellFormula(=orders 전체 스캔)를 부르면
+  // 셀 수 × 발주건수라 이동 때마다 느려진다 → 렌더당 한 번만 만들어 셀은 O(1)로 조회한다.
+  const cellFormulaKeys = useMemo(() => {
+    const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
+    const set = new Set<string>();
+    orders.forEach((o) => {
+      if (o.formula && targetCategories.includes(o.category)) set.add(o.orderDate + "|" + o.vendorName);
+    });
+    return set;
+  }, [orders, reportCategory]);
+  const { cellProps, activeCell, isActive, focusCell } = useSheetKeyboardNav({
     rowCount: matrixDays.length,
     colCount: matrixVendors.length
   });
+
+  // 활성 칸이 수식 칸이면 그 위에 수식 바를 띄운다(칸엔 결과 숫자만). 바에서 편집 중(barFocused)에는
+  // activeCell이 잠시 null이 돼도 바를 닫지 않는다. 위치는 활성 칸 DOM에서 잰다.
+  useEffect(() => {
+    if (barFocused) return;
+    if (!activeCell) { setFormulaBar(null); return; }
+    // matrixDays[row]는 "일"(예: "01")일 뿐이다. 실제 dateKey는 렌더와 똑같이 reportMonth + "-" + day 로 만들어야
+    // cellFormula가 그 칸의 발주 건(orderDate="2026-07-01")을 찾는다. (이걸 빼먹어 바가 안 떴다.)
+    const day = matrixDays[activeCell.row];
+    const dateKey = day ? reportMonth + "-" + day : "";
+    const vendor = matrixVendors[activeCell.col];
+    const formula = dateKey && vendor ? cellFormula(dateKey, vendor) : "";
+    const el = activeCellElRef.current;
+    if (!formula || !el) { setFormulaBar(null); return; }
+    const rect = el.getBoundingClientRect();
+    const spillsAbove = rect.top - FORMULA_BAR_HEIGHT - 6 < 8;
+    const next = {
+      dateKey,
+      vendor,
+      row: activeCell.row,
+      col: activeCell.col,
+      top: spillsAbove ? rect.bottom + 6 : rect.top - FORMULA_BAR_HEIGHT - 6,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - FORMULA_BAR_WIDTH - 8))
+    };
+    // 값이 그대로면 같은 참조를 돌려줘 React가 재렌더를 건너뛰게 한다(렌더 루프 이중 방지).
+    setFormulaBar((prev) =>
+      prev && prev.dateKey === next.dateKey && prev.vendor === next.vendor
+        && prev.row === next.row && prev.col === next.col
+        && prev.top === next.top && prev.left === next.left
+        ? prev : next
+    );
+    setFormulaBarDraft((prev) => (prev === formula ? prev : formula));
+  }, [activeCell, barFocused, orders, matrixDays, matrixVendors, reportMonth]);
+
+  // 표는 안쪽 스크롤 상자에 있다 — 스크롤·리사이즈되면 바가 칸에서 떨어지므로 활성 칸을 다시 재서 따라붙인다.
+  // 스크롤 폭주(포커스 이동 시 자동 스크롤 등)에 매번 reflow+재렌더하면 셀 이동이 버벅인다 → rAF로 한 프레임에 한 번만,
+  // 위치가 실제로 바뀔 때만 갱신한다. 리스너는 passive로 스크롤 성능을 지킨다.
+  useEffect(() => {
+    if (!formulaBar) return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      const el = activeCellElRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const spillsAbove = rect.top - FORMULA_BAR_HEIGHT - 6 < 8;
+      const top = spillsAbove ? rect.bottom + 6 : rect.top - FORMULA_BAR_HEIGHT - 6;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - FORMULA_BAR_WIDTH - 8));
+      setFormulaBar((prev) => (prev && (prev.top !== top || prev.left !== left) ? { ...prev, top, left } : prev));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [formulaBar?.dateKey, formulaBar?.vendor]);
+
+  /** 수식 바의 값을 계산해 칸에 반영하고, 이어서 갈 칸으로 포커스를 돌린다(then이 없으면 원래 칸). 계산 실패면 바에 머문다. */
+  const applyFormulaBar = (then?: () => void) => {
+    if (!formulaBar) return;
+    const { dateKey, vendor, row, col } = formulaBar;
+    const draft = formulaBarDraft.trim();
+    const stored = (cellFormula(dateKey, vendor) || "").trim();
+    if (draft === stored) {
+      // 안 바꿨으면 다시 저장하지 않는다(무의미한 재저장·크로스디바이스 부하 방지).
+    } else if (draft === "" || draft === "=") {
+      updateOrderDraft(dateKey, vendor, ""); // 비우고 적용 = 값 삭제(메모 있으면 확인창)
+    } else {
+      const expr = draft.startsWith("=") ? draft : "=" + draft;
+      if (!commitOrderFormula(dateKey, vendor, expr, true)) return; // 실패 → alert 뒤 바 유지
+    }
+    // setBarFocused(false)는 여기서 하지 않는다 — 포커스가 칸으로 옮겨가며 바 input의 onBlur가 꺼준다.
+    // (여기서 미리 끄면 effect가 잠깐 바를 닫았다 다시 여는 깜빡임이 생긴다.)
+    setTimeout(() => (then ? then() : focusCell(row, col)), 0);
+  };
 
   return (
     <div className="space-y-5" id="orders-tab-view">
@@ -866,7 +994,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                       // 대분류가 겹쳐 합계로 보이는 칸 — 낱개처럼 고칠 수 없으므로 잠근다(단, 메모는 전부 보여준다).
                       const aggregate = isAggregateCell(dateKey, vendor);
                       const memo = cellMemoDisplay(dateKey, vendor);
-                      const cellHasFormula = !!cellFormula(dateKey, vendor); // 이 칸이 수식으로 저장돼 있나(ƒ 배지)
+                      const cellHasFormula = cellFormulaKeys.has(dateKey + "|" + vendor); // 이 칸이 수식으로 저장돼 있나(O(1) 조회)
                       // 아래쪽 행은 말풍선이 표 밖으로 잘리므로 위로 뒤집는다.
                       const memoFlipUp = rowIndex >= matrixDays.length - 6;
                       // 한 번만 만든다 — F2를 가로채려면 훅이 준 onKeyDown을 다시 불러야 하는데,
@@ -921,6 +1049,15 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                                   formulaJustCommitted.current = draftKey; // 뒤이어 터질 blur가 같은 칸을 또 계산하지 않게
                                 }
                               }
+                              // 수식 칸에서 ↑ → 위 수식 바로 들어가 편집한다(칸엔 결과 숫자만 보이므로).
+                              // setBarFocused를 먼저 켜서, 곧 터질 셀 blur가 바를 닫지 않게 한다.
+                              if (e.key === "ArrowUp" && !e.nativeEvent.isComposing && cellHasFormula && !isFormulaInput(e.currentTarget.value) && formulaBarInputRef.current) {
+                                e.preventDefault();
+                                setBarFocused(true);
+                                formulaBarInputRef.current.focus();
+                                formulaBarInputRef.current.select();
+                                return;
+                              }
                               sheetCell.onKeyDown(e);
                             }}
                             // 다른 칸으로 옮길 때 수식이 남아 있으면 계산해 넣는다. 계산 못 하는 수식은 원래 값으로 되돌려
@@ -940,17 +1077,10 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                               }
                               sheetCell.onBlur();
                             }}
-                            // 엑셀처럼: 수식으로 저장된 칸을 고르면(클릭·화살표) 그 칸에 수식(=12000+...)이 바로 뜬다.
-                            // 전체선택까지 다시 잡아, 곧바로 Delete로 지우거나 새 값으로 덮어쓸 수 있게 한다.
+                            // 칸을 고르면 그 DOM을 기억해 둔다(위 effect가 수식 칸일 때 이 위치 위에 수식 바를 띄운다).
+                            // 칸엔 결과 숫자만 보이고, 수식은 바에서 본다·고친다(추천안).
                             onFocus={(e) => {
-                              // 수식으로 저장된 칸이면, 지금 수식을 치는 중이 아닐 때(=커밋 뒤 숫자만 보이거나 빈 초안일 때) 저장된 수식을 띄운다.
-                              // draftValue===undefined 로만 판단하면 커밋 직후 draftValue엔 결과 숫자가 남아 있어 화살표로 다시 와도 수식이 안 떴다.
-                              const stored = cellFormula(dateKey, vendor);
-                              if (stored && !isFormulaInput(draftValue)) {
-                                const input = e.currentTarget;
-                                setOrderDraftCells((prev) => ({ ...prev, [draftKey]: stored }));
-                                setTimeout(() => { try { input.select(); } catch { /* 선택 미지원 입력 */ } }, 0);
-                              }
+                              activeCellElRef.current = e.currentTarget;
                               sheetCell.onFocus();
                             }}
                             disabled={aggregate || !loaded}
@@ -1083,6 +1213,61 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
             </div>
           </div>
         </>
+      ) : null}
+
+      {/* 수식 바 — 활성 수식 칸 바로 위에 떠서 수식을 넓게 보여준다. 칸에서 ↑로 들어와 편집, ↓/Enter로 적용·복귀, Esc로 취소. */}
+      {formulaBar ? (
+        <div
+          className="fixed z-50 rounded-xl border border-[#2E6DB4] bg-white px-2.5 py-1.5 shadow-2xl"
+          style={{ top: formulaBar.top, left: formulaBar.left, width: FORMULA_BAR_WIDTH }}
+          role="group"
+          aria-label={`${Number(formulaBar.dateKey.slice(-2))}일 ${formulaBar.vendor} 수식`}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 text-[10px] font-black italic text-[#2E6DB4]">fx</span>
+            <input
+              ref={formulaBarInputRef}
+              value={formulaBarDraft}
+              onChange={(e) => setFormulaBarDraft(e.target.value)}
+              onFocus={() => setBarFocused(true)}
+              onBlur={() => setBarFocused(false)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setFormulaBarDraft(cellFormula(formulaBar.dateKey, formulaBar.vendor)); // 원래 수식으로 되돌림
+                  focusCell(formulaBar.row, formulaBar.col); // 칸으로 복귀(바 onBlur가 barFocused를 꺼준다)
+                } else if (e.key === "Enter" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  applyFormulaBar(); // 계산 반영 + 그 칸으로 복귀
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  applyFormulaBar(() => focusCell(formulaBar.row - 1, formulaBar.col)); // 적용 후 위 행으로
+                }
+              }}
+              placeholder="예: =12000+3400+8000-500"
+              spellCheck={false}
+              className="w-full bg-transparent font-mono text-sm font-bold text-[var(--branch-black)] focus:outline-none"
+            />
+          </div>
+          <div className="pl-5 pt-0.5 text-[11px] font-black">
+            {(() => {
+              const draft = formulaBarDraft.trim();
+              if (draft === "" || draft === "=") {
+                return <span className="text-rose-500">비우고 적용하면 값이 지워집니다{barFocused ? " (↓/Enter)" : ""}</span>;
+              }
+              const expr = draft.startsWith("=") ? draft : "=" + draft;
+              const preview = evaluateOrderFormula(expr);
+              if (!preview.ok) return <span className="text-rose-500">{preview.reason}</span>;
+              return (
+                <span className="text-[#2E6DB4]">
+                  = {formatNumber(preview.value ?? 0)}원
+                  <span className="ml-1.5 font-bold text-gray-400">{barFocused ? "· ↓/Enter 적용 · Esc 취소" : "· ↑ 눌러 편집"}</span>
+                </span>
+              );
+            })()}
+          </div>
+        </div>
       ) : null}
 
     </div>

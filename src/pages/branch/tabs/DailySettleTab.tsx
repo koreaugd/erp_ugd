@@ -1560,8 +1560,6 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
 3. 근무자
 - ${workersText}
-- 홀:
-- 주방:
 
 4. 특이사항
 - 직원 특이사항: ${staffMemo.trim() || "없음"}
