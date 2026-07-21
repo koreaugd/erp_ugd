@@ -98,26 +98,67 @@ export function diffSalaryMonths(
   const prevNameCount = countByName(prev);
   const currNameCount = countByName(curr);
 
-  const prevById = new Map<string, SalaryRow>();
-  const prevByName = new Map<string, SalaryRow>();
+  // ── 짝짓기는 반드시 1:1 이어야 한다 ──
+  // 지난달 행을 '소비'하지 않고 이름으로 찾기만 하면, 한 지점에 동명이인이 있을 때 이번 달 두 행이
+  // 같은 지난달 행 하나와 비교되고(두 번째 사람에게 엉뚱한 증감이 찍힌다), 짝을 못 찾은 지난달 행은
+  // 재직 중인데도 '퇴사(추정)'로 보고된다. 그래서 employeeId → 이름 순으로 한 번씩만 소비한다.
+  // employeeId 도 '대기열'로 둔다. 같은 id 가 두 행에 붙어 있을 수 있기 때문이다(저장 데이터 오염·행 복제).
+  // 그때 id 를 확실한 짝으로 믿으면, 엉뚱한 사람과 급여를 비교하고 진짜 짝은 '퇴사(추정)'로 새어 나간다.
+  const prevByIdQueue = new Map<string, SalaryRow[]>();
   prev.forEach((r) => {
-    if (r.employeeId) prevById.set(r.employeeId, r);
-    if (!prevByName.has(nameOf(r))) prevByName.set(nameOf(r), r);
+    if (!r.employeeId) return;
+    if (!prevByIdQueue.has(r.employeeId)) prevByIdQueue.set(r.employeeId, []);
+    prevByIdQueue.get(r.employeeId)!.push(r);
   });
+  const prevIdCount = new Map<string, number>(Array.from(prevByIdQueue, ([k, v]) => [k, v.length]));
+  const currIdCount = new Map<string, number>();
+  curr.forEach((r) => { if (r.employeeId) currIdCount.set(r.employeeId, (currIdCount.get(r.employeeId) || 0) + 1); });
+
+  const matchedPrev = new Set<SalaryRow>();
+  const matchOf = new Map<SalaryRow, SalaryRow>();      // 이번달 행 → 짝지은 지난달 행
+  const matchedById = new Set<SalaryRow>();             // 그중 employeeId 가 양쪽에서 유일해 '확실'한 것
+  const idDuplicated = new Set<SalaryRow>();            // id 가 중복이라 짝을 단정할 수 없는 행
+
+  // 1차: employeeId 로 짝짓는다(확실한 짝을 이름 매칭보다 먼저 확보해야 뺏기지 않는다).
+  for (const row of curr) {
+    if (!row.employeeId) continue;
+    const q = prevByIdQueue.get(row.employeeId);
+    if (!q || q.length === 0) continue;
+    // id 가 중복일 땐 이름이 같은 후보를 먼저 고른다 — 순서만 믿으면 다른 사람과 짝지어진다.
+    const byName = q.findIndex((p) => nameOf(p) === nameOf(row));
+    const p = q.splice(byName === -1 ? 0 : byName, 1)[0];
+    matchedPrev.add(p);
+    matchOf.set(row, p);
+    const unique = (prevIdCount.get(row.employeeId) || 0) === 1 && (currIdCount.get(row.employeeId) || 0) === 1;
+    if (unique) matchedById.add(row); else idDuplicated.add(row);
+  }
+  // 2차: 남은 지난달 행을 이름별 대기열에 넣고 앞에서부터 하나씩 꺼내 쓴다(같은 행을 두 번 쓰지 않는다).
+  const queueByName = new Map<string, SalaryRow[]>();
+  for (const p of prev) {
+    if (matchedPrev.has(p)) continue;
+    const k = nameOf(p);
+    if (!queueByName.has(k)) queueByName.set(k, []);
+    queueByName.get(k)!.push(p);
+  }
+  for (const row of curr) {
+    if (matchOf.has(row)) continue;
+    const q = queueByName.get(nameOf(row));
+    if (q && q.length) { const p = q.shift()!; matchedPrev.add(p); matchOf.set(row, p); }
+  }
 
   const changes: SalaryChange[] = [];
-  const matchedPrev = new Set<SalaryRow>();
 
   for (const row of curr) {
     const name = nameOf(row);
-    const byId = row.employeeId ? prevById.get(row.employeeId) : undefined;
-    const before = byId || prevByName.get(name);
-    if (before) matchedPrev.add(before);
+    const before = matchOf.get(row);
+    const byId = matchedById.has(row) ? before : undefined;
 
     const currSalary = money(row.thisSalary);
     const declaredPrev = row.prevSalary != null && String(row.prevSalary) !== "" ? money(row.prevSalary) : null;
-    // 이름만으로 짝지었고 그 이름이 어느 한쪽에서든 중복이면 불확실하다(id 로 짝지었으면 확실).
-    const ambiguous = !byId && !!before && ((prevNameCount.get(name) || 0) > 1 || (currNameCount.get(name) || 0) > 1);
+    // 불확실한 짝: (a) 같은 employeeId 가 여러 행에 붙어 있거나, (b) 이름으로만 짝지었는데 그 이름이 중복.
+    // id 가 양쪽에서 유일할 때만 '확실'로 본다.
+    const ambiguous = !!before && (idDuplicated.has(row) ||
+      (!byId && ((prevNameCount.get(name) || 0) > 1 || (currNameCount.get(name) || 0) > 1)));
 
     if (!before) {
       // 이번 달 입사자는 '신규'가 가장 정확한 설명이다 — 전월급여 칸에 뭐가 적혀 있든 신규로 본다.
@@ -178,13 +219,18 @@ export function diffSalaryMonths(
     if (matchedPrev.has(before)) continue;
     const prevSalary = money(before.thisSalary);
     if (prevSalary === 0 && rowTotalOf(before) === 0) continue; // 지난달에도 빈 행이었으면 변동이 아니다
+    const leftName = nameOf(before);
     changes.push({
-      branchName, name: nameOf(before), rank: String(before.rank ?? ""),
+      branchName, name: leftName, rank: String(before.rank ?? ""),
       kind: "left",
       prevSalary, prevSource: "document", currSalary: null, delta: null,
       prevTotal: rowTotalOf(before), currTotal: null,
       entryDate: String(before.entryDate ?? ""), memo: String(before.memo ?? ""),
-      declaredPrev: null, prevMismatch: false, ambiguous: false,
+      declaredPrev: null, prevMismatch: false,
+      // 동명이인·중복 employeeId 가 섞였으면 짝짓기 순서에 따라 '남은 쪽'이 정해진 것이라,
+      // 정말 이 사람이 퇴사한 게 맞는지 알 수 없다. 퇴사 오보는 파장이 크므로 반드시 경고를 남긴다.
+      ambiguous: (prevNameCount.get(leftName) || 0) > 1 || (currNameCount.get(leftName) || 0) > 1
+        || (!!before.employeeId && (prevIdCount.get(before.employeeId) || 0) > 1),
     });
   }
 

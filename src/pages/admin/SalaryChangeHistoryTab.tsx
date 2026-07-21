@@ -14,13 +14,15 @@ import { diffSalaryMonths, sortChanges, summarize, type ChangeKind, type SalaryC
 const KIND_LABEL: Record<ChangeKind, string> = {
   raise: "인상", cut: "인하", new: "신규", noPrevRecord: "지난달 기록 없음", left: "퇴사(추정)",
 };
-// 색은 DESIGN.md 토큰을 따른다 — 임의 팔레트 금지.
+// 색은 DESIGN_ADMIN.md 의 관리자 토큰(--admin-*)을 쓴다 — 임의 팔레트 금지.
+// 지점 토큰(--branch-*)은 .branch-redesign 스코프에만 정의돼 있어 관리자 화면에서는 값이 없다
+// (= 배경이 아예 안 칠해진다). 두 토큰 세트는 서로를 참조하지 않는다 — DESIGN_ADMIN.md §1.
 const KIND_CHIP: Record<ChangeKind, string> = {
-  raise: "bg-[var(--branch-vanilla)] text-zinc-900",
-  cut: "bg-[var(--branch-honey)] text-zinc-900",
-  new: "bg-white text-zinc-900",
-  noPrevRecord: "bg-zinc-100 text-zinc-500",
-  left: "bg-zinc-100 text-zinc-500",
+  raise: "bg-[var(--admin-vanilla)] text-[#212121]",
+  cut: "bg-[var(--admin-honey)] text-[#212121]",
+  new: "bg-white text-[#212121]",
+  noPrevRecord: "bg-gray-100 text-gray-500",
+  left: "bg-gray-100 text-gray-500",
 };
 const FILTERS: Array<{ key: "all" | ChangeKind; label: string }> = [
   { key: "all", label: "전체" }, { key: "raise", label: "인상" }, { key: "cut", label: "인하" },
@@ -135,7 +137,7 @@ export function SalaryChangeHistoryTab() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-black text-zinc-900">급여 변동 이력</h2>
+          <h3 className="text-sm font-black text-gray-900 w-fit">급여 변동 이력</h3>
           <p className="text-[11px] font-semibold text-zinc-400 mt-1">
             {prevMonthLabel} 대비 {shownMonth} · 기본급(이달 급여)이 달라진 정직원만 표시합니다. 읽기 전용입니다.
           </p>
@@ -163,7 +165,9 @@ export function SalaryChangeHistoryTab() {
         </div>
       </div>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{error}</div>}
+      {/* 실패는 반드시 붉게 보여야 한다. 표준 rose 계열을 쓰면 관리자 CSS가 bg-rose-50 → --admin-honey(완료·긍정색)로
+          바꿔버려 '실패가 성공처럼' 보인다(index.css의 .admin-redesign .bg-rose-50). DESIGN.md §11의 오류 hex를 직접 박는다. */}
+      {error && <div className="rounded-2xl border border-[#C93A3A] bg-[#FDE2E2] px-4 py-3 text-xs font-bold text-[#B91C1C]">{error}</div>}
 
       {stale && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800 flex items-start gap-2">
@@ -173,7 +177,7 @@ export function SalaryChangeHistoryTab() {
       )}
 
       {failedBranches.length > 0 && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700 flex items-start gap-2">
+        <div className="rounded-2xl border border-[#C93A3A] bg-[#FDE2E2] px-4 py-3 text-xs font-bold text-[#B91C1C] flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>다음 지점은 급여 자료를 불러오지 못했습니다(변동 없음이 아닙니다): {failedBranches.join(", ")}. 새로고침을 눌러 다시 시도해주세요.</span>
         </div>
@@ -210,7 +214,7 @@ export function SalaryChangeHistoryTab() {
             {FILTERS.map((f) => (
               <button key={f.key} onClick={() => setKindFilter(f.key)}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer ${
-                  kindFilter === f.key ? "bg-[var(--branch-vanilla)] border-[#212121] text-zinc-900" : "bg-white border-gray-200 text-zinc-500"}`}>
+                  kindFilter === f.key ? "bg-[var(--admin-vanilla)] border-[#212121] text-[#212121]" : "bg-white border-gray-200 text-gray-500"}`}>
                 {f.label}
               </button>
             ))}
@@ -249,7 +253,8 @@ export function SalaryChangeHistoryTab() {
                     </td>
                     <td className="px-4 py-3 text-zinc-500">{c.rank || "-"}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full border border-zinc-900 px-2 py-0.5 text-[10px] font-black ${KIND_CHIP[c.kind]}`}>
+                      {/* 테두리는 zinc 금지 — 검정 치환에서 빠져 연회색 잔선이 남는다(DESIGN.md 13번). */}
+                      <span className={`inline-block rounded-full border border-[#212121] px-2 py-0.5 text-[10px] font-black ${KIND_CHIP[c.kind]}`}>
                         {KIND_LABEL[c.kind]}
                       </span>
                     </td>
