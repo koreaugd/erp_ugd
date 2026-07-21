@@ -1778,6 +1778,13 @@ function AdminDailySettlementStatusSection({
   );
 }
 
+// 본사는 월말업무를 하지 않는다(2026-07 방침) — 제출현황·현금관리·현금지출 세 탭 모두에서 뺀다.
+// 표에서만 숨기면 '미제출' 카운트·법인별 배치 다운로드·지점 드롭다운·'전체' 합계에는 그대로 남으므로,
+// 지점 목록을 읽어오는 지점마다 이 필터를 공통으로 건다. (일일마감정산 등 본사가 실제로 쓰는 화면은 제외 대상 아님)
+const MONTHLY_WORK_EXEMPT_BRANCHES = ["본사"];
+const isMonthlyWorkBranch = (b: any): boolean =>
+  b?.role === "branch" && !MONTHLY_WORK_EXEMPT_BRANCHES.includes(String(b?.branchName || "").trim());
+
 function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" | "cashExpenses" } = {}) {
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const today = new Date();
@@ -1808,7 +1815,7 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
     try {
       setLoading(true);
       const branchList = await gasClient.getBranchList();
-      const activeBranches = (Array.isArray(branchList) ? branchList : []).filter((branch: any) => branch?.role === "branch" && branch.branchName);
+      const activeBranches = (Array.isArray(branchList) ? branchList : []).filter((branch: any) => isMonthlyWorkBranch(branch) && branch.branchName);
       setBranches(activeBranches);
       const targets = selectedBranch === "전체"
         ? activeBranches
@@ -2720,7 +2727,7 @@ function AdminMonthlyClosingStatusSection() {
         gasClient.getBranchList(),
         gasClient.getSharedData<any[]>("monthly_closings")
       ]);
-      setBranches((branchList || []).filter((branch: any) => branch.role === "branch"));
+      setBranches((branchList || []).filter(isMonthlyWorkBranch));
       setRecords(Array.isArray(monthlyRecords) ? monthlyRecords : []);
     } catch (error) {
       console.error("월말마감 현황 로드 실패:", error);
@@ -2889,7 +2896,7 @@ function AdminMonthlyClosingStatusSection() {
     const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
     try {
       const XLSX = await import("xlsx");
-      const allBranches = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
+      const allBranches = branches.length ? branches : (await gasClient.getBranchList()).filter(isMonthlyWorkBranch);
       // 법인별 배치(confirmedOnly): 정직원급여 통합과 동일 기준 — '확정(제출)'한 지점만 내보낸다.
       // 확정 상태는 서버에서 '신선하게' 읽어 fail-closed로 거른다. 화면 캐시(records)로만 거르면 방금 다른 기기에서
       // '수정중/미제출'로 바뀐 지점을 못 걸러, 미확정 매출집계가 최종본처럼 섞여 나갈 수 있다.
@@ -2988,7 +2995,7 @@ function AdminMonthlyClosingStatusSection() {
   // 정직원급여 통합 다운로드(법인/전지점 공용). branchFilter로 대상 지점을 좁히고, label로 파일명/안내문을 정한다.
   const downloadFullTimeSalary = async (branchFilter: (name: string) => boolean, label: string) => {
     try {
-      const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter((b: any) => b.role === "branch");
+      const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter(isMonthlyWorkBranch);
       // '확정(제출)'한 지점만 포함한다 — 지점별 다운로드 버튼과 같은 기준. 미제출·수정중 지점(예: 한남점)이 섞여 나가지 않게 한다.
       // 확정 판정은 화면 캐시(records)가 아니라 '서버에서 신선하게' 읽는다: 관리자가 새로고침 전이면
       // 방금 다른 기기에서 '수정중/미제출'로 바뀐 지점을 못 걸러 잘못된 통합본이 나갈 수 있다(fail-closed — 못 읽으면 취소).
