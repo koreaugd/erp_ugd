@@ -977,10 +977,16 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                     {/* 날짜 칸 — 왼쪽에 고정되고, 지금 편집 중인 행을 짚어준다.
                         z-20이 없으면 안 된다: 금액 칸들이 relative(위치 지정)라, 같은 층위에서는
                         DOM 순서상 뒤에 오는 금액 칸이 위에 그려져 가로 스크롤 시 날짜를 덮는다.
-                        메모 말풍선(z-30)보다는 아래여야 하므로 z-20으로 둔다. */}
+                        메모 말풍선(z-30)보다는 아래여야 하므로 z-20으로 둔다.
+
+                        행 전체를 짚는 띠(바닐라 막 + 위아래 검정 선 + 왼쪽 4px)는 여기서 못 그린다 —
+                        고정 칸의 background 를 전역 `.branch-redesign .sticky` 규칙이 !important 로
+                        못 박아 두어 배경 클래스가 먹지 않기 때문이다(재고 시트와 같은 사정).
+                        띠는 index.css 의 `#orders-tab-view tbody tr:focus-within` 이 그린다.
+                        여기서는 날짜 숫자 색만 바꿔 "몇 일 줄인지"를 한 번 더 짚어 준다. */}
                     <td
                       className={`sticky left-0 z-20 p-1.5 text-center font-mono font-black border-r transition-colors ${
-                        rowActive ? "bg-blue-50 text-[#2E6DB4]" : "bg-white text-gray-600"
+                        rowActive ? "text-[#2E6DB4]" : "text-gray-600"
                       }`}
                     >
                       {Number(day)}
