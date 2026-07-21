@@ -455,11 +455,38 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
     setVendorRename(null);
   };
 
-  const cellAmount = (dateKey: string, vendor: string) => {
+  /**
+   * 칸 조회용 색인. 아래 cellAmount·cellOrderIndex·isAggregateCell이 여기서 O(1)로 꺼내 쓴다.
+   *
+   * 예전엔 셀마다 orders 전체를 훑었다 — (셀 수 × 발주 건수)라, 한 달 표(31일 × 거래처 10)에
+   * 발주가 몇 천 건 쌓이면 화살표로 칸을 옮길 때마다 수백만 번을 세느라 표가 멈칫했다.
+   * 렌더당 한 번만 만들어 두면 칸 조회는 Map 조회 한 번이다(cellFormulaKeys와 같은 취지).
+   *
+   * countAllCategories만 대분류를 가리지 않는다 — isAggregateCell의 원래 규칙이 그렇다.
+   * "이 날짜·거래처에 건이 둘 이상인가"를 화면 필터와 무관하게 봐야 겹친 칸을 잠글 수 있다.
+   */
+  const cellIndex = useMemo(() => {
     const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
-    return orders
-      .filter((order) => targetCategories.includes(order.category) && order.orderDate === dateKey && order.vendorName === vendor)
-      .reduce((sum, order) => sum + Number(order.amount || 0), 0);
+    const amount = new Map<string, number>();
+    const firstIndex = new Map<string, number>();
+    const countAllCategories = new Map<string, number>();
+    orders.forEach((order, index) => {
+      const key = order.orderDate + "|" + order.vendorName;
+      countAllCategories.set(key, (countAllCategories.get(key) ?? 0) + 1);
+      if (!targetCategories.includes(order.category)) return;
+      // `?? 0`이어야 한다(`|| 0` 아님) — 금액이 깨진 데이터(숫자로 못 읽는 값)가 섞이면 합이 NaN이 되는데,
+      // `|| 0`은 그 NaN을 0으로 바꿔 버린다. 예전 구현은 NaN을 그대로 드러냈으니 그 동작을 지킨다
+      // (금액이 있는데 0원으로 보이는 것이 NaN으로 보이는 것보다 위험하다 — 조용히 틀리기 때문).
+      amount.set(key, (amount.get(key) ?? 0) + Number(order.amount || 0));
+      // 첫 건만 기억한다 — cellOrderIndex는 findIndex(맨 앞 한 건)와 같은 값을 줘야 한다.
+      if (!firstIndex.has(key)) firstIndex.set(key, index);
+    });
+    return { amount, firstIndex, countAllCategories };
+  }, [orders, reportCategory]);
+
+  const cellAmount = (dateKey: string, vendor: string) => {
+    const sum = cellIndex.amount.get(dateKey + "|" + vendor);
+    return sum === undefined ? 0 : sum; // undefined만 0으로. NaN은 위 주석대로 그대로 내보낸다.
   };
 
   /**
@@ -469,9 +496,8 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
    * 이때 조건에 맞는 건을 전부 건드리면 다른 분류의 메모까지 덮어쓰므로, 언제나 첫 한 건으로 못 박는다.
    */
   const cellOrderIndex = (dateKey: string, vendor: string) => {
-    const targetCategories = reportCategory === ALL_ORDER_CATEGORIES ? ORDER_CATEGORIES : [reportCategory];
-    return orders.findIndex((order) =>
-      targetCategories.includes(order.category) && order.orderDate === dateKey && order.vendorName === vendor);
+    const index = cellIndex.firstIndex.get(dateKey + "|" + vendor);
+    return index === undefined ? -1 : index;
   };
 
   const cellMemo = (dateKey: string, vendor: string) => {
@@ -494,7 +520,7 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
    */
   const isAggregateCell = (dateKey: string, vendor: string) => {
     if (reportCategory !== ALL_ORDER_CATEGORIES) return false;
-    return orders.filter((order) => order.orderDate === dateKey && order.vendorName === vendor).length > 1;
+    return (cellIndex.countAllCategories.get(dateKey + "|" + vendor) || 0) > 1;
   };
 
   const AGGREGATE_CELL_HINT = "대분류가 둘 이상 겹친 칸입니다. 위에서 대분류를 하나 고른 뒤 수정해 주세요.";

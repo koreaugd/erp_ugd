@@ -309,10 +309,58 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     });
   };
 
+  /**
+   * 칸 조회용 색인. 아래 savedAmount·stockBeforeDate가 여기서 꺼내 쓴다.
+   *
+   * 예전엔 칸마다 movements 전체를 훑었다 — 입고·판매·재고 세 칸이 각각 훑으니
+   * (칸 수 × 입출고 건수)다. 상품 30개 × 31일에 기록이 몇 천 건 쌓이면 화살표로 칸을 옮길 때마다
+   * 수천만 번을 세느라 시트가 멈칫했다. 렌더당 한 번만 만들어 두면 칸 조회는 Map 조회 한 번이다.
+   *
+   * byCell: "상품|날짜" → 그날 입고·판매 합계.
+   * prefixByProduct: 상품별로 날짜를 오름차순 정렬하고 "그 날 직전까지의 누적 증감"을 미리 재 둔다.
+   *   stockBeforeDate가 "그 날보다 앞선 기록 전부의 합"이므로, 정렬된 날짜에서 이진탐색으로 바로 꺼낸다.
+   *   날짜 비교는 예전과 같은 문자열 비교다("2026-07-05" < "2026-07-06").
+   */
+  const movementIndex = useMemo(() => {
+    const byCell = new Map<string, { inbound: number; sold: number }>();
+    const deltasByProduct = new Map<string, Map<string, number>>();
+    movements.forEach((movement) => {
+      const inbound = Number(movement.inbound || 0);
+      const sold = Number(movement.sold || 0);
+      const cellKey = movement.productId + "|" + movement.movementDate;
+      const cell = byCell.get(cellKey);
+      if (cell) {
+        cell.inbound += inbound;
+        cell.sold += sold;
+      } else {
+        byCell.set(cellKey, { inbound, sold });
+      }
+      let dates = deltasByProduct.get(movement.productId);
+      if (!dates) {
+        dates = new Map<string, number>();
+        deltasByProduct.set(movement.productId, dates);
+      }
+      // `?? 0`이어야 한다(`|| 0` 아님) — 숫자로 못 읽는 값이 섞이면 합이 NaN이 되는데, `||`는 그 NaN을
+      // 0으로 바꿔 버린다. 예전 구현은 NaN을 그대로 드러냈으니 그 동작을 지킨다(조용히 0으로 보이면 더 위험).
+      dates.set(movement.movementDate, (dates.get(movement.movementDate) ?? 0) + inbound - sold);
+    });
+    const prefixByProduct = new Map<string, { dates: string[]; before: number[]; total: number }>();
+    deltasByProduct.forEach((dates, productId) => {
+      const sorted = Array.from(dates.keys()).sort();
+      const before: number[] = [];
+      let running = 0;
+      sorted.forEach((date) => {
+        before.push(running); // 이 날 직전까지의 누적
+        running += dates.get(date) ?? 0; // 위와 같은 이유로 `??` (NaN을 0으로 지우지 않는다)
+      });
+      prefixByProduct.set(productId, { dates: sorted, before, total: running });
+    });
+    return { byCell, prefixByProduct };
+  }, [movements]);
+
   const savedAmount = (productId: string, date: string, field: "inbound" | "sold") => {
-    return movements
-      .filter((movement) => movement.productId === productId && movement.movementDate === date)
-      .reduce((sum, movement) => sum + Number(movement[field] || 0), 0);
+    const cell = movementIndex.byCell.get(productId + "|" + date);
+    return cell === undefined ? 0 : cell[field]; // 기록이 없을 때만 0. NaN은 위 주석대로 그대로 내보낸다.
   };
 
   const filteredProducts = useMemo(() => {
@@ -345,10 +393,19 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
     return draft !== undefined && draft !== "" ? Number(draft || 0) : savedAmount(productId, date, field);
   };
 
+  /** 그 날보다 앞선 기록 전부의 증감 합. 정렬된 날짜에서 "date보다 작은 마지막 자리"를 이진탐색으로 찾는다. */
   const stockBeforeDate = (productId: string, date: string) => {
-    return movements
-      .filter((movement) => movement.productId === productId && movement.movementDate < date)
-      .reduce((sum, movement) => sum + Number(movement.inbound || 0) - Number(movement.sold || 0), 0);
+    const prefix = movementIndex.prefixByProduct.get(productId);
+    if (!prefix) return 0;
+    // date 이상인 첫 자리(lower bound)를 찾는다 — 그 자리의 before가 곧 "date보다 앞선 기록의 합"이다.
+    let low = 0;
+    let high = prefix.dates.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (prefix.dates[mid] < date) low = mid + 1;
+      else high = mid;
+    }
+    return low < prefix.dates.length ? prefix.before[low] : prefix.total;
   };
 
   const stockOnDate = (productId: string, date: string) => {
