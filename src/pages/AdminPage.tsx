@@ -10,6 +10,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -66,7 +67,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -769,6 +770,13 @@ export default function AdminPage() {
           >
             연차관리
           </button>
+          <button
+            onClick={() => setAdminSection("salaryChanges")}
+            aria-current={adminSection === "salaryChanges" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "salaryChanges" ? " is-active" : ""}`}
+          >
+            급여 변동 이력
+          </button>
           {employeeDirectoryEnabled && <button
             onClick={() => setAdminSection("employeeDirectory")}
             aria-current={adminSection === "employeeDirectory" ? "page" : undefined}
@@ -938,6 +946,8 @@ export default function AdminPage() {
           )}
 
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
+
+          {adminSection === "salaryChanges" && <SalaryChangeHistoryTab />}
 
           {adminSection === "dailySettlement" && (
             <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
