@@ -14,7 +14,7 @@ import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
   Download, FileSpreadsheet, Eye, 
-  X, Edit3, Save, LogOut, ShieldAlert, ClipboardList, Clock, Briefcase, Trash2,
+  X, Edit3, Save, LogOut, ClipboardList, Briefcase, Trash2,
   Coins
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -82,7 +82,10 @@ export default function AdminPage() {
   const [clearingDirectory, setClearingDirectory] = useState(false);
   const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks" | "otherMemo">("dashboard");
   const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
-  const [dailyLogsSubTab, setDailyLogsSubTab] = useState<"logs" | "manualOvertimes">("logs");
+  // 마감 이력 점검 탭은 하위탭이 없어졌다. 대시보드 알림에서 넘어올 때 어느 섹션으로 스크롤할지만 가리킨다.
+  // 기본값은 반드시 null이다 — 값이 있으면 사이드바로 그냥 들어와도 그 섹션까지 스크롤해 버려,
+  // 맨 위 섹션(현금차이)을 건너뛰고 화면이 아래로 튄다.
+  const [dailyLogsFocus, setDailyLogsFocus] = useState<"logs" | "manualOvertimes" | null>(null);
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
@@ -437,6 +440,9 @@ export default function AdminPage() {
   const loadDashboardAlerts = useCallback(async () => {
     try {
       setDashboardAlertsLoading(true);
+      // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
+      // (강조가 최근 3일 기준으로 저절로 꺼지게 바뀜) 이제 아무도 이 목록에 쓰지 않는다. 다만 예전에 확인해 둔
+      // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
       const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
@@ -480,11 +486,11 @@ export default function AdminPage() {
     setAdminSection("dailySettlement");
     setDailySettlementTab("logs");
     if (target === "editLogs") {
-      setDailyLogsSubTab("logs");
+      setDailyLogsFocus("logs");
       localStorage.setItem("admin_dashboard_dismissed_edit_logs_date", getYesterdayDateString());
       setDashboardAlerts((current) => ({ ...current, editLogs: 0 }));
     } else {
-      setDailyLogsSubTab("manualOvertimes");
+      setDailyLogsFocus("manualOvertimes");
       localStorage.setItem("admin_dashboard_dismissed_manual_overtimes_date", getYesterdayDateString());
       setDashboardAlerts((current) => ({ ...current, manualOvertimes: 0 }));
     }
@@ -719,12 +725,12 @@ export default function AdminPage() {
           </button>
 
           <p className="ugd-nav-group">일일업무</p>
-          {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "변경이력 & 수기대장" }].map((sub) => {
+          {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "마감 이력 점검" }].map((sub) => {
             const subActive = adminSection === "dailySettlement" && dailySettlementTab === sub.id;
             return (
               <button
                 key={sub.id}
-                onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs"); }}
+                onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs"); setDailyLogsFocus(null); }}
                 aria-current={subActive ? "page" : undefined}
                 className={`ugd-nav-item${subActive ? " is-active" : ""}`}
               >
@@ -937,7 +943,7 @@ export default function AdminPage() {
             <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
                 <button onClick={() => setDailySettlementTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
-                <button onClick={() => setDailySettlementTab("logs")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변경이력 & 수기대장</button>
+                <button onClick={() => { setDailySettlementTab("logs"); setDailyLogsFocus(null); }} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>마감 이력 점검</button>
               </div>
               {dailySettlementTab === "status" ? (
                 <AdminDailySettlementStatusSection
@@ -952,7 +958,7 @@ export default function AdminPage() {
                   handleDownloadExcel={handleDownloadExcel}
                   handleOpenDetail={handleOpenDetail}
                 />
-              ) : <AdminModificationLogsSection defaultSubTab={dailyLogsSubTab} />}
+              ) : <AdminModificationLogsSection focusSection={dailyLogsFocus} />}
             </section>
           )}
 
@@ -2237,23 +2243,130 @@ function AdminAnnualLeaveSection() {
   );
 }
 
-function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTab?: "logs" | "manualOvertimes" } = {}) {
-  const [subTab, setSubTab] = useState<"logs" | "manualOvertimes" | "cashDiff">(defaultSubTab);
+// 마감 이력 점검 탭 — 하위탭 없이 세 섹션(현금차이 이력 · 수기 초과근무 대장 · 정산 변경이력)을 세로로 쌓아
+// 한 화면에서 바로 본다. 예전엔 하위탭을 눌러 하나씩 오갔으나 평탄화했다(2026-07-21).
+// 순서는 '금액 이상 → 수기 입력 → 사후 수정' 순으로, 급한 것부터 위에 둔다.
+function AdminModificationLogsSection({ focusSection }: { focusSection?: "logs" | "manualOvertimes" | null } = {}) {
+  // 대시보드 알림에서 넘어왔을 때만 그 섹션으로 스크롤해 짚어 준다(예전 하위탭 전환의 대체).
+  // 사이드바로 그냥 들어온 경우엔 focusSection이 null이라 스크롤하지 않고 맨 위부터 보인다.
+  useEffect(() => {
+    if (!focusSection) return;
+    document
+      .getElementById(focusSection === "manualOvertimes" ? "modlog-manual-overtimes" : "modlog-edit-logs")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusSection]);
+
+  return (
+    <div className="space-y-5 animate-fade-in" id="modification-logs-section">
+      <AdminCashDiffHistorySection />
+      <AdminManualOvertimesSection />
+      <AdminEditLogsSection />
+    </div>
+  );
+}
+
+// 세 섹션 공통 규격 — 관리자 표준(제출현황 섹션)과 같은 값으로 못 박아 셋이 어긋나지 않게 한다.
+// 카드 DESIGN.md §4 / 제목 알약 §6(텍스트만) / 컨트롤 h-8·11px §10 / 표 여백 §8.
+const MODLOG_CARD = "bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3";
+const MODLOG_TITLE = "inline-flex w-fit items-center rounded-full border border-[#212121] bg-amber-50 px-3 py-1.5 text-[11px] font-black text-gray-900";
+const MODLOG_SUB = "text-[11px] text-gray-400";
+const MODLOG_FIELD = "h-8 rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold";
+const MODLOG_REFRESH = "h-8 rounded-lg bg-[#2E6DB4] text-white px-3 text-[11px] font-black cursor-pointer";
+// 표는 카드 안에서 자체 스크롤한다 — 세 섹션을 쌓아도 제목이 한 화면에 들어오게. 헤더 고정은 index.css가 맡는다.
+const MODLOG_SCROLL = "max-h-[320px] overflow-auto rounded-lg border border-gray-100";
+const MODLOG_TH = "py-2 px-2 text-left text-[11px] font-black text-[#212121] whitespace-nowrap";
+const MODLOG_TD = "py-1.5 px-2";
+const MODLOG_EMPTY = "py-8 text-center text-[11px] font-bold text-gray-400";
+// 삭제 버튼 — 행 높이를 키우지 않도록 h-6로 납작하게.
+const MODLOG_DELETE = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-rose-600 hover:bg-rose-50 cursor-pointer";
+
+// ── 최근 건 강조 ───────────────────────────────────────────────────────────
+// 최근 3일(오늘·어제·그저께) 안에 올라온 행을 바닐라로 짚어 준다. 예전엔 관리자가 행마다 '확인'을 눌러
+// 강조를 끄는 방식이었으나, 그 확인 목록을 통째로 덮어쓰는 구조라 다른 관리자의 확인이 지워졌다.
+// 시간 기준으로 저절로 꺼지게 바꿔 그 저장 경로 자체를 없앴다(2026-07-21).
+const MODLOG_RECENT_DAYS = 3;
+
+// '최근 N일'의 시작 시각(로컬 자정). 행마다 new Date()를 만들지 않도록 렌더당 한 번만 계산해 넘긴다.
+const modlogRecentCutoff = (): number => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - (MODLOG_RECENT_DAYS - 1)); // 오늘을 포함해 3일
+  return d.getTime();
+};
+
+const modlogIsRecent = (value: unknown, cutoff: number): boolean => {
+  const raw = String(value || "");
+  if (!raw) return false;
+  // "2026-07-20"처럼 날짜만 있는 값은 Date가 UTC 자정으로 읽어 한국 시간 기준 하루가 밀린다 → 로컬 자정으로 만든다.
+  const t = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(Number(raw.slice(0, 4)), Number(raw.slice(5, 7)) - 1, Number(raw.slice(8, 10))).getTime()
+    : new Date(raw).getTime();
+  return Number.isNaN(t) ? false : t >= cutoff;
+};
+
+// 바닐라 강조는 index.css(#modification-logs-section .admin-log-recent)가 준다
+// — tbody 줄무늬가 !important라 인라인 클래스로는 못 이긴다(DESIGN.md §8).
+const modlogRowClass = (recent: boolean) => `border-b ${recent ? "admin-log-recent" : "hover:bg-slate-50/50"}`;
+
+// 세 섹션 공통 필터 줄 — 지점명(드롭다운) · 월 선택 · 새로고침. 한 컴포넌트로 두어 셋이 어긋나지 않게 한다.
+// `monthRequired`(현금차이)는 월을 비울 수 없다 — 그 섹션의 월은 화면 필터가 아니라 서버 조회 조건이라,
+// 비우면 전 지점 전 기간을 훑게 되어 조회 자체가 불가능해진다.
+function ModlogFilters({ branches, branch, onBranchChange, month, onMonthChange, onRefresh, monthRequired = false }: {
+  branches: string[];
+  branch: string;
+  onBranchChange: (value: string) => void;
+  month: string;
+  onMonthChange: (value: string) => void;
+  onRefresh: () => void;
+  monthRequired?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select
+        value={branch}
+        onChange={(e) => onBranchChange(e.target.value)}
+        aria-label="지점명 필터"
+        className={`${MODLOG_FIELD} w-32`}
+      >
+        <option value="">전체 지점</option>
+        {branches.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select>
+      <input
+        type="month"
+        value={month}
+        onChange={(e) => onMonthChange(e.target.value)}
+        aria-label="조회 월"
+        title={monthRequired ? "조회할 월" : "비우면 전체 기간"}
+        className={MODLOG_FIELD}
+      />
+      <button type="button" onClick={onRefresh} className={MODLOG_REFRESH}>새로고침</button>
+    </div>
+  );
+}
+
+// 표에 실제로 들어 있는 지점명으로 드롭다운을 채운다(별도 조회 없이). 현재 선택값은 목록에서 사라져도
+// 남겨 둔다 — 새로고침 후 그 지점 기록이 0건이 되면 select가 빈 칸으로 보여 무엇으로 걸러진 건지 알 수 없다.
+const modlogBranchOptions = (rows: Array<{ branchName?: string }>, selected: string): string[] => {
+  const names = new Set(rows.map((row) => String(row?.branchName || "")).filter(Boolean));
+  if (selected) names.add(selected);
+  return Array.from(names).sort((a, b) => a.localeCompare(b, "ko"));
+};
+
+// 마감 대상일(settleDate, "2026-06-14")이 선택한 월에 속하는지. 월이 비었으면 전체 기간이다.
+const modlogInMonth = (settleDate: unknown, month: string): boolean =>
+  !month || String(settleDate || "").startsWith(month);
+
+function AdminEditLogsSection() {
   const [logs, setLogs] = useState<any[]>([]);
-  const [reviewedLogIds, setReviewedLogIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
-  const [searchDate, setSearchDate] = useState("");
+  // 월은 비워 두면 전체 기간이다. 기본을 이번 달로 두면 지난달 기록이 화면에서 사라져 놓치게 된다.
+  const [searchMonth, setSearchMonth] = useState("");
 
   const loadLogs = async () => {
     try {
       setLoading(true);
-      const [data, reviewed] = await Promise.all([
-        gasClient.getEditLogs(),
-        gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => [])
-      ]);
-      setLogs(data);
-      setReviewedLogIds(Array.isArray(reviewed) ? reviewed : []);
+      setLogs(await gasClient.getEditLogs());
     } catch (err) {
       console.error(err);
     } finally {
@@ -2265,17 +2378,14 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
     loadLogs();
   }, []);
 
-  useEffect(() => {
-    setSubTab(defaultSubTab);
-  }, [defaultSubTab]);
+  const branchOptions = useMemo(() => modlogBranchOptions(logs, searchBranch), [logs, searchBranch]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
-      const matchBranch = !searchBranch || log.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
-      const matchDate = !searchDate || log.settleDate?.includes(searchDate);
-      return matchBranch && matchDate;
+      const matchBranch = !searchBranch || log.branchName === searchBranch;
+      return matchBranch && modlogInMonth(log.settleDate, searchMonth);
     });
-  }, [logs, searchBranch, searchDate]);
+  }, [logs, searchBranch, searchMonth]);
 
   const deleteLog = async (log: any) => {
     if (!log?.id) return;
@@ -2287,15 +2397,6 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
       console.error("변경이력 삭제 실패:", error);
       alert("변경이력 삭제에 실패했습니다.");
     }
-  };
-
-  const getLogReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
-
-  const markLogReviewed = async (log: any) => {
-    const reviewId = getLogReviewId(log);
-    const next = Array.from(new Set([...reviewedLogIds, reviewId]));
-    setReviewedLogIds(next);
-    await gasClient.saveSharedData("admin_reviewed_edit_logs", next);
   };
 
   const formatShortDate = (isoString: string) => {
@@ -2353,176 +2454,80 @@ function AdminModificationLogsSection({ defaultSubTab = "logs" }: { defaultSubTa
     }
 
     if (changes.length === 0) {
-      return <span className="text-gray-400">변경 사항 없음 (또는 기타 설정 변경)</span>;
+      return <span className="text-[11px] text-gray-400">변경 사항 없음 (또는 기타 설정 변경)</span>;
     }
 
-    return (
-      <ul className="space-y-1 text-xs font-bold text-gray-700">
-        {changes.map((ch, idx) => (
-          <li key={idx} className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#2E6DB4]" />
-            <span>{ch}</span>
-          </li>
-        ))}
-      </ul>
-    );
+    // 세로 불릿 목록 대신 한 줄로 이어 붙여 행 높이를 낮춘다(항목이 많으면 줄바꿈).
+    const text = changes.join("  ·  ");
+    return <span className="text-[11px] font-bold text-gray-700" title={text}>{text}</span>;
   };
 
+  const recentCutoff = modlogRecentCutoff();
+  const recentCount = filteredLogs.filter((log) => modlogIsRecent(log.modifiedAt, recentCutoff)).length;
+
   return (
-    <div className="space-y-5 animate-fade-in" id="modification-logs-section">
-      <div className="flex gap-2 border-b border-gray-200">
-        <button
-          onClick={() => setSubTab("logs")}
-          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
-        >
-          정산 변경이력 로그
-        </button>
-        <button
-          onClick={() => setSubTab("manualOvertimes")}
-          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "manualOvertimes" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
-        >
-          지점 수기 초과근무 대장
-        </button>
-        <button
-          onClick={() => setSubTab("cashDiff")}
-          className={`px-4 py-3 text-sm font-bold border-b-2 transition-all ${subTab === "cashDiff" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400 hover:text-gray-600"}`}
-        >
-          현금차이 이력
-        </button>
+    <div id="modlog-edit-logs" className={MODLOG_CARD}>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div className="space-y-1.5">
+          <h3 className={MODLOG_TITLE}>정산 변경이력</h3>
+          <p className={MODLOG_SUB}>지점이 마감 제출 후 수정한 내역 · 총 {filteredLogs.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
+        </div>
+        <ModlogFilters
+          branches={branchOptions}
+          branch={searchBranch}
+          onBranchChange={setSearchBranch}
+          month={searchMonth}
+          onMonthChange={setSearchMonth}
+          onRefresh={() => void loadLogs()}
+        />
       </div>
 
-      {subTab === "logs" ? (
-        <>
-          <div className="bg-white p-6 rounded-2xl border shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-amber-500" /> 지점 마감 수정이력 모니터링
-                </h3>
-                <p className="text-xs text-gray-400 mt-1">
-                  각 지점에서 마감 제출 후 수정한 세부 정보 및 변경 내역을 실시간으로 추적합니다.
-                </p>
-              </div>
-              <button
-                onClick={loadLogs}
-                className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-              >
-                새로고침
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase">지점명 검색</label>
-                <input
-                  type="text"
-                  value={searchBranch}
-                  onChange={(e) => setSearchBranch(e.target.value)}
-                  placeholder="예: 강남점"
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-gray-500 uppercase">마감 대상 날짜 검색</label>
-                <input
-                  type="text"
-                  value={searchDate}
-                  onChange={(e) => setSearchDate(e.target.value)}
-                  placeholder="예: 2026-06"
-                  className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
-                <thead>
-                  <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
-                    <th className="p-4 w-44">수정 일시</th>
-                    <th className="py-4 px-3 w-28">지점명</th>
-                    <th className="py-4 px-3 w-32">마감 대상일</th>
-                    <th className="py-4 px-3 w-28">작업자</th>
-                    <th className="py-4 px-3">수정 전 ➔ 수정 후 세부 내역</th>
-                    <th className="py-4 px-3 w-24 text-center">확인</th>
-                    <th className="py-4 px-3 w-20 text-center">관리</th>
+      <div className={MODLOG_SCROLL}>
+        <table className="w-full min-w-[720px] text-xs">
+          <thead>
+            <tr>
+              <th className={`${MODLOG_TH} w-28`}>수정일시</th>
+              <th className={`${MODLOG_TH} w-24`}>지점명</th>
+              <th className={`${MODLOG_TH} w-24`}>대상일</th>
+              <th className={`${MODLOG_TH} w-20`}>작업자</th>
+              <th className={MODLOG_TH}>변경 내용</th>
+              <th className={`${MODLOG_TH} w-12 text-center`}>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={6} className="py-8 text-center"><LoadingSpinner size="sm" /></td></tr>
+            ) : filteredLogs.length === 0 ? (
+              <tr><td colSpan={6} className={MODLOG_EMPTY}>기록된 마감 수정 이력이 없습니다.</td></tr>
+            ) : (
+              filteredLogs.map((log) => (
+                  <tr key={log.id} className={modlogRowClass(modlogIsRecent(log.modifiedAt, recentCutoff))}>
+                    <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
+                      {formatShortDate(log.modifiedAt)}
+                    </td>
+                    <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
+                      {log.branchName}
+                    </td>
+                    <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>
+                      {log.settleDate}
+                    </td>
+                    <td className={`${MODLOG_TD} text-[11px] font-bold text-gray-700 whitespace-nowrap`}>
+                      {log.modifiedBy || "지점담당"}
+                    </td>
+                    <td className={MODLOG_TD}>
+                      {getChangesSummary(log)}
+                    </td>
+                    <td className={`${MODLOG_TD} text-center`}>
+                      <button type="button" onClick={() => void deleteLog(log)} className={MODLOG_DELETE} title="변경이력 삭제">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={7} className="p-12 text-center text-gray-400 font-semibold">
-                        <LoadingSpinner size="sm" />
-                      </td>
-                    </tr>
-                  ) : filteredLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-12 text-center text-gray-400 font-bold">
-                        기록된 마감 수정 이력이 없습니다.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredLogs.map((log) => {
-                      const reviewed = reviewedLogIds.includes(getLogReviewId(log));
-                      return (
-                      <tr key={log.id} className={`border-b transition-colors ${reviewed ? "bg-white hover:bg-slate-50/50" : "bg-[#F4F2A8]/70 hover:bg-[#F4F2A8]"}`}>
-                        <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
-                          {formatShortDate(log.modifiedAt)}
-                        </td>
-                        <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
-                          {log.branchName}
-                        </td>
-                        <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
-                          {log.settleDate}
-                        </td>
-                        <td className="py-4 px-3 whitespace-nowrap">
-                          <span className="inline-block px-2.5 py-1 bg-zinc-100 text-zinc-800 rounded-full text-xs font-extrabold">
-                            {log.modifiedBy || "지점담당"}
-                          </span>
-                        </td>
-                        <td className="py-4 px-3">
-                          {getChangesSummary(log)}
-                        </td>
-                        <td className="py-4 px-3 text-center">
-                          {reviewed ? (
-                            <span className="inline-flex items-center justify-center rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs font-black text-slate-500">
-                              확인됨
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => void markLogReviewed(log)}
-                              className="inline-flex items-center justify-center rounded-lg bg-[#2E6DB4] px-3 py-2 text-xs font-black text-white hover:bg-[#20528B]"
-                            >
-                              확인
-                            </button>
-                          )}
-                        </td>
-                        <td className="py-4 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => void deleteLog(log)}
-                            className="inline-flex items-center justify-center rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
-                            title="변경이력 삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : subTab === "cashDiff" ? (
-        <AdminCashDiffHistorySection />
-      ) : (
-        <AdminManualOvertimesSection />
-      )}
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2533,8 +2538,15 @@ function AdminCashDiffHistorySection() {
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
   const [rows, setRows] = useState<Array<{ date: string; branchName: string; cashDifference: number; reason: string }> | null>(null);
   const [partialError, setPartialError] = useState(false);
+  const [branch, setBranch] = useState("");
+  // 이 조회는 전 지점을 각각 훑어 느리다. 월을 빠르게 바꾸면 이전 달 응답이 늦게 도착해
+  // 새 달 결과를 덮어써, 화면의 월 선택칸과 표 내용이 어긋난다. 최신 요청 번호를 남겨 뒤늦은 응답은 버린다.
+  // 언마운트 때도 번호를 올려 사라진 컴포넌트에 setState하지 않는다.
+  const loadSeq = useRef(0);
+  useEffect(() => () => { loadSeq.current += 1; }, []);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setRows(null);
     setPartialError(false);
     try {
@@ -2558,10 +2570,12 @@ function AdminCashDiffHistorySection() {
           } catch { return []; }
         });
       }));
+      if (seq !== loadSeq.current) return; // 더 새 요청이 시작됐거나 언마운트됨 — 이 결과는 버린다.
       setPartialError(anyFail);
       const flat = perBranch.flat();
       setRows(flat.sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.branchName.localeCompare(b.branchName, "ko")));
     } catch {
+      if (seq !== loadSeq.current) return;
       setPartialError(true);
       setRows([]);
     }
@@ -2569,63 +2583,67 @@ function AdminCashDiffHistorySection() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const totalDiff = (rows || []).reduce((s, r) => s + r.cashDifference, 0);
+  // 지점 드롭다운은 화면 필터다(월과 달리 서버 재조회를 일으키지 않는다).
+  const branchOptions = useMemo(() => modlogBranchOptions(rows || [], branch), [rows, branch]);
+  const visibleRows = useMemo(() => (rows || []).filter((r) => !branch || r.branchName === branch), [rows, branch]);
+  const totalDiff = visibleRows.reduce((s, r) => s + r.cashDifference, 0);
+  const recentCutoff = modlogRecentCutoff();
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white p-5 rounded-2xl border shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-rose-500" /> 현금차이 이력
-          </h3>
-          <p className="text-xs text-gray-400 mt-1">선택한 달에 각 지점이 기록한 현금 차이(실사현금 − 장부)를 날짜별로 모았습니다.</p>
+    <div id="modlog-cash-diff" className={MODLOG_CARD}>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div className="space-y-1.5">
+          <h3 className={MODLOG_TITLE}>현금차이 이력</h3>
+          {/* 요약(건수·합계)은 별도 KPI 박스 대신 부제 한 줄로 — 행 높이·세로 공간을 아낀다. */}
+          <p className={MODLOG_SUB}>
+            선택한 달의 현금 차이(실사현금 − 장부) · {rows === null ? "불러오는 중…" : `${visibleRows.length}건 · 합계 ${formatNumber(totalDiff)}원`}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black" />
-          <button onClick={() => void load()} className="px-3 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">새로고침</button>
-        </div>
+        <ModlogFilters
+          branches={branchOptions}
+          branch={branch}
+          onBranchChange={setBranch}
+          month={month}
+          onMonthChange={(value) => { if (value) setMonth(value); }}
+          onRefresh={() => void load()}
+          monthRequired
+        />
       </div>
 
       {partialError && (
-        <p className="text-xs font-bold text-rose-600">일부 지점의 이력을 서버에서 불러오지 못했습니다. 아래 목록이 일부 누락됐을 수 있습니다 — 새로고침 후 다시 확인해주세요.</p>
+        <p className="text-[11px] font-bold text-rose-600">일부 지점의 이력을 서버에서 불러오지 못했습니다. 아래 목록이 일부 누락됐을 수 있습니다 — 새로고침 후 다시 확인해주세요.</p>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs font-bold text-rose-600">현금차이 발생</p><p className="text-2xl font-black text-rose-700">{rows === null ? "…" : `${rows.length}건`}</p></div>
-        <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">차이 합계</p><p className="text-2xl font-black text-slate-700">{rows === null ? "…" : `${formatNumber(totalDiff)}원`}</p></div>
-      </div>
-
-      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b">
-              <tr>
-                <th className="p-4 w-32">마감일자</th>
-                <th className="py-4 px-3 w-32">지점</th>
-                <th className="py-4 px-3 w-32 text-right">현금차이</th>
-                <th className="py-4 px-3">사유</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {rows === null ? (
-                <tr><td colSpan={4} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={4} className="p-12 text-center text-gray-400 font-bold">{month}에 기록된 현금차이가 없습니다.</td></tr>
-              ) : (
-                rows.map((r, i) => (
-                  <tr key={`${r.branchName}-${r.date}-${i}`} className="hover:bg-slate-50/60">
-                    <td className="p-4 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">{r.date}</td>
-                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{r.branchName}</td>
-                    <td className={`py-4 px-3 text-right font-mono font-black whitespace-nowrap ${r.cashDifference < 0 ? "text-rose-600" : "text-amber-600"}`}>
-                      {r.cashDifference > 0 ? "+" : ""}{formatNumber(r.cashDifference)}원
-                    </td>
-                    <td className="py-4 px-3 text-gray-600 font-bold">{r.reason || <span className="text-gray-300">사유 미입력</span>}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className={MODLOG_SCROLL}>
+        <table className="w-full min-w-[560px] text-xs">
+          <thead>
+            <tr>
+              <th className={`${MODLOG_TH} w-24`}>마감일자</th>
+              <th className={`${MODLOG_TH} w-28`}>지점</th>
+              <th className={`${MODLOG_TH} w-28 text-right`}>현금차이</th>
+              <th className={MODLOG_TH}>사유</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows === null ? (
+              <tr><td colSpan={4} className="py-8 text-center"><LoadingSpinner size="sm" /></td></tr>
+            ) : visibleRows.length === 0 ? (
+              <tr><td colSpan={4} className={MODLOG_EMPTY}>{month}{branch ? ` ${branch}에` : "에"} 기록된 현금차이가 없습니다.</td></tr>
+            ) : (
+              visibleRows.map((r, i) => (
+                // 이 표에는 '등록 시각'이 없다(지점 마감 기록에서 그때그때 계산해 만든 행이라) → 마감일자로 최근 여부를 본다.
+                <tr key={`${r.branchName}-${r.date}-${i}`} className={modlogRowClass(modlogIsRecent(r.date, recentCutoff))}>
+                  <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>{r.date}</td>
+                  <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>{r.branchName}</td>
+                  <td className={`${MODLOG_TD} text-right font-mono font-black whitespace-nowrap ${r.cashDifference < 0 ? "text-rose-600" : "text-amber-600"}`}>
+                    {r.cashDifference > 0 ? "+" : ""}{formatNumber(r.cashDifference)}원
+                  </td>
+                  <td className={`${MODLOG_TD} text-[11px] font-bold text-gray-600`}>{r.reason || <span className="text-gray-300">사유 미입력</span>}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -3244,20 +3262,15 @@ function AdminMonthlyClosingStatusSection() {
 
 function AdminManualOvertimesSection() {
   const [records, setRecords] = useState<any[]>([]);
-  const [reviewedRecordIds, setReviewedRecordIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchBranch, setSearchBranch] = useState("");
-  const [searchName, setSearchName] = useState("");
+  // 월은 비워 두면 전체 기간(정산 변경이력과 동일 규칙).
+  const [searchMonth, setSearchMonth] = useState("");
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [data, reviewed] = await Promise.all([
-        gasClient.getAllManualOvertimes(),
-        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => [])
-      ]);
-      setRecords(data || []);
-      setReviewedRecordIds(Array.isArray(reviewed) ? reviewed : []);
+      setRecords((await gasClient.getAllManualOvertimes()) || []);
     } catch (err) {
       console.error("Failed to load manual overtimes:", err);
     } finally {
@@ -3269,17 +3282,18 @@ function AdminManualOvertimesSection() {
     void loadData();
   }, []);
 
+  const branchOptions = useMemo(() => modlogBranchOptions(records, searchBranch), [records, searchBranch]);
+
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
-      const matchBranch = !searchBranch || r.branchName?.toLowerCase().includes(searchBranch.toLowerCase());
-      const matchName = !searchName || r.staffName?.toLowerCase().includes(searchName.toLowerCase());
-      return matchBranch && matchName;
+      const matchBranch = !searchBranch || r.branchName === searchBranch;
+      return matchBranch && modlogInMonth(r.settleDate, searchMonth);
     }).sort((a, b) => {
       const dateA = a.createdAt || a.settleDate || "";
       const dateB = b.createdAt || b.settleDate || "";
       return dateB.localeCompare(dateA);
     });
-  }, [records, searchBranch, searchName]);
+  }, [records, searchBranch, searchMonth]);
 
   const deleteManualRecord = async (record: any) => {
     if (!record?.branchName || !record?.id) return;
@@ -3294,15 +3308,6 @@ function AdminManualOvertimesSection() {
       console.error("수기 초과근무 삭제 실패:", error);
       alert("수기 초과근무 삭제에 실패했습니다.");
     }
-  };
-
-  const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
-
-  const markManualReviewed = async (record: any) => {
-    const reviewId = getManualReviewId(record);
-    const next = Array.from(new Set([...reviewedRecordIds, reviewId]));
-    setReviewedRecordIds(next);
-    await gasClient.saveSharedData("admin_reviewed_manual_overtimes", next);
   };
 
   const formatShortDate = (isoStr?: string) => {
@@ -3321,135 +3326,80 @@ function AdminManualOvertimesSection() {
     }
   };
 
-  return (
-    <div className="space-y-5 animate-fade-in" id="manual-overtimes-section">
-      <div className="bg-white p-6 rounded-2xl border shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
-              <Clock className="w-5 h-5 text-[#2E6DB4]" /> 지점 수기 초과근무 대장
-            </h3>
-            <p className="text-xs text-gray-400 mt-1">
-              각 지점에서 수기로 직접 등록한 초과근무 대장 내역을 종합 모니터링합니다.
-            </p>
-          </div>
-          <button
-            onClick={() => void loadData()}
-            className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-          >
-            새로고침
-          </button>
-        </div>
+  const recentCutoff = modlogRecentCutoff();
+  const recentCount = filteredRecords.filter((r) => modlogIsRecent(r.createdAt, recentCutoff)).length;
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-          <div>
-            <label className="text-[10px] font-black text-gray-500 uppercase">지점명 검색</label>
-            <input
-              type="text"
-              value={searchBranch}
-              onChange={(e) => setSearchBranch(e.target.value)}
-              placeholder="예: 강남점"
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-black text-gray-500 uppercase">직원명 검색</label>
-            <input
-              type="text"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
-              placeholder="예: 홍길동"
-              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50 focus:bg-white focus:outline-none focus:border-[#2E6DB4] transition-all"
-            />
-          </div>
+  return (
+    <div id="modlog-manual-overtimes" className={MODLOG_CARD}>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div className="space-y-1.5">
+          <h3 className={MODLOG_TITLE}>수기 초과근무 대장</h3>
+          <p className={MODLOG_SUB}>지점이 수기로 등록한 초과근무 · 총 {filteredRecords.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
         </div>
+        <ModlogFilters
+          branches={branchOptions}
+          branch={searchBranch}
+          onBranchChange={setSearchBranch}
+          month={searchMonth}
+          onMonthChange={setSearchMonth}
+          onRefresh={() => void loadData()}
+        />
       </div>
 
-      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
-                <th className="p-4 w-44">등록 일시</th>
-                <th className="py-4 px-3 w-32">지점명</th>
-                <th className="py-4 px-3 w-32">마감 대상일</th>
-                <th className="py-4 px-3 w-32">직원명</th>
-                <th className="py-4 px-3 w-28 text-center">초과시간</th>
-                <th className="py-4 px-3">수기 입력 사유</th>
-                <th className="py-4 px-3 w-24 text-center">확인</th>
-                <th className="py-4 px-3 w-20 text-center">관리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-12 text-center text-gray-400 font-semibold">
-                    <LoadingSpinner size="sm" />
-                  </td>
-                </tr>
-              ) : filteredRecords.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-12 text-center text-gray-400 font-bold">
-                    수기로 등록된 초과근무 내역이 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecords.map((r, idx) => {
-                  const reviewed = reviewedRecordIds.includes(getManualReviewId(r));
-                  return (
-                  <tr key={r.id || idx} className={`border-b transition-colors ${reviewed ? "bg-white hover:bg-slate-50/50" : "bg-[#F4F2A8]/70 hover:bg-[#F4F2A8]"}`}>
-                    <td className="p-4 font-mono text-xs text-gray-500 font-medium whitespace-nowrap">
+      <div className={MODLOG_SCROLL}>
+        <table className="w-full min-w-[700px] text-xs">
+          <thead>
+            <tr>
+              <th className={`${MODLOG_TH} w-28`}>등록일시</th>
+              <th className={`${MODLOG_TH} w-24`}>지점명</th>
+              <th className={`${MODLOG_TH} w-24`}>대상일</th>
+              <th className={`${MODLOG_TH} w-20`}>직원명</th>
+              <th className={`${MODLOG_TH} w-16 text-right`}>초과시간</th>
+              <th className={MODLOG_TH}>수기 입력 사유</th>
+              <th className={`${MODLOG_TH} w-12 text-center`}>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={7} className="py-8 text-center"><LoadingSpinner size="sm" /></td></tr>
+            ) : filteredRecords.length === 0 ? (
+              <tr><td colSpan={7} className={MODLOG_EMPTY}>수기로 등록된 초과근무 내역이 없습니다.</td></tr>
+            ) : (
+              filteredRecords.map((r, idx) => (
+                  <tr key={r.id || idx} className={modlogRowClass(modlogIsRecent(r.createdAt, recentCutoff))}>
+                    <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {formatShortDate(r.createdAt)}
                     </td>
-                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">
+                    <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
                       {r.branchName}
                     </td>
-                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">
+                    <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>
                       {r.settleDate}
                     </td>
-                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">
+                    <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
                       {r.staffName}
                     </td>
-                    <td className="py-4 px-3 text-center whitespace-nowrap">
-                      <span className="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full text-xs font-black">
-                        {r.overtime}h
-                      </span>
+                    <td className={`${MODLOG_TD} text-right font-mono font-black text-gray-800 whitespace-nowrap`}>
+                      {r.overtime}h
                     </td>
-                    <td className="py-4 px-3 text-gray-700 font-medium max-w-sm truncate">
+                    <td className={`${MODLOG_TD} text-[11px] font-bold text-gray-700`} title={r.reason || ""}>
                       {r.reason || "-"}
                     </td>
-                    <td className="py-4 px-3 text-center">
-                      {reviewed ? (
-                        <span className="inline-flex items-center justify-center rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs font-black text-slate-500">
-                          확인됨
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void markManualReviewed(r)}
-                          className="inline-flex items-center justify-center rounded-lg bg-[#2E6DB4] px-3 py-2 text-xs font-black text-white hover:bg-[#20528B]"
-                        >
-                          확인
-                        </button>
-                      )}
-                    </td>
-                    <td className="py-4 px-3 text-center">
+                    <td className={`${MODLOG_TD} text-center`}>
                       <button
                         type="button"
                         onClick={() => void deleteManualRecord(r)}
-                        className="inline-flex items-center justify-center rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-600 hover:bg-rose-100"
+                        className={MODLOG_DELETE}
                         title="수기 내역 삭제"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
                       </button>
                     </td>
                   </tr>
-                );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

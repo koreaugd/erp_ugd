@@ -3725,3 +3725,30 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   color: #b91c1c;
   vertical-align: top;
 }
+
+/* ── 관리자 · 일일업무 › 마감 이력 점검 탭 ────────────────────────────────
+   하위탭을 없애고 세 섹션(정산 변경이력 · 수기 초과근무 대장 · 현금차이 이력)을
+   세로로 쌓았다. 각 표는 카드 안에서 자체 스크롤하므로 아래 두 가지가 필요하다. */
+
+/* ① 스크롤 상자 안에서 헤더를 위에 고정. 배경은 thead tr이 아니라 th에 직접 준다
+      — tr 배경은 본문이 그 위로 지나갈 때 헤더를 덮지 못한다. */
+#modification-logs-section thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--admin-alice) !important;
+}
+
+/* ② 최근 3일 안에 올라온 행 = 바닐라 강조.
+      tbody nth-child 줄무늬가 !important라 인라인 클래스로는 못 이긴다 →
+      ID를 낀 선택자로 특이성을 높여 이긴다(DESIGN.md §8). */
+#modification-logs-section tbody tr.admin-log-recent,
+#modification-logs-section tbody tr.admin-log-recent:nth-child(even),
+#modification-logs-section tbody tr.admin-log-recent:nth-child(odd) {
+  background: var(--admin-vanilla) !important;
+}
+
+/* 최근 행 hover — 새 색을 만들지 않고 같은 바닐라를 살짝 눌러 준다. */
+#modification-logs-section tbody tr.admin-log-recent:hover {
+  background: color-mix(in srgb, var(--admin-vanilla) 93%, var(--admin-black)) !important;
+}
