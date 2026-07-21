@@ -546,10 +546,12 @@ export function MonthlyFullTimeSalarySubTab({
   const cellNum = "sheet-cell-input w-full h-9 px-2 text-[11px] font-mono font-black text-right focus:outline-none";
   const cellText = "sheet-cell-input w-full h-9 px-2 text-[11px] font-bold placeholder-gray-300 focus:outline-none";
   // 엑셀 셀: 격자선은 td가 긋고, 현재 칸은 굵은 테두리로 짚어준다.
+  // 지금 '어느 행'인지는 이 칸 테두리가 아니라 index.css의 행 띠(tr:focus-within)가 알려준다 — DESIGN.md §9-3.
+  // 아웃라인 색은 매입매출·파트타이머 급여대장과 같은 액션 블루(#2E6DB4, DESIGN.md §2 토큰)를 쓴다.
   const cellTd = (rowIndex: number, col: number, extra = "") =>
     [
       "border-r border-b border-black/10 p-0 relative",
-      isActive(rowIndex, col) ? "outline outline-2 -outline-offset-2 outline-indigo-500 z-10" : "",
+      isActive(rowIndex, col) ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4] z-10" : "",
       extra,
     ].join(" ");
   const th = "py-3 px-2 text-center font-black";
@@ -669,7 +671,7 @@ export function MonthlyFullTimeSalarySubTab({
                   {/* 성명 칸은 왼쪽 고정 — sticky와 relative(cellTd)는 함께 못 쓰므로 클래스를 직접 적는다. bg-white로 밑에 깔리는 칸을 가린다.
                       z는 활성 셀(z-10)과 헤더(z-20) '사이'여야 한다 — z-10이면 활성 셀이 가로 스크롤 때 이 칸을 덮고,
                       z-20이면 DOM 뒤쪽인 이 칸이 세로 스크롤 때 헤더를 덮는다. */}
-                  <td className={`sticky left-0 z-[15] bg-white border-l border-r border-b border-black/10 p-0 ${isActive(rowIndex, 0) ? "outline outline-2 -outline-offset-2 outline-indigo-500" : ""}`}>
+                  <td className={`sticky left-0 z-[15] bg-white border-l border-r border-b border-black/10 p-0 ${isActive(rowIndex, 0) ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4]" : ""}`}>
                     {/* 성명 + 행 삭제(×). 표가 가로로 길어 오른쪽 끝 삭제칸은 스크롤해야 닿으므로 이름 옆에 둔다(파트타이머 급여대장과 동일). */}
                     <div className="flex items-center gap-1 pl-1 pr-0.5">
                       <input {...cellProps(rowIndex, 0)} type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className="sheet-cell-input w-full min-w-0 h-9 px-1 text-[11px] font-bold placeholder-gray-300 focus:outline-none" />
