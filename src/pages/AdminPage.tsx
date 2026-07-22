@@ -11,6 +11,8 @@ import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
+import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
+import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import {
   Users, CheckCircle2, AlertTriangle, 
   TrendingUp, Calendar, Filter, 
@@ -67,7 +69,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "analysis" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -79,19 +81,28 @@ export default function AdminPage() {
   const [salaryUnlocked, setSalaryUnlocked] = useState(false);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
+  // 이상치를 못 읽은 지점 — '이상 없음'과 '못 읽음'을 구분해 보여주기 위해 이름을 남긴다(P0-2).
+  const [anomalyFailedBranches, setAnomalyFailedBranches] = useState<string[]>([]);
+  const [anomalyLoadError, setAnomalyLoadError] = useState(false);
   const [cleaningRosters, setCleaningRosters] = useState(false);
   const [clearingDirectory, setClearingDirectory] = useState(false);
-  const [closingView, setClosingView] = useState<"dashboard" | "overtime" | "cash" | "remarks" | "otherMemo">("dashboard");
+  // 마감 이상치 표의 분류. 예전엔 'dashboard' 탭이 하나 더 있었지만 필터가 'cash'와 완전히 같은 죽은 탭이라 없앴다
+  // (대시보드 → 전일 정산현황으로 옮기면서 정리, 2026-07-22).
+  const [closingView, setClosingView] = useState<"overtime" | "cash" | "remarks" | "otherMemo">("cash");
   const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
   // 마감 이력 점검 탭은 하위탭이 없어졌다. 대시보드 알림에서 넘어올 때 어느 섹션으로 스크롤할지만 가리킨다.
   // 기본값은 반드시 null이다 — 값이 있으면 사이드바로 그냥 들어와도 그 섹션까지 스크롤해 버려,
   // 맨 위 섹션(현금차이)을 건너뛰고 화면이 아래로 튄다.
   const [dailyLogsFocus, setDailyLogsFocus] = useState<"logs" | "manualOvertimes" | null>(null);
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
+  const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
   const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
+  const anomalyRequestRef = useRef(0);
+  // 지점별 일일마감 이력 캐시(이상치 표) — 날짜를 바꿔도 다시 읽지 않게. 실패는 캐시하지 않는다.
+  const anomalyCacheRef = useRef(new Map<string, { records: any[]; at: number }>());
   const detailRequestRef = useRef(0);
   const employeeIdSequence = useRef(1);
   // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
@@ -392,13 +403,36 @@ export default function AdminPage() {
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "직원명부"); XLSX.writeFile(workbook, `UGD_직원명부_${getTodayDateString()}.xlsx`);
   };
 
+  // [P0-2 / Codex 리뷰 2026-07-22] 예전에는 getBranchHistory(실패를 []로 삼킴)로 훑어서, 어느 지점 조회가
+  // 실패하면 그 지점 이상치가 통째로 사라지고 화면은 "해당 항목이 없습니다"로 닫혔다 —
+  // '이상 없음'과 '못 읽음'이 구분되지 않았다. 서버 전용 조회 + null 센티넬로 바꿔 실패 지점을 이름으로 알린다.
+  //
+  // [읽기 비용 — 2026-07-23 정정] getBranchHistoryFromServer 의 month 인자는 **서버 필터가 아니다**.
+  // 쿼리는 지점으로만 좁히고(firebaseDirect: dailyDocsQuery) 월은 받은 뒤 클라이언트에서 거른다.
+  // 그래서 월을 넘겨도 서버 읽기량은 그대로다 — 예전 주석은 "달만 읽는다"고 잘못 적혀 있었다.
+  // 대신 **지점당 한 번만 읽고 TTL 캐시**를 둔다(매출 대시보드와 같은 방식). 날짜·월을 바꿔도 다시 읽지 않는다.
+  // (진짜 월 범위 쿼리는 settleDate 복합 인덱스가 필요해 별도 작업으로 둔다.)
   const loadClosingAnomalies = async () => {
+    const requestId = ++anomalyRequestRef.current;
     try {
       setAnomalyLoading(true);
+      setAnomalyLoadError(false);
       const branches = await gasClient.getBranchList();
-      const records = await Promise.all(branches.map(async (branch) => {
-        const history = await gasClient.getBranchHistory(branch.branchName);
-        return history.flatMap((record: any) => {
+      const targets = (Array.isArray(branches) ? branches : []).filter((branch: any) => branch?.role === "branch" && branch.branchName);
+      const collected = await Promise.all(targets.map(async (branch) => {
+        const cached = anomalyCacheRef.current.get(branch.branchName);
+        const fresh = cached && Date.now() - cached.at < ANOMALY_CACHE_TTL_MS;
+        const history = fresh
+          ? cached.records
+          : await gasClient.getBranchHistoryFromServer(branch.branchName).catch(() => null);
+        if (history === null) return { failedBranch: branch.branchName, records: [] as any[] };
+        // 새로 읽었을 때만 시각을 갱신한다(캐시 적중이면 그대로 둬야 TTL 이 제때 만료된다).
+        // 지난 요청이 늦게 끝나 캐시에 쓰면 '새로고침으로 캐시를 비웠는데 옛 값이 되살아나는' 일이 생기므로,
+        // 최신 요청일 때만 캐시에 넣는다(Codex 지적).
+        if (!fresh && anomalyRequestRef.current === requestId) {
+          anomalyCacheRef.current.set(branch.branchName, { records: history, at: Date.now() });
+        }
+        return { failedBranch: null, records: history.flatMap((record: any) => {
           try {
             const memoText = String(record.memo || "");
             const meta = JSON.parse(memoText.split("\n---\nMETADATA:")[1] || "{}");
@@ -429,14 +463,30 @@ export default function AdminPage() {
               remarks
             }];
           } catch { return []; }
-        });
+        }) };
       }));
-      setAnomalyRecords(records.flat().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName), "ko")));
+      if (anomalyRequestRef.current !== requestId) return;
+      setAnomalyRecords(collected.flatMap((item) => item.records).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branchName).localeCompare(String(b.branchName), "ko")));
+      setAnomalyFailedBranches(collected.map((item) => item.failedBranch).filter((name): name is string => Boolean(name)));
+    } catch (error) {
+      // 지점 목록 자체를 못 읽은 경우 — 빈 표를 '이상 없음'으로 오해하지 않도록 명시한다.
+      console.error("마감 이상치 로드 실패:", error);
+      if (anomalyRequestRef.current !== requestId) return;
+      setAnomalyRecords([]);
+      setAnomalyFailedBranches([]);
+      setAnomalyLoadError(true);
     } finally {
-      setAnomalyLoading(false);
+      if (anomalyRequestRef.current === requestId) setAnomalyLoading(false);
     }
   };
-  useEffect(() => { if (adminSection === "dashboard") void loadClosingAnomalies(); }, [adminSection]);
+  // 마감 이상치는 '전일 정산현황' 탭에서 쓴다(대시보드는 전지점 매출 종합으로 바뀜, 2026-07-22).
+  // 그 탭을 실제로 열 때만 읽는다. 서버 조회가 지점 전체 이력을 주므로 **날짜를 바꿔도 다시 읽지 않는다**
+  // (화면 표시는 selectedDateAnomalyRecords 가 고른 날짜로 거른다). 최신값이 필요하면 '새로고침'.
+  useEffect(() => {
+    if (adminSection === "dailySettlement" && dailySettlementTab === "status") void loadClosingAnomalies();
+    // 언마운트·탭 이동 뒤 도착한 응답이 상태를 건드리지 않게 요청 표식을 무효화한다(매출 대시보드와 같은 방식).
+    return () => { anomalyRequestRef.current++; };
+  }, [adminSection, dailySettlementTab]);
 
   const loadDashboardAlerts = useCallback(async () => {
     try {
@@ -539,18 +589,13 @@ export default function AdminPage() {
     };
   }, [filteredList]);
 
-  const yesterdayAnomalyRecords = useMemo(() => {
-    const yesterday = getYesterdayDateString();
-    return anomalyRecords.filter((item) => item.date === yesterday);
-  }, [anomalyRecords]);
-
-  const recentAnomalyRecords = useMemo(() => {
-    const recentDates = Array.from(new Set<string>(anomalyRecords.map((item) => String(item.date || "")).filter(Boolean)))
-      .sort((a, b) => b.localeCompare(a))
-      .slice(0, 3);
-    const dateSet = new Set(recentDates);
-    return anomalyRecords.filter((item) => dateSet.has(String(item.date || "")));
-  }, [anomalyRecords]);
+  // 이상치는 '선택한 날짜' 기준으로 본다. 예전엔 어제로 못 박혀 있어, 전일 정산현황에서 날짜를 바꿔도
+  // 현금차이·기타메모만 계속 어제 것이 나왔다(같은 화면 안에서 기준일이 둘로 갈리는 문제).
+  // 누적·과거 조회는 '마감 이력 점검' 탭이 담당한다.
+  const selectedDateAnomalyRecords = useMemo(
+    () => anomalyRecords.filter((item) => String(item.date || "") === selectedDate),
+    [anomalyRecords, selectedDate]
+  );
 
   // ----------------------------------------------------
   // 특정 지점 클릭 시 우측 드로어 상세 오픈 및 서브테이블 로드
@@ -755,6 +800,21 @@ export default function AdminPage() {
             );
           })}
 
+          <p className="ugd-nav-group">분석</p>
+          {[{ id: "summary", label: "손익 종합" }, { id: "charts", label: "손익 차트" }, { id: "branch", label: "지점 손익계산서" }].map((sub) => {
+            const subActive = adminSection === "analysis" && analysisTab === sub.id;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => { setAdminSection("analysis"); setAnalysisTab(sub.id as "summary" | "charts" | "branch"); }}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
+
           <p className="ugd-nav-group">인사</p>
           <button
             onClick={() => setAdminSection("laborContracts")}
@@ -835,101 +895,9 @@ export default function AdminPage() {
                 </div>
               </section>
 
-              <section className="admin-kpi-grid">
-                <button type="button" onClick={() => setAdminSection("dailySettlement")} className="admin-kpi-card admin-kpi-vanilla">
-                  <span>일일정산 미제출</span>
-                  <strong>{stats.pending}</strong>
-                  <small>클릭해서 지점별 제출 상태 확인</small>
-                </button>
-                <button type="button" onClick={() => setClosingView("cash")} className="admin-kpi-card admin-kpi-blue">
-                  <span>현금차이</span>
-                  <strong>{yesterdayAnomalyRecords.filter((item) => item.cashDifference).length}</strong>
-                  <small>어제 마감의 현금 차이 확인</small>
-                </button>
-                <button type="button" onClick={() => setClosingView("otherMemo")} className="admin-kpi-card admin-kpi-honey">
-                  <span>ERP 기타메모</span>
-                  <strong>{yesterdayAnomalyRecords.filter((item) => item.remarks?.otherMemo).length}</strong>
-                  <small>어제 마감의 기타메모 확인</small>
-                </button>
-                <button type="button" onClick={() => setAdminSection("monthlyClosing")} className="admin-kpi-card admin-kpi-white">
-                  <span>월말마감</span>
-                  <strong>보기</strong>
-                  <small>현금관리와 제출 현황으로 이동</small>
-                </button>
-              </section>
-
-              <section className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-                <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-black text-[#2C3E50]">마감현황</h2><p className="text-xs text-gray-400 mt-1">전체 지점의 마감 상태와 누적 이상치를 점검합니다. 어제 날짜({getYesterdayDateString()}) 마감 내용만 강조 표시합니다.</p></div><button onClick={() => void loadClosingAnomalies()} className="text-xs font-bold text-[#2E6DB4]">새로고침</button></div>
-                <div className="flex gap-2 border-b border-gray-100"><button onClick={() => setClosingView("dashboard")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "dashboard" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>대시보드</button><button onClick={() => setClosingView("overtime")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무</button><button onClick={() => setClosingView("cash")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "cash" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금차이</button><button onClick={() => setClosingView("remarks")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "remarks" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>특이사항</button><button onClick={() => setClosingView("otherMemo")} className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === "otherMemo" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>기타메모</button></div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-sm">
-                    <thead className="border-b text-left text-gray-500">
-                      <tr>
-                        <th className="py-3">마감일</th>
-                        <th>지점</th>
-                        <th>마감자</th>
-                        <th>이상 항목</th>
-                        <th>내용</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {anomalyLoading ? (
-                        <tr>
-                          <td colSpan={5} className="py-10 text-center">
-                            <LoadingSpinner size="sm" />
-                          </td>
-                        </tr>
-                      ) : (
-                        recentAnomalyRecords
-                          .filter((item) =>
-                            closingView === "remarks"
-                              ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)
-                              : closingView === "otherMemo"
-                              ? Boolean(item.remarks?.otherMemo)
-                              : closingView === "dashboard" || closingView === "cash"
-                              ? Boolean(item.cashDifference)
-                              : Boolean(item.overtime)
-                          )
-                          .map((item, index) => (
-                            <tr
-                              key={`${item.branchName}-${item.date}-${index}`}
-                              className={item.date === getYesterdayDateString() ? "admin-yesterday-new-row bg-sky-50" : ""}
-                            >
-                              <td className="py-3 font-mono">{item.date}</td>
-                              <td className="font-bold">{item.branchName}</td>
-                              <td>{item.writer || "-"}</td>
-                              <td className="font-bold text-rose-600">
-                                {closingView === "cash"
-                                  ? "현금 차이"
-                                  : closingView === "overtime"
-                                  ? "초과근무"
-                                  : closingView === "remarks"
-                                  ? "특이사항"
-                                  : closingView === "otherMemo"
-                                  ? "기타메모"
-                                  : item.issues.join(", ")}
-                                {item.date === getYesterdayDateString() && (
-                                  <span className="admin-yesterday-new-badge ml-2 rounded bg-sky-600 px-1.5 py-0.5 text-[10px] text-white">
-                                    어제
-                                  </span>
-                                )}
-                              </td>
-                              <td>
-                                {closingView === "cash"
-                                  ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
-                                  : closingView === "remarks"
-                                  ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p></div>
-                                  : closingView === "otherMemo"
-                                  ? <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{item.remarks?.otherMemo || "-"}</div>
-                                  : item.overtime || "-"}
-                              </td>
-                            </tr>
-                          ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+              {/* 전지점 매출 종합 — 대시보드의 본체. 예전 KPI 4칸(미제출·현금차이·기타메모·월말마감)과
+                  마감현황 표는 전부 '전일' 성격이라 전일 정산현황 탭으로 옮겼다(2026-07-22). */}
+              <AdminSalesOverviewSection />
 
               <div className="admin-dashboard-compact-grid">
                 <AdminDashboardAlertHub
@@ -943,6 +911,21 @@ export default function AdminPage() {
               </div>
 
             </>
+          )}
+
+          {adminSection === "analysis" && (
+            <section className="space-y-5 animate-fade-in">
+              {/* 모바일은 사이드바가 없어 여기서 하위탭을 고른다(전일정산·월말 탭과 같은 패턴). */}
+              <div className="flex gap-2 border-b border-gray-200 lg:hidden">
+                {[{ id: "summary", label: "손익 종합" }, { id: "charts", label: "손익 차트" }, { id: "branch", label: "지점 손익계산서" }].map((sub) => (
+                  <button key={sub.id} onClick={() => setAnalysisTab(sub.id as "summary" | "charts" | "branch")}
+                    className={`px-4 py-3 text-sm font-bold border-b-2 ${analysisTab === sub.id ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+              <AdminAnalysisSection view={analysisTab} />
+            </section>
           )}
 
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
@@ -967,6 +950,13 @@ export default function AdminPage() {
                   filteredList={filteredList}
                   handleDownloadExcel={handleDownloadExcel}
                   handleOpenDetail={handleOpenDetail}
+                  anomalyRecords={selectedDateAnomalyRecords}
+                  anomalyLoading={anomalyLoading}
+                  anomalyFailedBranches={anomalyFailedBranches}
+                  anomalyLoadError={anomalyLoadError}
+                  closingView={closingView}
+                  setClosingView={setClosingView}
+                  reloadAnomalies={() => { anomalyCacheRef.current.clear(); void loadClosingAnomalies(); }}
                 />
               ) : <AdminModificationLogsSection focusSection={dailyLogsFocus} />}
             </section>
@@ -1672,6 +1662,24 @@ function AdminMonthlyMissingDaysPanel({ month }: { month: string }) {
   );
 }
 
+type ClosingView = "overtime" | "cash" | "remarks" | "otherMemo";
+
+const CLOSING_VIEWS: Array<{ key: ClosingView; label: string }> = [
+  { key: "cash", label: "현금차이" },
+  { key: "overtime", label: "초과근무" },
+  { key: "remarks", label: "특이사항" },
+  { key: "otherMemo", label: "기타메모" },
+];
+
+/** 선택한 날짜의 마감 이상치 중 지금 보고 있는 분류에 해당하는 것만 */
+const filterAnomalies = (records: any[], view: ClosingView): any[] =>
+  records.filter((item) =>
+    view === "remarks" ? Boolean(item.remarks?.staffMemo || item.remarks?.reviewMemo)
+    : view === "otherMemo" ? Boolean(item.remarks?.otherMemo)
+    : view === "cash" ? Boolean(item.cashDifference)
+    : Boolean(item.overtime)
+  );
+
 function AdminDailySettlementStatusSection({
   selectedDate,
   setSelectedDate,
@@ -1682,7 +1690,14 @@ function AdminDailySettlementStatusSection({
   loading,
   filteredList,
   handleDownloadExcel,
-  handleOpenDetail
+  handleOpenDetail,
+  anomalyRecords,
+  anomalyLoading,
+  anomalyFailedBranches,
+  anomalyLoadError,
+  closingView,
+  setClosingView,
+  reloadAnomalies
 }: {
   selectedDate: string;
   setSelectedDate: (value: string) => void;
@@ -1694,13 +1709,30 @@ function AdminDailySettlementStatusSection({
   filteredList: DailyListRow[];
   handleDownloadExcel: () => void;
   handleOpenDetail: (row: DailyListRow) => void;
+  /** 이미 selectedDate 로 걸러진 이상치 목록 */
+  anomalyRecords: any[];
+  anomalyLoading: boolean;
+  /** 이상치를 못 읽은 지점 이름 — 이 지점들은 '이상 없음'이 아니라 '확인 못 함'이다 */
+  anomalyFailedBranches: string[];
+  anomalyLoadError: boolean;
+  closingView: ClosingView;
+  setClosingView: (view: ClosingView) => void;
+  reloadAnomalies: () => void;
 }) {
+  const cashDiffCount = anomalyRecords.filter((item) => item.cashDifference).length;
+  const otherMemoCount = anomalyRecords.filter((item) => item.remarks?.otherMemo).length;
+  // 이상치 카드를 누르면 그 분류로 바꾸고 아래 표까지 짚어 준다.
+  const focusAnomalies = (view: ClosingView) => {
+    setClosingView(view);
+    document.getElementById("admin-closing-anomaly-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <section className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전일 정산현황</h2>
-          <p className="text-xs text-gray-400 mt-0.5 font-medium">선택한 날짜 기준으로 지점별 제출 상태와 매출 합계를 확인합니다.</p>
+          <p className="text-xs text-gray-400 mt-0.5 font-medium">선택한 날짜 기준으로 지점별 제출 상태·매출 합계와 마감 이상치를 함께 확인합니다.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 border border-gray-200 bg-white py-2 px-3 rounded-xl shadow-xs">
@@ -1718,7 +1750,9 @@ function AdminDailySettlementStatusSection({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* 현금차이·기타메모는 예전에 대시보드 KPI로 따로 있었다. 같은 날짜를 두 화면에서 나눠 보던 것을
+          한 줄로 합쳤다(2026-07-22). 두 칸은 누르면 아래 마감 이상치 표의 해당 분류로 이동한다. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
           <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">제출 지점</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{stats.submitted} <span className="text-xs font-bold text-gray-300 font-sans">/ {stats.total}</span></span></div>
           <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600"><CheckCircle2 className="w-6 h-6" /></div>
@@ -1731,6 +1765,14 @@ function AdminDailySettlementStatusSection({
           <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">총 수집 매출</span><span className="text-2xl font-mono font-black text-[#2E6DB4]">{formatNumber(stats.revenue)}원</span></div>
           <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl"><TrendingUp className="w-6 h-6" /></div>
         </div>
+        <button type="button" onClick={() => focusAnomalies("cash")} className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between text-left cursor-pointer">
+          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">현금차이</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{anomalyLoading ? "…" : cashDiffCount}</span></div>
+          <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]"><Coins className="w-6 h-6" /></div>
+        </button>
+        <button type="button" onClick={() => focusAnomalies("otherMemo")} className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between text-left cursor-pointer">
+          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">ERP 기타메모</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{anomalyLoading ? "…" : otherMemoCount}</span></div>
+          <div className="p-4 bg-blue-50 rounded-2xl text-[#2E6DB4]"><ClipboardList className="w-6 h-6" /></div>
+        </button>
       </div>
 
       {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점·날짜를 한눈에. */}
@@ -1774,6 +1816,86 @@ function AdminDailySettlementStatusSection({
           </table>
         </div>
       </div>
+
+      {/* 마감 이상치 — 대시보드 '마감현황'에서 옮겨왔다(2026-07-22).
+          예전엔 '어제'로 못 박혀 있어 날짜를 바꿔도 따라오지 않았다. 이제 위 날짜 선택을 그대로 따른다.
+          예전의 '대시보드' 탭은 '현금차이'와 필터가 완전히 같아 없앴다. */}
+      <section id="admin-closing-anomaly-section" className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black text-[#2C3E50]">마감 이상치</h2>
+            <p className="text-xs text-gray-400 mt-1">{selectedDate} 마감에서 현금차이·초과근무·특이사항·기타메모가 있는 지점입니다.</p>
+          </div>
+          <button onClick={reloadAnomalies} className="h-8 px-3 rounded-xl bg-slate-100 text-slate-600 text-[11px] font-black">새로고침</button>
+        </div>
+        {/* 못 읽은 지점을 밝히지 않으면 '이상 없음'과 '확인 못 함'이 똑같아 보인다(P0-2). */}
+        {anomalyLoadError && (
+          <p className="text-xs font-black text-rose-600">지점 목록을 불러오지 못해 이상치를 확인하지 못했습니다. 새로고침 후 다시 확인해주세요.</p>
+        )}
+        {!anomalyLoadError && anomalyFailedBranches.length > 0 && (
+          <p className="text-xs font-black text-rose-600">
+            {anomalyFailedBranches.join(", ")} — 이 지점은 기록을 읽지 못해 이상치를 확인하지 못했습니다. (아래 개수에 빠져 있습니다)
+          </p>
+        )}
+        <div className="flex gap-2 border-b border-gray-100">
+          {CLOSING_VIEWS.map((view) => {
+            const count = filterAnomalies(anomalyRecords, view.key).length;
+            return (
+              <button
+                key={view.key}
+                onClick={() => setClosingView(view.key)}
+                aria-current={closingView === view.key ? "true" : undefined}
+                className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === view.key ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}
+              >
+                {view.label}{anomalyLoading ? "" : ` ${count}`}
+              </button>
+            );
+          })}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="text-left">
+              <tr>
+                <th className="py-2 px-2 text-[11px] font-black text-[#212121]">지점</th>
+                <th className="py-2 px-2 text-[11px] font-black text-[#212121]">마감자</th>
+                <th className="py-2 px-2 text-[11px] font-black text-[#212121]">이상 항목</th>
+                <th className="py-2 px-2 text-[11px] font-black text-[#212121]">내용</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {anomalyLoading ? (
+                <tr><td colSpan={4} className="py-10 text-center"><LoadingSpinner size="sm" /></td></tr>
+              ) : (() => {
+                const visible = filterAnomalies(anomalyRecords, closingView);
+                if (visible.length === 0) {
+                  return <tr><td colSpan={4} className="py-10 text-center text-gray-400 text-xs">
+                    {selectedDate} 마감에는 해당 항목이 없습니다.
+                    {anomalyFailedBranches.length > 0 ? " (위에 적힌 확인 불가 지점은 제외한 결과입니다)" : ""}
+                  </td></tr>;
+                }
+                return visible.map((item, index) => (
+                  <tr key={`${item.branchName}-${item.date}-${index}`}>
+                    <td className="py-1.5 px-2 font-bold text-[#2C3E50]">{item.branchName}</td>
+                    <td className="py-1.5 px-2 text-gray-500">{item.writer || "-"}</td>
+                    <td className="py-1.5 px-2 font-bold text-rose-600">
+                      {CLOSING_VIEWS.find((view) => view.key === closingView)?.label}
+                    </td>
+                    <td className="py-1.5 px-2">
+                      {closingView === "cash"
+                        ? `${formatNumber(item.cashDifference)}원 ${item.reason || ""}`
+                        : closingView === "remarks"
+                        ? <div className="space-y-1 text-xs"><p><b>직원</b> {item.remarks?.staffMemo || "-"}</p><p><b>리뷰</b> {item.remarks?.reviewMemo || "-"}</p></div>
+                        : closingView === "otherMemo"
+                        ? <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{item.remarks?.otherMemo || "-"}</div>
+                        : item.overtime || "-"}
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   );
 }
@@ -2665,6 +2787,9 @@ function AdminCashDiffHistorySection() {
     </div>
   );
 }
+
+// 이상치 이력 캐시 유효시간 — 이 안에서는 날짜를 바꿔도 다시 읽지 않는다(수동 새로고침은 즉시 무효화).
+const ANOMALY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const MONTHLY_CLOSE_SECTIONS: Array<{ key: "salesSummary" | "purchase" | "salary"; label: string }> = [
   { key: "salesSummary", label: "매출집계" },
