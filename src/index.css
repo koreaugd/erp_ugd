@@ -711,8 +711,7 @@ input[type=number] {
 }
 
 .admin-design-preview main > section:nth-of-type(5),
-.admin-design-preview main > div > section:nth-of-type(5),
-.admin-design-preview section:has(.admin-yesterday-new-row) {
+.admin-design-preview main > div > section:nth-of-type(5) {
   background: transparent !important;
 }
 
@@ -721,32 +720,390 @@ input[type=number] {
   background: transparent !important;
 }
 
-.admin-design-preview .admin-yesterday-new-row,
-.admin-design-preview .admin-yesterday-new-row:nth-child(even),
-.admin-design-preview .admin-yesterday-new-row:nth-child(odd) {
-  background: var(--admin-vanilla) !important;
-}
-
-.admin-design-preview .admin-yesterday-new-badge {
-  background: var(--admin-black) !important;
-  color: var(--admin-ghost) !important;
-}
-
+/* 마감 이상치 표(.admin-dashboard-closing-section)와 전지점 매출 순위표는 같은 검정 카드로 그린다.
+   예전엔 `section:has(.admin-yesterday-new-row)` 로도 같은 규칙을 걸었는데, :has() 는 조상까지 매치해서
+   이 표를 다른 섹션 안으로 옮기면 바깥 섹션(전일 정산현황 전체)까지 카드로 감싸 버린다. 클래스로만 지정한다.
+   (`.admin-yesterday-new-row` 자체도 없앴다 — 표가 단일 날짜만 보여주게 되어 '어제' 강조가 무의미해졌다.) */
 .admin-design-preview .admin-dashboard-closing-section thead tr,
 .admin-design-preview .admin-dashboard-closing-section th,
-.admin-design-preview section:has(.admin-yesterday-new-row) thead tr,
-.admin-design-preview section:has(.admin-yesterday-new-row) th {
+.admin-design-preview .admin-sales-overview-section thead tr,
+.admin-design-preview .admin-sales-overview-section th {
   background: var(--admin-alice) !important;
 }
 
-.admin-design-preview .admin-dashboard-closing-section,
-.admin-design-preview section:has(.admin-yesterday-new-row) {
+/* [ID 특이성 필수] 위쪽 `main > section:not(...):not(...)` 규칙이 border/radius/background 를 !important 로
+   0·투명으로 밀어 버리고, 그 선택자가 클래스 3개짜리라 클래스만으로는 못 이긴다(DESIGN.md §13-7).
+   최상위 래퍼 id 를 끼워 특이성으로 이긴다. (예전 마감현황 카드는 이 싸움에 져서 border/radius 가 죽고
+   outline 만 살아 '각진 테두리'로 보였다 — 여기서 함께 바로잡는다.) */
+#admin-layout-wrapper.admin-design-preview .admin-dashboard-closing-section,
+#admin-layout-wrapper.admin-design-preview .admin-sales-overview-section,
+#admin-layout-wrapper.admin-design-preview .admin-sales-filter-section {
+  background: var(--admin-ghost) !important;
   border: 1px solid var(--admin-black) !important;
   outline: 1px solid var(--admin-black) !important;
   outline-offset: -1px;
   border-radius: 30px !important;
   box-shadow: 0 20px 46px rgba(33, 33, 33, 0.055) !important;
 }
+
+/* 매출 순위표 합계 행 — 본문 줄무늬와 구분되게 위에 검정 선을 긋는다. */
+.admin-redesign .admin-sales-total-row > td {
+  border-top: 1px solid var(--admin-black);
+}
+
+/* 증감 표시. 관리자 스코프는 emerald 계열과 rose 계열 글자색을 전부 검정으로 치환하므로(위 .admin-redesign 규칙)
+   증감 색은 전용 클래스로 못 박는다(DESIGN.md §12). 색이 안 보여도 읽히도록 컴포넌트가 ▲/▼ 기호를 함께 찍는다.
+   [주의] 이 주석 안에 별표+슬래시 조합을 쓰지 말 것 — 주석이 거기서 끝나 다음 선택자가 깨진다. */
+.admin-redesign .admin-delta-up { color: #1F7A4D !important; }
+.admin-redesign .admin-delta-down { color: #B3261E !important; }
+.admin-redesign .admin-delta-flat { color: rgba(33, 33, 33, 0.55) !important; }
+
+/* 매출 KPI 칸 — 금액은 자릿수가 길어 기본 30px/46px 숫자에 안 들어간다. 이 칸만 작게 쓰고,
+   이동용 화살표(↗)는 누를 수 없는 칸이라 지운다. */
+.admin-kpi-card.admin-kpi-money::after { content: none; }
+.admin-kpi-card.admin-kpi-money strong { font-size: 24px; }
+.admin-design-preview .admin-kpi-card.admin-kpi-money { padding-right: 22px; }
+.admin-design-preview .admin-kpi-card.admin-kpi-money strong {
+  font-size: 21px;
+  min-width: 0;
+  grid-row: auto;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+.admin-design-preview .admin-kpi-card.admin-kpi-money span { grid-column: 1 / -1; }
+.admin-design-preview .admin-kpi-card.admin-kpi-money small { grid-column: 1 / -1; }
+
+/* 카드를 3개만 둘 때. 기본 .admin-kpi-grid 는 4열이라 그대로 두면 한 칸이 빈다. */
+.admin-kpi-grid-3,
+.admin-design-preview .admin-kpi-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .admin-kpi-grid-3,
+  .admin-design-preview .admin-kpi-grid-3 { grid-template-columns: 1fr; }
+}
+
+/* 집계가 불완전할 때 카드 밑줄 — 부분합을 정상 숫자처럼 보이게 두지 않는다(AGENTS.md P0-2).
+   .admin-kpi-card small 의 회색을 이겨야 하므로 !important 로 못 박는다. */
+.admin-redesign .admin-kpi-warn {
+  color: #B3261E !important;
+  font-weight: 900 !important;
+}
+
+/* 기간 선택 알약 — DESIGN.md §10 의 알약 토글(켜짐 검정↔꺼짐 바닐라)을 관리자 토큰으로. */
+.admin-redesign .admin-period-chip {
+  border: 1px solid var(--admin-black);
+  background: var(--admin-ghost);
+  color: var(--admin-black);
+  white-space: nowrap;
+}
+.admin-redesign .admin-period-chip:hover { background: var(--admin-vanilla); }
+.admin-redesign .admin-period-chip.is-active {
+  background: var(--admin-black);
+  color: var(--admin-ghost);
+}
+
+/* 선그래프 — 선 색은 컴포넌트가 인라인으로 준다(SVG stroke 는 Tailwind 치환 대상이 아니라 안전). */
+.admin-sales-chart svg { display: block; }
+
+/* 분석 탭 — 경보 기준을 넘은 비율 값. text-rose-* 는 관리자 스코프에서 검정으로 치환되므로 전용 클래스로 못 박는다. */
+.admin-redesign .admin-rate-hot { color: #B3261E !important; }
+
+/* 분석 탭 PRIME COST 게이지 — branch_detail PNG의 스택 바(식재료율+인건비율, 목표 60% 세로선).
+   색은 관리자 토큰: 식재료=바닐라, 인건비=엘리스. 축은 0~100%. */
+.admin-redesign .admin-prime-gauge {
+  position: relative;
+  display: flex;
+  height: 22px;
+  border: 1px solid var(--admin-black);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--admin-ghost);
+}
+.admin-redesign .admin-prime-food { background: var(--admin-vanilla); }
+.admin-redesign .admin-prime-labor { background: var(--admin-alice); }
+.admin-redesign .admin-prime-target {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #B3261E;
+}
+
+/* 손익계산서 합계 행(총매출·총지출·이익금) — 줄무늬/호버보다 진하게 구분선을 준다. */
+.admin-redesign .admin-statement-strong > td {
+  border-top: 1px solid var(--admin-black);
+  background: color-mix(in srgb, var(--admin-ghost) 60%, #ffffff);
+}
+
+/* 손익계산서 구획 밴드(매출부/지출부) — 제출현황 법인 밴드와 같은 문법(연한 바닐라 띠). */
+.admin-redesign .admin-statement-band > td {
+  background: var(--admin-vanilla);
+  border-top: 1px solid var(--admin-black);
+}
+
+/* 표 셀 인라인 막대 — 값 텍스트 뒤에 최댓값 대비 막대(05 순위표의 생산성 막대 문법).
+   막대가 글자를 가리지 않게 fill 은 아래층, 텍스트는 위층. */
+.admin-redesign .admin-cell-bar {
+  position: relative;
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.admin-redesign .admin-cell-bar-fill {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 4px;
+  opacity: 0.55;
+}
+.admin-redesign .admin-cell-bar-alice { background: var(--admin-alice); }
+.admin-redesign .admin-cell-bar-honey { background: var(--admin-honey); }
+.admin-redesign .admin-cell-bar-vanilla { background: var(--admin-vanilla); }
+.admin-redesign .admin-cell-bar-text { position: relative; z-index: 1; }
+
+/* 분석 차트 2열 그리드 — 그래프 하나가 화면 전체 폭을 먹지 않게 1행 2개 배치(좁은 화면은 1열). */
+.admin-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: stretch;
+}
+@media (max-width: 1100px) {
+  .admin-chart-grid { grid-template-columns: 1fr; }
+}
+
+/* 가로 막대(지점별 순위 차트) 트랙 */
+.admin-redesign .admin-hbar-track {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  background: rgba(33, 33, 33, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.admin-redesign .admin-hbar-fill {
+  height: 100%;
+  border: 1px solid rgba(33, 33, 33, 0.35);
+  border-radius: 4px;
+}
+
+/* 분석 탭 섹션 제목 — DESIGN.md §6 바닐라 알약(텍스트만)을 관리자 토큰으로 옮긴 것.
+   값은 §6 그대로: 999px 알약 · 1px 검정 · 11px/900 · 6px 12px. (사용자 지시 2026-07-22) */
+.admin-redesign .admin-pill-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid var(--admin-black);
+  background: var(--admin-vanilla);
+  color: var(--admin-black) !important;
+  padding: 6px 12px;
+  font-size: 11px !important;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+/* ── 손익 요약표: 읽기 전용 엑셀형 (DESIGN.md §9) ──
+   · 헤더 = §9-1: 바닐라 배경 + 각 셀 사방 1px 검정 격자 + 검정 볼드 11px
+   · border-separate (§9: collapse 는 sticky 에서 테두리가 깨진다) + 스크롤 시 헤더(top)·매장명(left) 고정
+   · 클릭한 행 = §9-3 커서 띠(바닐라 35% 막 + 위아래 검정 선), 상태색 있는 행(소계·정산부)은 선만 */
+.admin-redesign .admin-summary-scroll {
+  max-height: 72vh;
+  overflow: auto;
+}
+/* [사용자 지시 2026-07-22] 분석 탭 글자 크기는 제목 알약과 같은 11px 하나로 통일한다.
+   SVG 차트 글자(text)는 제외 — viewBox 안에서 자체 스케일을 쓰므로 건드리면 비율이 깨진다. */
+.admin-redesign .admin-analysis-uniform :where(p, span, small, b, strong, em, li, td, th, h2, h3, button, select, label, div) {
+  font-size: 11px !important;
+}
+.admin-redesign .admin-summary-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+/* 헤더(컬럼)만 가운데정렬 · 본문은 우측정렬(구분 열만 왼쪽) — 사용자 지시 */
+.admin-redesign .admin-summary-table thead th { text-align: center; }
+.admin-redesign .admin-summary-table tbody td { text-align: right; }
+/* 헤더 격자: border-separate 에서 셀마다 사방 테두리를 주면 이웃끼리 2px 이중선이 된다 —
+   오른쪽·아래만 주고, 첫 행이 위 선·첫 칸이 왼 선을 채워 단일 1px 격자로 만든다. */
+.admin-redesign .admin-summary-table thead th {
+  position: sticky;
+  z-index: 40;
+  background: var(--admin-vanilla);
+  border-right: 1px solid var(--admin-black);
+  border-bottom: 1px solid var(--admin-black);
+  border-top: 0;
+  border-left: 0;
+  color: #212121; /* text-gray-* 는 68% 회색으로 치환되므로 리터럴 100% 검정(§9-1) */
+  font-weight: 900;
+  font-size: 11px;
+}
+.admin-redesign .admin-summary-table .admin-sum-h1 { top: 0; height: 32px; border-top: 1px solid var(--admin-black); }
+.admin-redesign .admin-summary-table .admin-sum-h2 { top: 32px; height: 26px; font-size: 10px; }
+/* 매장명(첫 열) 고정 — 헤더 교차 칸은 top+left 둘 다 고정이라 z 를 한 층 더 올린다.
+   폭은 좁게 고정(가장 긴 지점명 기준), 글자는 제목 알약과 같은 11px. */
+.admin-redesign .admin-summary-table .admin-summary-name {
+  position: sticky;
+  left: 0;
+  z-index: 30;
+  /* 11px 로 통일해 폭을 더 줄였다(124→104px). 최장 지점명은 말줄임 + title 툴팁으로 처리. */
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  background: #ffffff;
+  border-right: 2px solid rgba(33, 33, 33, 0.55); /* 고정 블록을 닫는 진한 우측 선(§9) */
+}
+.admin-redesign .admin-summary-table thead .admin-summary-name {
+  z-index: 50;
+  background: var(--admin-vanilla);
+  border-left: 1px solid var(--admin-black);
+}
+/* 본문 격자(§9-1: 헤더는 검정, 본문은 옅은 격자로 대비). 바탕은 지점명 칸과 같은 흰색으로 통일. */
+.admin-redesign .admin-summary-table tbody td {
+  background: #ffffff;
+  border-right: 1px solid rgba(33, 33, 33, 0.08);
+  border-bottom: 1px solid rgba(33, 33, 33, 0.10);
+}
+/* 항목 그룹(매출/인건비/…) 경계선 — colSpan 행에서도 어긋나지 않게 셀 클래스로 직접 */
+.admin-redesign .admin-summary-table .admin-group-start { border-left: 1px solid rgba(33, 33, 33, 0.22); }
+/* 행 하이라이트: 소계(진하게)·정산부(회색 톤) — sticky 매장명 칸도 같은 배경으로 덮는다 */
+.admin-redesign .admin-summary-table tr.admin-statement-strong td,
+.admin-redesign .admin-summary-table tr.admin-statement-strong .admin-summary-name {
+  background: color-mix(in srgb, var(--admin-vanilla) 45%, #ffffff);
+  border-top: 1px solid var(--admin-black);
+}
+.admin-redesign .admin-summary-table tr.admin-summary-hq td {
+  background: color-mix(in srgb, var(--admin-alice) 40%, #ffffff);
+}
+/* 키보드로 행을 옮길 때도 어디에 있는지 보이게 — 브라우저 기본 outline 은 sticky 셀에 가려 잘 안 보인다. */
+.admin-redesign .admin-summary-table tbody tr:focus-visible > td {
+  box-shadow: inset 0 2px 0 0 #2E6DB4, inset 0 -2px 0 0 #2E6DB4;
+  outline: none;
+}
+.admin-redesign .admin-summary-table tbody tr:focus { outline: none; }
+
+/* 클릭한 행 커서 띠(§9-3) — 일반 행: 바닐라 35% 막 + 위아래 검정 선 */
+.admin-redesign .admin-summary-table tr.admin-summary-row-active > td {
+  box-shadow:
+    inset 0 1px 0 0 var(--admin-black),
+    inset 0 -1px 0 0 var(--admin-black),
+    inset 0 0 0 9999px color-mix(in srgb, var(--admin-vanilla) 35%, transparent);
+}
+/* 맨 앞 칸에는 왼쪽 4px 띠로 행 시작을 짚어 준다(§9-3) */
+.admin-redesign .admin-summary-table tr.admin-summary-row-active > td:first-child {
+  box-shadow:
+    inset 4px 0 0 0 var(--admin-black),
+    inset 0 1px 0 0 var(--admin-black),
+    inset 0 -1px 0 0 var(--admin-black),
+    inset 0 0 0 9999px color-mix(in srgb, var(--admin-vanilla) 35%, transparent);
+}
+/* 이미 상태색을 지닌 행(소계·정산부)은 막을 겹치지 않고 위·아래 검정 선만(§9-3) */
+.admin-redesign .admin-summary-table tr.admin-summary-row-active.admin-statement-strong > td,
+.admin-redesign .admin-summary-table tr.admin-summary-row-active.admin-summary-hq > td {
+  box-shadow:
+    inset 0 1px 0 0 var(--admin-black),
+    inset 0 -1px 0 0 var(--admin-black);
+}
+
+/* ── 본사 종합 탭 (05 본사 대시보드 PNG 재현) ── */
+.admin-hq-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--admin-black);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--admin-ghost);
+}
+/* 지점 손익계산서 탭은 KPI 가 4개(총매출·이익·객단가·영수건수) */
+.admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .admin-hq-kpi-grid, .admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: 1fr; } }
+.admin-redesign .admin-hq-kpi { padding: 10px 14px; }
+.admin-redesign .admin-hq-kpi + .admin-hq-kpi { border-left: 1px solid rgba(33, 33, 33, 0.18); }
+/* 4열이 2열/1열로 접히면 세로 경계선도 필요하다(줄바꿈된 칸의 왼쪽 선은 위 규칙으로 남고, 윗줄과의 구분은 이것). */
+@media (max-width: 1000px) {
+  .admin-redesign .admin-hq-kpi-4 .admin-hq-kpi:nth-child(n + 3) { border-top: 1px solid rgba(33, 33, 33, 0.18); }
+  /* 2열로 접히면 3번째는 새 줄 첫 칸이라 왼쪽 선이 남으면 안 된다(Codex P2). */
+  .admin-redesign .admin-hq-kpi-4 .admin-hq-kpi:nth-child(2n + 1) { border-left: 0; }
+}
+@media (max-width: 700px) {
+  .admin-redesign .admin-hq-kpi + .admin-hq-kpi { border-left: 0; border-top: 1px solid rgba(33, 33, 33, 0.18); }
+}
+.admin-redesign .admin-hq-kpi span { display: block; color: rgba(33, 33, 33, 0.55); font-weight: 800; }
+.admin-redesign .admin-hq-kpi strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 19px !important; /* 금액은 KPI 라 통일 규칙에서 예외 */
+  font-weight: 900;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.admin-redesign .admin-hq-kpi strong em { font-size: 12px !important; margin-left: 4px; }
+/* 컴팩트 변형(지점 손익계산서 4칸) — 증감과 "전월 대비"를 한 줄에 붙여 세로를 줄인다. */
+.admin-redesign .admin-hq-kpi small { display: block; margin-top: 2px; font-weight: 800; white-space: nowrap; }
+.admin-redesign .admin-hq-kpi-4 .admin-hq-kpi { padding: 8px 12px; }
+.admin-redesign .admin-hq-kpi-4 .admin-hq-kpi strong { font-size: 17px !important; }
+
+/* 본사 손익계산서 표 — 요약표와 같은 엑셀형 문법(헤더 바닐라·검정 격자) */
+.admin-redesign .admin-hq-statement { border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.admin-redesign .admin-hq-statement thead th {
+  background: var(--admin-vanilla);
+  border-right: 1px solid var(--admin-black);
+  border-bottom: 1px solid var(--admin-black);
+  border-top: 1px solid var(--admin-black);
+  color: #212121;
+  font-weight: 900;
+}
+.admin-redesign .admin-hq-statement thead th:first-child { border-left: 1px solid var(--admin-black); }
+.admin-redesign .admin-hq-statement tbody td {
+  background: #ffffff;
+  border-right: 1px solid rgba(33, 33, 33, 0.08);
+  border-bottom: 1px solid rgba(33, 33, 33, 0.10);
+}
+.admin-redesign .admin-hq-statement tbody td:first-child { border-left: 1px solid rgba(33, 33, 33, 0.08); }
+/* [순서 주의] 위 `tbody td { background:#fff }` 가 앞서 정의된 밴드·강조행 배경을 덮는다(명시도 동일·뒤에 옴).
+   지점 손익계산서가 이 표 스타일을 함께 쓰면서 매출부/지출부 밴드와 합계행이 흰색이 됐다(Codex P1).
+   여기서 tr 클래스를 낀 더 높은 명시도로 되살린다. */
+.admin-redesign .admin-hq-statement tr.admin-statement-band td {
+  background: var(--admin-vanilla);
+  border-top: 1px solid var(--admin-black);
+}
+.admin-redesign .admin-hq-statement tr.admin-statement-strong td {
+  background: color-mix(in srgb, var(--admin-ghost) 60%, #ffffff);
+  border-top: 1px solid var(--admin-black);
+}
+/* 이익금 행 — PNG 처럼 네이비 채움 + 밝은 글자 */
+.admin-redesign .admin-hq-statement tr.admin-hq-profit td {
+  background: #1A3C6E;
+  color: var(--admin-ghost);
+  border-top: 1px solid var(--admin-black);
+}
+.admin-redesign .admin-hq-statement tr.admin-hq-profit td .admin-delta-up,
+.admin-redesign .admin-hq-statement tr.admin-hq-profit td .admin-delta-down,
+.admin-redesign .admin-hq-statement tr.admin-hq-profit td .admin-delta-flat { color: #F4F2CC !important; }
+
+/* 상태 배지(PRIME·경보) — 채도는 상태칩 규칙(§2-1)대로 연하게 하지 않는다. */
+.admin-redesign .admin-pnl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--admin-black);
+  font-weight: 900;
+}
+.admin-redesign .admin-pnl-badge-good { background: #CFDECA; color: #212121; }
+.admin-redesign .admin-pnl-badge-warn { background: #EFF0A3; color: #212121; }
+.admin-redesign .admin-pnl-badge-bad { background: #FDE2E2; color: #8F1F1F; border-color: #C93A3A; }
 
 .admin-dashboard-compact-grid {
   display: grid;
@@ -800,10 +1157,13 @@ input[type=number] {
   padding: 0 !important;
 }
 
+/* 통계 칸은 `div` 였는데, 현금차이·기타메모 칸이 (아래 이상치 표로 이동하는) `button` 이 되었다.
+   선택자에 button 을 함께 넣지 않으면 그 두 칸만 테두리 없이 떠 보인다. */
 .admin-design-preview .admin-daily-settlement-section #stats-cards > div,
 .admin-design-preview .admin-daily-settlement-section #table-card,
 .admin-design-preview .admin-daily-settlement-section div[class*="bg-white"][class*="rounded-2xl"],
-.admin-design-preview .admin-daily-settlement-section div[class*="bg-white"][class*="rounded-3xl"] {
+.admin-design-preview .admin-daily-settlement-section div[class*="bg-white"][class*="rounded-3xl"],
+.admin-design-preview .admin-daily-settlement-section button[class*="bg-white"][class*="rounded-2xl"] {
   background: color-mix(in srgb, var(--admin-ghost) 94%, #ffffff) !important;
   border: 1px solid var(--admin-black) !important;
   box-shadow: 0 10px 24px rgba(33, 33, 33, 0.035) !important;
