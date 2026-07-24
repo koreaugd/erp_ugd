@@ -11,6 +11,7 @@ import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
+import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import {
@@ -87,7 +88,7 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "analysis" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges">("dashboard");
+  const [adminSection, setAdminSection] = useState<"dashboard" | "analysis" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges" | "kakaoTaxi">("dashboard");
   const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
@@ -114,6 +115,7 @@ export default function AdminPage() {
   const [dailyLogsFocus, setDailyLogsFocus] = useState<"logs" | "manualOvertimes" | null>(null);
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
+  const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
   const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
@@ -893,6 +895,21 @@ export default function AdminPage() {
             직원명부
           </button>}
 
+          <p className="ugd-nav-group">법인택시</p>
+          {[{ id: "orders", label: "이용내역" }, { id: "anomaly", label: "이상 점검" }, { id: "requests", label: "신청 관리" }, { id: "members", label: "직원 관리" }].map((sub) => {
+            const subActive = adminSection === "kakaoTaxi" && kakaoTaxiTab === sub.id;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => { setAdminSection("kakaoTaxi"); setKakaoTaxiTab(sub.id as KakaoTaxiView); }}
+                aria-current={subActive ? "page" : undefined}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
+
           <p className="ugd-nav-group">이동</p>
           <button
             onClick={() => navigate("/branch-confirm")}
@@ -989,6 +1006,23 @@ export default function AdminPage() {
           {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
 
           {adminSection === "salaryChanges" && <SalaryChangeHistoryTab />}
+
+          {adminSection === "kakaoTaxi" && (
+            <section className="space-y-5 animate-fade-in">
+              {/* 모바일은 사이드바가 없어 여기서 하위탭을 고른다(분석 탭과 같은 패턴). */}
+              <div className="flex gap-2 border-b border-gray-200 lg:hidden">
+                {/* 다른 탭들의 모바일 하위탭은 text-sm 이지만, 신규 화면은 §6-0-1 폰트 기준표(버튼 11px/900)를 따른다.
+                    기존 탭들은 다음에 손볼 때 함께 11px 로 맞춘다(§9 의 12px 레거시와 같은 취급). */}
+                {[{ id: "orders", label: "이용내역" }, { id: "anomaly", label: "이상 점검" }, { id: "requests", label: "신청 관리" }, { id: "members", label: "직원 관리" }].map((sub) => (
+                  <button key={sub.id} onClick={() => setKakaoTaxiTab(sub.id as KakaoTaxiView)}
+                    className={`px-4 py-3 text-[11px] font-black border-b-2 ${kakaoTaxiTab === sub.id ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>
+                    {sub.label}
+                  </button>
+                ))}
+              </div>
+              <KakaoTaxiSection view={kakaoTaxiTab} />
+            </section>
+          )}
 
           {adminSection === "dailySettlement" && (
             <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
