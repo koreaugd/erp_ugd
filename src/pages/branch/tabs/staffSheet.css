@@ -35,12 +35,13 @@
   background: color-mix(in srgb, var(--branch-vanilla) 35%, transparent) !important;
 }
 
-/* 커서(포커스) 있는 행 표시 — 주류재고와 같은 취지(§9-1 커서 위치 표시).
-   여기선 '바닐라 막'이 아니라 위·아래 검정 띠선으로만 짚는다: 근무 완료 행은 이미 바닐라로 차 있고
-   오류 셀은 빨강이라, 그 위에 막을 또 씌우면 상태색을 가린다. 선은 셀 배경을 가리지 않으므로
-   어떤 상태의 행이든 커서 위치를 안전하게 표시한다. */
+/* 커서(포커스) 있는 행 표시 — DESIGN §9-3 표준 레시피(바닐라 35% 얇은 막 + 위·아래 검정 띠선).
+   막이 반투명이라 상태색이 그대로 비친다: 오류 셀 빨강(bg-[#FDE2E2])은 65%가 남아 여전히 빨갛고,
+   근무 완료 행(바닐라 35%)은 막이 겹쳐 조금 더 진해질 뿐이다. 커서 행은 항상 띠 전체로 구분된다.
+   (종전엔 선만 쓰는 변형이었는데, 선이 얇아 행 전체가 짚여 보이지 않는다는 지적으로 표준형으로 통일.) */
 .branch-redesign #staff-attendance-section .staff-sheet tbody tr:focus-within > td {
   box-shadow:
     inset 0 1px 0 0 var(--branch-black),
-    inset 0 -1px 0 0 var(--branch-black);
+    inset 0 -1px 0 0 var(--branch-black),
+    inset 0 0 0 9999px color-mix(in srgb, var(--branch-vanilla) 35%, transparent);
 }
