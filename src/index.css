@@ -4136,3 +4136,31 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 #modification-logs-section tbody tr.admin-log-recent:hover {
   background: color-mix(in srgb, var(--admin-vanilla) 93%, var(--admin-black)) !important;
 }
+
+/* ============================================================
+   [공용] 지점 알약 제목 — `.branch-pill-title`
+   ------------------------------------------------------------
+   기존 지점 알약 제목 규칙은 탭마다 #tab-view-settle / #labor-contract-tab 같은
+   **ID 셀렉터로 개별 지정**돼 있다. 그래서 새 탭을 만들면 제목이 평범한 글씨로 남는
+   사고가 반복됐다(비즈니스택시 탭에서 실제 발생, 2026-07-24).
+
+   [규칙] 새로 만드는 지점 탭은 index.css 에 ID 규칙을 추가하지 말고
+   h3 에 이 클래스를 붙인다. 값은 DESIGN.md §6 과 동일(11px·900·바닐라·1px 검정·999px).
+   ============================================================ */
+.branch-redesign .branch-pill-title {
+  display: inline-flex !important;
+  width: fit-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--branch-black) !important;
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+/* 제목 안에는 글자만 — DESIGN.md §6-1 (아이콘이 들어가면 알약 크기가 들쭉날쭉해진다) */
+.branch-redesign .branch-pill-title svg { display: none !important; }

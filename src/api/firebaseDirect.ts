@@ -416,6 +416,79 @@ export async function firebaseCreateSharedDataIfMissing(dataKey: string, value: 
   return { created };
 }
 
+/**
+ * 배열형 공유데이터의 특정 항목을 **원자적으로** 조건부 갱신한다(compare-and-set).
+ *
+ * 트랜잭션 안에서 서버 문서를 다시 읽어 조건(expectStatus)을 확인하고, 맞을 때만 그 항목을 바꾼다.
+ * 두 사람이 동시에 같은 항목을 선점하려 하면 하나만 성공한다 — 읽고-고치고-쓰는 방식으로는
+ * 둘 다 통과해 카카오 등록이 이중 실행될 수 있어(비즈니스택시 승인), 그 경로는 반드시 이 함수를 쓴다.
+ *
+ * 반환 outcome: "updated"(내가 선점/갱신함) | "notFound"(항목 없음) | "conflict"(다른 상태 — 남이 먼저 처리)
+ */
+export async function firebaseUpdateSharedArrayItem(
+  dataKey: string,
+  itemId: string,
+  expectStatus: string[],
+  patch: Record<string, unknown>,
+  /** 추가 조건 — 이 필드들이 모두 일치할 때만 갱신한다(예: 자기가 잡은 선점만 풀도록 claimedBy 확인). */
+  expectMatch?: Record<string, unknown>
+): Promise<{ outcome: "updated" | "notFound" | "conflict"; list: any[] }> {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const recordRef = doc(db, "shared_data", encodeURIComponent(dataKey));
+  const nowIso = new Date().toISOString();
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const raw = snapshot.exists() ? snapshot.data().value : [];
+    const list: any[] = Array.isArray(raw) ? raw : [];
+    const index = list.findIndex((item) => item && item.id === itemId);
+    if (index < 0) return { outcome: "notFound" as const, list };
+    if (!expectStatus.includes(String(list[index].status))) return { outcome: "conflict" as const, list };
+    if (expectMatch && !Object.entries(expectMatch).every(([k, v]) => list[index][k] === v)) {
+      return { outcome: "conflict" as const, list };
+    }
+    const next = list.map((item, i) => (i === index ? { ...item, ...patch } : item));
+    tx.set(recordRef, { value: next, updatedAt: nowIso });
+    return { outcome: "updated" as const, list: next };
+  });
+}
+
+/**
+ * 배열형 공유데이터에 항목을 **원자적으로** 추가한다(중복 검사 포함).
+ *
+ * 읽고-고치고-쓰면 두 사람이 동시에 제출했을 때 나중 저장이 먼저 것을 통째로 덮어써 신청이 사라진다.
+ * 트랜잭션 안에서 최신 배열을 다시 읽어 중복을 확인하고 이어붙이므로, 동시 제출도 둘 다 남는다.
+ *
+ * dedupeMatch: 이 필드들이 모두 같고 상태가 dedupeStatuses 에 속하는 항목이 있으면 중복으로 본다.
+ * (함수는 트랜잭션에 넘길 수 없어 "필드 동등 비교" 형태로 조건을 받는다.)
+ */
+export async function firebaseAppendSharedArrayItem(
+  dataKey: string,
+  item: Record<string, unknown>,
+  dedupe?: { match: Record<string, unknown>; statuses: string[] }
+): Promise<{ outcome: "appended" | "duplicate"; list: any[] }> {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const recordRef = doc(db, "shared_data", encodeURIComponent(dataKey));
+  const nowIso = new Date().toISOString();
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const raw = snapshot.exists() ? snapshot.data().value : [];
+    const list: any[] = Array.isArray(raw) ? raw : [];
+    if (dedupe) {
+      const hit = list.some((existing) =>
+        existing
+        && dedupe.statuses.includes(String(existing.status))
+        && Object.entries(dedupe.match).every(([k, v]) => existing[k] === v)
+      );
+      if (hit) return { outcome: "duplicate" as const, list };
+    }
+    const next = [item, ...list];
+    tx.set(recordRef, { value: next, updatedAt: nowIso });
+    return { outcome: "appended" as const, list: next };
+  });
+}
+
 export async function firebaseGetAllManualOvertimes() {
   await waitForFirebaseUser(); // 인증 전 거부를 빈 목록으로 오해하지 않도록 로그인 복원을 기다린다.
   const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));

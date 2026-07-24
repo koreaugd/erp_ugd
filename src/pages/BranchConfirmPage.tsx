@@ -12,6 +12,7 @@ import { cleanNumeric } from "./branch/helpers/formatters";
 import type { BranchDailyTab } from "./branch/types";
 import { AnnualLeaveTab } from "./branch/tabs/AnnualLeaveTab";
 import { LaborContractTab } from "./branch/tabs/LaborContractTab";
+import { BusinessTaxiTab } from "./branch/tabs/BusinessTaxiTab";
 import { BranchDashboardTab } from "./branch/tabs/BranchDashboardTab";
 import { OvertimeLogTab } from "./branch/tabs/OvertimeLogTab";
 import { PartTimeLogTab } from "./branch/tabs/PartTimeLogTab";
@@ -221,7 +222,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract">("dashboard");
+  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract" | "businessTaxi">("dashboard");
   const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
 
   const dailySubTabs = [
@@ -598,6 +599,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           >
             <span>근로계약서</span>
           </button>
+          {/* 순서: 근로계약서 → 비즈니스택시 → 연차관리 (사용자 지시 2026-07-24) */}
+          <button
+            type="button"
+            onClick={() => setMainCategory("businessTaxi")}
+            aria-current={mainCategory === "businessTaxi" ? "page" : undefined}
+            className={`ugd-nav-item shrink-0${mainCategory === "businessTaxi" ? " is-active" : ""}`}
+          >
+            <span>비즈니스택시</span>
+          </button>
           <button
             type="button"
             onClick={() => { setMainCategory("annualLeave"); setActiveTab("annualLeave"); }}
@@ -702,6 +712,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
 
           {mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
+
+          {mainCategory === "businessTaxi" && <BusinessTaxiTab branchName={activeBranchName} />}
         </main>
       </div>
 

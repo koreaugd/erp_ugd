@@ -1,4 +1,5 @@
 // server.ts
+import "dotenv/config"; // .env의 KAKAO_T_* 등 로컬 개발 비밀값 로드 (파일 없으면 조용히 무시)
 import express, { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
@@ -208,6 +209,249 @@ function writeDB(db: LocalDB) {
 }
 
 // ----------------------------------------------------
+// 카카오T 비즈니스(법인택시) API 프록시 — 로컬 개발용
+// 운영은 gas/Code.gs 의 동일 액션이 처리한다(시크릿은 GAS 스크립트 속성).
+// 로컬은 .env 의 KAKAO_T_CORP_ID / KAKAO_T_SECRET 를 쓴다. 양쪽 로직을 같이 고칠 것.
+// ----------------------------------------------------
+const KAKAO_TAXI_BASE = "https://b2b-api.kakaomobility.com";
+
+// PIN 해시 → 지점_설정 행 조회. verifyPin 액션과 카카오 관리자 게이트가 같은 규칙을 쓰도록
+// 한 곳에 모았다(admin 해시 2종 호환 포함 — 복원 데이터가 구 해시를 들고 있어도 로그인과 어긋나지 않게).
+function findLocalSettingByPinHash(db: LocalDB, pinHash: unknown) {
+  const cleanPinHash = String(pinHash || "").trim().toLowerCase();
+  if (!cleanPinHash) return undefined;
+  return db.settings.find(s => {
+    if (!s.is_active) return false;
+    if (s.pin_hash === cleanPinHash) return true;
+    // admin 호환성
+    if (s.role === "admin") {
+      const isDbAdminHash = (s.pin_hash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || s.pin_hash === "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95");
+      const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95");
+      if (isDbAdminHash && isInputAdminHash) return true;
+    }
+    return false;
+  });
+}
+
+// 관리자 PIN 검증 게이트 — gas/Code.gs requireKakaoTaxiAdmin 과 같은 규칙.
+// 실패 유형과 무관하게 같은 문구로 답해 PIN 존재 여부를 밖에서 구분할 수 없게 한다.
+// [주의] 로컬 로그인은 Firebase(운영 지점목록)를 탈 수 있어, db_simulation.json 의 관리자
+// pin_hash 가 운영 관리자 PIN 의 해시와 같아야 로컬에서 이 게이트를 통과한다.
+function requireKakaoTaxiAdmin(db: LocalDB, adminPinHash: unknown) {
+  const denied = new Error("법인택시 메뉴는 관리자만 사용할 수 있습니다. 다시 로그인해주세요.");
+  const setting = findLocalSettingByPinHash(db, adminPinHash);
+  if (!setting || setting.role !== "admin") throw denied;
+}
+
+// 카카오T 액션 목록 — 이 액션들은 GAS 웹앱과 같은 규약으로 응답한다(오류도 HTTP 200 + success:false).
+// 500으로 주면 클라이언트 callApi 가 본문을 읽지 않아 사용자에게 "HTTP Error 500"만 보인다.
+const KAKAO_TAXI_ACTIONS = new Set([
+  "getKakaoTaxiOrders", "getKakaoTaxiGroups", "getKakaoTaxiMembers",
+  "registerKakaoTaxiMember", "updateKakaoTaxiMember", "blockKakaoTaxiMember", "unblockKakaoTaxiMember",
+  "deleteKakaoTaxiMember", "sendKakaoTaxiMemberTms",
+]);
+
+async function runKakaoTaxiAction(action: string, body: any): Promise<any> {
+  switch (action) {
+    case "getKakaoTaxiOrders":
+      return kakaoTaxiOrders(String(body.month || ""));
+    case "getKakaoTaxiGroups":
+      return (await kakaoTaxiFetch("GET", "/external/v1/groups")) || [];
+    case "getKakaoTaxiMembers":
+      return kakaoTaxiMembers();
+    case "registerKakaoTaxiMember":
+      return kakaoTaxiRegisterMember(body.member);
+    case "updateKakaoTaxiMember":
+      return kakaoTaxiUpdateMember(String(body.memberId || ""), body.member);
+    case "blockKakaoTaxiMember":
+      return kakaoTaxiSetBlocked(body.memberIds, true);
+    case "unblockKakaoTaxiMember":
+      return kakaoTaxiSetBlocked(body.memberIds, false);
+    case "deleteKakaoTaxiMember": {
+      const memberId = String(body.memberId || "");
+      if (!memberId) throw new Error("삭제할 직원이 지정되지 않았습니다.");
+      await kakaoTaxiFetch("DELETE", "/external/v1/members/" + encodeURIComponent(memberId));
+      return { success: true };
+    }
+    case "sendKakaoTaxiMemberTms": {
+      const memberId = String(body.memberId || "");
+      if (!memberId) throw new Error("알림톡을 보낼 직원이 지정되지 않았습니다.");
+      await kakaoTaxiFetch("POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms");
+      return { success: true };
+    }
+    default:
+      throw new Error("알 수 없는 카카오T 액션: " + action);
+  }
+}
+
+function kakaoTaxiCredentials() {
+  const corpId = process.env.KAKAO_T_CORP_ID;
+  const secret = process.env.KAKAO_T_SECRET;
+  if (!corpId || !secret) {
+    throw new Error("카카오T 연동 정보가 없습니다. .env 에 KAKAO_T_CORP_ID / KAKAO_T_SECRET 를 등록해주세요.");
+  }
+  return { corpId, secret };
+}
+
+async function kakaoTaxiFetch(method: string, apiPath: string, query?: string | null, body?: unknown): Promise<any> {
+  const { corpId, secret } = kakaoTaxiCredentials();
+  // [주의] 서명 URL에는 쿼리 파라미터를 넣지 않는다.
+  // 넣으면 카카오가 90003("인증 토큰이 유효하지 않습니다")을 돌려준다 — 2026-07-24 실계정에서 확인.
+  const signUrl = KAKAO_TAXI_BASE + apiPath;
+  const nonce = String(Math.floor(Math.random() * 100000));
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const message = `${nonce}\n${signUrl}\n${method}\n${corpId}\n${timestamp}\n${nonce}`;
+  const token = crypto.createHmac("sha1", secret).update(message, "utf8").digest("base64");
+  const headers: Record<string, string> = {
+    "Authorization": "Token " + token,
+    "x-mob-b2b-corp-id": corpId,
+    "x-mob-b2b-nonce": nonce,
+    "x-mob-b2b-timestamp": timestamp
+  };
+  const init: RequestInit = { method, headers };
+  if (body !== undefined && body !== null) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(KAKAO_TAXI_BASE + apiPath + (query ? "?" + query : ""), init);
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error) detail = parsed.error;
+    } catch { /* 본문이 JSON이 아니면 원문 그대로 */ }
+    throw new Error(`카카오T API 오류(${response.status}): ${detail}`);
+  }
+  if (!text) return null; // send_tms 등 본문 없는 성공 응답
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function kakaoTaxiMonthRange(month: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    throw new Error("조회 월 형식이 올바르지 않습니다(YYYY-MM): " + month);
+  }
+  const y = Number(month.slice(0, 4));
+  const m = Number(month.slice(5, 7));
+  const lastDay = new Date(y, m, 0).getDate();
+  return { start: `${month}-01`, end: `${month}-${String(lastDay).padStart(2, "0")}` };
+}
+
+// 월별 이용내역 전량 수집 — gas/Code.gs getKakaoTaxiOrders 와 동일 로직
+async function kakaoTaxiOrders(month: string) {
+  const range = kakaoTaxiMonthRange(month);
+  const orders: any[] = [];
+  let reportedCount = 0;
+  for (let page = 1; page <= 50; page++) {
+    const res = await kakaoTaxiFetch(
+      "GET", "/external/v2/orders",
+      `start_date=${range.start}&end_date=${range.end}&per=100&page=${page}`
+    );
+    const batch: any[] = res?.orders || [];
+    if (typeof res?.count === "number") reportedCount = res.count;
+    orders.push(...batch);
+    if (batch.length < 100 || orders.length >= reportedCount) break;
+  }
+  return { month, count: reportedCount, orders };
+}
+
+async function kakaoTaxiMembers() {
+  const members: any[] = [];
+  let reportedCount = 0;
+  for (let page = 1; page <= 50; page++) {
+    const res = await kakaoTaxiFetch("GET", "/external/v2/members/connected", `per=100&page=${page}`);
+    const batch: any[] = res?.members || [];
+    if (typeof res?.count === "number") reportedCount = res.count;
+    members.push(...batch);
+    if (batch.length < 100 || members.length >= reportedCount) break;
+  }
+  return { count: reportedCount, members };
+}
+
+// 카카오 부서 표기 → ERP 지점명 별칭표.
+// [동기화] src/pages/admin/helpers/kakaoTaxi.ts 의 KAKAO_BRANCH_ALIASES, gas/Code.gs 와 세 곳을 같게 유지할 것.
+const KAKAO_TAXI_BRANCH_ALIASES: Record<string, string> = {
+  "금샤빠 을지로": "금샤빠",
+  "대물섬 한남동": "대물섬 한남점",
+  "대골뼈국": "강남대골뼈국",
+  "대물섬종로점": "대물섬 종로점",
+};
+
+// 지점 화면용 — 타 지점 직원 정보가 새지 않도록 필터는 반드시 백엔드에서. gas/Code.gs 동일 로직.
+async function kakaoTaxiBranchMembers(db: LocalDB, pinHash: unknown, branchName: string) {
+  const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
+  if (!pinHash || !branchName) throw denied;
+  const setting = findLocalSettingByPinHash(db, pinHash);
+  if (!setting) throw denied;
+  // 지점 PIN 은 자기 지점만, 관리자 PIN 은 어느 지점이든(관리자가 지점 화면을 볼 때)
+  if (setting.role !== "admin" && setting.branch_name !== branchName) throw denied;
+  const all = (await kakaoTaxiMembers()).members || [];
+  return all.filter((m: any) => {
+    const dept = String(m?.department || "").trim();
+    if (!dept) return false;
+    return dept === branchName || KAKAO_TAXI_BRANCH_ALIASES[dept] === branchName;
+  });
+}
+
+// 검증은 정규화(숫자만 남긴 전화·공백 제거한 그룹id) 이후 값으로 한다 — raw 값만 보면
+// "---" 같은 전화나 [""] 그룹이 통과해 카카오까지 갔다가 애매한 오류로 돌아온다. gas/Code.gs 와 동일 기준.
+function kakaoTaxiNormalizeContact(member: any) {
+  const m = member || {};
+  return {
+    phone: String(m.mobile_phone || "").replace(/[^0-9]/g, ""),
+    groupIds: (Array.isArray(m.group_ids) ? m.group_ids : [])
+      .map((id: unknown) => String(id || "").trim())
+      .filter(Boolean)
+  };
+}
+
+async function kakaoTaxiRegisterMember(member: any) {
+  const m = member || {};
+  const norm = kakaoTaxiNormalizeContact(m);
+  if (!m.identifier || !norm.phone || !norm.groupIds.length) {
+    throw new Error("직원 등록에는 사번(identifier)·휴대전화번호·그룹이 모두 필요합니다.");
+  }
+  const body: any = {
+    identifier: String(m.identifier),
+    mobile_phone: norm.phone,
+    group_ids: norm.groupIds
+  };
+  if (m.name) body.name = String(m.name);
+  if (m.department) body.department = String(m.department);
+  return kakaoTaxiFetch("POST", "/external/v1/members", null, body);
+}
+
+async function kakaoTaxiUpdateMember(memberId: string, member: any) {
+  if (!memberId) throw new Error("수정할 직원이 지정되지 않았습니다.");
+  const m = member || {};
+  const norm = kakaoTaxiNormalizeContact(m);
+  if (!norm.phone || !norm.groupIds.length) {
+    throw new Error("직원 수정에는 휴대전화번호와 그룹이 모두 필요합니다.");
+  }
+  // [함정] 카카오 수정 API 는 name/department 를 보내지 않으면(null) 공백으로 지워버린다 — 4개 필드를 항상 모두 보낸다.
+  // 전화번호가 실제로 바뀐 경우 카카오가 새 번호로 인증 알림톡을 자동 발송한다(문서 명시). gas/Code.gs 와 동일 로직.
+  const body = {
+    mobile_phone: norm.phone,
+    group_ids: norm.groupIds,
+    name: m.name ? String(m.name) : "",
+    department: m.department ? String(m.department) : ""
+  };
+  return kakaoTaxiFetch("PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
+}
+
+async function kakaoTaxiSetBlocked(memberIds: unknown, blocked: boolean) {
+  const ids = (Array.isArray(memberIds) ? memberIds : []).filter(Boolean).map(String);
+  if (!ids.length) throw new Error("휴직 처리할 직원이 지정되지 않았습니다.");
+  const apiPath = blocked ? "/external/v1/members/block" : "/external/v1/members/unblock";
+  const results: any[] = (await kakaoTaxiFetch("POST", apiPath, null, { members: ids.join(",") })) || [];
+  const failed = results.filter((r) => r && r.status_code !== 0);
+  if (failed.length) {
+    throw new Error("일부 직원 처리 실패: " + failed.map((r) => `${r.id}(${r.status_msg || "실패"})`).join(", "));
+  }
+  return results;
+}
+
+// ----------------------------------------------------
 // API 라우터 구현 (GAS Proxy 및 로컬 DB 대체)
 // ----------------------------------------------------
 app.post("/api/gas", async (req: Request, res: Response) => {
@@ -254,21 +498,34 @@ app.post("/api/gas", async (req: Request, res: Response) => {
 
     console.log(`Fallback Local Simulation database call for [${action}]`);
 
+    // ---------- 카카오T 비즈니스(법인택시) — 운영은 gas/Code.gs 동일 액션 ----------
+    // 지점용 인원 조회 — 지점 PIN(또는 관리자 PIN)으로 자기 지점 매핑 인원만.
+    if (action === "getKakaoTaxiBranchMembers") {
+      try {
+        return res.json({
+          success: true,
+          data: await kakaoTaxiBranchMembers(db, req.body.pinHash, String(req.body.branchName || "")),
+        });
+      } catch (error: any) {
+        return res.json({ success: false, error: error?.message || String(error) });
+      }
+    }
+
+    // 조회·쓰기 모두 관리자 PIN 검증을 강제한다(직원 삭제·휴직 같은 쓰기가 특히 위험).
+    // 오류는 GAS 와 같은 규약(HTTP 200 + success:false)으로 반환해 화면에 메시지가 그대로 보이게 한다.
+    if (KAKAO_TAXI_ACTIONS.has(action)) {
+      try {
+        requireKakaoTaxiAdmin(db, req.body.adminPinHash);
+        return res.json({ success: true, data: await runKakaoTaxiAction(action, req.body) });
+      } catch (error: any) {
+        return res.json({ success: false, error: error?.message || String(error) });
+      }
+    }
+
     switch (action) {
       case "verifyPin": {
         const { pinHash } = req.body;
-        const cleanPinHash = String(pinHash || "").trim().toLowerCase();
-        const found = db.settings.find(s => {
-          if (!s.is_active) return false;
-          if (s.pin_hash === cleanPinHash) return true;
-          // admin 호환성
-          if (s.role === "admin") {
-            const isDbAdminHash = (s.pin_hash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || s.pin_hash === "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95");
-            const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95");
-            if (isDbAdminHash && isInputAdminHash) return true;
-          }
-          return false;
-        });
+        const found = findLocalSettingByPinHash(db, pinHash);
         if (found) {
           const branches = db.settings
             .filter(s => s.is_active)
