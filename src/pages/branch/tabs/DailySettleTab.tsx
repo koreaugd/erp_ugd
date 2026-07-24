@@ -111,6 +111,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const [cardSales, setCardSales] = useState<string>("");
   const [transferSales, setTransferSales] = useState<string>("");
   const [deliverySales, setDeliverySales] = useState<string>("");
+  // 당일 신규 네이버 리뷰 갯수 — 매출과 함께 매일 필수 입력. GAS 마스터 컬럼이 아니라 메모 METADATA에 저장된다.
+  const [naverReviewCount, setNaverReviewCount] = useState<string>("");
+  // 이 필드가 없던 시절(레거시) 기록만 필수 검증에서 면제한다. 필드를 갖고 저장된 기록은
+  // 수정 모드에서도 필수 유지 — 안 그러면 수정 제출로 필수값이 조용히 지워진다(Codex P1).
+  const [existingRecordHadNaverReview, setExistingRecordHadNaverReview] = useState<boolean>(false);
 
   // Cash Balance & Split Memo States
   const [cashBalance, setCashBalance] = useState<string>("");
@@ -204,6 +209,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       setCardSales(draft.cardSales || "");
       setTransferSales(draft.transferSales || "");
       setDeliverySales(draft.deliverySales || "");
+      setNaverReviewCount(draft.naverReviewCount || "");
       setCashBalance(draft.cashBalance || "");
       setPrevDayCash(options?.preservePrevDayCash ?? draft.prevDayCash ?? "0");
       setCashDiffReason(draft.cashDiffReason || "");
@@ -549,6 +555,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             setCashExpenses(padExpenseRows(metadataParsed.cashExpenses));
             setCardExpenses(padExpenseRows(metadataParsed.cardExpenses));
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
+            setNaverReviewCount(metadataParsed.naverReviewCount !== undefined ? String(metadataParsed.naverReviewCount) : "");
+            setExistingRecordHadNaverReview(metadataParsed.naverReviewCount !== undefined);
             setPrevDayCash(prevCashVal);
             setCashDiffReason(metadataParsed.cashDiffReason || "");
             setStaffMemo(metadataParsed.staffMemo || "");
@@ -616,6 +624,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
             // Legacy raw memo parser
             setCashBalance("");
+            setNaverReviewCount("");
+            setExistingRecordHadNaverReview(false);
             const extractSection = (text: string, title: string): string => {
               const regex = new RegExp(`\\[${title}\\]\\s*([\\s\\S]*?)(?=\\s*\\[|$)`);
               const match = text.match(regex);
@@ -642,6 +652,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setCardSales("");
           setTransferSales("");
           setDeliverySales("");
+          setNaverReviewCount("");
+          setExistingRecordHadNaverReview(false);
           setCashExpenses(padExpenseRows([]));
           setCardExpenses(padExpenseRows([]));
           setMemo("");
@@ -668,6 +680,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         setExistingRecordId(null);
         setIsEditApproved(true);
         setCashBalance("");
+        setNaverReviewCount("");
+        setExistingRecordHadNaverReview(false);
         setPrevDayCash("0");
         setCashDiffReason("");
         setStaffMemo("");
@@ -709,10 +723,10 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     colCount: isHeadOffice ? 11 : 8
   });
 
-  // 마감정보+매출 엑셀 셀을 방향키·Enter로 오간다(§9 엑셀 형식 필수). 한 줄, 6칸:
-  // 작성자(0)·카드(1)·현금(2)·계좌이체(3)·배달(4)·금고(5). 날짜 칸은 커스텀 달력 버튼이라 이 그리드 밖이고,
+  // 마감정보+매출 엑셀 셀을 방향키·Enter로 오간다(§9 엑셀 형식 필수). 한 줄, 7칸:
+  // 작성자(0)·카드(1)·현금(2)·계좌이체(3)·배달(4)·금고(5)·네이버리뷰(6). 날짜 칸은 커스텀 달력 버튼이라 이 그리드 밖이고,
   // 버튼에서 →로 작성자(0)로 넘어오게 별도 배선한다(아래 date 버튼 onKeyDown).
-  const SETTLE_SHEET_COLS = 6;
+  const SETTLE_SHEET_COLS = 7;
   const { cellProps: settleSheetCellProps, focusCell: settleSheetFocusCell } = useSheetKeyboardNav({
     rowCount: 1,
     colCount: SETTLE_SHEET_COLS
@@ -763,6 +777,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           cardSales,
           transferSales,
           deliverySales,
+          naverReviewCount,
           cashBalance,
           prevDayCash,
           cashDiffReason,
@@ -779,7 +794,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       }
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [draftReady, checking, submittedResult, draftKey, writer, cashSales, cardSales, transferSales, deliverySales, cashBalance, prevDayCash, cashDiffReason, staffMemo, reviewMemo, otherMemo, cashExpenses, cardExpenses, staffRows]);
+  }, [draftReady, checking, submittedResult, draftKey, writer, cashSales, cardSales, transferSales, deliverySales, naverReviewCount, cashBalance, prevDayCash, cashDiffReason, staffMemo, reviewMemo, otherMemo, cashExpenses, cardExpenses, staffRows]);
 
   // Core Math - Decimal Time Parsing
   const parseTimeToDecimal = (timeStr: string): number => {
@@ -1006,6 +1021,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       if (hasSalesRequiredError) {
         validationMessages.push("필수 매출 항목을 모두 작성해 주세요.");
       }
+      // 이 필드가 없던 시절(레거시) 기록 수정만 면제. 필드를 갖고 저장된 기록은 수정 시에도 필수
+      // — 아니면 수정 제출로 필수값이 조용히 지워진다.
+      if ((!hasExistingRecord || existingRecordHadNaverReview) && !naverReviewCount) {
+        nextValidationTargets.fields.naverReviewCount = true;
+        validationMessages.push("네이버 신규 리뷰 갯수를 입력해 주세요.");
+        rememberFirstInvalid("settle-naverReviewCount-input");
+      }
     }
 
     const settlePrevDayCashNum = Number(prevDayCash) || 0;
@@ -1117,6 +1139,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       triggerToast("일일 매출 필수 요건(현금, 카드 매출액 및 금고 현금 잔액)을 모두 채워주십시오.", "error");
       return;
     }
+    if (!isHeadOffice && (!hasExistingRecord || existingRecordHadNaverReview) && !naverReviewCount) {
+      setValidationErrors(true);
+      triggerToast("네이버 신규 리뷰 갯수를 입력해 주세요.", "error");
+      return;
+    }
 
     const prevDayCashNum = Number(prevDayCash) || 0;
     const cashSalesNum = Number(cashSales) || 0;
@@ -1183,6 +1210,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         cashExpenses: cashExpenses.filter(isExpenseRowFilled),
         cardExpenses: cardExpenses.filter(isExpenseRowFilled),
         cashBalance,
+        naverReviewCount,
         prevDayCash,
         cashDiffReason,
         staffMemo,
@@ -1338,6 +1366,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setCardSales("");
     setTransferSales("");
     setDeliverySales("");
+    setNaverReviewCount("");
+    setExistingRecordHadNaverReview(false);
     setCashExpenses(padExpenseRows([]));
     setCardExpenses(padExpenseRows([]));
     setMemo("");
@@ -1563,7 +1593,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
 4. 특이사항
 - 직원 특이사항: ${staffMemo.trim() || "없음"}
-- 리뷰 특이사항: ${reviewMemo.trim() || "없음"}`;
+- 리뷰 특이사항: ${reviewMemo.trim() || "없음"}${isHeadOffice ? "" : `
+- 네이버 신규 리뷰: ${naverReviewCount === "" ? "미입력" : `${formatNumber(Number(naverReviewCount) || 0)}개`}`}`;
     };
 
     return (
@@ -1744,6 +1775,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 <col style={{ width: 118 }} />
                 {salesShown && <col style={{ width: 22 }} />}
                 {salesShown && salesFields.map((_, i) => <col key={i} style={{ width: 108 }} />)}
+                {salesShown && <col style={{ width: 22 }} />}
+                {salesShown && <col style={{ width: 132 }} />}
               </colgroup>
               <thead>
                 {/* 구획 제목 줄 — 투명·무테두리, 바닐라 알약이 컬럼 위에 얹힌다 */}
@@ -1762,6 +1795,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </div>
                     </th>
                   )}
+                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && (
+                    <th className="settle-group-th">
+                      <h3 className="text-sm font-black text-gray-800 w-fit whitespace-nowrap">당일 신규 리뷰</h3>
+                    </th>
+                  )}
                 </tr>
                 {/* 컬럼 라벨 줄 — 바닐라 헤더셀 + 검정 격자 */}
                 <tr>
@@ -1773,6 +1812,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       {f.label}{f.req && <span className="settle-req">필수</span>}
                     </th>
                   ))}
+                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && (
+                    <th className="settle-col-th is-groupstart">
+                      네이버 신규 리뷰 갯수<span className="settle-req">필수</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1842,6 +1887,26 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       </td>
                     );
                   })}
+                  {salesShown && <td className="settle-spacer" aria-hidden="true" />}
+                  {salesShown && (
+                    <td
+                      className={`settle-cell is-groupstart${validationErrors && hasValidationField("naverReviewCount") ? " settle-cell-error" : ""}`}
+                      data-guide="daily-naver-review"
+                    >
+                      <input
+                        {...settleSheetNav(salesFields.length + 1)}
+                        type="text"
+                        value={formatWithCommas(naverReviewCount)}
+                        onChange={(e) => {
+                          setNaverReviewCount(cleanNumeric(e.target.value));
+                          clearValidationField("naverReviewCount");
+                        }}
+                        placeholder="갯수"
+                        id="settle-naverReviewCount-input"
+                        className="sheet-cell-input text-right font-mono font-bold"
+                      />
+                    </td>
+                  )}
                 </tr>
               </tbody>
                 </table>
@@ -1930,7 +1995,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     return;
                   }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 id="daily-settle-reset-button"

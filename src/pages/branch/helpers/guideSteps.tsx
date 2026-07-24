@@ -238,6 +238,19 @@ export const dailySettleGuideSteps: GuideStep[] = [
     ),
   },
   {
+    // 금일 네이버 리뷰 칸에 붙인다. 금고잔액 안내와 같은 줄이므로 아래(below)로 내려 겹침을 피한다.
+    anchor: "daily-naver-review",
+    title: "당일 신규 리뷰",
+    placement: "below",
+    arrow: "anchor",
+    width: 320,
+    body: (
+      <p>
+        네이버플레이스에서 <b className="font-black text-rose-700">오늘 달린 리뷰 갯수</b>를 확인해 적어주세요.
+      </p>
+    ),
+  },
+  {
     // 근무자 섹션 제목에 붙인다. 위/아래 섹션과 겹치지 않게 오른쪽(right)으로 낸다.
     anchor: "daily-staff-limit",
     title: "근무자 · 기준 한도시간",

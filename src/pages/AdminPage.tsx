@@ -14,11 +14,11 @@ import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import {
-  Users, CheckCircle2, AlertTriangle, 
-  TrendingUp, Calendar, Filter, 
-  Download, FileSpreadsheet, Eye, 
-  X, Edit3, Save, LogOut, ClipboardList, Briefcase, Trash2,
-  Coins
+  Users, CheckCircle2, AlertTriangle,
+  Calendar, Filter,
+  Download, FileSpreadsheet, Eye,
+  X, Edit3, Save, LogOut, Briefcase, Trash2,
+  ChevronRight, Menu
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -56,6 +56,24 @@ export default function AdminPage() {
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
   const [detailData, setDetailData] = useState<DailySettleDetail | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+
+  // 모바일(<1024px)에서는 사이드바가 hidden lg:flex라 아예 없어서 섹션 이동이 불가능했다.
+  // 모바일 헤더의 햄버거 버튼으로 같은 사이드바를 오버레이 드로어로 여닫는다.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
+  // 드로어 접근성: Esc로 닫기, 열릴 때 닫기 버튼으로 포커스 이동, 닫히면 햄버거 버튼으로 포커스 복귀.
+  const mobileSidebarCloseBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    mobileSidebarCloseBtnRef.current?.focus();
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setMobileSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.getElementById("mobile-btn-open-sidebar")?.focus();
+    };
+  }, [mobileSidebarOpen]);
 
   // 4. 인라인 수정 모드 상태
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -753,14 +771,44 @@ export default function AdminPage() {
   return (
     <div className={`admin-redesign ${designPreview ? "admin-design-preview" : ""} min-h-screen bg-[#F6F5FA] flex`} id="admin-layout-wrapper">
       
-      {/* PC 전전 사이드바 레이아웃 */}
-      <aside className="hidden lg:flex flex-col w-64 bg-[#1A3C6E] text-white p-6 shrink-0" id="sidebar">
-        <div className="mb-10 text-center py-4 border-b border-white/10">
+      {/* 모바일 드로어 배경 — 탭하면 닫힌다 */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* PC 전전 사이드바 레이아웃 — 모바일에서는 햄버거로 여는 오버레이 드로어로 동작 */}
+      <aside
+        className={`${mobileSidebarOpen ? "flex fixed inset-y-0 left-0 z-50 overflow-y-auto" : "hidden"} lg:flex lg:static lg:inset-auto lg:z-auto lg:overflow-visible flex-col w-64 bg-[#1A3C6E] text-white p-6 shrink-0`}
+        id="sidebar"
+        role={mobileSidebarOpen ? "dialog" : undefined}
+        aria-modal={mobileSidebarOpen || undefined}
+        aria-label="관리자 메뉴"
+      >
+        <div className="mb-10 text-center py-4 border-b border-white/10 relative">
           <h2 className="text-2xl font-black tracking-widest text-[#D6E4F0]">ERP_UGD</h2>
           <p className="text-[10px] text-white/60 mt-1 uppercase font-semibold">UGD 주식회사 마감 총괄 시스템</p>
+          <button
+            ref={mobileSidebarCloseBtnRef}
+            onClick={() => setMobileSidebarOpen(false)}
+            className="lg:hidden absolute top-0 right-0 p-2 cursor-pointer"
+            aria-label="메뉴 닫기"
+            id="mobile-sidebar-close"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <nav className="space-y-0">
+        <nav
+          className="space-y-0"
+          onClick={(e) => {
+            // 메뉴 항목을 누르면(어느 버튼이든) 모바일 드로어를 닫는다 — 데스크톱에는 영향 없음.
+            if ((e.target as HTMLElement).closest("button")) setMobileSidebarOpen(false);
+          }}
+        >
           <p className="ugd-nav-group">메인</p>
           <button
             onClick={() => setAdminSection("dashboard")}
@@ -867,11 +915,21 @@ export default function AdminPage() {
         
         {/* 모바일 대형 헤더 */}
         <header className="admin-mobile-header lg:hidden bg-[#1A3C6E] text-white px-4 py-4 flex items-center justify-between shadow-md">
-          <div className="flex flex-col">
-            <span className="text-lg font-black tracking-wider text-white">ERP_UGD</span>
-            <span className="text-[10px] text-white/75">본사 총괄 대시보드</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="p-1.5 -ml-1 cursor-pointer"
+              aria-label="메뉴 열기"
+              id="mobile-btn-open-sidebar"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div className="flex flex-col">
+              <span className="text-lg font-black tracking-wider text-white">ERP_UGD</span>
+              <span className="text-[10px] text-white/75">본사 총괄 대시보드</span>
+            </div>
           </div>
-          
+
           <button
             onClick={logout}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -1628,30 +1686,30 @@ function AdminMonthlyMissingDaysPanel({ month }: { month: string }) {
   }, [month]);
 
   return (
-    <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-3">
-      <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-[#F39C12]" />
-        <h3 className="text-sm font-black text-[#2C3E50]">이번 달 미작성 지점 <span className="font-bold text-gray-400">({month} · 기록 없는 날짜 · 어제까지 기준)</span></h3>
+    <div className="bg-white p-4 rounded-2xl border border-gray-100 space-y-2">
+      {/* 제목엔 글자만 둔다(DESIGN.md §6-1) — 예전 경고 아이콘은 뺐다. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+        <h3 className="text-[13px] font-black text-[#2C3E50]">이번 달 미작성 지점</h3>
+        <span className="text-[11px] font-bold text-gray-400">{month} · 기록 없는 날짜 · 어제까지 기준</span>
       </div>
       {rows === null ? (
-        <p className="text-xs font-bold text-gray-400">불러오는 중…</p>
+        <p className="text-[11px] font-bold text-gray-400">불러오는 중…</p>
       ) : loadError ? (
-        <p className="text-xs font-bold text-rose-600">지점 목록을 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요. (미작성 여부를 확인하지 못했습니다.)</p>
+        // 관리자 스코프는 text-rose-*를 검정으로 죽인다 — 오류 색은 hex로 못 박는다(DESIGN_ADMIN §2-1).
+        <p className="rounded-lg border border-[#C93A3A] bg-[#FDE2E2] px-2.5 py-1.5 text-[11px] font-black text-[#B91C1C]">지점 목록을 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요. (미작성 여부를 확인하지 못했습니다.)</p>
       ) : rows.length === 0 ? (
-        <p className="text-xs font-bold text-emerald-600">모든 지점이 이번 달 일일마감을 빠짐없이 작성했습니다.</p>
+        <p className="text-[11px] font-bold text-emerald-600">모든 지점이 이번 달 일일마감을 빠짐없이 작성했습니다.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="divide-y divide-gray-100">
           {rows.map((r) => (
-            <div key={r.branchName} className="flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-3 border-b border-gray-50 pb-2 last:border-0 last:pb-0">
-              <span className="shrink-0 inline-flex items-center gap-1.5 min-w-36">
-                <span className="font-black text-[#2C3E50] text-sm">{r.branchName}</span>
-                {r.error ? (
-                  <span className="inline-flex px-1.5 py-0.5 rounded-md bg-gray-200 text-gray-600 text-[10px] font-black">확인 불가</span>
-                ) : (
-                  <span className="inline-flex px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[10px] font-black">{r.missing.length}일 빠짐</span>
-                )}
-              </span>
-              <span className="text-xs font-bold text-gray-500 leading-relaxed">
+            <div key={r.branchName} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5 first:pt-0 last:pb-0">
+              <span className="font-black text-[#2C3E50] text-[12px] w-24 shrink-0 truncate" title={r.branchName}>{r.branchName}</span>
+              {r.error ? (
+                <span className="inline-flex px-1.5 rounded-md bg-gray-200 text-gray-600 text-[10px] font-black shrink-0">확인 불가</span>
+              ) : (
+                <span className="inline-flex px-1.5 rounded-md border border-[#C93A3A] bg-[#FDE2E2] text-[#B91C1C] text-[10px] font-black shrink-0">{r.missing.length}일</span>
+              )}
+              <span className="text-[11px] font-bold text-gray-500 min-w-0">
                 {r.error ? "서버 응답이 없어 작성 여부를 확인하지 못했습니다." : r.missing.map((d) => `${d}일`).join(", ")}
               </span>
             </div>
@@ -1726,89 +1784,96 @@ function AdminDailySettlementStatusSection({
     setClosingView(view);
     document.getElementById("admin-closing-anomaly-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+  // 통계 5칸은 카드 5장이 아니라 카드 1장을 세로선으로 나눈다(2026-07-23 컴팩트화).
+  // 좁은 화면에선 세로로 쌓이므로 구분선도 가로선으로 바뀐다.
+  const statCell = "px-4 py-2.5 border-t border-gray-100 first:border-t-0 sm:border-t-0 sm:border-l sm:first:border-l-0";
+  const statLabel = "text-[11px] font-black text-gray-400";
+  const statValue = "block mt-0.5 font-mono text-base font-black text-[#2C3E50] whitespace-nowrap";
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전일 정산현황</h2>
-          <p className="text-xs text-gray-400 mt-0.5 font-medium">선택한 날짜 기준으로 지점별 제출 상태·매출 합계와 마감 이상치를 함께 확인합니다.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 border border-gray-200 bg-white py-2 px-3 rounded-xl shadow-xs">
-            <Calendar className="w-4 h-4 text-[#2E6DB4]" />
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="font-mono text-xs font-extrabold text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-32"
-            />
+      {/* 제목·날짜·다운로드·브랜드 필터를 카드 1장으로 합쳤다 — 브랜드 필터가 카드 한 장을 통째로 쓰고 있었다(2026-07-23). */}
+      <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+            <h2 className="text-base font-black text-[#2C3E50] tracking-tight">전일 정산현황</h2>
+            <p className="text-[11px] text-gray-400 font-medium">선택한 날짜의 지점별 제출·매출과 마감 이상치</p>
           </div>
-          <button onClick={handleDownloadExcel} className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer">
-            <Download className="w-4 h-4" /> 엑셀 다운로드
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="flex items-center gap-1.5 h-8 border border-gray-200 bg-white px-2.5 rounded-lg">
+              <Calendar className="w-3.5 h-3.5 text-[#2E6DB4] shrink-0" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="font-mono text-[11px] font-black text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-[104px]"
+              />
+            </label>
+            <button onClick={handleDownloadExcel} className="flex items-center gap-1.5 h-8 px-3 bg-emerald-600 text-white text-[11px] font-black rounded-lg cursor-pointer">
+              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+            </button>
+          </div>
         </div>
-      </div>
-
-      {/* 현금차이·기타메모는 예전에 대시보드 KPI로 따로 있었다. 같은 날짜를 두 화면에서 나눠 보던 것을
-          한 줄로 합쳤다(2026-07-22). 두 칸은 누르면 아래 마감 이상치 표의 해당 분류로 이동한다. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">제출 지점</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{stats.submitted} <span className="text-xs font-bold text-gray-300 font-sans">/ {stats.total}</span></span></div>
-          <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600"><CheckCircle2 className="w-6 h-6" /></div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">미제출 지점</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{stats.pending}</span></div>
-          <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]"><AlertTriangle className="w-6 h-6" /></div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between">
-          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">총 수집 매출</span><span className="text-2xl font-mono font-black text-[#2E6DB4]">{formatNumber(stats.revenue)}원</span></div>
-          <div className="p-4 bg-blue-50 text-[#2E6DB4] rounded-2xl"><TrendingUp className="w-6 h-6" /></div>
-        </div>
-        <button type="button" onClick={() => focusAnomalies("cash")} className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between text-left cursor-pointer">
-          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">현금차이</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{anomalyLoading ? "…" : cashDiffCount}</span></div>
-          <div className="p-4 bg-amber-50 rounded-2xl text-[#F39C12]"><Coins className="w-6 h-6" /></div>
-        </button>
-        <button type="button" onClick={() => focusAnomalies("otherMemo")} className="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-between text-left cursor-pointer">
-          <div className="space-y-1"><span className="text-xs font-bold text-gray-400 block">ERP 기타메모</span><span className="text-2xl font-mono font-black text-[#2C3E50]">{anomalyLoading ? "…" : otherMemoCount}</span></div>
-          <div className="p-4 bg-blue-50 rounded-2xl text-[#2E6DB4]"><ClipboardList className="w-6 h-6" /></div>
-        </button>
-      </div>
-
-      {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점·날짜를 한눈에. */}
-      <AdminMonthlyMissingDaysPanel month={selectedDate.slice(0, 7)} />
-
-      <div className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 flex flex-wrap gap-4 items-center justify-between">
-        <div className="flex items-center gap-2"><Filter className="w-4 h-4 text-gray-400 shrink-0" /><span className="text-xs font-bold text-gray-500">브랜드 필터</span></div>
-        <div className="flex gap-1.5 overflow-x-auto pb-1 max-w-full">
+        <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-100 pt-2.5">
+          <Filter className="w-3.5 h-3.5 text-gray-400 shrink-0" />
           {brandList.map((brand) => (
-            <button key={brand} onClick={() => setSelectedBrand(brand)} className={`px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-colors whitespace-nowrap ${selectedBrand === brand ? "bg-[#2E6DB4] text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
+            <button key={brand} onClick={() => setSelectedBrand(brand)} className={`h-6 px-2.5 rounded-full text-[11px] font-bold cursor-pointer transition-colors whitespace-nowrap ${selectedBrand === brand ? "bg-[#2E6DB4] text-white" : "bg-gray-100 text-gray-500"}`}>
               {brand}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl shadow-xs border border-gray-100 overflow-hidden">
+      {/* 현금차이·기타메모는 예전에 대시보드 KPI로 따로 있었다. 같은 날짜를 두 화면에서 나눠 보던 것을
+          한 줄로 합쳤다(2026-07-22). 두 칸은 누르면 아래 마감 이상치 표의 해당 분류로 이동한다. */}
+      <div className="bg-white rounded-2xl border border-gray-100 grid grid-cols-1 sm:grid-cols-5 overflow-hidden">
+        <div className={statCell}>
+          <span className={`block ${statLabel}`}>제출 지점</span>
+          <span className={statValue}>{stats.submitted} <span className="text-[11px] font-bold text-gray-300 font-sans">/ {stats.total}</span></span>
+        </div>
+        <div className={statCell}>
+          <span className={`block ${statLabel}`}>미제출 지점</span>
+          <span className={statValue}>{stats.pending}</span>
+        </div>
+        <div className={statCell}>
+          <span className={`block ${statLabel}`}>총 수집 매출</span>
+          <span className={statValue}>{formatNumber(stats.revenue)}원</span>
+        </div>
+        <button type="button" onClick={() => focusAnomalies("cash")} title="마감 이상치의 현금차이 목록으로 이동" className={`${statCell} text-left cursor-pointer`}>
+          <span className={`flex items-center gap-0.5 ${statLabel}`}>현금차이 <ChevronRight className="w-3 h-3" /></span>
+          <span className={statValue}>{anomalyLoading ? "…" : cashDiffCount}</span>
+        </button>
+        <button type="button" onClick={() => focusAnomalies("otherMemo")} title="마감 이상치의 기타메모 목록으로 이동" className={`${statCell} text-left cursor-pointer`}>
+          <span className={`flex items-center gap-0.5 ${statLabel}`}>ERP 기타메모 <ChevronRight className="w-3 h-3" /></span>
+          <span className={statValue}>{anomalyLoading ? "…" : otherMemoCount}</span>
+        </button>
+      </div>
+
+      {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점·날짜를 한눈에. */}
+      <AdminMonthlyMissingDaysPanel month={selectedDate.slice(0, 7)} />
+
+      {/* 행 여백을 DESIGN.md §8 기준값(thead py-2 px-2 / tbody py-1.5 px-2)에 맞춰 낮췄다 — 예전엔 px-6 py-4라
+          14개 지점이 한 화면에 안 들어왔다(2026-07-23). */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] border-collapse">
-            <thead><tr className="bg-[#D6E4F0]/30 border-b border-gray-100 text-left"><th className="px-6 py-4 text-xs font-bold text-gray-500">지점명</th><th className="px-6 py-4 text-xs font-bold text-gray-500">브랜드</th><th className="px-6 py-4 text-xs font-bold text-gray-500 text-right">총 매출</th><th className="px-4 py-4 text-xs font-bold text-gray-400 text-right">현금</th><th className="px-4 py-4 text-xs font-bold text-gray-400 text-right">카드</th><th className="px-6 py-4 text-xs font-bold text-gray-500">상태</th><th className="px-6 py-4 text-xs font-bold text-gray-500 text-center">관리</th></tr></thead>
-            <tbody className="divide-y divide-gray-100 text-sm">
+          <table className="w-full min-w-[760px] border-collapse">
+            <thead><tr className="bg-[#D6E4F0]/30 border-b border-gray-100 text-left"><th className="px-3 py-2 text-[11px] font-black text-[#212121]">지점명</th><th className="px-3 py-2 text-[11px] font-black text-[#212121]">브랜드</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">총 매출</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">현금</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">카드</th><th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-center">관리</th></tr></thead>
+            <tbody className="divide-y divide-gray-100 text-xs">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-16"><LoadingSpinner size="md" /></td></tr>
+                <tr><td colSpan={7} className="text-center py-10"><LoadingSpinner size="md" /></td></tr>
               ) : filteredList.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-16 text-gray-400 text-xs">조건에 맞는 지점이 없습니다.</td></tr>
+                <tr><td colSpan={7} className="text-center py-10 text-gray-400 text-xs">조건에 맞는 지점이 없습니다.</td></tr>
               ) : filteredList.map((item) => {
                 const record = item.record;
                 return (
                   <tr key={item.branchName} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-6 py-4 font-bold text-[#2C3E50]">{item.branchName}</td>
-                    <td className="px-6 py-4 text-xs text-gray-500 font-semibold">{item.brand}</td>
-                    <td className="px-6 py-4 text-right font-mono font-bold text-[#1A3C6E]">{record ? `${formatNumber(record.totalSales)}원` : "-"}</td>
-                    <td className="px-4 py-4 text-right font-mono text-xs text-gray-500">{record ? formatNumber(record.cashSales) : "-"}</td>
-                    <td className="px-4 py-4 text-right font-mono text-xs text-gray-500">{record ? formatNumber(record.cardSales) : "-"}</td>
-                    <td className="px-6 py-4">{item.submitted ? <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full"><CheckCircle2 className="w-3.5 h-3.5" /> 완료</span> : <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-[#F39C12] text-xs font-bold rounded-full"><AlertTriangle className="w-3.5 h-3.5" /> 미제출</span>}</td>
-                    <td className="px-6 py-4 text-center">{item.submitted ? <button onClick={() => handleOpenDetail(item)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-[#D6E4F0]/60 text-gray-600 hover:text-[#1A3C6E] text-xs font-bold rounded-xl transition-all cursor-pointer"><Eye className="w-3.5 h-3.5" /> 상세 보기</button> : <span className="text-xs text-gray-300 font-semibold">대기중</span>}</td>
+                    <td className="px-3 py-1.5 font-black text-[#2C3E50] text-[13px]">{item.branchName}</td>
+                    <td className="px-3 py-1.5 text-gray-500 font-semibold">{item.brand}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-black text-[#1A3C6E] text-[13px]">{record ? `${formatNumber(record.totalSales)}원` : "-"}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-gray-500">{record ? formatNumber(record.cashSales) : "-"}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-gray-500">{record ? formatNumber(record.cardSales) : "-"}</td>
+                    <td className="px-3 py-1.5">{item.submitted ? <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-black rounded-full"><CheckCircle2 className="w-3 h-3" /> 완료</span> : <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-[#F39C12] text-[10px] font-black rounded-full"><AlertTriangle className="w-3 h-3" /> 미제출</span>}</td>
+                    <td className="px-3 py-1.5 text-center">{item.submitted ? <button onClick={() => handleOpenDetail(item)} className="inline-flex h-6 items-center gap-1 px-2 bg-gray-100 hover:bg-[#D6E4F0]/60 text-gray-600 hover:text-[#1A3C6E] text-[11px] font-black rounded-lg transition-all cursor-pointer"><Eye className="w-3 h-3" /> 상세</button> : <span className="text-[11px] text-gray-300 font-black">대기중</span>}</td>
                   </tr>
                 );
               })}
@@ -1820,24 +1885,25 @@ function AdminDailySettlementStatusSection({
       {/* 마감 이상치 — 대시보드 '마감현황'에서 옮겨왔다(2026-07-22).
           예전엔 '어제'로 못 박혀 있어 날짜를 바꿔도 따라오지 않았다. 이제 위 날짜 선택을 그대로 따른다.
           예전의 '대시보드' 탭은 '현금차이'와 필터가 완전히 같아 없앴다. */}
-      <section id="admin-closing-anomaly-section" className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-black text-[#2C3E50]">마감 이상치</h2>
-            <p className="text-xs text-gray-400 mt-1">{selectedDate} 마감에서 현금차이·초과근무·특이사항·기타메모가 있는 지점입니다.</p>
+      <section id="admin-closing-anomaly-section" className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
+            <h2 className="text-base font-black text-[#2C3E50]">마감 이상치</h2>
+            <p className="text-[11px] text-gray-400">{selectedDate} 마감의 현금차이·초과근무·특이사항·기타메모</p>
           </div>
-          <button onClick={reloadAnomalies} className="h-8 px-3 rounded-xl bg-slate-100 text-slate-600 text-[11px] font-black">새로고침</button>
+          <button onClick={reloadAnomalies} className="h-7 px-2.5 rounded-lg border border-gray-200 text-gray-600 text-[11px] font-black cursor-pointer">새로고침</button>
         </div>
-        {/* 못 읽은 지점을 밝히지 않으면 '이상 없음'과 '확인 못 함'이 똑같아 보인다(P0-2). */}
+        {/* 못 읽은 지점을 밝히지 않으면 '이상 없음'과 '확인 못 함'이 똑같아 보인다(P0-2).
+            관리자 스코프는 text-rose-*를 검정으로 죽이므로 오류 색은 hex로 못 박는다(DESIGN_ADMIN §2-1). */}
         {anomalyLoadError && (
-          <p className="text-xs font-black text-rose-600">지점 목록을 불러오지 못해 이상치를 확인하지 못했습니다. 새로고침 후 다시 확인해주세요.</p>
+          <p className="rounded-lg border border-[#C93A3A] bg-[#FDE2E2] px-2.5 py-1.5 text-[11px] font-black text-[#B91C1C]">지점 목록을 불러오지 못해 이상치를 확인하지 못했습니다. 새로고침 후 다시 확인해주세요.</p>
         )}
         {!anomalyLoadError && anomalyFailedBranches.length > 0 && (
-          <p className="text-xs font-black text-rose-600">
+          <p className="rounded-lg border border-[#C93A3A] bg-[#FDE2E2] px-2.5 py-1.5 text-[11px] font-black text-[#B91C1C]">
             {anomalyFailedBranches.join(", ")} — 이 지점은 기록을 읽지 못해 이상치를 확인하지 못했습니다. (아래 개수에 빠져 있습니다)
           </p>
         )}
-        <div className="flex gap-2 border-b border-gray-100">
+        <div className="admin-anomaly-tabs flex gap-1.5 flex-wrap border-b border-gray-100 pb-2">
           {CLOSING_VIEWS.map((view) => {
             const count = filterAnomalies(anomalyRecords, view.key).length;
             return (
@@ -1845,7 +1911,7 @@ function AdminDailySettlementStatusSection({
                 key={view.key}
                 onClick={() => setClosingView(view.key)}
                 aria-current={closingView === view.key ? "true" : undefined}
-                className={`px-4 py-3 text-sm font-bold border-b-2 ${closingView === view.key ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}
+                className={`px-3 py-1.5 text-[11px] font-black border-b-2 cursor-pointer ${closingView === view.key ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}
               >
                 {view.label}{anomalyLoading ? "" : ` ${count}`}
               </button>
@@ -1877,7 +1943,8 @@ function AdminDailySettlementStatusSection({
                   <tr key={`${item.branchName}-${item.date}-${index}`}>
                     <td className="py-1.5 px-2 font-bold text-[#2C3E50]">{item.branchName}</td>
                     <td className="py-1.5 px-2 text-gray-500">{item.writer || "-"}</td>
-                    <td className="py-1.5 px-2 font-bold text-rose-600">
+                    {/* text-rose-600 은 관리자 스코프에서 검정으로 죽는다 — 경고색은 hex 로 못 박는다(DESIGN_ADMIN §2-1). */}
+                    <td className="py-1.5 px-2 font-black text-[#B91C1C]">
                       {CLOSING_VIEWS.find((view) => view.key === closingView)?.label}
                     </td>
                     <td className="py-1.5 px-2">

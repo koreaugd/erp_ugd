@@ -53,7 +53,8 @@ export type DailySettleValidationField =
   | "cashSales"
   | "cardSales"
   | "cashBalance"
-  | "cashDiffReason";
+  | "cashDiffReason"
+  | "naverReviewCount";
 
 export interface DailySettleValidationTargets {
   fields: Partial<Record<DailySettleValidationField, boolean>>;
