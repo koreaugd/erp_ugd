@@ -57,6 +57,13 @@
   - 색은 `DESIGN.md`의 토큰 6개(`--branch-ghost/alice/honey/vanilla/black` + 오류색) 안에서만 쓴다. 새 색을 만들지 않는다.
   - **관리자 화면(`src/pages/AdminPage.tsx`, `src/pages/admin/**`)이면 `DESIGN_ADMIN.md`를 반드시 함께 읽는다.** 관리자는 `DESIGN.md` 규칙을 상속하되 색만 연하게 치환하는데, 그 치환 탓에 **`DESIGN.md`를 곧이곧대로 따르면 규칙을 어기게 되는 함정**이 있다(`DESIGN_ADMIN.md` §2-1): ① 실패 배너에 `bg-rose-50`을 쓰면 "완료·긍정"인 허니색으로 뒤집혀 **실패가 성공처럼** 보인다 → 오류는 hex(`#FDE2E2`/`#C93A3A`/`#B91C1C`)로 직접 박는다. ② `--branch-*` 토큰은 `.branch-redesign` 스코프 전용이라 관리자에선 **값이 없어 배경이 안 칠해진다** → `--admin-*`을 쓴다.
   - **섹션 제목은 바닐라 알약 칩, 텍스트만 넣는다(아이콘·이미지 금지).** `<h3 className="… w-fit">텍스트</h3>` 형태로 두고 `<div>`로 감싸지 않는다.
+  - **[P0·필수] 새 탭/새 화면을 만들면 제목 알약이 자동으로 붙지 않는다.** 지점 알약 CSS는 `#tab-view-settle`·`#labor-contract-tab`처럼 **탭마다 ID 셀렉터로 개별 지정**돼 있어, 새 파일은 규칙에서 빠져 제목이 평범한 글씨로 남는다(비즈니스택시 탭에서 실제 발생, 2026-07-24). → **새 지점 탭의 제목은 `<h3 className="branch-pill-title">`**, **새 관리자 탭은 `<h2 className="admin-pill-title">`** 을 쓴다. index.css 에 새 ID 규칙을 추가하지 말 것.
+  - **[P0·필수] 화면을 만들거나 고친 뒤 아래 5줄을 눈으로 확인하고 통과해야 "완료"라고 말한다.** (이 확인을 건너뛰어 디자인이 빠지는 일이 반복됐다.)
+    1. 제목이 바닐라 알약으로 보이는가 — 지점 `.branch-pill-title` / 관리자 `.admin-pill-title`, 아이콘 없음
+    2. 글자 크기가 `DESIGN.md` §6-0-1 폰트 기준표대로인가 — 제목·표헤더·입력칸·버튼 11px, 표 데이터 12px, **`text-sm` 이상 0건**(`grep -c "text-sm" <파일>`로 확인)
+    3. 섹션 카드가 `bg-white p-4 rounded-2xl border border-gray-100 shadow-sm`인가
+    4. 오류·실패 표시가 hex(`#FDE2E2`/`#C93A3A`/`#B91C1C`)인가 (`bg-rose-50` 금지 — 관리자에서 긍정색으로 뒤집힌다)
+    5. 스코프에 맞는 토큰을 썼는가 — 지점 `--branch-*` / 관리자 `--admin-*` (교차 사용 시 배경이 아예 안 칠해진다)
   - 섹션 카드는 `bg-white p-4 rounded-2xl border border-gray-100 shadow-sm`(검정 1px·28px 라운드로 렌더). **테두리는 `border-gray-*`로 준다** — slate/zinc 등은 검정 치환에서 빠져 연회색 잔선이 남는다(DESIGN.md 13번).
   - 검정 테두리에 연회색 선이 남지 않게 DESIGN.md 13번(테두리 함정) 규칙을 지킨다. `!important`를 이겨야 하면 ID 특이성으로 이긴다.
   - 특정 색을 유지해야 하면 전용 클래스로 `index.css`에 못 박는다(Tailwind 표준색은 `.branch-redesign`가 토큰으로 자동 치환한다).

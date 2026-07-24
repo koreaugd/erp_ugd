@@ -91,6 +91,48 @@ function doPost(e) {
       case "deleteBranch":
         result = deleteBranch(requestData.branchName);
         break;
+      // 카카오T 액션은 조회·쓰기 모두 관리자 PIN 검증을 강제한다 — GAS 웹앱 URL은 공개돼 있어
+      // 액션명만 알면 아무나 호출할 수 있기 때문(직원 삭제·휴직 같은 쓰기가 특히 위험).
+      case "getKakaoTaxiOrders":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = getKakaoTaxiOrders(requestData.month);
+        break;
+      case "getKakaoTaxiGroups":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = getKakaoTaxiGroups();
+        break;
+      case "getKakaoTaxiMembers":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = getKakaoTaxiMembers();
+        break;
+      case "getKakaoTaxiBranchMembers":
+        // 지점용 — 지점 PIN(또는 관리자 PIN)으로 자기 지점에 매핑되는 인원만 반환한다.
+        result = getKakaoTaxiBranchMembers(requestData.pinHash, requestData.branchName);
+        break;
+      case "registerKakaoTaxiMember":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = registerKakaoTaxiMember(requestData.member);
+        break;
+      case "updateKakaoTaxiMember":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = updateKakaoTaxiMember(requestData.memberId, requestData.member);
+        break;
+      case "blockKakaoTaxiMember":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = setKakaoTaxiMemberBlocked(requestData.memberIds, true);
+        break;
+      case "unblockKakaoTaxiMember":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = setKakaoTaxiMemberBlocked(requestData.memberIds, false);
+        break;
+      case "deleteKakaoTaxiMember":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = deleteKakaoTaxiMember(requestData.memberId);
+        break;
+      case "sendKakaoTaxiMemberTms":
+        requireKakaoTaxiAdmin(requestData.adminPinHash);
+        result = sendKakaoTaxiMemberTms(requestData.memberId);
+        break;
       default:
         throw new Error("정의되지 않은 액션명입니다: " + action);
     }
@@ -1149,4 +1191,229 @@ function generateUUID() {
     const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+}
+
+// ----------------------------------------------------
+// 카카오T 비즈니스(법인택시) API 프록시
+// 시크릿은 저장소에 두지 않는다 — Apps Script 편집기 > 프로젝트 설정 > 스크립트 속성에
+// KAKAO_T_CORP_ID(T 비즈 ID), KAKAO_T_SECRET(이메일로 받은 토큰) 두 개를 등록해야 동작한다.
+// 로컬 개발은 server.ts 가 같은 액션명을 .env 값으로 처리한다(양쪽 로직을 같이 고칠 것).
+// ----------------------------------------------------
+const KAKAO_TAXI_BASE = "https://b2b-api.kakaomobility.com";
+
+// 관리자 PIN 검증 게이트 — 카카오T 액션 전체(조회 포함)에 강제. 실패 유형과 무관하게
+// 같은 문구로 답해 PIN 존재 여부를 밖에서 구분할 수 없게 한다.
+function requireKakaoTaxiAdmin(adminPinHash) {
+  const denied = new Error("법인택시 메뉴는 관리자만 사용할 수 있습니다. 다시 로그인해주세요.");
+  if (!adminPinHash) throw denied;
+  let setting;
+  try {
+    setting = verifyPin(adminPinHash);
+  } catch (e) {
+    throw denied;
+  }
+  if (!setting || setting.role !== "admin") throw denied;
+}
+
+function kakaoTaxiCredentials() {
+  const corpId = PROPERTIES.getProperty("KAKAO_T_CORP_ID");
+  const secret = PROPERTIES.getProperty("KAKAO_T_SECRET");
+  if (!corpId || !secret) {
+    throw new Error("카카오T 연동 정보가 등록되지 않았습니다. Apps Script 스크립트 속성에 KAKAO_T_CORP_ID / KAKAO_T_SECRET 를 등록해주세요.");
+  }
+  return { corpId: corpId, secret: secret };
+}
+
+function kakaoTaxiFetch(method, path, query, body) {
+  const cred = kakaoTaxiCredentials();
+  // [주의] 서명 URL에는 쿼리 파라미터를 넣지 않는다.
+  // 넣으면 카카오가 90003("인증 토큰이 유효하지 않습니다")을 돌려준다 — 2026-07-24 실계정에서 확인.
+  const signUrl = KAKAO_TAXI_BASE + path;
+  const nonce = String(Math.floor(Math.random() * 100000));
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const message = nonce + "\n" + signUrl + "\n" + method + "\n" + cred.corpId + "\n" + timestamp + "\n" + nonce;
+  const token = Utilities.base64Encode(
+    Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_1, message, cred.secret)
+  );
+  const options = {
+    method: method.toLowerCase(),
+    muteHttpExceptions: true,
+    headers: {
+      "Authorization": "Token " + token,
+      "x-mob-b2b-corp-id": cred.corpId,
+      "x-mob-b2b-nonce": nonce,
+      "x-mob-b2b-timestamp": timestamp
+    }
+  };
+  if (body) {
+    options.contentType = "application/json";
+    options.payload = JSON.stringify(body);
+  }
+  const res = UrlFetchApp.fetch(KAKAO_TAXI_BASE + path + (query ? "?" + query : ""), options);
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code < 200 || code >= 300) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error) detail = parsed.error;
+    } catch (ignore) {}
+    throw new Error("카카오T API 오류(" + code + "): " + detail);
+  }
+  if (!text) return null; // send_tms 등 본문 없는 성공 응답
+  try { return JSON.parse(text); } catch (ignore) { return null; }
+}
+
+function kakaoTaxiMonthRange(month) {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ""))) {
+    throw new Error("조회 월 형식이 올바르지 않습니다(YYYY-MM): " + month);
+  }
+  const y = Number(month.slice(0, 4));
+  const m = Number(month.slice(5, 7));
+  const lastDay = new Date(y, m, 0).getDate();
+  return { start: month + "-01", end: month + "-" + (lastDay < 10 ? "0" + lastDay : String(lastDay)) };
+}
+
+// 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
+function getKakaoTaxiOrders(month) {
+  const range = kakaoTaxiMonthRange(month);
+  const orders = [];
+  let reportedCount = 0;
+  // per=100 × 50페이지 = 5,000건 상한 — 월 200여 건 규모에서 사실상 무제한이자 무한루프 방지선
+  for (let page = 1; page <= 50; page++) {
+    const res = kakaoTaxiFetch(
+      "GET", "/external/v2/orders",
+      "start_date=" + range.start + "&end_date=" + range.end + "&per=100&page=" + page,
+      null
+    );
+    const batch = (res && res.orders) || [];
+    reportedCount = (res && typeof res.count === "number") ? res.count : reportedCount;
+    for (let i = 0; i < batch.length; i++) orders.push(batch[i]);
+    if (batch.length < 100 || orders.length >= reportedCount) break;
+  }
+  // count 는 카카오가 보고한 총 건수. 수집본과 다르면(조회 도중 새 이용 발생 등) 화면이 경고를 띄운다.
+  return { month: month, count: reportedCount, orders: orders };
+}
+
+function getKakaoTaxiGroups() {
+  return kakaoTaxiFetch("GET", "/external/v1/groups", null, null) || [];
+}
+
+// 인증완료 직원 전량 수집. 카카오는 인증완료(connected) 직원만 목록 조회를 제공한다 —
+// 등록만 하고 아직 인증 안 한 직원은 여기 안 나오므로 화면에서 그 사실을 안내한다.
+function getKakaoTaxiMembers() {
+  const members = [];
+  let reportedCount = 0;
+  for (let page = 1; page <= 50; page++) {
+    const res = kakaoTaxiFetch("GET", "/external/v2/members/connected", "per=100&page=" + page, null);
+    const batch = (res && res.members) || [];
+    reportedCount = (res && typeof res.count === "number") ? res.count : reportedCount;
+    for (let i = 0; i < batch.length; i++) members.push(batch[i]);
+    if (batch.length < 100 || members.length >= reportedCount) break;
+  }
+  return { count: reportedCount, members: members };
+}
+
+// 검증은 정규화(숫자만 남긴 전화·공백 제거한 그룹id) 이후 값으로 한다 — raw 값만 보면
+// "---" 같은 전화나 [""] 그룹이 통과해 카카오까지 갔다가 애매한 오류로 돌아온다.
+// server.ts 로컬 프록시와 검증 기준을 같게 유지할 것.
+function kakaoTaxiNormalizeContact(member) {
+  const m = member || {};
+  return {
+    phone: String(m.mobile_phone || "").replace(/[^0-9]/g, ""),
+    groupIds: (Array.isArray(m.group_ids) ? m.group_ids : [])
+      .map(function (id) { return String(id || "").trim(); })
+      .filter(function (id) { return !!id; })
+  };
+}
+
+// 카카오 부서 표기 → ERP 지점명 별칭표.
+// [동기화] src/pages/admin/helpers/kakaoTaxi.ts 의 KAKAO_BRANCH_ALIASES, server.ts 와 세 곳을 같게 유지할 것.
+var KAKAO_TAXI_BRANCH_ALIASES = {
+  "금샤빠 을지로": "금샤빠",
+  "대물섬 한남동": "대물섬 한남점",
+  "대골뼈국": "강남대골뼈국",
+  "대물섬종로점": "대물섬 종로점"
+};
+
+// 지점 화면용 — 요청한 PIN 의 지점(관리자는 임의 지점)에 매핑되는 인증완료 인원만 반환.
+// 타 지점 직원의 이름·전화번호가 지점에 노출되지 않도록 필터는 반드시 여기(백엔드)에서 한다.
+function getKakaoTaxiBranchMembers(pinHash, branchName) {
+  const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
+  if (!pinHash || !branchName) throw denied;
+  let setting;
+  try {
+    setting = verifyPin(pinHash);
+  } catch (e) {
+    throw denied;
+  }
+  if (!setting) throw denied;
+  // 지점 PIN 은 자기 지점만, 관리자 PIN 은 어느 지점이든 조회 가능(관리자가 지점 화면을 볼 때)
+  if (setting.role !== "admin" && setting.branchName !== branchName) throw denied;
+  const all = getKakaoTaxiMembers().members || [];
+  return all.filter(function (m) {
+    const dept = String((m && m.department) || "").trim();
+    if (!dept) return false;
+    return dept === branchName || KAKAO_TAXI_BRANCH_ALIASES[dept] === branchName;
+  });
+}
+
+function registerKakaoTaxiMember(member) {
+  const m = member || {};
+  const norm = kakaoTaxiNormalizeContact(m);
+  if (!m.identifier || !norm.phone || !norm.groupIds.length) {
+    throw new Error("직원 등록에는 사번(identifier)·휴대전화번호·그룹이 모두 필요합니다.");
+  }
+  const body = {
+    identifier: String(m.identifier),
+    mobile_phone: norm.phone,
+    group_ids: norm.groupIds
+  };
+  if (m.name) body.name = String(m.name);
+  if (m.department) body.department = String(m.department);
+  return kakaoTaxiFetch("POST", "/external/v1/members", null, body);
+}
+
+function updateKakaoTaxiMember(memberId, member) {
+  if (!memberId) throw new Error("수정할 직원이 지정되지 않았습니다.");
+  const m = member || {};
+  const norm = kakaoTaxiNormalizeContact(m);
+  if (!norm.phone || !norm.groupIds.length) {
+    throw new Error("직원 수정에는 휴대전화번호와 그룹이 모두 필요합니다.");
+  }
+  // [함정] 카카오 수정 API 는 name/department 를 보내지 않으면(null) 공백으로 지워버린다.
+  // 그래서 화면이 기존 값을 채워 보내는 것을 전제로, 여기서도 4개 필드를 항상 모두 보낸다.
+  // 전화번호가 실제로 바뀐 경우 카카오가 새 번호로 인증 알림톡을 자동 발송한다(문서 명시).
+  const body = {
+    mobile_phone: norm.phone,
+    group_ids: norm.groupIds,
+    name: m.name ? String(m.name) : "",
+    department: m.department ? String(m.department) : ""
+  };
+  return kakaoTaxiFetch("PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
+}
+
+function setKakaoTaxiMemberBlocked(memberIds, blocked) {
+  const ids = (Array.isArray(memberIds) ? memberIds : []).filter(function (id) { return !!id; }).map(String);
+  if (!ids.length) throw new Error("휴직 처리할 직원이 지정되지 않았습니다.");
+  const path = blocked ? "/external/v1/members/block" : "/external/v1/members/unblock";
+  const results = kakaoTaxiFetch("POST", path, null, { members: ids.join(",") }) || [];
+  // 카카오는 건별 성공/실패를 배열로 돌려준다. 하나라도 실패면 화면이 성공으로 오해하지 않게 에러로 알린다.
+  const failed = results.filter(function (r) { return r && r.status_code !== 0; });
+  if (failed.length) {
+    throw new Error("일부 직원 처리 실패: " + failed.map(function (r) { return r.id + "(" + (r.status_msg || "실패") + ")"; }).join(", "));
+  }
+  return results;
+}
+
+function deleteKakaoTaxiMember(memberId) {
+  if (!memberId) throw new Error("삭제할 직원이 지정되지 않았습니다.");
+  kakaoTaxiFetch("DELETE", "/external/v1/members/" + encodeURIComponent(memberId), null, null);
+  return { success: true };
+}
+
+function sendKakaoTaxiMemberTms(memberId) {
+  if (!memberId) throw new Error("알림톡을 보낼 직원이 지정되지 않았습니다.");
+  kakaoTaxiFetch("POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms", null, null);
+  return { success: true };
 }

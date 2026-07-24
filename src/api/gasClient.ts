@@ -574,6 +574,35 @@ export const gasClient = {
 
   // 자가복구 전용: 서버에 문서가 없을 때만 원자적으로 만든다(트랜잭션 create-only).
   // 이미 값이 있으면 덮지 않고 { created: false } 반환. 다른 기기의 최신 값을 덮어쓰지 않는다.
+  /**
+   * 배열형 공유데이터의 한 항목을 원자적으로 조건부 갱신한다(compare-and-set).
+   * 동시에 같은 항목을 처리하려 할 때 하나만 성공해야 하는 경로(비즈니스택시 승인 선점)에서 쓴다.
+   */
+  async updateSharedArrayItem(
+    dataKey: string,
+    itemId: string,
+    expectStatus: string[],
+    patch: Record<string, unknown>,
+    /** 추가 조건(선택) — 이 필드들이 모두 일치할 때만 갱신. 자기가 잡은 선점만 풀 때 쓴다. */
+    expectMatch?: Record<string, unknown>
+  ): Promise<{ outcome: "updated" | "notFound" | "conflict"; list: any[] }> {
+    const { firebaseUpdateSharedArrayItem } = await loadFirebaseDirect();
+    return await firebaseUpdateSharedArrayItem(dataKey, itemId, expectStatus, patch, expectMatch);
+  },
+
+  /**
+   * 배열형 공유데이터에 항목을 원자적으로 추가한다(중복 검사 포함).
+   * 동시 제출로 신청이 유실되면 안 되는 경로(비즈니스택시 신청 등)에서 saveSharedData 대신 쓴다.
+   */
+  async appendSharedArrayItem(
+    dataKey: string,
+    item: Record<string, unknown>,
+    dedupe?: { match: Record<string, unknown>; statuses: string[] }
+  ): Promise<{ outcome: "appended" | "duplicate"; list: any[] }> {
+    const { firebaseAppendSharedArrayItem } = await loadFirebaseDirect();
+    return await firebaseAppendSharedArrayItem(dataKey, item, dedupe);
+  },
+
   async createSharedDataIfMissing(dataKey: string, value: unknown): Promise<{ created: boolean }> {
     const { firebaseCreateSharedDataIfMissing } = await loadFirebaseDirect();
     const result = await firebaseCreateSharedDataIfMissing(dataKey, value);
@@ -730,8 +759,137 @@ export const gasClient = {
       const { restoreDirectFromFirebase } = await loadFirebaseDirect();
       return await restoreDirectFromFirebase();
     }
+  },
+
+  // ----------------------------------------------------
+  // 카카오T 비즈니스(법인택시) — 백엔드(GAS/로컬 server.ts)가 시크릿으로 서명해 카카오를 대신 호출한다.
+  // 브라우저는 시크릿을 모른다. 액션 스펙: gas/Code.gs "카카오T 비즈니스 API 프록시" 섹션.
+  // GAS 웹앱 URL은 공개돼 있으므로 모든 카카오 액션은 adminPinHash(로그인 세션의 pinHash)를
+  // 함께 보내야 하고, 백엔드가 관리자 여부를 검증한다.
+  // ----------------------------------------------------
+  async getKakaoTaxiOrders(month: string, adminPinHash: string): Promise<KakaoTaxiOrdersResult> {
+    return callApi("getKakaoTaxiOrders", { month, adminPinHash });
+  },
+
+  async getKakaoTaxiGroups(adminPinHash: string): Promise<KakaoTaxiGroup[]> {
+    return callApi("getKakaoTaxiGroups", { adminPinHash });
+  },
+
+  async getKakaoTaxiMembers(adminPinHash: string): Promise<{ count: number; members: KakaoTaxiMember[] }> {
+    return callApi("getKakaoTaxiMembers", { adminPinHash });
+  },
+
+  // 지점용 — 백엔드가 지점 PIN을 검증하고 그 지점에 매핑되는 인원만 돌려준다(타 지점 정보 비노출).
+  async getKakaoTaxiBranchMembers(branchName: string, pinHash: string): Promise<KakaoTaxiMember[]> {
+    return callApi("getKakaoTaxiBranchMembers", { branchName, pinHash });
+  },
+
+  async registerKakaoTaxiMember(member: KakaoTaxiMemberInput, adminPinHash: string): Promise<KakaoTaxiMember> {
+    return callApi("registerKakaoTaxiMember", { member, adminPinHash });
+  },
+
+  // 주의: 카카오 수정 API 는 name/department 를 안 보내면 공백으로 지워버린다 — 호출부는 기존 값을 항상 채워 보낼 것.
+  async updateKakaoTaxiMember(memberId: string, member: KakaoTaxiMemberUpdateInput, adminPinHash: string): Promise<KakaoTaxiMember> {
+    return callApi("updateKakaoTaxiMember", { memberId, member, adminPinHash });
+  },
+
+  async blockKakaoTaxiMember(memberIds: string[], adminPinHash: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
+    return callApi("blockKakaoTaxiMember", { memberIds, adminPinHash });
+  },
+
+  async unblockKakaoTaxiMember(memberIds: string[], adminPinHash: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
+    return callApi("unblockKakaoTaxiMember", { memberIds, adminPinHash });
+  },
+
+  async deleteKakaoTaxiMember(memberId: string, adminPinHash: string): Promise<{ success: boolean }> {
+    return callApi("deleteKakaoTaxiMember", { memberId, adminPinHash });
+  },
+
+  async sendKakaoTaxiMemberTms(memberId: string, adminPinHash: string): Promise<{ success: boolean }> {
+    return callApi("sendKakaoTaxiMemberTms", { memberId, adminPinHash });
   }
 };
+
+// ----------------------------------------------------
+// 카카오T 비즈니스(법인택시) 타입 — 카카오 응답 필드명(snake_case)을 그대로 쓴다.
+// 임의로 camelCase 로 바꾸면 GAS·server.ts 두 백엔드와 화면이 서로 어긋난다.
+// ----------------------------------------------------
+export interface KakaoTaxiPaymentItem {
+  id: number;
+  status: string; // "paid" 등
+  item_type: string; // "fare" 등
+  amount: number;
+  approval_no: string;
+  org_date_time: string;
+  card_number: string;
+}
+
+export interface KakaoTaxiOrder {
+  id: string;
+  service_fare: number;
+  toll: number;
+  platform_fee: number;
+  call_time: string; // "YYYY-MM-DD HH:mm:ss"
+  departure_time: string;
+  arrival_time: string;
+  departure_point: string;
+  arrival_point: string;
+  waypoints: string | null;
+  member_id: string;
+  member_name: string;
+  member_identifier: string;
+  member_department: string;
+  group_id: string;
+  group_name: string;
+  car_model: string;
+  car_number: string;
+  taxi_company_name: string;
+  taxi_kind: string;
+  vertical_code: string; // "taxi" | "quick" 등
+  vertical_product_name: string;
+  total_distance: number;
+  payment_items: KakaoTaxiPaymentItem[];
+}
+
+export interface KakaoTaxiOrdersResult {
+  month: string;
+  count: number; // 카카오가 보고한 총 건수 — 수집본(orders.length)과 다르면 화면이 경고한다
+  orders: KakaoTaxiOrder[];
+}
+
+export interface KakaoTaxiGroup {
+  id: string;
+  name: string;
+  status: string; // "enabled" | "deactivated"
+  description: string;
+}
+
+export interface KakaoTaxiMember {
+  id: string;
+  name: string;
+  department: string;
+  identifier: string;
+  mobile_phone: string;
+  status: string; // created | connected | refused | blocked
+  confirmed_at: string | null;
+  group_ids: string[];
+}
+
+export interface KakaoTaxiMemberInput {
+  identifier: string;
+  mobile_phone: string;
+  group_ids: string[];
+  name?: string;
+  department?: string;
+}
+
+// 직원 수정용 — 등록과 달리 identifier 는 변경 불가라 없다. 전화번호가 바뀌면 카카오가 인증 알림톡을 자동 발송한다.
+export interface KakaoTaxiMemberUpdateInput {
+  mobile_phone: string;
+  group_ids: string[];
+  name?: string;
+  department?: string;
+}
 
 export interface AdminBranchSetting extends BranchSetting {
   isActive: boolean;
