@@ -7,6 +7,7 @@ import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
 import { toLocalDateInputValue, toLocalMonthInputValue, toNumberPromptValue } from "../helpers/formatters";
 import { updateDailyMetadata } from "../helpers/dailyOps";
+import { useAuthContext } from "../../../contexts/AuthContext";
 
 /** 00:00부터 30분 간격. 출퇴근은 대개 정시·30분이라 직접 치는 것보다 고르는 편이 빠르고 오타가 없다. */
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) =>
@@ -89,6 +90,7 @@ const namesWith = (names: string[], current: string) => {
 };
 
 export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
+  const { user } = useAuthContext();
   const [loading, setLoading] = useState(true);
   // 저장이 도는 중임을 알리는 작은 배지. 화면은 이미 바뀌어 있으므로 표를 막지 않는다.
   const [saving, setSaving] = useState(false);
@@ -410,7 +412,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
       return;
     }
     localStorage.setItem(editorNameKey, editorName);
-    const actor = `${editorName} (${editorScope})`;
+    const actor = { name: `${editorName} (${editorScope})`, uid: user?.uid };
 
     // 낙관적 반영: 모달을 즉시 닫고 표의 값을 바로 갱신 → 저장이 끝날 때까지 기다리지 않아도 화면이 반응한다.
     // 저장도 재조회도 실패하면 이 스냅샷으로 되돌린다(아래 catch 참고).
@@ -514,7 +516,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
           const nextRows = staffRows.filter((_: any, index: number) => index !== targetIndex);
           const nextStaff = row.segmentId ? (detail.staff || []) : (detail.staff || []).filter((staff: any) => (staff.staffName || staff.name) !== row.staffName);
           return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-        }, editActor);
+        }, { name: editActor, uid: user?.uid });
       }
       // 수정과 같은 이유 — 지워졌는데 다시 못 읽으면 오른쪽 집계가 옛 값으로 남는다.
       const reloaded = await loadData(true, { silent: true });

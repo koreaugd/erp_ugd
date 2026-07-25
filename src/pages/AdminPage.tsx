@@ -11,9 +11,12 @@ import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
+import { AccountManagementSection } from "./admin/AccountManagementSection";
+import { listUserProfiles } from "../api/userProfile";
 import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
+import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, type AdminPermKey } from "./admin/adminTabRegistry";
 import {
   Users, CheckCircle2, AlertTriangle,
   Calendar, Filter,
@@ -26,6 +29,11 @@ import { motion, AnimatePresence } from "motion/react";
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
   const navigate = useNavigate();
+  // [Codex P0 / 2026-07-25] role !== "admin"일 때 806줄의 렌더 가드(return null)는 화면만 막는다 —
+  // 그 위에 선언된 useEffect들은 훅 규칙상 조건 없이 실행되므로, 지점 세션이 /admin에 직접 들어오면
+  // 관리자 전용 데이터 로드(전 지점 일일마감·마감 이상치·대시보드 알림 등)가 그대로 호출된다.
+  // 데이터를 불러오는 모든 effect·로드 함수 첫 줄에서 이 값으로 한 번 더 막는다.
+  const isAdminSession = !!user && user.role === "admin";
 
   const getTodayDateString = () => {
     const local = new Date();
@@ -88,23 +96,24 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [isSaveConfirmOpen, setIsSaveConfirmOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
-  const [adminSection, setAdminSection] = useState<"dashboard" | "analysis" | "dailySettlement" | "monthlyClosing" | "employeeDirectory" | "annualLeave" | "modificationLogs" | "laborContracts" | "salaryChanges" | "kakaoTaxi">("dashboard");
-  const [directoryTab, setDirectoryTab] = useState<"roster" | "movements">("roster");
-  const [directoryLoading, setDirectoryLoading] = useState(false);
-  const [directoryEmployees, setDirectoryEmployees] = useState<Array<any>>([]);
-  const [movementHistory, setMovementHistory] = useState<Array<any>>([]);
-  const [directoryBranches, setDirectoryBranches] = useState<Array<any>>([]);
-  const [showEmployeeRegistration, setShowEmployeeRegistration] = useState(false);
-  const [registrationRows, setRegistrationRows] = useState<Array<any>>([{ branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }]);
-  const [uploadingPayroll, setUploadingPayroll] = useState(false);
-  const [salaryUnlocked, setSalaryUnlocked] = useState(false);
+  // 관리자 화면 탭 권한(2026-07-25 신설). user가 아직 없는 첫 렌더에서는 undefined→"all" 취급이라
+  // 기존과 동일하게 "dashboard"로 시작한다. user가 늦게 채워지는 경우를 대비해 마운트 1회 보정 effect를
+  // 아래에 두고, sectionAllowed 렌더 가드가 그 사이 첫 프레임의 무단 접근을 막는다.
+  const allowedAdminTabs = user?.allowedAdminTabs ?? "all";
+  const [adminSection, setAdminSection] = useState<AdminPermKey>(() => firstAllowedAdminKey(user?.allowedAdminTabs ?? "all"));
+  const adminSectionCorrectedRef = useRef(false);
+  useEffect(() => {
+    if (adminSectionCorrectedRef.current) return;
+    if (!user) return;
+    adminSectionCorrectedRef.current = true;
+    setAdminSection((current) => (isAdminTabAllowed(user.allowedAdminTabs, current) ? current : firstAllowedAdminKey(user.allowedAdminTabs)));
+  }, [user]);
+  const sectionAllowed = isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection));
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [anomalyRecords, setAnomalyRecords] = useState<Array<any>>([]);
   // 이상치를 못 읽은 지점 — '이상 없음'과 '못 읽음'을 구분해 보여주기 위해 이름을 남긴다(P0-2).
   const [anomalyFailedBranches, setAnomalyFailedBranches] = useState<string[]>([]);
   const [anomalyLoadError, setAnomalyLoadError] = useState(false);
-  const [cleaningRosters, setCleaningRosters] = useState(false);
-  const [clearingDirectory, setClearingDirectory] = useState(false);
   // 마감 이상치 표의 분류. 예전엔 'dashboard' 탭이 하나 더 있었지만 필터가 'cash'와 완전히 같은 죽은 탭이라 없앴다
   // (대시보드 → 전일 정산현황으로 옮기면서 정리, 2026-07-22).
   const [closingView, setClosingView] = useState<"overtime" | "cash" | "remarks" | "otherMemo">("cash");
@@ -116,7 +125,7 @@ export default function AdminPage() {
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
   const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
-  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
@@ -124,9 +133,6 @@ export default function AdminPage() {
   // 지점별 일일마감 이력 캐시(이상치 표) — 날짜를 바꿔도 다시 읽지 않게. 실패는 캐시하지 않는다.
   const anomalyCacheRef = useRef(new Map<string, { records: any[]; at: number }>());
   const detailRequestRef = useRef(0);
-  const employeeIdSequence = useRef(1);
-  // 직원명부 기능은 별도 재설계 전까지 이전 관리자 화면처럼 노출·동기화하지 않는다.
-  const employeeDirectoryEnabled = false;
 
   // 본인 권한 검수 및 마크업 라우팅 분기
   useEffect(() => {
@@ -141,6 +147,7 @@ export default function AdminPage() {
 
   // 전 지점 정산 총람 불러오기
   const fetchDailyList = async () => {
+    if (!isAdminSession) return;
     if (!user) return;
     const requestId = ++dailyListRequestRef.current;
     try {
@@ -177,250 +184,12 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
+    if (!isAdminSession) return;
     fetchDailyList();
-  }, [selectedDate, user]);
+  }, [selectedDate, user, isAdminSession]);
 
   const triggerToast = (message: string, type: ToastType = "success") => {
     setToast({ message, type });
-  };
-
-  const loadEmployeeDirectory = async () => {
-    if (!employeeDirectoryEnabled) return;
-    try {
-      setDirectoryLoading(true);
-      const branches = await gasClient.getBranchList();
-      setDirectoryBranches(branches);
-      const results = await Promise.all(branches.map(async (branch) => {
-        const [employees, movements] = await Promise.all([
-          gasClient.getStaffRoster(branch.branchName),
-          gasClient.getSharedData<any[]>(`staff_movements:${branch.branchName}`).catch(() => null)
-        ]);
-        const normalizedEmployees = employees.map((employee) => employee.employeeId ? employee : {
-          ...employee,
-          employeeId: `UGD-${normalizeText(branch.branchName).toUpperCase()}-${employee.id}`
-        });
-        if (normalizedEmployees.some((employee, index) => employee !== employees[index])) {
-          await gasClient.saveStaffRoster(branch.branchName, normalizedEmployees);
-        }
-        return {
-          employees: normalizedEmployees.filter((employee) => employee.division === "정직원").map((employee) => ({ ...employee, branchName: branch.branchName, brand: branch.brand })),
-          movements: Array.isArray(movements) ? movements : []
-        };
-      }));
-      setDirectoryEmployees(results.flatMap((result) => result.employees));
-      const ids = results.flatMap((result) => result.employees).map((employee: any) => Number(String(employee.employeeId || "").replace(/^emp-/i, ""))).filter(Number.isFinite);
-      employeeIdSequence.current = Math.max(0, ...ids) + 1;
-      setMovementHistory(results.flatMap((result) => result.movements).sort((a, b) => String(b.effectiveDate || b.createdAt || "").localeCompare(String(a.effectiveDate || a.createdAt || ""))));
-    } catch (error) {
-      console.error("Employee directory load failed:", error);
-      triggerToast("직원명부를 불러오지 못했습니다.", "error");
-    } finally {
-      setDirectoryLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (employeeDirectoryEnabled && adminSection === "employeeDirectory") void loadEmployeeDirectory();
-  }, [adminSection, employeeDirectoryEnabled]);
-
-  const cleanBranchOwnRosters = async () => {
-    if (!window.confirm("모든 지점의 직원현황에서 관리자 등록 직원을 제거하고 지점 등록 직원만 남깁니다. 계속할까요?")) return;
-    try {
-      setCleaningRosters(true);
-      const branches = await gasClient.getBranchList();
-      for (const branch of branches) {
-        const employees = await gasClient.getStaffRoster(branch.branchName);
-        const branchCode = String(branch.branchName).replace(/[\s()점]/g, "");
-        const isAdminEmployee = (emp: any): boolean => {
-          const id = String(emp.id || "");
-          const eid = String(emp.employeeId || "");
-          if (/^emp-\d{10,}-[a-z0-9]{3,}$/i.test(id)) return true;
-          if (/^emp-\d{1,6}$/.test(eid)) return true;
-          return false;
-        };
-        const isBranchEmployee = (emp: any): boolean => {
-          const eid = String(emp.employeeId || "").toLowerCase();
-          if (!eid) return true;
-          if (eid.startsWith(`ugd-${branchCode.toLowerCase()}-`)) return true;
-          return false;
-        };
-        const branchOnly = employees.filter((emp: any) => !isAdminEmployee(emp) && isBranchEmployee(emp));
-        await gasClient.saveBranchOwnRoster(branch.branchName, branchOnly);
-      }
-      triggerToast(`${branches.length}개 지점 직원현황 정리 완료`, "success");
-    } catch (error) {
-      console.error("직원현황 정리 실패:", error);
-      triggerToast("직원현황 정리에 실패했습니다.", "error");
-    } finally {
-      setCleaningRosters(false);
-    }
-  };
-
-  const clearEmployeeDirectory = async () => {
-    if (!window.confirm("전 지점 직원명부의 모든 직원 데이터를 삭제합니다. 되돌릴 수 없습니다. 계속할까요?")) return;
-    try {
-      setClearingDirectory(true);
-      const branches = await gasClient.getBranchList();
-      for (const branch of branches) {
-        await gasClient.saveStaffRoster(branch.branchName, []);
-      }
-      setDirectoryEmployees([]);
-      triggerToast(`전 지점 직원명부 초기화 완료`, "success");
-    } catch (error) {
-      console.error("직원명부 초기화 실패:", error);
-      triggerToast("직원명부 초기화에 실패했습니다.", "error");
-    } finally {
-      setClearingDirectory(false);
-    }
-  };
-
-  const makeEmployeeId = () => `emp-${String(employeeIdSequence.current++).padStart(5, "0")}`;
-  const toMoney = (value: unknown) => Number(String(value ?? "").replace(/[^0-9.-]/g, "")) || 0;
-  const normalizeText = (value: unknown) => String(value ?? "").replace(/[\s()점]/g, "").toLowerCase();
-  const birthDateFromResident = (value: string) => {
-    const digits = value.replace(/\D/g, "");
-    if (digits.length < 7) return "";
-    const century = ["1", "2", "5", "6"].includes(digits[6]) ? "19" : "20";
-    return digits.slice(0, 6);
-  };
-  const formatDate = (value?: string) => value ? String(value).replace(/-/g, ".") : "-";
-  const formatBirthDate = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6) || "-";
-  const formatResidentNumber = (value?: string) => {
-    const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
-    if (digits.length <= 6) return digits;
-    return `${digits.slice(0, 6)}-${digits.slice(6)}`;
-  };
-  const maskResidentNumber = (value?: string) => {
-    const digits = String(value || "").replace(/\D/g, "").slice(0, 13);
-    if (digits.length <= 6) return digits || "-";
-    return `${digits.slice(0, 6)}-${"*".repeat(Math.min(7, digits.length - 6))}`;
-  };
-  const formatTenure = (entryDate?: string) => {
-    if (!entryDate) return "-";
-    const start = new Date(entryDate);
-    if (Number.isNaN(start.getTime())) return "-";
-    const now = new Date();
-    let months = (now.getFullYear() - start.getFullYear()) * 12 + now.getMonth() - start.getMonth();
-    if (now.getDate() < start.getDate()) months--;
-    if (months < 0) return "-";
-    return `${Math.floor(months / 12)}년 ${months % 12}개월`;
-  };
-
-  const saveRegistrationRows = async () => {
-    const grouped = new Map<string, any[]>();
-    registrationRows.filter((row) => row.branchName && row.name.trim()).forEach((row) => {
-      const list = grouped.get(row.branchName) || [];
-      list.push(row);
-      grouped.set(row.branchName, list);
-    });
-    if (grouped.size === 0) return triggerToast("지점과 직원명을 입력해 주세요.", "error");
-    const invalidResident = registrationRows.find((row) => row.branchName && row.name.trim() && formatResidentNumber(row.residentNumber).replace(/\D/g, "").length !== 13);
-    if (invalidResident) return triggerToast("주민등록번호 13자리를 모두 입력해 주세요.", "error");
-    try {
-    await Promise.all(Array.from(grouped.entries()).map(async ([branchName, rows]) => {
-      const current = await gasClient.getStaffRoster(branchName);
-      const next = [...current, ...rows.map((row) => {
-        const formattedResident = formatResidentNumber(row.residentNumber);
-        const effectiveEntryDate = row.addReason === "신규입사" ? row.hireDate || row.entryDate : row.entryDate;
-        return {
-          id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          employeeId: makeEmployeeId(),
-          name: row.name.trim(),
-          division: "정직원",
-          rank: row.rank || "사원",
-          residentNumber: formattedResident,
-          birthDate: formattedResident.replace(/\D/g, "").slice(0, 6),
-          entryDate: effectiveEntryDate,
-          salary: toMoney(row.salary),
-          contractType: "4대보험" as const,
-          addReason: row.addReason || "신규입사",
-          fromBranch: row.addReason === "지점이동" ? row.fromBranch : "",
-          transferDate: row.addReason === "지점이동" ? row.transferDate : "",
-          hireDate: row.addReason === "신규입사" ? row.hireDate || row.entryDate : "",
-          addReasonMemo: row.addReason === "기타" ? row.addReasonMemo : ""
-        };
-      })];
-      await gasClient.saveStaffRoster(branchName, next);
-    }));
-    setRegistrationRows([{ branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }]);
-    setShowEmployeeRegistration(false);
-    await loadEmployeeDirectory();
-    triggerToast("직원명부를 등록했습니다.");
-    } catch (error) {
-      // 인증 복원 대기 실패 등으로 저장이 거부되면 조용히 넘어가지 않는다 — 입력 행을 남겨두고 재시도를 안내한다.
-      console.error("직원명부 등록 저장 실패", error);
-      triggerToast("직원 등록 저장에 실패했습니다. 로그인 상태를 확인한 뒤 다시 시도해 주세요.", "error");
-    }
-  };
-
-  const handlePayrollUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []) as File[];
-    if (!files.length) return;
-    try {
-      setUploadingPayroll(true);
-      const XLSX = await import("xlsx");
-      const branches = directoryBranches.length ? directoryBranches : await gasClient.getBranchList();
-      const updates = new Map<string, any[]>();
-      for (const file of files) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-        for (const sheetName of workbook.SheetNames) {
-          const rows = XLSX.utils.sheet_to_json<any[]>(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false });
-          const headerIndex = rows.findIndex((row) => row.some((cell) => String(cell).trim() === "성명"));
-          if (headerIndex < 0) continue;
-          const headers = rows[headerIndex].map((cell) => String(cell).trim());
-          const col = (name: string) => headers.indexOf(name);
-          const nameCol = col("성명"), typeCol = col("분류"), salaryCol = col("이달급여"), residentCol = col("주민등록번호"), rankCol = col("직급"), entryCol = col("입사일"), contractCol = col("근로계약"), branchCol = col("실제 송금지점");
-          for (const row of rows.slice(headerIndex + 1)) {
-            const name = String(row[nameCol] || "").trim();
-            if (!name || name === "합계") continue;
-            const employmentType = String(row[typeCol] || "").trim();
-            const rank = String(row[rankCol] || "사원").trim();
-            if (employmentType.includes("파트") || rank.includes("파트")) continue;
-            const rawBranch = String(row[branchCol] || sheetName).trim();
-            const branch = branches.find((item) => { const a = normalizeText(item.branchName); const b = normalizeText(rawBranch); const c = normalizeText(sheetName); return a === b || a === c || a.includes(b) || b.includes(a) || a.includes(c) || c.includes(a); });
-            if (!branch) continue;
-            const list = updates.get(branch.branchName) || [];
-            const residentNumber = String(row[residentCol] || "").trim();
-            list.push({ name, residentNumber, birthDate: birthDateFromResident(residentNumber), rank, entryDate: String(row[entryCol] || "").trim(), contractType: String(row[contractCol] || "4대보험").trim(), salary: toMoney(row[salaryCol]) });
-            updates.set(branch.branchName, list);
-          }
-        }
-      }
-      await Promise.all(Array.from(updates.entries()).map(async ([branchName, rows]) => {
-        const current = await gasClient.getStaffRoster(branchName);
-        const next = [...current];
-        rows.forEach((row) => {
-          const index = next.findIndex((employee: any) => (row.residentNumber && employee.residentNumber === row.residentNumber) || employee.name === row.name);
-          const patch = { ...row, division: "정직원", contractType: row.contractType.includes("3.3%") ? "3.3%" as const : "4대보험" as const, employeeId: index >= 0 ? next[index].employeeId || makeEmployeeId() : makeEmployeeId() };
-          if (index >= 0) next[index] = { ...next[index], ...patch }; else next.push({ id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...patch });
-        });
-        await gasClient.saveStaffRoster(branchName, next);
-      }));
-      await loadEmployeeDirectory();
-      triggerToast("인건비 파일의 급여 정보를 반영했습니다.");
-    } catch (error) {
-      console.error("Payroll upload failed:", error);
-      triggerToast("인건비 파일을 처리하지 못했습니다.", "error");
-    } finally {
-      setUploadingPayroll(false);
-      event.target.value = "";
-    }
-  };
-
-  // 고유 브랜드 리스트 추출
-  const unlockSalary = async () => {
-    const pin = window.prompt("급여 정보를 열람하려면 관리자 PIN을 다시 입력하세요.");
-    if (!pin) return false;
-    try { const { loginWithAdminPin } = await import("../api/firebaseAuth"); await loginWithAdminPin(pin); setSalaryUnlocked(true); return true; }
-    catch { triggerToast("관리자 PIN이 일치하지 않습니다.", "error"); return false; }
-  };
-
-  const downloadEmployeeDirectory = async () => {
-    let includeSalary = window.confirm("급여 정보를 포함해 다운로드할까요?");
-    if (includeSalary && !salaryUnlocked) includeSalary = await unlockSalary();
-    const rows = directoryEmployees.map((employee) => ({ "직원ID": employee.employeeId || employee.id, "지점": employee.branchName, "이름": employee.name, "생년월일": employee.birthDate || "", "직급": employee.rank || "사원", "입사일": employee.entryDate || "", ...(includeSalary ? { "급여": employee.salary || 0 } : {}), "재직년수": formatTenure(employee.entryDate) }));
-    const XLSX = await import("xlsx");
-    const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "직원명부"); XLSX.writeFile(workbook, `UGD_직원명부_${getTodayDateString()}.xlsx`);
   };
 
   // [P0-2 / Codex 리뷰 2026-07-22] 예전에는 getBranchHistory(실패를 []로 삼킴)로 훑어서, 어느 지점 조회가
@@ -433,6 +202,7 @@ export default function AdminPage() {
   // 대신 **지점당 한 번만 읽고 TTL 캐시**를 둔다(매출 대시보드와 같은 방식). 날짜·월을 바꿔도 다시 읽지 않는다.
   // (진짜 월 범위 쿼리는 settleDate 복합 인덱스가 필요해 별도 작업으로 둔다.)
   const loadClosingAnomalies = async () => {
+    if (!isAdminSession) return;
     const requestId = ++anomalyRequestRef.current;
     try {
       setAnomalyLoading(true);
@@ -503,22 +273,31 @@ export default function AdminPage() {
   // 그 탭을 실제로 열 때만 읽는다. 서버 조회가 지점 전체 이력을 주므로 **날짜를 바꿔도 다시 읽지 않는다**
   // (화면 표시는 selectedDateAnomalyRecords 가 고른 날짜로 거른다). 최신값이 필요하면 '새로고침'.
   useEffect(() => {
-    if (adminSection === "dailySettlement" && dailySettlementTab === "status") void loadClosingAnomalies();
+    if (!isAdminSession) return;
+    if (adminSection === "dailySettlement" && dailySettlementTab === "status" && isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection))) void loadClosingAnomalies();
     // 언마운트·탭 이동 뒤 도착한 응답이 상태를 건드리지 않게 요청 표식을 무효화한다(매출 대시보드와 같은 방식).
     return () => { anomalyRequestRef.current++; };
-  }, [adminSection, dailySettlementTab]);
+  }, [adminSection, dailySettlementTab, allowedAdminTabs, isAdminSession]);
 
   const loadDashboardAlerts = useCallback(async () => {
+    if (!isAdminSession) return;
     try {
       setDashboardAlertsLoading(true);
       // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
       // (강조가 최근 3일 기준으로 저절로 꺼지게 바뀜) 이제 아무도 이 목록에 쓰지 않는다. 다만 예전에 확인해 둔
       // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
-      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes] = await Promise.all([
+      // 신규 가입 알림은 개인 관리자 세션에서만 조회한다 — PIN 관리자는 users 컬렉션 읽기 권한이 없어
+      // (firestore.rules: isPersonalAdmin()만 read 허용) 그대로 부르면 permission-denied로 거부된다.
+      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
         gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
-        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => [])
+        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => []),
+        // accounts 탭 권한이 없는 관리자는 화면 접근이 막혀 있으므로 신규가입 카운트를 아예 불러오지 않는다
+        // (권한 있는 배지가 뜨는데 눌러도 안내만 나오면 혼란 — 사용자 지시 2026-07-25).
+        user?.loginType === "personal" && isAdminTabAllowed(user.allowedAdminTabs, "accounts")
+          ? listUserProfiles().catch(() => [])
+          : Promise.resolve([])
       ]);
       const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
       const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
@@ -536,22 +315,29 @@ export default function AdminPage() {
       setDashboardAlerts({
         editLogs: editNew.length,
         manualOvertimes: manualNew.length,
+        newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length,
         latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
         latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
       });
     } finally {
       setDashboardAlertsLoading(false);
     }
-  }, []);
+  }, [user, isAdminSession]);
 
   useEffect(() => {
-    if (adminSection === "dashboard") void loadDashboardAlerts();
-  }, [adminSection, loadDashboardAlerts]);
+    if (!isAdminSession) return;
+    if (adminSection === "dashboard" && isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection))) void loadDashboardAlerts();
+  }, [adminSection, loadDashboardAlerts, allowedAdminTabs, isAdminSession]);
 
-  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes") => {
+  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts") => {
     if (target === "dailyPending") {
       setAdminSection("dailySettlement");
       setDailySettlementTab("status");
+      return;
+    }
+    if (target === "accounts") {
+      // 확인 처리는 계정 관리 화면에서 개별 '확인 처리' 버튼으로 한다(reviewedByAdmin) — 여기서는 이동만.
+      setAdminSection("accounts");
       return;
     }
     setAdminSection("dailySettlement");
@@ -700,16 +486,22 @@ export default function AdminPage() {
         memo: editMemo.substring(0, 500)
       };
 
-      await gasClient.updateDaily(
+      const result = await gasClient.updateDaily(
         selectedRow.record.recordId,
         masterPayload,
         undefined, // 지출 상세 및 직원은 관리자 인라인 수정에서 제외 (마스터 매출 수정 최우선 요구)
         undefined,
-        user?.branchName || "관리자"
+        // 개인 로그인 계정이면 실제 이름을 남긴다. PIN 관리자 세션은 예전과 같은 "관리자" 표기를 유지한다.
+        user?.loginType === "personal" ? user.name : (user?.branchName || "관리자"),
+        user?.uid
       );
 
       triggerToast("정산 수정 내역이 성공적으로 구글 시트에 업데이트 되었습니다.", "success");
-      
+      // 본문 저장은 이미 끝났다 — 수정이력(edit_logs) 기록만 실패한 경우, 성공 토스트에 이어 알린다.
+      if ((result as any)?.editLogFailed) {
+        triggerToast("수정이력 기록에 실패했습니다. 저장은 완료됐습니다.", "error");
+      }
+
       // 메인 리스트 갱신 및 드로어 내용도 반영
       await fetchDailyList();
       
@@ -767,7 +559,9 @@ export default function AdminPage() {
     }
   };
 
-  if (!user) return null;
+  // 관리자 세션이 아니면 아무것도 렌더하지 않는다 — 첫 프레임에 대시보드가 마운트되어
+  // 하위 섹션의 데이터 로드 effect가 실행되는 것을 차단(redirect effect가 곧 이동시킴).
+  if (!user || user.role !== "admin") return null;
   const designPreview = new URLSearchParams(window.location.search).get("designPreview") !== "0";
 
   return (
@@ -815,7 +609,7 @@ export default function AdminPage() {
           <button
             onClick={() => setAdminSection("dashboard")}
             aria-current={adminSection === "dashboard" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "dashboard" ? " is-active" : ""}`}
+            className={`ugd-nav-item${adminSection === "dashboard" ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "dashboard") ? " opacity-50" : ""}`}
           >
             대시보드
           </button>
@@ -828,7 +622,7 @@ export default function AdminPage() {
                 key={sub.id}
                 onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs"); setDailyLogsFocus(null); }}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "dailySettlement") ? " opacity-50" : ""}`}
               >
                 {sub.label}
               </button>
@@ -843,7 +637,7 @@ export default function AdminPage() {
                 key={sub.id}
                 onClick={() => { setAdminSection("monthlyClosing"); setMonthlyClosingTab(sub.id as "status" | "cashManagement" | "cashExpenses"); }}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "monthlyClosing") ? " opacity-50" : ""}`}
               >
                 {sub.label}
               </button>
@@ -858,7 +652,7 @@ export default function AdminPage() {
                 key={sub.id}
                 onClick={() => { setAdminSection("analysis"); setAnalysisTab(sub.id as "summary" | "charts" | "branch"); }}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "analysis") ? " opacity-50" : ""}`}
               >
                 {sub.label}
               </button>
@@ -869,31 +663,31 @@ export default function AdminPage() {
           <button
             onClick={() => setAdminSection("laborContracts")}
             aria-current={adminSection === "laborContracts" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "laborContracts" ? " is-active" : ""}`}
+            className={`ugd-nav-item${adminSection === "laborContracts" ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "laborContracts") ? " opacity-50" : ""}`}
           >
             근로계약서 발송 현황
           </button>
           <button
             onClick={() => setAdminSection("annualLeave")}
             aria-current={adminSection === "annualLeave" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "annualLeave" ? " is-active" : ""}`}
+            className={`ugd-nav-item${adminSection === "annualLeave" ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "annualLeave") ? " opacity-50" : ""}`}
           >
             연차관리
           </button>
           <button
             onClick={() => setAdminSection("salaryChanges")}
             aria-current={adminSection === "salaryChanges" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "salaryChanges" ? " is-active" : ""}`}
+            className={`ugd-nav-item${adminSection === "salaryChanges" ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "salaryChanges") ? " opacity-50" : ""}`}
           >
             급여 변동 이력
           </button>
-          {employeeDirectoryEnabled && <button
-            onClick={() => setAdminSection("employeeDirectory")}
-            aria-current={adminSection === "employeeDirectory" ? "page" : undefined}
-            className={`ugd-nav-item${adminSection === "employeeDirectory" ? " is-active" : ""}`}
+          <button
+            onClick={() => setAdminSection("accounts")}
+            aria-current={adminSection === "accounts" ? "page" : undefined}
+            className={`ugd-nav-item${adminSection === "accounts" ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "accounts") ? " opacity-50" : ""}`}
           >
-            직원명부
-          </button>}
+            계정 관리
+          </button>
 
           <p className="ugd-nav-group">법인택시</p>
           {[{ id: "orders", label: "이용내역" }, { id: "anomaly", label: "이상 점검" }, { id: "requests", label: "신청 관리" }, { id: "members", label: "직원 관리" }].map((sub) => {
@@ -903,7 +697,7 @@ export default function AdminPage() {
                 key={sub.id}
                 onClick={() => { setAdminSection("kakaoTaxi"); setKakaoTaxiTab(sub.id as KakaoTaxiView); }}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi") ? " opacity-50" : ""}`}
               >
                 {sub.label}
               </button>
@@ -958,7 +752,14 @@ export default function AdminPage() {
         </header>
 
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
-          {adminSection === "dashboard" && (
+          {!sectionAllowed && (
+            <div className="flex flex-col items-center justify-center py-24 gap-2">
+              <p className="text-sm font-bold text-zinc-600">접근 권한이 없는 화면입니다.</p>
+              <p className="text-xs text-zinc-400">다른 관리자에게 권한을 요청해 주세요.</p>
+            </div>
+          )}
+
+          {sectionAllowed && adminSection === "dashboard" && (
             <>
               <section className="admin-hero-panel">
                 <div>
@@ -988,7 +789,7 @@ export default function AdminPage() {
             </>
           )}
 
-          {adminSection === "analysis" && (
+          {sectionAllowed && adminSection === "analysis" && (
             <section className="space-y-5 animate-fade-in">
               {/* 모바일은 사이드바가 없어 여기서 하위탭을 고른다(전일정산·월말 탭과 같은 패턴). */}
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
@@ -1003,11 +804,15 @@ export default function AdminPage() {
             </section>
           )}
 
-          {adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
+          {sectionAllowed && adminSection === "annualLeave" && <AdminAnnualLeaveSection />}
 
-          {adminSection === "salaryChanges" && <SalaryChangeHistoryTab />}
+          {sectionAllowed && adminSection === "salaryChanges" && <SalaryChangeHistoryTab />}
 
-          {adminSection === "kakaoTaxi" && (
+          {sectionAllowed && adminSection === "accounts" && (
+            <AccountManagementSection currentUid={user?.loginType === "personal" ? user.uid : undefined} />
+          )}
+
+          {sectionAllowed && adminSection === "kakaoTaxi" && (
             <section className="space-y-5 animate-fade-in">
               {/* 모바일은 사이드바가 없어 여기서 하위탭을 고른다(분석 탭과 같은 패턴). */}
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
@@ -1024,7 +829,7 @@ export default function AdminPage() {
             </section>
           )}
 
-          {adminSection === "dailySettlement" && (
+          {sectionAllowed && adminSection === "dailySettlement" && (
             <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
                 <button onClick={() => setDailySettlementTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
@@ -1054,7 +859,7 @@ export default function AdminPage() {
             </section>
           )}
 
-          {adminSection === "monthlyClosing" && (
+          {sectionAllowed && adminSection === "monthlyClosing" && (
             <section className="space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
                 <button onClick={() => setMonthlyClosingTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>제출현황</button>
@@ -1067,48 +872,10 @@ export default function AdminPage() {
             </section>
           )}
 
-          {adminSection === "modificationLogs" && <AdminModificationLogsSection />}
+          {sectionAllowed && adminSection === "modificationLogs" && <AdminModificationLogsSection />}
 
-          {adminSection === "laborContracts" && <AdminLaborContractsSection />}
+          {sectionAllowed && adminSection === "laborContracts" && <AdminLaborContractsSection />}
 
-          {employeeDirectoryEnabled && adminSection === "employeeDirectory" && (
-            <section className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 지점 직원명부</h2>
-                  <p className="text-xs text-gray-400 mt-1">정직원 명부와 퇴사·지점이동 이력을 확인합니다.</p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => void loadEmployeeDirectory()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
-                  <button onClick={() => void cleanBranchOwnRosters()} disabled={cleaningRosters} className="px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold disabled:opacity-50">{cleaningRosters ? "정리 중…" : "직원현황 정리"}</button>
-                  <button onClick={() => void clearEmployeeDirectory()} disabled={clearingDirectory} className="px-4 py-2 bg-red-700 text-white rounded-xl text-xs font-bold disabled:opacity-50">{clearingDirectory ? "삭제 중…" : "명부 전체 삭제"}</button>
-                </div>
-              </div>
-              <div className="flex gap-2 border-b border-gray-200">
-                <button onClick={() => setDirectoryTab("roster")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "roster" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>직원명부</button>
-                <button onClick={() => setDirectoryTab("movements")} className={`px-4 py-3 text-sm font-bold border-b-2 ${directoryTab === "movements" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>변동내역</button>
-              </div>
-              {directoryTab === "roster" && !directoryLoading && (
-                <>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <button onClick={() => setShowEmployeeRegistration((open) => !open)} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-bold">직원 직접 등록</button>
-                    <label className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold cursor-pointer">{uploadingPayroll ? "인건비 반영 중…" : "인건비내역 업로드"}<input type="file" accept=".xlsx,.xls" multiple className="hidden" disabled={uploadingPayroll} onChange={handlePayrollUpload} /></label>
-                    <button onClick={() => void downloadEmployeeDirectory()} className="px-4 py-2 rounded-xl bg-slate-700 text-white text-xs font-bold">엑셀 다운로드</button>
-                    <button onClick={() => salaryUnlocked ? setSalaryUnlocked(false) : void unlockSalary()} className="px-4 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold">{salaryUnlocked ? "급여 다시 잠금" : "급여 열람 잠금 해제"}</button>
-                  </div>
-                  {showEmployeeRegistration && <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3"><div className="overflow-x-auto"><table className="w-full min-w-[1280px] text-xs"><thead><tr className="text-gray-500"><th className="text-left pb-2">지점</th><th className="text-left pb-2">이름</th><th className="text-left pb-2">주민등록번호</th><th className="text-left pb-2">직급</th><th className="text-left pb-2">추가 사유</th><th className="text-left pb-2">신규입사일</th><th className="text-left pb-2">이동 전 지점</th><th className="text-left pb-2">이동일</th><th className="text-left pb-2">기타 내용</th><th className="text-left pb-2">급여</th></tr></thead><tbody>{registrationRows.map((row, index) => <tr key={index}><td className="pr-2 pb-2"><select value={row.branchName} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, branchName: e.target.value } : item))} className="w-full p-2 rounded border"><option value="">지점 선택</option>{directoryBranches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input value={row.name} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><input value={row.residentNumber || ""} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, residentNumber: formatResidentNumber(e.target.value) } : item))} placeholder="000000-0000000" className="w-full p-2 rounded border font-mono" /></td><td className="pr-2 pb-2"><input value={row.rank} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, rank: e.target.value } : item))} className="w-full p-2 rounded border" /></td><td className="pr-2 pb-2"><select value={row.addReason || "신규입사"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, addReason: e.target.value } : item))} className="w-full p-2 rounded border"><option value="신규입사">신규입사</option><option value="지점이동">지점이동</option><option value="기타">기타</option></select></td><td className="pr-2 pb-2"><input type="date" value={row.hireDate || row.entryDate || ""} disabled={(row.addReason || "신규입사") !== "신규입사"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, hireDate: e.target.value, entryDate: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pr-2 pb-2"><select value={row.fromBranch || ""} disabled={row.addReason !== "지점이동"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, fromBranch: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100"><option value="">이동 전 지점</option>{directoryBranches.filter((branch) => branch.branchName !== row.branchName).map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}</select></td><td className="pr-2 pb-2"><input type="date" value={row.transferDate || ""} disabled={row.addReason !== "지점이동"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, transferDate: e.target.value, entryDate: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pr-2 pb-2"><input value={row.addReasonMemo || ""} disabled={row.addReason !== "기타"} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, addReasonMemo: e.target.value } : item))} className="w-full p-2 rounded border disabled:bg-gray-100" /></td><td className="pb-2"><input type="number" value={row.salary} onChange={(e) => setRegistrationRows((rows) => rows.map((item, i) => i === index ? { ...item, salary: e.target.value } : item))} className="w-full p-2 rounded border" /></td></tr>)}</tbody></table></div><p className="text-[11px] text-gray-500 font-bold">수정 추천: 주민등록번호처럼 민감한 정보는 목록에서는 마스킹하고, 수정 버튼을 눌러 별도 확인 후 편집하는 방식이 가장 안전합니다.</p><div className="flex gap-2"><button onClick={() => setRegistrationRows((rows) => [...rows, { branchName: "", name: "", residentNumber: "", rank: "사원", entryDate: "", salary: "", addReason: "신규입사", fromBranch: "", transferDate: "", hireDate: "", addReasonMemo: "" }])} className="px-3 py-2 bg-white border rounded-lg text-xs font-bold">입력칸 추가</button><button onClick={() => void saveRegistrationRows()} className="px-3 py-2 bg-[#2E6DB4] text-white rounded-lg text-xs font-bold">등록 저장</button></div></div>}
-                  <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-3 text-left">직원ID</th><th className="px-4 py-3 text-left">지점</th><th className="px-4 py-3 text-left">이름</th><th className="px-4 py-3 text-left">생년월일</th><th className="px-4 py-3 text-left">직급</th><th className="px-4 py-3 text-left">입사일</th><th className="px-4 py-3 text-right">급여</th><th className="px-4 py-3 text-left">재직년수</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-4 py-3 font-mono text-xs">{employee.employeeId || employee.id}</td><td className="px-4 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-4 py-3 font-bold">{employee.name}</td><td className="px-4 py-3 font-mono">{formatBirthDate(employee.birthDate || employee.residentNumber)}</td><td className="px-4 py-3">{employee.rank || "사원"}</td><td className="px-4 py-3 font-mono">{formatDate(employee.entryDate)}</td><td className="px-4 py-3 text-right font-mono">{salaryUnlocked && employee.salary ? formatNumber(employee.salary) : "잠김"}</td><td className="px-4 py-3">{formatTenure(employee.entryDate)}</td></tr>) : <tr><td colSpan={8} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
-                </>
-              )}
-              {directoryLoading ? <div className="py-20 text-center"><LoadingSpinner size="md" /></div> : directoryTab === "roster" ? (
-                <div className="hidden">
-                  <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">지점</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">직급</th><th className="px-5 py-3 text-left">주민등록번호</th><th className="px-5 py-3 text-left">입사일</th></tr></thead><tbody className="divide-y divide-gray-100">{directoryEmployees.length ? directoryEmployees.map((employee) => <tr key={`${employee.branchName}-${employee.id}`}><td className="px-5 py-3 font-bold text-[#1A3C6E]">{employee.branchName}</td><td className="px-5 py-3 font-bold">{employee.name}</td><td className="px-5 py-3">{employee.rank || "사원"}</td><td className="px-5 py-3 font-mono">{maskResidentNumber(employee.residentNumber)}</td><td className="px-5 py-3 font-mono">{employee.entryDate || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 정직원이 없습니다.</td></tr>}</tbody></table></div>
-                </div>
-              ) : (
-                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-gray-50 text-gray-500"><tr><th className="px-5 py-3 text-left">처리일</th><th className="px-5 py-3 text-left">구분</th><th className="px-5 py-3 text-left">직원명</th><th className="px-5 py-3 text-left">기존 지점</th><th className="px-5 py-3 text-left">이동 지점</th></tr></thead><tbody className="divide-y divide-gray-100">{movementHistory.length ? movementHistory.map((item, index) => <tr key={item.id || index}><td className="px-5 py-3 font-mono">{item.effectiveDate || "-"}</td><td className="px-5 py-3 font-bold">{item.type || "-"}</td><td className="px-5 py-3 font-bold">{item.employeeName || "-"}</td><td className="px-5 py-3">{item.fromBranch || "-"}</td><td className="px-5 py-3">{item.toBranch || "-"}</td></tr>) : <tr><td colSpan={5} className="px-5 py-16 text-center text-gray-400">등록된 퇴사 또는 지점이동 내역이 없습니다.</td></tr>}</tbody></table></div></div>
-              )}
-            </section>
-          )}
         </main>
       </div>
 
@@ -1626,12 +1393,12 @@ function AdminDashboardAlertHub({
   onOpen
 }: {
   pendingDailyCount: number;
-  alerts: { editLogs: number; manualOvertimes: number };
+  alerts: { editLogs: number; manualOvertimes: number; newSignups: number };
   loading: boolean;
   onRefresh: () => void;
-  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes") => void;
+  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts") => void;
 }) {
-  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes;
+  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups;
 
   return (
     <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
@@ -1664,6 +1431,11 @@ function AdminDashboardAlertHub({
           {alerts.manualOvertimes > 0 && (
             <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-sm font-black hover:bg-violet-100">
               초과근무 수기작성: {alerts.manualOvertimes}건
+            </button>
+          )}
+          {alerts.newSignups > 0 && (
+            <button onClick={() => onOpen("accounts")} className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-sm font-black hover:bg-emerald-100">
+              신규 가입: {alerts.newSignups}건
             </button>
           )}
         </div>

@@ -3,12 +3,35 @@ import { useNavigate } from "react-router-dom";
 import { AlertOctagon, Lock, LogIn } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuthContext } from "../contexts/AuthContext";
+import { warmPersonalAuth } from "../hooks/useAuth";
 import LoadingSpinner from "../components/LoadingSpinner";
+import GateStep from "./login/GateStep";
 import type { LoginBranch } from "../api/firebaseAuth";
 import { ensureLatestAppVersion } from "../utils/appVersion";
 
+type LoginMode = "personal" | "pin";
+type EmailFormMode = "signin" | "signup" | "reset";
+
 export default function LoginPage() {
-  const { user, login, loading, error, failedAttempts, setError } = useAuthContext();
+  const {
+    user, login, loading, error, failedAttempts, setError,
+    loginWithGoogle, loginWithEmail, signUpWithEmail, sendPasswordReset, pendingGate
+  } = useAuthContext();
+  const navigate = useNavigate();
+
+  // 공통 화면 상태
+  const [mode, setMode] = useState<LoginMode>("personal");
+
+  // 개인 로그인(이메일) 상태
+  const [emailForm, setEmailForm] = useState<EmailFormMode>("signin");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");   // 가입 폼 전용 — 오타 가입 방지
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [sendingReset, setSendingReset] = useState(false);
+
+  // 기존 PIN 로그인 상태 — 그대로 유지
   const [pin, setPin] = useState("");
   const [branches, setBranches] = useState<LoginBranch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<LoginBranch | null>(null);
@@ -16,7 +39,14 @@ export default function LoginPage() {
   const [adminMode, setAdminMode] = useState(false);
   const [showBranchSelect, setShowBranchSelect] = useState(false);
   const [checkingVersion, setCheckingVersion] = useState(false);
-  const navigate = useNavigate();
+
+  const busy = loading || sendingReset;
+
+  // 로그인 화면이 뜨자마자 Firebase 로그인 준비를 미리 끝내둔다 —
+  // "Google로 시작하기" 클릭 시 팝업이 지연 없이 바로 열리게(실패해도 클릭 시 재시도되므로 무시).
+  useEffect(() => {
+    void warmPersonalAuth().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -32,6 +62,68 @@ export default function LoginPage() {
       .catch(() => setBranches([]))
       .finally(() => setLoadingBranches(false));
   }, [showBranchSelect, adminMode]);
+
+  // 개인 ↔ PIN 모드 전환 시 입력값·오류·안내 문구를 모두 초기화한다.
+  const switchToPersonal = () => {
+    setMode("personal");
+    setError(null);
+    setResetMessage(null);
+    setPin("");
+    setAdminMode(false);
+    setShowBranchSelect(false);
+    setSelectedBranch(null);
+  };
+
+  const switchToPin = () => {
+    setMode("pin");
+    setError(null);
+    setResetMessage(null);
+    setEmailForm("signin");
+    setName("");
+    setEmail("");
+    setPassword("");
+  };
+
+  const switchEmailForm = (next: EmailFormMode) => {
+    setEmailForm(next);
+    setError(null);
+    setResetMessage(null);
+    setPassword("");
+    setPasswordConfirm("");
+  };
+
+  const handleEmailSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError(null);
+    setResetMessage(null);
+
+    if (emailForm === "reset") {
+      setSendingReset(true);
+      try {
+        await sendPasswordReset(email);
+        setResetMessage("메일을 보냈습니다. 스팸함도 확인해 주세요.");
+        setEmailForm("signin");
+        setPassword("");
+      } catch (err: any) {
+        setError(err?.message || "재설정 메일 전송에 실패했습니다.");
+      } finally {
+        setSendingReset(false);
+      }
+      return;
+    }
+
+    if (emailForm === "signup" && password !== passwordConfirm) {
+      // 두 비밀번호가 일치해야만 가입 진행(사용자 요청 2026-07-25) — 오타 가입 방지.
+      setError("비밀번호가 서로 일치하지 않습니다. 두 칸에 같은 비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    const success = emailForm === "signup"
+      ? await signUpWithEmail(name, email, password)
+      : await loginWithEmail(email, password);
+    if (success) { setPassword(""); setPasswordConfirm(""); }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -88,78 +180,178 @@ export default function LoginPage() {
           )}
         </AnimatePresence>
 
-        <form className="space-y-4" onSubmit={handleSubmit} id="login-form">
-          <div className="relative">
-            <input
-              id="pin-input"
-              name="pin"
-              type="password"
-              inputMode="text"
-              autoComplete="current-password"
-              required
-              value={pin}
-              onChange={handlePinChange}
-              disabled={loading || checkingVersion}
-              placeholder="PIN"
-              aria-label="PIN"
-              className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
-            />
-            <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
+        {!error && resetMessage && (
+          <div
+            className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-700"
+            id="login-reset-alert"
+          >
+            {resetMessage}
           </div>
+        )}
 
-          {!adminMode && showBranchSelect && (
-            <div className="space-y-2">
-              <p className="text-xs font-bold text-zinc-600">지점 선택</p>
-              {loadingBranches ? (
-                <div className="flex justify-center py-5"><LoadingSpinner size="sm" /></div>
-              ) : (
-                <select
-                  value={selectedBranch?.branchName || ""}
-                  onChange={(event) => setSelectedBranch(branches.find((branch) => branch.branchName === event.target.value) || null)}
+        {pendingGate ? (
+          <GateStep profile={pendingGate.profile} />
+        ) : mode === "personal" ? (
+          <div className="space-y-4" id="personal-login-section">
+            <button
+              type="button"
+              onClick={() => void loginWithGoogle()}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-300 bg-white px-4 py-4 text-sm font-bold text-zinc-800 hover:bg-zinc-50"
+              id="btn-google-login"
+            >
+              {/* 구글 공식 브랜드 가이드의 "G" 로고 — 색·비율 변형 금지 자산이라 SVG 원본 그대로 사용 */}
+              <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+              </svg>
+              Google로 시작하기
+            </button>
+            <div className="text-center text-xs font-bold text-zinc-400">또는 이메일로</div>
+            <form className="space-y-3" onSubmit={handleEmailSubmit} id="email-login-form">
+              {emailForm === "signup" && (
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-black bg-white px-4 py-4 text-center text-sm font-bold outline-hidden"
-                >
-                  <option value="">지점을 선택하세요</option>
-                  {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-                </select>
+                  placeholder="이름"
+                  className="w-full rounded-xl border border-black px-4 py-3 text-sm font-bold"
+                />
               )}
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="이메일"
+                className="w-full rounded-xl border border-black px-4 py-3 text-sm font-bold"
+              />
+              {emailForm !== "reset" && (
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="비밀번호"
+                  autoComplete={emailForm === "signup" ? "new-password" : "current-password"}
+                  className="w-full rounded-xl border border-black px-4 py-3 text-sm font-bold"
+                />
+              )}
+              {emailForm === "signup" && (
+                <div className="space-y-1">
+                  <input
+                    type="password"
+                    value={passwordConfirm}
+                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                    required
+                    placeholder="비밀번호 확인"
+                    autoComplete="new-password"
+                    className={`w-full rounded-xl border px-4 py-3 text-sm font-bold ${passwordConfirm && password !== passwordConfirm ? "border-rose-500" : "border-black"}`}
+                  />
+                  {/* 입력 즉시 일치 여부를 보여준다 — 가입하기를 눌러야만 아는 구조는 불편(사용자 지적 2026-07-25) */}
+                  {passwordConfirm && (
+                    password === passwordConfirm
+                      ? <p className="text-[11px] font-bold text-emerald-600">비밀번호가 일치합니다</p>
+                      : <p className="text-[11px] font-bold text-rose-600">비밀번호가 일치하지 않습니다</p>
+                  )}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={busy || (emailForm === "signup" && (!passwordConfirm || password !== passwordConfirm))}
+                className="w-full rounded-xl bg-black px-4 py-4 text-sm font-bold text-white hover:bg-zinc-800 disabled:opacity-50"
+                id="btn-email-submit"
+              >
+                {busy
+                  ? <LoadingSpinner size="sm" light />
+                  : emailForm === "signin" ? "로그인" : emailForm === "signup" ? "가입하기" : "재설정 메일 보내기"}
+              </button>
+            </form>
+            <div className="flex justify-between text-xs font-bold text-zinc-500">
+              <button
+                type="button"
+                className="underline underline-offset-4"
+                onClick={() => switchEmailForm(emailForm === "signup" ? "signin" : "signup")}
+              >
+                {emailForm === "signup" ? "로그인으로 돌아가기" : "이메일로 가입하기"}
+              </button>
+              <button type="button" className="underline underline-offset-4" onClick={() => switchEmailForm("reset")}>
+                비밀번호 찾기
+              </button>
             </div>
-          )}
-          <div className="relative hidden">
-            <input
-              id="pin-input"
-              name="pin"
-              type="password"
-              inputMode="text"
-              autoComplete="current-password"
-              required
-              value={pin}
-              onChange={handlePinChange}
-              disabled={loading}
-              hidden
-              placeholder="PIN 번호"
-              aria-label="PIN 번호"
-              className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
-            />
-            <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500 hidden" />
+            <button
+              type="button"
+              onClick={switchToPin}
+              className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4"
+            >
+              기존 PIN으로 로그인
+            </button>
           </div>
+        ) : (
+          <form className="space-y-4" onSubmit={handleSubmit} id="login-form">
+            <div className="relative">
+              <input
+                id="pin-input"
+                name="pin"
+                type="password"
+                inputMode="text"
+                autoComplete="current-password"
+                required
+                value={pin}
+                onChange={handlePinChange}
+                disabled={loading || checkingVersion}
+                placeholder="PIN"
+                aria-label="PIN"
+                className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
+              />
+              <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading || checkingVersion || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            id="btn-login-submit"
-          >
-            {loading || checkingVersion ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
-          </button>
-          <button
-            type="button"
-            onClick={() => { setAdminMode((current) => !current); setPin(""); setShowBranchSelect(false); setSelectedBranch(null); setError(null); }}
-            className="w-full text-xs font-bold text-zinc-500 underline underline-offset-4"
-          >
-            {adminMode ? "지점 로그인으로 돌아가기" : "관리자 로그인"}
-          </button>
-        </form>
+            {!adminMode && showBranchSelect && (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-zinc-600">지점 선택</p>
+                {loadingBranches ? (
+                  <div className="flex justify-center py-5"><LoadingSpinner size="sm" /></div>
+                ) : (
+                  <select
+                    value={selectedBranch?.branchName || ""}
+                    onChange={(event) => setSelectedBranch(branches.find((branch) => branch.branchName === event.target.value) || null)}
+                    required
+                    className="w-full rounded-xl border border-black bg-white px-4 py-4 text-center text-sm font-bold outline-hidden"
+                  >
+                    <option value="">지점을 선택하세요</option>
+                    {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || checkingVersion || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              id="btn-login-submit"
+            >
+              {loading || checkingVersion ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAdminMode((current) => !current); setPin(""); setShowBranchSelect(false); setSelectedBranch(null); setError(null); }}
+              className="w-full text-xs font-bold text-zinc-500 underline underline-offset-4"
+            >
+              {adminMode ? "지점 로그인으로 돌아가기" : "관리자 로그인"}
+            </button>
+            <button
+              type="button"
+              onClick={switchToPersonal}
+              className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4"
+            >
+              개인 계정으로 로그인
+            </button>
+          </form>
+        )}
       </motion.div>
     </main>
   );

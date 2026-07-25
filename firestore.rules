@@ -10,16 +10,44 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == 'admin@ugd-erp.example';
     }
 
+    // 개인 계정 관리자 판정 — users 문서 기반. status까지 확인한다(정지된 관리자 배제).
+    function isPersonalAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // 개인 계정 프로필. PIN 로그인 계정은 이 컬렉션을 사용하지 않는다.
+    match /users/{uid} {
+      // 본인 문서 읽기 + 개인 관리자 전체 읽기
+      allow read: if signedIn() && (request.auth.uid == uid || isPersonalAdmin());
+      // 본인 생성은 "신규 기본값 그대로"일 때만 — 셀프 권한 상향 차단
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(["name","email","role","allowedTabs","allowedBranches","status","createdAt","reviewedByAdmin"])
+        && request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.createdAt is string
+        && request.resource.data.role == "branch"
+        && request.resource.data.allowedTabs == "all"   // 신규 = 전 탭 허용(사용자 지시 2026-07-25). 제한은 관리자가 계정 관리 탭에서.
+        && request.resource.data.allowedBranches == "all"
+        && request.resource.data.status == "active"
+        && request.resource.data.reviewedByAdmin == false;
+      // 수정·삭제는 개인 관리자만, 본인 문서는 관리자라도 불가(셀프 정지해제·권한조작 차단).
+      // 주의: PIN 관리자(admin@ugd-erp.example)는 여기서 의도적으로 배제 — isAdmin() 쓰지 말 것.
+      allow update, delete: if isPersonalAdmin() && request.auth.uid != uid;
+    }
+
     // 로그인 전 지점 선택 화면에 필요한 공개 정보만 둡니다. PIN·해시값은 포함하지 않습니다.
     match /public_branches/{branchId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin() || isPersonalAdmin();
     }
 
     // 지점 설정 및 PIN 관련 데이터는 인증 후에만 읽고, 관리 계정만 변경합니다.
     match /settings/{branchId} {
       allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin() || isPersonalAdmin();
     }
 
     // 일일마감 원본 데이터입니다. 공통 지점 PIN 정책이므로 로그인한 사용자가 조회·저장합니다.
@@ -51,7 +79,7 @@ service cloud.firestore {
 
     match /edit_logs/{logId} {
       allow read, create: if signedIn();
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdmin() || isPersonalAdmin();
     }
 
     match /{document=**} {
