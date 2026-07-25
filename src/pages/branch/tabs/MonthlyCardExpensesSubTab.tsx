@@ -7,6 +7,7 @@ import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } f
 import { updateDailyMetadata } from "../helpers/dailyOps";
 import { EXPENSE_CLASSIFICATIONS, EXPENSE_USAGES } from "../helpers/expenseRows";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
+import { useAuthContext } from "../../../contexts/AuthContext";
 
 // 드롭다운 목록에 현재 값이 없으면(레거시 표기 등) 그 값을 앞에 끼워 빈 칸으로 보이지 않게 한다.
 const withCurrent = (list: readonly string[], value: string): string[] =>
@@ -25,6 +26,14 @@ export function MonthlyCardExpensesSubTab({
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
 }) {
+  const { user } = useAuthContext();
+  // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
+  const actor = {
+    name: isAdmin
+      ? (user?.loginType === "personal" ? user.name : "관리자")
+      : (user?.loginType === "personal" ? user.name : branchName),
+    uid: user?.uid
+  };
   const [items, setItems] = useState<any[]>([]);
   const [editCardExpense, setEditCardExpense] = useState<{ item: any; fields: Record<string, string> } | null>(null);
   const [usageFilter, setUsageFilter] = useState("전체");
@@ -138,7 +147,7 @@ export function MonthlyCardExpensesSubTab({
         }
         cardExpenses[item.metaIndex] = { ...current, amount: String(amount), usage: patch.usage, classification: patch.classification, detail: patch.detail };
         return { metadata: { ...metadata, cardExpenses } };
-      }, isAdmin ? "관리자" : branchName);
+      }, actor);
     } catch (err) {
       console.error("카드지출 수정 실패", err);
       if (err instanceof Error && err.message === "STALE_METAINDEX") {
@@ -163,7 +172,7 @@ export function MonthlyCardExpensesSubTab({
       const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
       cardExpenses.splice(item.metaIndex, 1);
       return { metadata: { ...metadata, cardExpenses } };
-    });
+    }, actor);
     await refreshHistory?.();
   };
 

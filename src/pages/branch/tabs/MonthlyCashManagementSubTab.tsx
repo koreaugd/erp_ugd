@@ -5,6 +5,7 @@ import { formatNumber } from "../../../utils/formatNumber";
 import { toNumberPromptValue } from "../helpers/formatters";
 import { updateDailyMetadata } from "../helpers/dailyOps";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
+import { useAuthContext } from "../../../contexts/AuthContext";
 
 export function MonthlyCashManagementSubTab({
   branchName,
@@ -19,6 +20,14 @@ export function MonthlyCashManagementSubTab({
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
 }) {
+  const { user } = useAuthContext();
+  // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
+  const actor = {
+    name: isAdmin
+      ? (user?.loginType === "personal" ? user.name : "관리자")
+      : (user?.loginType === "personal" ? user.name : branchName),
+    uid: user?.uid
+  };
   const [logs, setLogs] = useState<any[]>([]);
   const [editCashManagement, setEditCashManagement] = useState<{ row: any; fields: Record<string, string> } | null>(null);
 
@@ -83,7 +92,7 @@ export function MonthlyCashManagementSubTab({
         cashDiffReason: fields.reason.trim()
       },
       masterPatch: { cashSales: Number(fields.cashSales) || 0 }
-    }));
+    }), actor);
     setEditCashManagement(null);
     await refreshHistory?.();
   };
@@ -93,7 +102,7 @@ export function MonthlyCashManagementSubTab({
     await updateDailyMetadata(row.recordId, (metadata) => ({
       metadata: { ...metadata, prevDayCash: "", cashBalance: "", cashDiffReason: "" },
       masterPatch: { cashSales: 0 }
-    }));
+    }), actor);
     await refreshHistory?.();
   };
 

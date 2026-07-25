@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type KeyboardEvent }
 import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Lock, Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import "./staffSheet.css";
 import { gasClient } from "../../../api/gasClient";
+import { useAuthContext } from "../../../contexts/AuthContext";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
@@ -16,6 +17,8 @@ import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import { createDailySettleValidationTargets, createEmployeeFromStaffRow, createStaffAddDraft, employeeNameKey, getAddReasonChoiceClass, getDailyStaffValidationKey, isSampleEmployee, needsOvertimeReason, normalizeRosterEmployee, parseStaffAddReasonChoice, shouldSkipDailyRosterRegistration, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
 export function DailySettleTab({ branchName }: { branchName: string }) {
+  const { user } = useAuthContext();
+  const isPersonalSession = user?.loginType === "personal";
   // Helper to retrieve live employees inside "settle" tab
   const getRoster = useCallback((): Employee[] => {
     try {
@@ -153,6 +156,19 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const [checking, setChecking] = useState<boolean>(false);
   const [hasExistingRecord, setHasExistingRecord] = useState<boolean>(false);
   const [existingRecordId, setExistingRecordId] = useState<string | null>(null);
+  // 기존 기록 로드 시점의 원작성자를 보관한다. 수정 저장 시 submittedBy를 현재 화면의
+  // writer(작성자란은 수정자일 뿐 원작성자가 아니다)로 덮어쓰지 않기 위한 보존용 참조.
+  const originalSubmittedByRef = useRef<{ name: string; uid: string }>({ name: "", uid: "" });
+
+  // 개인 로그인 세션은 작성자란을 계정 이름으로 고정한다(공용기기 오염·거짓 작성자 방지, 설계서 §7).
+  // 임시저장 복원·새 일지 시작 등 writer가 어디서 바뀌든, 여기서 즉시 계정 이름으로 되돌린다.
+  // 단, 기존 기록을 열람/수정하는 중에는 원작성자를 보존해야 하므로(위 §7이 "거짓 작성자"를 막는
+  // 취지이지 원작성자 덮어쓰기를 정당화하지 않는다) 신규 작성일 때만(hasExistingRecord === false) 강제한다.
+  useEffect(() => {
+    if (isPersonalSession && !hasExistingRecord && user?.name && writer !== user.name) {
+      setWriter(user.name);
+    }
+  }, [isPersonalSession, hasExistingRecord, user, writer]);
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
   const [timeErrors, setTimeErrors] = useState<Record<string, string>>({});
 
@@ -531,7 +547,10 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           // 당시 작성자를 반드시 되살립니다.
           // 과거 마감에는 작성자가 숫자로 저장된 경우가 있습니다.
           // 입력값과 제출 검증에서 trim()을 안전하게 사용할 수 있도록 항상 문자열로 정규화합니다.
-          setWriter(String(detail.master.submittedBy ?? ""));
+          const restoredWriter = String(detail.master.submittedBy ?? "");
+          setWriter(restoredWriter);
+          // 수정 저장 시 submittedBy를 덮어쓰지 않도록 원작성자(이름·uid)를 보존해 둔다.
+          originalSubmittedByRef.current = { name: restoredWriter, uid: String((detail.master as any).submittedByUid ?? "") };
 
           // Metadata extraction from memo
           const divider = "\n---\nMETADATA:";
@@ -647,6 +666,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           // Fresh form setup for no existing record
           setHasExistingRecord(false);
           setExistingRecordId(null);
+          originalSubmittedByRef.current = { name: "", uid: "" };
           setIsEditApproved(true); // Automatically approved since it is fresh!
           setCashSales("");
           setCardSales("");
@@ -678,6 +698,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         // Fresh start on fail
         setHasExistingRecord(false);
         setExistingRecordId(null);
+        originalSubmittedByRef.current = { name: "", uid: "" };
         setIsEditApproved(true);
         setCashBalance("");
         setNaverReviewCount("");
@@ -1313,6 +1334,14 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       }));
 
       // 4. Primary Master Object payload
+      // 기존 기록 수정 저장 시에는 submittedBy/submittedByUid를 원작성자 값으로 보존한다.
+      // 화면의 writer는 수정 중인 사람의 이름일 수 있고(작성자란이 원작성자로 채워지지 않은 레거시
+      // 기록 등), modifiedBy/modifiedByUid가 이미 수정자를 별도로 기록하므로 여기서 덮어쓰지 않는다.
+      const isEditingExisting = hasExistingRecord && !!existingRecordId;
+      // 원작성자 보존은 개인 세션에만 적용 — PIN 세션은 작성자란을 수기로 고칠 수 있어(입력칸 활성) 그 값을 그대로 저장한다(기존 동작 유지).
+      const preserveOriginal = isEditingExisting && isPersonalSession;
+      const persistedSubmittedBy = preserveOriginal ? (originalSubmittedByRef.current.name || writerName) : writerName;
+      const persistedSubmittedByUid = preserveOriginal ? (originalSubmittedByRef.current.uid || user?.uid || "") : (isPersonalSession ? (user?.uid || "") : "");
       const masterPayload = {
         branchName,
         settleDate,
@@ -1321,14 +1350,19 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         transferSales: Number(transferSales) || 0,
         deliverySales: Number(deliverySales) || 0,
         memo: combinedMemo,
-        submittedBy: writerName
+        submittedBy: persistedSubmittedBy,
+        submittedByUid: persistedSubmittedByUid
       };
 
       let response;
       if (hasExistingRecord && existingRecordId) {
         // Edit mode (GAS Spreadsheet updates row & logs modification)
-        response = await gasClient.updateDaily(existingRecordId, masterPayload, formattedExpenses, formattedStaff, writerName);
+        response = await gasClient.updateDaily(existingRecordId, masterPayload, formattedExpenses, formattedStaff, writerName, user?.uid || "");
         triggerToast("해당 날짜의 마감 정산 정보가 업데이트에 성공했습니다!");
+        // 본문 저장은 이미 끝났다 — 수정이력(edit_logs) 기록만 실패한 경우, 저장 성공 토스트를 덮어써서 알린다.
+        if ((response as any)?.editLogFailed) {
+          triggerToast("수정이력 기록에 실패했습니다. 저장은 완료됐습니다.", "error");
+        }
       } else {
         // Save mode
         response = await gasClient.submitDaily(masterPayload, formattedExpenses, formattedStaff);
@@ -1356,6 +1390,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const handleCreateNewSettle = () => {
     setHasExistingRecord(false);
     setExistingRecordId(null);
+    originalSubmittedByRef.current = { name: "", uid: "" };
     setIsEditApproved(true);
     setWriter("");
     setTimeErrors({});
@@ -1862,6 +1897,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       placeholder="작성자 성명"
                       className="sheet-cell-input"
                       id="settle-writer-input"
+                      disabled={isPersonalSession}
+                      title={isPersonalSession ? "개인 로그인 계정 이름으로 자동 기록됩니다." : undefined}
                     />
                   </td>
                   {salesShown && <td className="settle-spacer" aria-hidden="true" />}
@@ -1995,6 +2032,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     return;
                   }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
+                  originalSubmittedByRef.current = { name: "", uid: "" };
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
@@ -2675,6 +2713,9 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
       {/* FINAL SUBMIT ACTION ROW */}
       <div className="flex gap-4 items-center justify-end pt-4">
+        {/* 공용기기에서 남의 이름으로 제출되는 것을 막기 위해, 실제로 기록될 작성자를 항상 눈에 보이게 둔다(설계서 §7).
+            개인 세션 + 기존 기록 열람 중에는 (신규 작성 강제와 달리) 원작성자를 그대로 보여준다. */}
+        <span className="text-sm font-bold text-zinc-700">작성자: {isPersonalSession ? (hasExistingRecord ? (writer || "-") : (user?.name || "-")) : (writer || "-")}</span>
         <button
           onClick={handleSettleSubmit}
           disabled={submitting}
