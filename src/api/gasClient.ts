@@ -45,8 +45,10 @@ export interface MasterDaily {
   memo: string;
   submittedAt?: string;
   submittedBy?: string;
+  submittedByUid?: string;   // personal 로그인 계정의 uid. GAS 시트엔 이 컬럼이 없다 — Firebase 문서에만 저장.
   modifiedAt?: string;
   modifiedBy?: string;
+  modifiedByUid?: string;    // personal 로그인 계정의 uid. GAS 시트엔 이 컬럼이 없다 — Firebase 문서에만 저장.
 }
 
 export interface ExpenseDetail {
@@ -234,14 +236,14 @@ function clearReadCache() {
 }
 
 // Helper to safely write to direct Firebase in the background (used for Netlify / local offline static modes)
-async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id: string, payload?: any) {
+async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id: string, payload?: any, isAdminSession = false) {
   try {
     const isServerEnv = typeof window !== "undefined" && (
       window.location.hostname.includes("localhost") ||
       window.location.hostname.includes("127.0.0.1") ||
       window.location.hostname.includes("run.app")
     );
-    
+
     // In Netlify/static environments (where server.ts is non-existent), we mirror directly from the browser.
     if (!isServerEnv) {
       const { isFirebaseConfigValid, getDirectDb, backupSettleDirect, backupSettingDirect, deleteSettingDirect } = await loadFirebaseDirect();
@@ -251,7 +253,7 @@ async function tryDirectBackup(type: "settle" | "setting" | "delete_setting", id
           if (type === "settle") {
             await backupSettleDirect(id, payload);
           } else if (type === "setting") {
-            await backupSettingDirect(id, payload);
+            await backupSettingDirect(id, payload, isAdminSession);
           } else if (type === "delete_setting") {
             await deleteSettingDirect(id);
           }
@@ -316,10 +318,11 @@ export const gasClient = {
     masterData: Partial<MasterDaily>,
     expenses?: ExpenseDetail[],
     staff?: StaffRecord[],
-    modifiedBy?: string
-  ): Promise<{ success: boolean }> {
+    modifiedBy?: string,
+    modifiedByUid?: string
+  ): Promise<{ success: boolean; editLogFailed?: boolean }> {
     const { firebaseUpdateDaily } = await loadFirebaseDirect();
-    const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy);
+    const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy, modifiedByUid);
     clearReadCache();
     if (result && result.success !== false) {
       // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화
@@ -642,10 +645,10 @@ export const gasClient = {
   /**
    * 관리자용: 신규 지점 등록
    */
-  async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string): Promise<{ success: boolean }> {
+  async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string, isAdminSession = false): Promise<{ success: boolean }> {
     const result = await callApi("addBranch", { branchName, pinHash, brand, role });
     if (result && result.success !== false) {
-      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, rawPin, is_active: true });
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, rawPin, is_active: true }, isAdminSession);
     }
     return result;
   },
@@ -653,10 +656,10 @@ export const gasClient = {
   /**
    * 관리자용: 지점 활성화/비활성화 상태 변경
    */
-  async toggleBranchActive(branchName: string, isActive: boolean): Promise<{ success: boolean }> {
+  async toggleBranchActive(branchName: string, isActive: boolean, isAdminSession = false): Promise<{ success: boolean }> {
     const result = await callApi("toggleBranchActive", { branchName, isActive });
     if (result && result.success !== false) {
-      await tryDirectBackup("setting", branchName, { branch_name: branchName, is_active: isActive });
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, is_active: isActive }, isAdminSession);
     }
     return result;
   },
@@ -664,10 +667,10 @@ export const gasClient = {
   /**
    * 관리자용: 지점 PIN 비밀번호 해시 교체
    */
-  async updateBranchPin(branchName: string, pinHash: string): Promise<{ success: boolean }> {
+  async updateBranchPin(branchName: string, pinHash: string, isAdminSession = false): Promise<{ success: boolean }> {
     const result = await callApi("updateBranchPin", { branchName, pinHash });
     if (result && result.success !== false) {
-      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash });
+      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash }, isAdminSession);
     }
     return result;
   },
@@ -738,7 +741,7 @@ export const gasClient = {
   /**
    * 관리자용: Firebase Firestore 클라우드 보존재를 기반으로 현업 및 로컬 데이터 강제 복조(Restore)
    */
-  async restoreFromFirebase(): Promise<{ success: boolean; message?: string; error?: string }> {
+  async restoreFromFirebase(isAdminSession = false): Promise<{ success: boolean; message?: string; error?: string }> {
     const isServerEnvironment = typeof window !== "undefined" && (
       window.location.hostname.includes("localhost") ||
       window.location.hostname.includes("127.0.0.1") ||
@@ -747,7 +750,7 @@ export const gasClient = {
 
     if (!isServerEnvironment) {
       const { restoreDirectFromFirebase } = await loadFirebaseDirect();
-      return await restoreDirectFromFirebase();
+      return await restoreDirectFromFirebase(isAdminSession);
     }
 
     try {
@@ -757,7 +760,7 @@ export const gasClient = {
     } catch (err) {
       console.warn("[Firebase API] Server restore route failed. Utilizing direct browser restorer.", err);
       const { restoreDirectFromFirebase } = await loadFirebaseDirect();
-      return await restoreDirectFromFirebase();
+      return await restoreDirectFromFirebase(isAdminSession);
     }
   },
 

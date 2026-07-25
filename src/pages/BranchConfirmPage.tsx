@@ -10,6 +10,7 @@ import { hashPin } from "../utils/hashPin";
 import { ensureLatestAppVersion } from "../utils/appVersion";
 import { cleanNumeric } from "./branch/helpers/formatters";
 import type { BranchDailyTab } from "./branch/types";
+import { BRANCH_TAB_REGISTRY, isTabAllowed, firstAllowedKey, permKeyForState, type PermKey } from "./branch/tabRegistry";
 import { AnnualLeaveTab } from "./branch/tabs/AnnualLeaveTab";
 import { LaborContractTab } from "./branch/tabs/LaborContractTab";
 import { BusinessTaxiTab } from "./branch/tabs/BusinessTaxiTab";
@@ -72,6 +73,14 @@ export default function BranchConfirmPage() {
   // 1. Fetch available branches (세션 캐시 → GAS → 로컬 fallback 순서)
   const BRANCH_LIST_CACHE_KEY = "erp_branch_list_cache";
 
+  // 캐시/네트워크/로컬 fallback 어느 경로로 얻은 목록이든 반드시 이 필터를 거쳐야
+  // 권한 밖 지점이 화면에 노출되는 일이 없다.
+  const filterByAllowedBranches = (list: any[]): any[] => {
+    if (!user || user.allowedBranches === "all") return list;
+    const allowed = user.allowedBranches as string[];
+    return list.filter((b: any) => allowed.includes(b.branchName));
+  };
+
   useEffect(() => {
     if (user && !selectedBranch) {
       const fetchBranches = async () => {
@@ -80,7 +89,7 @@ export default function BranchConfirmPage() {
           if (cached) {
             const parsed = JSON.parse(cached);
             const cachedBranches = Array.isArray(parsed) ? parsed : parsed?.branches;
-            if (Array.isArray(cachedBranches) && cachedBranches.length > 0) setBranches(cachedBranches);
+            if (Array.isArray(cachedBranches) && cachedBranches.length > 0) setBranches(filterByAllowedBranches(cachedBranches));
           }
           setLoadingBranches(true);
           let filtered: any[] = [];
@@ -93,11 +102,12 @@ export default function BranchConfirmPage() {
           if (filtered.length === 0) {
             filtered = LOCAL_BRANCH_FALLBACK;
           }
+          filtered = filterByAllowedBranches(filtered);
           sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify({ branches: filtered, savedAt: Date.now() }));
           setBranches(filtered);
         } catch (e) {
           console.error("지점 목록 로드 실패:", e);
-          setBranches(LOCAL_BRANCH_FALLBACK);
+          setBranches(filterByAllowedBranches(LOCAL_BRANCH_FALLBACK));
         } finally {
           setLoadingBranches(false);
         }
@@ -109,6 +119,11 @@ export default function BranchConfirmPage() {
   // Handle branch select action
   const handleSelectBranch = async (branch: any) => {
     if (!branch || !branch.branchName) {
+      return;
+    }
+    if (!user) return;
+    if (user.allowedBranches !== "all" && !(user.allowedBranches as string[]).includes(branch.branchName)) {
+      // 캐시/오류 경로로 잘못 노출된 권한 밖 지점 선택 시도 — 무시.
       return;
     }
     setCheckingAppVersion(true);
@@ -186,7 +201,7 @@ export default function BranchConfirmPage() {
 
   // Loaded if selectedBranch is present
   return (
-    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={user.role === "admin"} />
+    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={user.role === "admin"} allowedTabs={user.allowedTabs} loginType={user.loginType} />
   );
 }
 
@@ -200,9 +215,11 @@ interface WorkspaceProps {
   activeTab: BranchDailyTab;
   setActiveTab: (tab: BranchDailyTab) => void;
   isAdmin: boolean;
+  allowedTabs: string[] | "all";
+  loginType: "personal" | "pin";
 }
 
-function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin }: WorkspaceProps) {
+function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin, allowedTabs, loginType }: WorkspaceProps) {
   const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
   const isHeadOfficeBranch = activeBranchName === "본사";
@@ -222,8 +239,16 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract" | "businessTaxi">("dashboard");
-  const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">("purchaseSales");
+  const [mainCategory, setMainCategory] = useState<"dashboard" | "daily" | "monthly" | "annualLeave" | "laborContract" | "businessTaxi">(
+    () => (allowedTabs === "all" ? "dashboard" : (BRANCH_TAB_REGISTRY[firstAllowedKey(allowedTabs)].mainCategory as any))
+  );
+  const [monthlyTab, setMonthlyTab] = useState<"fullTimeSalary" | "purchaseSales" | "partTimeSalary" | "cashExpenses" | "cashManagement" | "cardExpenses">(
+    () => {
+      if (allowedTabs === "all") return "purchaseSales";
+      const target = BRANCH_TAB_REGISTRY[firstAllowedKey(allowedTabs)];
+      return (target.monthlyTab as any) || "purchaseSales";
+    }
+  );
 
   const dailySubTabs = [
     { id: "settle", label: "일일마감정산", icon: CircleDollarSign },
@@ -251,14 +276,24 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     { id: "cardExpenses", label: "카드지출", icon: ShoppingCart }
   ] as Array<{ id: typeof monthlyTab; label: string; icon: typeof FileText }>;
 
-  const openDailySubTab = (tabId: BranchDailyTab) => {
-    if (activeTab === "liquorInventory" && tabId !== "liquorInventory" && (window as any).__ugdLiquorInventoryDirty) {
+  const navigateTo = (key: PermKey) => {
+    const target = BRANCH_TAB_REGISTRY[key];
+    // 주류재고 이탈 확인(기존 openDailySubTab 로직 흡수)
+    if (activeTab === "liquorInventory" && target.activeTab !== "liquorInventory" && (window as any).__ugdLiquorInventoryDirty) {
       if (!window.confirm("저장하지 않은 주류 재고 입력값이 있습니다. 저장하지 않고 이동할까요?")) return;
       (window as any).__ugdLiquorInventoryDirty = false;
     }
-    setMainCategory("daily");
-    setActiveTab(tabId);
+    setMainCategory(target.mainCategory as any);
+    if (target.activeTab) setActiveTab(target.activeTab as BranchDailyTab);
+    if (target.monthlyTab) setMonthlyTab(target.monthlyTab as any);
   };
+
+  // 초기 라우팅: 개인 계정은 허용된 첫 화면으로 1회 이동. PIN 로그인("all")은 현행 대시보드 초기화면 유지(회귀 방지).
+  useEffect(() => {
+    if (allowedTabs === "all") return;
+    navigateTo(firstAllowedKey(allowedTabs));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 1. Admin Settings State and Sync listening
   const [adminSettings, setAdminSettings] = useState(() => {
@@ -449,13 +484,22 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const handleVerifyPasscode = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // 별도 로컬 비밀번호 대신 실제 Firebase 관리자 PIN으로 재인증합니다.
-      const { loginWithAdminPin } = await import("../api/firebaseAuth");
-      await loginWithAdminPin(passcode);
+      if (loginType === "personal") {
+        // 개인 세션에서는 loginWithAdminPin(주 Auth)을 쓰면 세션이 PIN 계정으로 오염된다 —
+        // gate 보조 인스턴스로만 검증한다.
+        const { verifyGatePin } = await import("../api/gateAuth");
+        await verifyGatePin({ kind: "admin" }, passcode);
+      } else {
+        // 별도 로컬 비밀번호 대신 실제 Firebase 관리자 PIN으로 재인증합니다.
+        const { loginWithAdminPin } = await import("../api/firebaseAuth");
+        await loginWithAdminPin(passcode);
+      }
       setIsPasscodeVerified(true);
       setPasscodeError("");
-    } catch {
-      setPasscodeError("관리자 PIN이 일치하지 않습니다. 다시 시도해 주세요.");
+    } catch (error: any) {
+      // verifyGatePin은 원인별 한국어 안내문(시도초과 등)을 담은 일반 Error를 던진다(코드 없음) — 그대로 보여준다.
+      // 반면 loginWithAdminPin의 Firebase 오류(error.code 있음)는 영어 원문이라 기존 안내문으로 대체한다.
+      setPasscodeError(!error?.code && error?.message ? error.message : "관리자 PIN이 일치하지 않습니다. 다시 시도해 주세요.");
     }
   };
 
@@ -489,6 +533,12 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   const isValidLoginPin = (value: string) => /^\d{4,12}$/.test(value.trim());
 
   const handleChangeFirebaseLoginPins = async () => {
+    if (loginType === "personal") {
+      // changeFirebaseLoginPins는 구조적으로 주 Auth로 각 계정에 로그인한다 —
+      // 개인 계정 세션에서 실행하면 로그인 상태가 PIN 계정으로 바뀌어 버리므로 차단한다.
+      triggerToast("PIN 변경은 기존 PIN 관리자 로그인에서만 가능합니다. (개인 계정 세션에서는 로그인 상태가 바뀌어 지원하지 않습니다)", "error");
+      return;
+    }
     const wantsBranchChange = Boolean(newBranchLoginPin.trim() || confirmBranchLoginPin.trim());
     const wantsAdminChange = Boolean(newAdminLoginPin.trim() || confirmAdminLoginPin.trim());
     if (!wantsBranchChange && !wantsAdminChange) {
@@ -526,6 +576,10 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     }
   };
 
+  // 현재 화면이 권한 밖이면 본문 콘텐츠를 마운트하지 않는다(첫 프레임 API 호출 차단 + 허용 0개 방어).
+  const currentKey = permKeyForState(mainCategory, activeTab, monthlyTab);
+  const contentAllowed = currentKey !== null && isTabAllowed(allowedTabs, currentKey);
+
   return (
     <div className="branch-redesign min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row">
       {/* Sidebar Layout */}
@@ -548,9 +602,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           <p className="ugd-nav-group">메인</p>
           <button
             type="button"
-            onClick={() => { setMainCategory("dashboard"); setActiveTab("dashboard"); }}
+            onClick={() => navigateTo("dashboard")}
             aria-current={mainCategory === "dashboard" ? "page" : undefined}
-            className={`ugd-nav-item shrink-0${mainCategory === "dashboard" ? " is-active" : ""}`}
+            className={`ugd-nav-item shrink-0${mainCategory === "dashboard" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "dashboard") ? " opacity-50" : ""}`}
           >
             <span>대시보드</span>
           </button>
@@ -559,13 +613,14 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           <p className="ugd-nav-group">일일 업무</p>
           {dailySubTabs.map((tab) => {
             const subActive = mainCategory === "daily" && activeTab === tab.id;
+            const allowed = isTabAllowed(allowedTabs, ("daily." + tab.id) as PermKey);
             return (
               <button
                 key={`daily-${tab.id}`}
                 type="button"
-                onClick={() => openDailySubTab(tab.id)}
+                onClick={() => navigateTo(("daily." + tab.id) as PermKey)}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}${!allowed ? " opacity-50" : ""}`}
               >
                 <span>{tab.label}</span>
               </button>
@@ -576,13 +631,14 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           <p className="ugd-nav-group">월말 업무</p>
           {monthlySubTabs.map((tab) => {
             const subActive = mainCategory === "monthly" && monthlyTab === tab.id;
+            const allowed = isTabAllowed(allowedTabs, ("monthly." + tab.id) as PermKey);
             return (
               <button
                 key={`monthly-${tab.id}`}
                 type="button"
-                onClick={() => { setMainCategory("monthly"); setMonthlyTab(tab.id); }}
+                onClick={() => navigateTo(("monthly." + tab.id) as PermKey)}
                 aria-current={subActive ? "page" : undefined}
-                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}`}
+                className={`ugd-nav-item shrink-0${subActive ? " is-active" : ""}${!allowed ? " opacity-50" : ""}`}
               >
                 <span>{tab.label}</span>
               </button>
@@ -593,26 +649,26 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           <p className="ugd-nav-group">인사 · 기타</p>
           <button
             type="button"
-            onClick={() => setMainCategory("laborContract")}
+            onClick={() => navigateTo("laborContract")}
             aria-current={mainCategory === "laborContract" ? "page" : undefined}
-            className={`ugd-nav-item shrink-0${mainCategory === "laborContract" ? " is-active" : ""}`}
+            className={`ugd-nav-item shrink-0${mainCategory === "laborContract" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "laborContract") ? " opacity-50" : ""}`}
           >
             <span>근로계약서</span>
           </button>
           {/* 순서: 근로계약서 → 비즈니스택시 → 연차관리 (사용자 지시 2026-07-24) */}
           <button
             type="button"
-            onClick={() => setMainCategory("businessTaxi")}
+            onClick={() => navigateTo("businessTaxi")}
             aria-current={mainCategory === "businessTaxi" ? "page" : undefined}
-            className={`ugd-nav-item shrink-0${mainCategory === "businessTaxi" ? " is-active" : ""}`}
+            className={`ugd-nav-item shrink-0${mainCategory === "businessTaxi" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "businessTaxi") ? " opacity-50" : ""}`}
           >
             <span>비즈니스택시</span>
           </button>
           <button
             type="button"
-            onClick={() => { setMainCategory("annualLeave"); setActiveTab("annualLeave"); }}
+            onClick={() => navigateTo("annualLeave")}
             aria-current={mainCategory === "annualLeave" ? "page" : undefined}
-            className={`ugd-nav-item shrink-0${mainCategory === "annualLeave" ? " is-active" : ""}`}
+            className={`ugd-nav-item shrink-0${mainCategory === "annualLeave" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "annualLeave") ? " opacity-50" : ""}`}
           >
             <span>연차관리</span>
           </button>
@@ -676,9 +732,16 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
       <div className="grow flex flex-col min-h-screen overflow-x-hidden">
         {/* Content Panel Frame */}
         <main className="grow p-4 sm:p-6 pb-20 max-w-7xl w-full mx-auto">
-          {mainCategory === "dashboard" && <BranchDashboardTab branchName={activeBranchName} />}
+          {!contentAllowed && (
+            <div className="flex flex-col items-center justify-center py-24 gap-2">
+              <p className="text-sm font-bold text-zinc-600">이 탭에 접근 권한이 없습니다.</p>
+              <p className="text-xs text-zinc-400">관리자에게 권한을 요청해 주세요.</p>
+            </div>
+          )}
 
-          {mainCategory === "daily" && (
+          {contentAllowed && mainCategory === "dashboard" && <BranchDashboardTab branchName={activeBranchName} />}
+
+          {contentAllowed && mainCategory === "daily" && (
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -701,7 +764,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             </AnimatePresence>
           )}
 
-          {mainCategory === "monthly" && (
+          {contentAllowed && mainCategory === "monthly" && (
             <MonthlySettleTab
               branchName={activeBranchName}
               activeSubTab={monthlyTab}
@@ -709,11 +772,11 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             />
           )}
 
-          {mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
+          {contentAllowed && mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
 
-          {mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
+          {contentAllowed && mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
 
-          {mainCategory === "businessTaxi" && <BusinessTaxiTab branchName={activeBranchName} />}
+          {contentAllowed && mainCategory === "businessTaxi" && <BusinessTaxiTab branchName={activeBranchName} />}
         </main>
       </div>
 
@@ -1175,7 +1238,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                 try {
                                   setNewBranchSubmitting(true);
                                   const phash = await hashPin(trimPin);
-                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole, trimPin);
+                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole, trimPin, isAdmin);
                                   if (res && res.success !== false) {
                                     triggerToast("신규 점포가 데이터베이스에 원활히 등록되었습니다!", "success");
                                     setNewBranchName("");
@@ -1263,7 +1326,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                       <button
                                         onClick={async () => {
                                           try {
-                                            const res = await gasClient.toggleBranchActive(b.branchName, !b.isActive);
+                                            const res = await gasClient.toggleBranchActive(b.branchName, !b.isActive, isAdmin);
                                             if (res && res.success !== false) {
                                               triggerToast(`${b.branchName} 지점의 영업 활성화 상태를 ${!b.isActive ? "가동 활성" : "폐점 / 비활성화"} 상태로 온전하게 제어 처리 완료하였습니다.`);
                                               fetchAdminBranches();
@@ -1525,7 +1588,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
                                       try {
                                         setFirebaseRestoring(true);
-                                        const res = await gasClient.restoreFromFirebase();
+                                        const res = await gasClient.restoreFromFirebase(isAdmin);
                                         if (res && res.success !== false) {
                                           triggerToast(res.message || "성공적으로 클라우드 구호 보존 완료!", "success");
                                           fetchFirebaseStatus();

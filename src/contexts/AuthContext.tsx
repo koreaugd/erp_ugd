@@ -1,8 +1,9 @@
 // src/contexts/AuthContext.tsx
 import React, { createContext, useContext, ReactNode } from "react";
-import { useAuth, UserSession } from "../hooks/useAuth";
+import { useAuth, UserSession, PendingGate } from "../hooks/useAuth";
 import { BranchSetting } from "../api/gasClient";
 import type { LoginBranch } from "../api/firebaseAuth";
+import type { GateTarget } from "../api/gateAuth";
 
 interface AuthContextType {
   user: UserSession | null;
@@ -14,6 +15,12 @@ interface AuthContextType {
   logout: () => void;
   failedAttempts: number;
   setError: (msg: string | null) => void;
+  loginWithGoogle: () => Promise<boolean>;
+  loginWithEmail: (email: string, password: string) => Promise<boolean>;
+  signUpWithEmail: (name: string, email: string, password: string) => Promise<boolean>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  pendingGate: PendingGate | null;
+  completeGate: (target: GateTarget, pin: string) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);

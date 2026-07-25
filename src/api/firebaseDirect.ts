@@ -142,8 +142,11 @@ export async function firebaseSubmitDaily(master: MasterDaily, expenses: Expense
     recordId,
     totalSales: Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0),
     submittedAt: existing.exists() ? existing.data().master.submittedAt : now,
+    submittedByUid: master.submittedByUid || "",
     modifiedAt: existing.exists() ? now : "",
-    modifiedBy: existing.exists() ? master.submittedBy || "branch" : ""
+    // 거짓 작성자 금지(설계서 §7) — 실제 값이 없으면 "branch" 같은 대체 문구 대신 빈 문자열로 남긴다.
+    modifiedBy: existing.exists() ? master.submittedBy || "" : "",
+    modifiedByUid: existing.exists() ? master.submittedByUid || "" : ""
   };
   await setDoc(recordRef, { recordId, master: savedMaster, expenses, staff, updatedAt: now });
   return { recordId };
@@ -215,7 +218,7 @@ export async function firebaseDeleteEditLog(logId: string) {
   return { success: true };
 }
 
-export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string) {
+export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string, modifiedByUid?: string) {
   const detail = await firebaseGetDailyDetail(recordId);
   const now = new Date().toISOString();
 
@@ -229,7 +232,8 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
     staff: detail.staff || []
   };
 
-  const master = { ...detail.master, ...masterData, modifiedAt: now, modifiedBy: modifiedBy || "관리자" };
+  // 거짓 작성자 금지(설계서 §7) — 실제 값이 없으면 "관리자" 같은 대체 문구 대신 빈 문자열로 남긴다.
+  const master = { ...detail.master, ...masterData, modifiedAt: now, modifiedBy: modifiedBy || "", modifiedByUid: modifiedByUid || "" };
   master.totalSales = Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0);
 
   const afterExpenses = expenses ?? detail.expenses;
@@ -247,6 +251,9 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
 
   await setDoc(doc(getDirectDb(), "daily_settles", recordId), { recordId, master, expenses: afterExpenses, staff: afterStaff, updatedAt: now });
 
+  // 본문 저장은 이미 끝났다 — 이력 기록 실패로 저장 자체를 막지 않는다(설계서 §7).
+  // 다만 실패를 그냥 삼키면 "수정됐는데 이력만 없는" 상태를 아무도 모르게 되므로, 호출부가 알 수 있게 플래그로 반환한다.
+  let editLogFailed = false;
   try {
     const logId = `${recordId}-${Date.now()}`;
     await setDoc(doc(getDirectDb(), "edit_logs", logId), {
@@ -255,15 +262,17 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
       branchName: master.branchName,
       settleDate: master.settleDate,
       modifiedAt: now,
-      modifiedBy: modifiedBy || "관리자",
+      modifiedBy: modifiedBy || "",
+      modifiedByUid: modifiedByUid || "",
       before: beforeState,
       after: afterState
     });
   } catch (err) {
     console.warn("Failed to write edit log to Firebase:", err);
+    editLogFailed = true;
   }
 
-  return { success: true };
+  return { success: true, editLogFailed };
 }
 
 export async function firebaseDeleteDaily(recordId: string) {
@@ -708,13 +717,14 @@ async function ensureBranchAuthUser(loginEmail: string, rawPin?: string) {
   throw new Error(message || `Failed to create Firebase Auth user: ${loginEmail}`);
 }
 
-async function upsertPublicBranchDirect(branchName: string, data: any) {
+async function upsertPublicBranchDirect(branchName: string, data: any, isAdminSession = false) {
   const role = data?.role || "branch";
   if (role !== "branch") return;
 
   const db = getDirectDb();
   const currentUser = getAuth(appInstance || getApp()).currentUser;
-  if (currentUser?.email !== "admin@ugd-erp.example") {
+  // 전환기: 공유 관리자 PIN(admin@ugd-erp.example) 계정 || 개인 관리자 세션(role=admin).
+  if (currentUser?.email !== "admin@ugd-erp.example" && !isAdminSession) {
     throw new Error("Firebase 관리자 인증이 준비되지 않아 로그인 지점 목록을 갱신하지 못했습니다. 관리자 PIN 인증 후 다시 시도해 주세요.");
   }
 
@@ -736,7 +746,7 @@ async function upsertPublicBranchDirect(branchName: string, data: any) {
 /**
  * Netlify 등 정적 호스팅 환경용: 실시간 지점 정보 개별 다이렉트 백업
  */
-export async function backupSettingDirect(branchName: string, data: any) {
+export async function backupSettingDirect(branchName: string, data: any, isAdminSession = false) {
   if (!isFirebaseConfigValid()) return;
   try {
     const db = getDirectDb();
@@ -750,7 +760,7 @@ export async function backupSettingDirect(branchName: string, data: any) {
       _updatedAt: new Date().toISOString()
     };
     await setDoc(docRef, payload);
-    await upsertPublicBranchDirect(branchName, data);
+    await upsertPublicBranchDirect(branchName, data, isAdminSession);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `settings/${branchName}`);
   }
@@ -927,7 +937,7 @@ export async function syncDirectToFirebase() {
 /**
  * Netlify 등 정적 호스팅 환경용: Firestore 클라우드 원본 -> 브라우저 직접 구글시트 복원 전송 가동
  */
-export async function restoreDirectFromFirebase() {
+export async function restoreDirectFromFirebase(isAdminSession = false) {
   try {
     const db = getDirectDb();
 
@@ -944,8 +954,8 @@ export async function restoreDirectFromFirebase() {
         const isActive = d.is_active !== false;
 
         // 구글 앱스 스크립트(GAS) 또는 로컬 대체처로 개별 오버라이트 주입 실행
-        await gasClient.addBranch(branchName, pinHash, brand, role);
-        await gasClient.toggleBranchActive(branchName, isActive);
+        await gasClient.addBranch(branchName, pinHash, brand, role, undefined, isAdminSession);
+        await gasClient.toggleBranchActive(branchName, isActive, isAdminSession);
         settingsCount++;
       }
     }

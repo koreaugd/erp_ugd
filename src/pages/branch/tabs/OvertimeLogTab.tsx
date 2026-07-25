@@ -7,6 +7,7 @@ import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
 import { toLocalDateInputValue, toLocalMonthInputValue, toNumberPromptValue } from "../helpers/formatters";
 import { updateDailyMetadata } from "../helpers/dailyOps";
+import { useAuthContext } from "../../../contexts/AuthContext";
 
 // 초과근무 행 식별: 동명이인·다중 근무 세그먼트에서 다른 행을 잘못 건드리지 않도록
 // segmentId(둘 다 있으면) → 출퇴근 시각(둘 다 있으면) → 이름 순으로 매칭합니다.
@@ -22,6 +23,14 @@ function isSameOvertimeRow(staff: any, row: any): boolean {
 }
 
 export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: string; isAdmin?: boolean }) {
+  const { user } = useAuthContext();
+  // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
+  const actor = {
+    name: isAdmin
+      ? (user?.loginType === "personal" ? user.name : "관리자")
+      : (user?.loginType === "personal" ? user.name : branchName),
+    uid: user?.uid
+  };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<any[]>([]);
@@ -167,7 +176,7 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
           const nextStaff = (detail.staff || []).map((staff: any) =>
             isSameOvertimeRow(staff, row) ? { ...staff, overtimeHours: hours, memo: reason, overtimeCleared: null } : staff);
           return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-        });
+        }, actor);
       }
       await loadData(true, { silent: true });
     } catch (e) {
@@ -201,7 +210,7 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
           const nextStaff = (detail.staff || []).map((staff: any) =>
             isSameOvertimeRow(staff, row) ? { ...staff, overtimeHours: 0, memo: "", overtimeCleared: clearedValue } : staff);
           return { metadata: { ...metadata, staffRows: nextRows }, staff: nextStaff };
-        });
+        }, actor);
       }
       await loadData(true, { silent: true });
     } catch (e) {
