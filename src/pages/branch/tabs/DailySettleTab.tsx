@@ -160,12 +160,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   // writer(작성자란은 수정자일 뿐 원작성자가 아니다)로 덮어쓰지 않기 위한 보존용 참조.
   const originalSubmittedByRef = useRef<{ name: string; uid: string }>({ name: "", uid: "" });
 
-  // 개인 로그인 세션은 작성자란을 계정 이름으로 고정한다(공용기기 오염·거짓 작성자 방지, 설계서 §7).
-  // 임시저장 복원·새 일지 시작 등 writer가 어디서 바뀌든, 여기서 즉시 계정 이름으로 되돌린다.
-  // 단, 기존 기록을 열람/수정하는 중에는 원작성자를 보존해야 하므로(위 §7이 "거짓 작성자"를 막는
-  // 취지이지 원작성자 덮어쓰기를 정당화하지 않는다) 신규 작성일 때만(hasExistingRecord === false) 강제한다.
+  // 개인 로그인 세션에서도 마감 작성자는 지점이 직접 입력한다(사용자 지시 2026-07-26).
+  // 편의로 신규 작성 시 계정 이름을 '기본값'으로 한 번만 채워주되, 이후 자유롭게 수정할 수 있다
+  // (writer가 비어 있을 때만 채우므로 사용자가 지우거나 바꾼 값을 되돌리지 않는다).
+  // 실제 로그인 계정은 submittedByUid/modifiedByUid 로 별도 기록되어 감사 추적은 그대로 유지된다.
   useEffect(() => {
-    if (isPersonalSession && !hasExistingRecord && user?.name && writer !== user.name) {
+    if (isPersonalSession && !hasExistingRecord && user?.name && !writer) {
       setWriter(user.name);
     }
   }, [isPersonalSession, hasExistingRecord, user, writer]);
@@ -1897,8 +1897,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                       placeholder="작성자 성명"
                       className="sheet-cell-input"
                       id="settle-writer-input"
-                      disabled={isPersonalSession}
-                      title={isPersonalSession ? "개인 로그인 계정 이름으로 자동 기록됩니다." : undefined}
+                      title="마감 작성자를 직접 입력하세요."
                     />
                   </td>
                   {salesShown && <td className="settle-spacer" aria-hidden="true" />}

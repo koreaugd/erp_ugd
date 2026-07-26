@@ -67,6 +67,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const [memberBusyId, setMemberBusyId] = useState("");
 
   const [branchFilter, setBranchFilter] = useState("all");
+  const [memberFilter, setMemberFilter] = useState("all"); // 상세내역 직원 필터 (memberKey — 동명이인 구분)
   const [highFare, setHighFare] = useState(DEFAULT_TAXI_THRESHOLDS.highFare);
 
   // ---------- 지점 신청 관리 ----------
@@ -110,6 +111,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         prev: prev ? normalizeKakaoTaxiOrders(prev.orders, erpNames) : null,
       });
       setBranchFilter("all");
+      setMemberFilter("all");
     } catch (e: any) {
       if (ordersGenRef.current !== gen) return;
       console.error("카카오T 이용내역 로드 실패:", e);
@@ -122,14 +124,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   // 성공 시 새 목록을 반환하고, 실패 시 null 을 반환한다 — 쓰기 작업이 "재조회로 반영을 확인"할 때
   // 이 반환값을 쓴다(재조회 실패를 성공 알림으로 덮으면 안 되므로).
-  const loadMembers = useCallback(async (): Promise<KakaoTaxiMember[] | null> => {
+  // forceRefresh=true 는 '새로고침' 버튼 전용 — 백엔드 캐시를 우회해 카카오에서 실시간 조회한다.
+  // 직원이 방금 카카오T 인증을 마쳐(우리가 무효화 못 하는 외부 변경) 목록에 아직 없을 때 즉시 반영.
+  const loadMembers = useCallback(async (forceRefresh?: boolean): Promise<KakaoTaxiMember[] | null> => {
     const gen = ++membersGenRef.current;
     membersRequestedRef.current = true;
     setMembersLoading(true);
     setMembersError("");
     try {
       const [membersRes, groups, branchList] = await Promise.all([
-        gasClient.getKakaoTaxiMembers(adminPinHash),
+        gasClient.getKakaoTaxiMembers(adminPinHash, forceRefresh),
         gasClient.getKakaoTaxiGroups(adminPinHash),
         // 부서 드롭다운용 ERP 지점 목록 — 실패해도 직원 목록은 보여준다(드롭다운만 비게 됨)
         gasClient.getBranchList().catch(() => []),
@@ -220,8 +224,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const countMismatch = ordersData != null && ordersData.reportedCount !== rows.length;
   const totalAmount = useMemo(() => rows.reduce((acc, r) => acc + r.amount, 0), [rows]);
   const visibleRows = useMemo(
-    () => (branchFilter === "all" ? rows : rows.filter((r) => r.branchName === branchFilter)),
-    [rows, branchFilter]
+    () => {
+      const filtered = rows.filter((r) =>
+        (branchFilter === "all" || r.branchName === branchFilter) &&
+        (memberFilter === "all" || r.memberKey === memberFilter)
+      );
+      // 최신 이용이 위로 오도록 이용일시(timeText = 출발시각||호출시각) 내림차순 정렬.
+      // rows 원본을 변형하지 않게 복사 후 정렬하고, 날짜 파싱 불가 시 문자열 역순으로 폴백한다.
+      return [...filtered].sort((a, b) => {
+        const ta = Date.parse(a.timeText);
+        const tb = Date.parse(b.timeText);
+        if (!isNaN(ta) && !isNaN(tb)) return tb - ta;
+        return String(b.timeText).localeCompare(String(a.timeText));
+      });
+    },
+    [rows, branchFilter, memberFilter]
   );
   const thresholds = useMemo(() => ({ ...DEFAULT_TAXI_THRESHOLDS, highFare }), [highFare]);
   const flagged = useMemo(() => flagTaxiOrders(rows, thresholds), [rows, thresholds]);
@@ -411,6 +428,19 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     const phone = editPhone.replace(/[^0-9]/g, "");
     if (!/^01[0-9]{8,9}$/.test(phone)) { window.alert("휴대전화번호를 확인해주세요. (예: 01012345678)"); return; }
     if (!editGroupIds.length) { window.alert("그룹을 최소 1개 선택해주세요."); return; }
+    // [카카오 API 제한] 직원의 그룹을 '빼는' 수정은 카카오가 500(Internal Server Error)으로 거부한다
+    // (그룹 추가·유지·부서·이름 변경은 정상). 500을 맞기 전에 막고 대안을 안내한다. 2026-07-26 실측 확인.
+    const removedGroups = (editing.group_ids || []).filter((id) => !editGroupIds.includes(id));
+    if (removedGroups.length) {
+      const names = removedGroups.map((id) => groupNameById.get(id) || id).join(", ");
+      window.alert(
+        `카카오T API 제한으로 '그룹 빼기'는 현재 처리되지 않습니다(카카오 서버 오류).\n` +
+        `빼려는 그룹: ${names}\n\n` +
+        `• 그룹 추가·부서·이름 변경만 저장하거나\n` +
+        `• 그룹 제거가 꼭 필요하면 카카오T 비즈니스 관리 웹에서 처리해주세요.`
+      );
+      return;
+    }
     const phoneChanged = phone !== (editing.mobile_phone || "").replace(/[^0-9]/g, "");
     const groupNames = editGroupIds.map((id) => groupNameById.get(id) || id).join(", ");
     if (!window.confirm(
@@ -864,8 +894,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         <button
           onClick={() => {
             if (needsMonth) void loadOrders();
-            else if (view === "requests") { void loadRequests(); void loadMembers(); }
-            else void loadMembers();
+            else if (view === "requests") { void loadRequests(); void loadMembers(true); }
+            else void loadMembers(true);
           }}
           disabled={needsMonth ? ordersLoading : view === "requests" ? requestsLoading : membersLoading}
           className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer disabled:opacity-50"
@@ -927,7 +957,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                   </tr></thead>
                   <tbody>
                     {branchTotals.map((b) => (
-                      <tr key={b.branchName} className="border-t border-gray-100">
+                      <tr key={b.branchName}
+                        onClick={() => { setBranchFilter(b.branchName); setMemberFilter("all"); }}
+                        className={`border-t border-gray-100 cursor-pointer hover:bg-gray-50 ${branchFilter === b.branchName ? "bg-gray-100" : ""}`}
+                        title="클릭하면 상세 내역이 이 지점만 표시됩니다">
                         <td className="px-4 py-2 font-bold text-[#212121]">
                           {b.branchName}
                           {b.unmapped && <span className="ml-1.5 text-[11px] font-bold text-[#B91C1C]">(미매핑)</span>}
@@ -952,7 +985,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                   </tr></thead>
                   <tbody>
                     {memberTotals.map((m) => (
-                      <tr key={m.memberKey} className="border-t border-gray-100">
+                      <tr key={m.memberKey}
+                        onClick={() => { setMemberFilter(m.memberKey); setBranchFilter("all"); }}
+                        className={`border-t border-gray-100 cursor-pointer hover:bg-gray-50 ${memberFilter === m.memberKey ? "bg-gray-100" : ""}`}
+                        title="클릭하면 상세 내역이 이 직원만 표시됩니다">
                         <td className="px-4 py-2 font-bold text-[#212121]">{m.name}</td>
                         <td className="px-4 py-2">{m.branchName}</td>
                         <td className="px-4 py-2 text-right">{formatNumber(m.count)}</td>
@@ -977,6 +1013,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 <option value="all">전체 지점</option>
                 {branchTotals.map((b) => <option key={b.branchName} value={b.branchName}>{b.branchName}</option>)}
               </select>
+              <select
+                value={memberFilter}
+                onChange={(e) => setMemberFilter(e.target.value)}
+                className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
+                aria-label="직원 필터"
+              >
+                <option value="all">전체 직원</option>
+                {memberTotals.map((m) => <option key={m.memberKey} value={m.memberKey}>{m.name} ({m.branchName})</option>)}
+              </select>
+              {(branchFilter !== "all" || memberFilter !== "all") && (
+                <button
+                  onClick={() => { setBranchFilter("all"); setMemberFilter("all"); }}
+                  className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[11px] font-black text-[#212121]"
+                >필터 해제</button>
+              )}
               <span className="text-[11px] font-bold text-[#212121]/60">{formatNumber(visibleRows.length)}건</span>
             </div>
             <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">

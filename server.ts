@@ -421,6 +421,88 @@ async function kakaoTaxiRegisterMember(member: any) {
   return kakaoTaxiFetch("POST", "/external/v1/members", null, body);
 }
 
+// [P1] 지점별 자동등록 쿨다운(반복 알림톡 방지). 프로세스 메모리 — 로컬 dev 재시작 시 리셋된다.
+const kakaoRegCooldown = new Map<string, number>();
+
+// 지점명 → 활성(enabled) 카카오 그룹 id. gas/Code.gs kakaoTaxiGroupIdForBranch 와 동일 로직으로 유지.
+function kakaoTaxiGroupIdForBranch(groups: any[], branchName: string): string | null {
+  const target = String(branchName || "").trim();
+  if (!target) return null;
+  for (const g of groups) {
+    if (String(g.status) !== "enabled") continue;
+    const gn = String(g.name || "").trim();
+    if (gn === target || KAKAO_TAXI_BRANCH_ALIASES[gn] === target) return g.id;
+  }
+  return null;
+}
+
+// 지점 자동 등록 — 지점 PIN 게이트로 관리자 승인 없이 카카오 등록 + 인증 알림톡 발송.
+// 안전장치: 지점 PIN(자기 지점만)·이름/전화 형식·지점↔그룹 자동매핑(못 찾으면 거부)·중복 전화 차단.
+// gas/Code.gs submitBranchKakaoRegister 와 동일 로직으로 유지할 것.
+async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, branchName: string, name: string, phone: string) {
+  const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
+  if (!pinHash || !branchName) throw denied;
+  const setting = findLocalSettingByPinHash(db, pinHash);
+  if (!setting) throw denied;
+  if (setting.role !== "admin" && setting.branch_name !== branchName) throw denied;
+
+  const cleanName = String(name || "").trim();
+  const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
+  if (!cleanName) throw new Error("이름을 입력해주세요.");
+  if (!/^01[0-9]{8,9}$/.test(cleanPhone)) throw new Error("휴대전화번호를 확인해주세요. (예: 01012345678)");
+
+  const groups = (await kakaoTaxiFetch("GET", "/external/v1/groups")) || [];
+  const groupId = kakaoTaxiGroupIdForBranch(groups, branchName);
+  if (!groupId) throw new Error("이 지점에 해당하는 카카오T 그룹을 찾지 못했습니다. 관리자에게 문의해주세요.");
+
+  // 중복 방지 — 어느 소속(지점)에 이미 있는지 알려주고 거부(전입 직원이 이전 지점으로 등록된 상황 파악).
+  const existing = (await kakaoTaxiMembers()).members || [];
+  for (const m of existing) {
+    if (String(m.mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
+      let where = String(m.department || "").trim();
+      if (!where && Array.isArray(m.group_ids) && m.group_ids.length) {
+        const g = groups.find((x: any) => x.id === m.group_ids[0]);
+        if (g) where = String(g.name || "");
+      }
+      if (!where) where = "다른 지점";
+      throw new Error(`${m.name || cleanName} 님(${cleanPhone})은 이미 '${where}'에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.`);
+    }
+  }
+
+  // [P1] 반복 등록 방지 — 같은 지점이 20초 내 연속 등록을 막아 알림톡 남발을 차단.
+  const nowTs = Date.now();
+  if (nowTs - (kakaoRegCooldown.get(branchName) || 0) < 20000) {
+    throw new Error("방금 등록 요청이 처리되었습니다. 잠시(약 20초) 후 다음 직원을 등록해주세요.");
+  }
+
+  // register 는 카카오가 이미 존재하는 번호(인증 대기 등 connected 목록에 안 보이는 경우)를 400 으로 막는다 — 친절히 안내.
+  let member: any;
+  try {
+    member = await kakaoTaxiRegisterMember({
+      identifier: cleanName, mobile_phone: cleanPhone, group_ids: [groupId], name: cleanName, department: branchName
+    });
+  } catch (e: any) {
+    const em = String(e?.message || e);
+    if (em.includes("이미 존재") || em.includes("(400)")) {
+      throw new Error(`이 전화번호(${cleanPhone})는 이미 카카오T에 등록돼 있습니다(인증 대기 중이거나 다른 소속일 수 있음). 관리자에게 확인을 요청해주세요.`);
+    }
+    throw e;
+  }
+  kakaoRegCooldown.set(branchName, Date.now()); // 등록 성공 → 쿨다운 설정
+  // 알림톡 발송은 일시 실패가 잦아 짧게 3회까지 재시도한다(복구). 그래도 실패하면 직원이
+  // 카카오T 앱 > 비즈니스에서 회사 초대를 직접 확인해 인증할 수 있으므로 등록 자체는 유효하다.
+  let tmsSent = false;
+  if (member?.id) {
+    for (let t = 0; t < 3 && !tmsSent; t++) {
+      try {
+        await kakaoTaxiFetch("POST", "/external/v1/members/" + encodeURIComponent(member.id) + "/send_tms");
+        tmsSent = true;
+      } catch { if (t < 2) await new Promise((r) => setTimeout(r, 700)); }
+    }
+  }
+  return { member, tmsSent };
+}
+
 async function kakaoTaxiUpdateMember(memberId: string, member: any) {
   if (!memberId) throw new Error("수정할 직원이 지정되지 않았습니다.");
   const m = member || {};
@@ -505,6 +587,18 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         return res.json({
           success: true,
           data: await kakaoTaxiBranchMembers(db, req.body.pinHash, String(req.body.branchName || "")),
+        });
+      } catch (error: any) {
+        return res.json({ success: false, error: error?.message || String(error) });
+      }
+    }
+
+    // 지점 자동 등록 — 지점 PIN 게이트(관리자 승인 없이 카카오 등록 + 인증 알림톡).
+    if (action === "submitBranchKakaoRegister") {
+      try {
+        return res.json({
+          success: true,
+          data: await kakaoTaxiSubmitBranchRegister(db, req.body.pinHash, String(req.body.branchName || ""), String(req.body.name || ""), String(req.body.phone || "")),
         });
       } catch (error: any) {
         return res.json({ success: false, error: error?.message || String(error) });
