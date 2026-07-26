@@ -778,13 +778,21 @@ export const gasClient = {
     return callApi("getKakaoTaxiGroups", { adminPinHash });
   },
 
-  async getKakaoTaxiMembers(adminPinHash: string): Promise<{ count: number; members: KakaoTaxiMember[] }> {
-    return callApi("getKakaoTaxiMembers", { adminPinHash });
+  // forceRefresh=true 면 백엔드가 ScriptCache 를 우회해 카카오에서 실시간 조회한다(화면 '새로고침'용).
+  // 직원이 방금 카카오T 앱에서 인증을 마친 경우처럼 우리가 무효화하지 못하는 외부 변경을 즉시 반영한다.
+  async getKakaoTaxiMembers(adminPinHash: string, forceRefresh?: boolean): Promise<{ count: number; members: KakaoTaxiMember[] }> {
+    return callApi("getKakaoTaxiMembers", { adminPinHash, forceRefresh });
   },
 
   // 지점용 — 백엔드가 지점 PIN을 검증하고 그 지점에 매핑되는 인원만 돌려준다(타 지점 정보 비노출).
-  async getKakaoTaxiBranchMembers(branchName: string, pinHash: string): Promise<KakaoTaxiMember[]> {
-    return callApi("getKakaoTaxiBranchMembers", { branchName, pinHash });
+  async getKakaoTaxiBranchMembers(branchName: string, pinHash: string, forceRefresh?: boolean): Promise<KakaoTaxiMember[]> {
+    return callApi("getKakaoTaxiBranchMembers", { branchName, pinHash, forceRefresh });
+  },
+
+  // 지점 자동 등록 — 지점 PIN 게이트로 관리자 승인 없이 카카오에 바로 등록하고 인증 알림톡을 발송한다.
+  // 백엔드가 지점명→그룹 자동 매핑·전화 중복 차단을 처리한다(지점은 그룹을 고르지 않는다).
+  async submitBranchKakaoRegister(branchName: string, pinHash: string, name: string, phone: string, memo?: string): Promise<{ member: KakaoTaxiMember; tmsSent: boolean }> {
+    return callApi("submitBranchKakaoRegister", { branchName, pinHash, name, phone, memo });
   },
 
   async registerKakaoTaxiMember(member: KakaoTaxiMemberInput, adminPinHash: string): Promise<KakaoTaxiMember> {
