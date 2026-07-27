@@ -34,7 +34,7 @@ interface OrdersData {
   month: string;
   reportedCount: number;
   current: NormalizedTaxiOrder[];
-  /** 전월 정규화 내역 — 조회 실패 시 null (급증 비교만 비활성, 당월 화면은 정상 표시) */
+  /** 전월 정규화 내역 — 아직 도착 전이거나 조회 실패 시 null (급증 비교만 비활성, 당월 화면은 정상 표시) */
   prev: NormalizedTaxiOrder[] | null;
 }
 
@@ -49,6 +49,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   });
   const [ordersData, setOrdersData] = useState<OrdersData | null>(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  /** 전월(급증 비교용) 조회가 아직 진행 중인지 — 당월 화면은 막지 않고 급증 표에만 안내를 띄운다 */
+  const [prevLoading, setPrevLoading] = useState(false);
   const [ordersError, setOrdersError] = useState("");
   const ordersGenRef = useRef(0);
   // "이 달은 이미 조회를 시작했다" 표식 — 탭 전환 시 중복 조회를 막되, 실패 시 무한 재시도
@@ -88,19 +90,23 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   /** 수정 요청 승인 → 수정 카드 저장 성공 시 완료 처리할 신청 */
   const [linkedUpdateRequest, setLinkedUpdateRequest] = useState<KakaoTaxiRequest | null>(null);
 
-  const loadOrders = useCallback(async () => {
+  // forceRefresh=true 는 '새로고침' 버튼 전용 — 당월만 백엔드 캐시를 우회해 실시간 조회한다.
+  // (전월은 마감된 불변 자료라 캐시를 그대로 쓴다 — 실패 후 재시도는 캐시가 없으니 자연히 재조회된다)
+  const loadOrders = useCallback(async (forceRefresh?: boolean) => {
     const gen = ++ordersGenRef.current;
     const target = month;
     ordersRequestedMonthRef.current = target;
     setOrdersLoading(true);
     setOrdersError("");
+    // 전월은 급증 비교용 보조 자료 — 당월과 병렬로 먼저 쏘아 두되, 화면은 당월 도착 즉시 그린다.
+    // 실패해도 당월 화면을 막지 않는다(급증 표만 안내문으로 대체).
+    setPrevLoading(true);
+    const prevMonth = addMonthsToMonthInputValue(target, -1);
+    const prevPromise = gasClient.getKakaoTaxiOrders(prevMonth, adminPinHash).catch(() => null);
     try {
-      const prevMonth = addMonthsToMonthInputValue(target, -1);
-      const [branchList, curr, prev] = await Promise.all([
+      const [branchList, curr] = await Promise.all([
         gasClient.getBranchList(),
-        gasClient.getKakaoTaxiOrders(target, adminPinHash),
-        // 전월은 급증 비교용 보조 자료 — 실패해도 당월 화면을 막지 않는다(급증 표만 안내문으로 대체)
-        gasClient.getKakaoTaxiOrders(prevMonth, adminPinHash).catch(() => null),
+        gasClient.getKakaoTaxiOrders(target, adminPinHash, forceRefresh),
       ]);
       if (ordersGenRef.current !== gen) return;
       const erpNames = Array.from(new Set([...(branchList || []).map((b) => b.branchName).filter(Boolean), "본사"]));
@@ -108,15 +114,25 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         month: target,
         reportedCount: curr.count,
         current: normalizeKakaoTaxiOrders(curr.orders, erpNames),
-        prev: prev ? normalizeKakaoTaxiOrders(prev.orders, erpNames) : null,
+        prev: null, // 전월은 아래에서 도착하는 대로 채운다
       });
       setBranchFilter("all");
       setMemberFilter("all");
+      void prevPromise.then((prev) => {
+        if (ordersGenRef.current !== gen) return; // 그 사이 새 조회가 시작됐으면 그쪽이 채운다
+        setOrdersData((cur) =>
+          cur && cur.month === target
+            ? { ...cur, prev: prev ? normalizeKakaoTaxiOrders(prev.orders, erpNames) : null }
+            : cur
+        );
+        setPrevLoading(false);
+      });
     } catch (e: any) {
       if (ordersGenRef.current !== gen) return;
       console.error("카카오T 이용내역 로드 실패:", e);
       setOrdersError(String(e?.message || "카카오T 이용내역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요."));
       setOrdersData(null);
+      setPrevLoading(false);
     } finally {
       if (ordersGenRef.current === gen) setOrdersLoading(false);
     }
@@ -134,7 +150,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     try {
       const [membersRes, groups, branchList] = await Promise.all([
         gasClient.getKakaoTaxiMembers(adminPinHash, forceRefresh),
-        gasClient.getKakaoTaxiGroups(adminPinHash),
+        gasClient.getKakaoTaxiGroups(adminPinHash, forceRefresh),
         // 부서 드롭다운용 ERP 지점 목록 — 실패해도 직원 목록은 보여준다(드롭다운만 비게 됨)
         gasClient.getBranchList().catch(() => []),
       ]);
@@ -292,6 +308,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     XLSX.writeFile(wb, `카카오T택시_이용내역_${shownMonth}${suffix}.xlsx`);
   };
 
+  // 직원 쓰기(등록·수정·휴직·삭제) 성공 후 — 부서(지점) 변경은 이용내역의 지점/직원 집계를 바꾼다.
+  // 백엔드도 쓰기 시점에 이용내역 캐시를 무효화하므로, 화면의 조회 표식을 지워 다음에
+  // 이용내역/이상 점검 탭을 열 때 새로 조회하게 한다(안 지우면 묵은 집계가 그대로 보인다).
+  const markOrdersStaleAfterMemberWrite = () => {
+    ordersRequestedMonthRef.current = null;
+  };
+
   // ---------- 직원 쓰기 작업 (전부 확인 모달 → 성공 시 재조회, 낙관적 갱신 금지) ----------
   // 한 건이라도 쓰기가 진행 중이면 다른 행의 버튼도 전부 잠근다 — 동시 실행되면 busy 표시가
   // 서로를 덮어쓰고, 늦게 끝난 재조회가 최신 목록을 지워버린다.
@@ -310,6 +333,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     setMemberBusyId(member.id);
     try {
       await action();
+      markOrdersStaleAfterMemberWrite();
       const list = await loadMembers();
       if (list === null) {
         window.alert(`${label} 요청은 접수됐지만 목록 재조회에 실패해 반영 여부를 확인하지 못했습니다.\n'새로고침'을 눌러 직접 확인해주세요.`);
@@ -368,6 +392,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         ...(regDepartment.trim() ? { department: regDepartment.trim() } : {}),
       };
       const created = await gasClient.registerKakaoTaxiMember(input, adminPinHash);
+      markOrdersStaleAfterMemberWrite();
       setRegName(""); setRegIdentifier(""); setRegPhone(""); setRegDepartment("");
       // 등록 직후엔 '미인증' 상태라 인증완료 목록에 아직 안 보인다 — 알림톡으로 인증을 유도해야 목록에 들어온다.
       if (created?.id && window.confirm("등록되었습니다. 지금 바로 인증 알림톡을 보낼까요?\n(직원이 카카오T 앱에서 인증해야 법인택시를 쓸 수 있습니다)")) {
@@ -495,6 +520,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         name: editName.trim(),
         department: editDept.trim(),
       }, adminPinHash);
+      markOrdersStaleAfterMemberWrite();
       // 쓰기 성공 알림은 재조회로 실제 반영을 확인한 뒤에만 — runMemberAction 과 같은 규약
       const list = await loadMembers();
       if (list === null) {
@@ -738,6 +764,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         name: request.name,
         department: request.branchName, // 부서=지점명 — 이용내역이 이 지점으로 집계되게 한다
       }, adminPinHash);
+      markOrdersStaleAfterMemberWrite();
       let tmsNote = "인증 알림톡 발송됨";
       if (created?.id) {
         try {
@@ -788,6 +815,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       if (!(await claimForProcessing(request))) return;
       claimed = true;
       await gasClient.deleteKakaoTaxiMember(request.memberId, adminPinHash);
+      markOrdersStaleAfterMemberWrite();
       const list = await loadMembers();
       const note = list === null
         ? "삭제 실행됨 — 목록 재조회 실패로 반영 미확인"
@@ -893,7 +921,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         )}
         <button
           onClick={() => {
-            if (needsMonth) void loadOrders();
+            // 새로고침은 백엔드 캐시를 우회해 실시간 조회한다(조회 도중 생긴 새 이용·방금 인증한 직원 반영)
+            if (needsMonth) void loadOrders(true);
             else if (view === "requests") { void loadRequests(); void loadMembers(true); }
             else void loadMembers(true);
           }}
@@ -1041,8 +1070,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">구분</th>
                 </tr></thead>
                 <tbody>
-                  {visibleRows.map(({ order, branchName, unmapped, amount, timeText }) => (
-                    <tr key={order.id} className="border-t border-gray-100">
+                  {/* id 없는 주문이 섞여도 key 가 중복되지 않게 순번으로 폴백 — 필터/정렬 결과라 순번 key 로 충분 */}
+                  {visibleRows.map(({ order, branchName, unmapped, amount, timeText }, i) => (
+                    <tr key={order.id || `noid-${i}`} className="border-t border-gray-100">
                       <td className="px-4 py-2">{timeText}</td>
                       <td className="px-4 py-2 font-bold text-[#212121]">{order.member_name || "(이름 없음)"}</td>
                       <td className="px-4 py-2">
@@ -1089,7 +1119,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             <div className="px-4 py-3 border-b border-gray-100">
               <h2 className="admin-pill-title">직원별 급증 ({shownMonth} vs 전월) — {formatNumber(surges.length)}명</h2>
             </div>
-            {ordersData.prev == null ? (
+            {prevLoading ? (
+              <p className="px-4 py-6 text-xs font-bold text-[#212121]/50">전월 자료를 불러오는 중입니다… 잠시 후 이 표가 채워집니다.</p>
+            ) : ordersData.prev == null ? (
               <p className="px-4 py-6 text-xs font-bold text-[#212121]/50">전월 자료를 불러오지 못해 급증 비교를 건너뛰었습니다. '새로고침'으로 다시 시도해주세요.</p>
             ) : surges.length ? (
               <div className="overflow-x-auto">
@@ -1132,8 +1164,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
                 </tr></thead>
                 <tbody>
-                  {flagged.map(({ row, reasons }) => (
-                    <tr key={row.order.id} className="border-t border-gray-100">
+                  {flagged.map(({ row, reasons }, i) => (
+                    <tr key={row.order.id || `noid-${i}`} className="border-t border-gray-100">
                       <td className="px-4 py-2">
                         <span className="inline-flex flex-wrap gap-1">
                           {reasons.map((r) => (
