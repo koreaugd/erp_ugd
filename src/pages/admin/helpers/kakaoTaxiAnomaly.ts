@@ -25,6 +25,21 @@ export const DEFAULT_TAXI_THRESHOLDS: TaxiAnomalyThresholds = {
   dayEndHour: 17,
 };
 
+// 이상 점검 제외 대상 — 본사 운영진은 업무 특성상 고액/낮 시간대 이용이 정상 패턴이라
+// 표식이 소음만 만든다(사용자 지시 2026-07-27). 이용내역 표에는 그대로 나온다 — 점검 표식만 제외.
+// [동명이인 함정] 이름으로 거르면 지점에 같은 이름 직원이 생겼을 때 그 직원까지 조용히 점검에서
+// 빠진다(사번=이름 관례라 identifier 로도 구분 불가) — 카카오 직원 고유 id 로 지정한다(운영 실측).
+// 카카오에서 삭제 후 재등록하면 id 가 바뀌어 제외가 풀리고 점검 표에 다시 나타난다(눈에 보이는
+// 실패라 안전한 방향 — 그때 이 목록의 id 만 갱신하면 된다).
+export const TAXI_ANOMALY_EXEMPT_MEMBER_IDS = new Set([
+  "JE1T6UC2", // 서광엽
+  "OGKR9ACV", // 이미림
+]);
+
+export function isAnomalyExempt(memberId: string | null | undefined): boolean {
+  return TAXI_ANOMALY_EXEMPT_MEMBER_IDS.has(String(memberId || "").trim());
+}
+
 export type TaxiAnomalyReason = "highFare" | "daytime" | "unmapped";
 
 export const TAXI_ANOMALY_LABEL: Record<TaxiAnomalyReason, string> = {
@@ -51,6 +66,7 @@ export interface MemberSurge {
 export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnomalyThresholds): FlaggedTaxiOrder[] {
   const flagged: FlaggedTaxiOrder[] = [];
   for (const row of rows) {
+    if (isAnomalyExempt(row.order.member_id)) continue; // 본사 운영진 제외
     const reasons: TaxiAnomalyReason[] = [];
     if (row.amount >= thresholds.highFare) reasons.push("highFare");
     // hour 파싱 실패 건은 시간대 규칙에서 제외 — 억지로 플래그하면 오탐이 늘어 표식 신뢰가 떨어진다
@@ -73,6 +89,7 @@ export function detectMemberSurges(
 ): MemberSurge[] {
   const currTotals = new Map<string, { name: string; branchName: string; amount: number }>();
   for (const row of current) {
+    if (isAnomalyExempt(row.order.member_id)) continue; // 본사 운영진 제외
     const entry = currTotals.get(row.memberKey) || {
       name: (row.order.member_name || "").trim() || "(이름 없음)",
       branchName: row.branchName,
