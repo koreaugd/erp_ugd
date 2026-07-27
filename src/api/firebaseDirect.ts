@@ -753,15 +753,21 @@ export async function backupSettingDirect(branchName: string, data: any, isAdmin
   try {
     const db = getDirectDb();
     const docRef = doc(db, "settings", branchName.trim());
-    const payload = {
+    // [Codex P0 2026-07-27] 전달된 필드만 merge 로 쓴다. 예전엔 누락 필드를 기본값(brand "기타",
+    // role "branch", pin_hash "")으로 채워 통째로 setDoc 덮어쓰기 했는데, 그러면 PIN만 바꾸는
+    // updateBranchPin·활성만 바꾸는 toggleBranchActive 가 관리자 행 role 이나 기존 pin_hash 를 오염시킨다.
+    const payload: Record<string, unknown> = {
       branch_name: branchName.trim(),
-      pin_hash: data?.pinHash || data?.pin_hash || "",
-      brand: data?.brand || "기타",
-      role: data?.role || "branch",
-      is_active: data?.isActive !== false && data?.is_active !== false,
       _updatedAt: new Date().toISOString()
     };
-    await setDoc(docRef, payload);
+    const pinHash = data?.pinHash ?? data?.pin_hash;
+    if (pinHash) payload.pin_hash = pinHash;
+    if (data?.brand !== undefined) payload.brand = data.brand;
+    if (data?.role !== undefined) payload.role = data.role;
+    if (data?.isActive !== undefined || data?.is_active !== undefined) {
+      payload.is_active = data?.isActive !== false && data?.is_active !== false;
+    }
+    await setDoc(docRef, payload, { merge: true });
     await upsertPublicBranchDirect(branchName, data, isAdminSession);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `settings/${branchName}`);

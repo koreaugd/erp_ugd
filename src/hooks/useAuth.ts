@@ -283,7 +283,17 @@ export function useAuth() {
       let branchSetting: BranchSetting;
       try {
         branchSetting = branch ? await loginWithBranchPin(branch, pin) : await loginWithAdminPin(pin);
-      } catch (firebaseError) {
+      } catch (firebaseError: any) {
+        // 자격증명 오류(틀린 PIN = invalid-credential/wrong-password)는 GAS 폴백 금지 —
+        // 시트에 남은 옛 pin_hash로 옛 PIN이 계속 통과하는 구멍이었다(2026-07-27 실제 발생).
+        // 폴백 허용은 두 경우뿐: ①네트워크 장애(gateAuth §4와 동일) ②Auth 계정 자체가 없는
+        // 레거시 지점(user-not-found — 시트에만 등록되고 Auth 프로비저닝이 안 된 경우.
+        // 단, 이메일 열거 보호가 켜진 프로젝트에서는 invalid-credential로 뭉개져 이 폴백이
+        // 안 탈 수 있다 — 그 지점은 관리자 화면에서 PIN 재설정/재등록으로 복구).
+        const fbCode = String(firebaseError?.code || "");
+        if (fbCode !== "auth/network-request-failed" && fbCode !== "auth/user-not-found") {
+          throw firebaseError;
+        }
         branchSetting = await gasClient.verifyPin(pinHash);
         if (branch && branchSetting.branchName !== branch.branchName) {
           throw firebaseError;
@@ -326,7 +336,12 @@ export function useAuth() {
       const nextAttempts = failedAttempts + 1;
       setFailedAttempts(nextAttempts);
       localStorage.setItem(ATTEMPTS_KEY, String(nextAttempts));
-      setError(err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요.");
+      // Firebase 오류(code 있음)는 영어 원문이라 한국어 안내로 바꾼다. 일반 Error는 메시지 유지.
+      setError(
+        err?.code === "auth/too-many-requests" ? "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
+          : err?.code ? "PIN이 올바르지 않습니다. 다시 확인해 주세요."
+          : (err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요.")
+      );
       return false;
     } finally {
       setLoading(false);

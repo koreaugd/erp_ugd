@@ -666,11 +666,18 @@ export const gasClient = {
 
   /**
    * 관리자용: 지점 PIN 비밀번호 해시 교체
+   * meta(brand/role/isActive)를 꼭 함께 넘겨라 — Firestore 미러(backupSettingDirect)는 merge 없는
+   * setDoc이라 메타가 빠지면 기본값(brand "기타", role "branch", is_active true)으로 문서를
+   * 덮어써 관리자 행까지 오염시킨다(Codex P0 2026-07-27).
    */
-  async updateBranchPin(branchName: string, pinHash: string, isAdminSession = false): Promise<{ success: boolean }> {
+  async updateBranchPin(branchName: string, pinHash: string, isAdminSession = false, meta?: { brand?: string; role?: string; isActive?: boolean }): Promise<{ success: boolean }> {
     const result = await callApi("updateBranchPin", { branchName, pinHash });
     if (result && result.success !== false) {
-      await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash }, isAdminSession);
+      await tryDirectBackup("setting", branchName, {
+        branch_name: branchName,
+        pin_hash: pinHash,
+        ...(meta ? { brand: meta.brand, role: meta.role, is_active: meta.isActive } : {})
+      }, isAdminSession);
     }
     return result;
   },
