@@ -24,6 +24,14 @@ export interface PendingGate {
   profile: UserProfile;
 }
 
+// 신규 개인계정(users 문서 없음) — 온보딩 폼에서 이름·연락처·근무지점을 받아
+// 프로필을 만들 때까지 대기하는 상태. 폼 제출(completeOnboarding) 시 프로필 생성 후 게이트로.
+export interface PendingOnboarding {
+  uid: string;
+  email: string | null;
+  suggestedName: string;   // 구글 displayName 또는 이메일 앞부분 — 폼 이름칸 초기값
+}
+
 const SESSION_KEY = "erp_ugd_session_v2";   // v2: loginType 필수. 구 세션과 절대 혼용 금지(설계서 §4)
 const LEGACY_SESSION_KEY = "erp_ugd_session";
 const ATTEMPTS_KEY = "erp_ugd_failed_attempts";
@@ -80,6 +88,9 @@ export function useAuth() {
   const [error, setError] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState<number>(0);
   const [pendingGate, setPendingGate] = useState<PendingGate | null>(null);
+  const [pendingOnboarding, setPendingOnboarding] = useState<PendingOnboarding | null>(null);
+  // PIN(회사 게이트)까지 통과했으나 관리자 승인(reviewedByAdmin) 전인 개인계정 — 앱에 진입시키지 않고 대기 화면으로.
+  const [pendingApproval, setPendingApproval] = useState<UserProfile | null>(null);
 
   // 세션 불러오기
   useEffect(() => {
@@ -114,9 +125,12 @@ export function useAuth() {
               return resolve();
             }
             try {
-              const { loadOrCreateUserProfile } = await import("../api/userProfile");
-              const profile = await loadOrCreateUserProfile(firebaseUser);
-              if (profile.status === "suspended") {
+              const { loadUserProfile } = await import("../api/userProfile");
+              const profile = await loadUserProfile(firebaseUser.uid);
+              // 세션 복원 대상은 게이트까지 통과한 사용자다 — 프로필이 없거나(신규 미완료·삭제),
+              // 정지됐거나, 관리자 승인(reviewedByAdmin) 전이면 유효하지 않은 세션이므로 폐기한다.
+              // 승인 후 취소된 계정도 새로고침 시 여기서 걸러진다(Codex 지적 2026-07-27, no-ship).
+              if (!profile || profile.status !== "active" || !profile.reviewedByAdmin) {
                 const { signOut } = await import("firebase/auth");
                 await signOut(auth);
                 sessionStorage.removeItem(SESSION_KEY);
@@ -155,15 +169,25 @@ export function useAuth() {
                 }
               }
             } catch {
-              // 프로필 재로드 실패(오프라인 등) — 이미 게이트 통과한 세션이므로 유지.
-              setUser(parsedSession);
+              // fail-closed: 프로필 재확인 실패 시 옛 세션을 신뢰하지 않는다 —
+              // 미승인/취소 계정의 재진입을 막는다(Codex 지적 2026-07-27). 재로그인 시 정상 게이트를 다시 탄다.
+              try { const { signOut } = await import("firebase/auth"); await signOut(auth); } catch {}
+              sessionStorage.removeItem(SESSION_KEY);
+              sessionStorage.removeItem(SELECTED_BRANCH_KEY);
+              setUser(null);
+              setSelectedBranchState(null);
             }
             resolve();
           });
         });
       } catch (e) {
         console.error("개인 세션 복구 실패:", e);
-        setUser(parsedSession);
+        // fail-closed: 승인 상태를 검증하지 못하면 옛 세션을 폐기하고 재로그인을 유도한다(Codex 지적 2026-07-27).
+        try { const { getAuth, signOut } = await import("firebase/auth"); await signOut(getAuth()); } catch {}
+        sessionStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem(SELECTED_BRANCH_KEY);
+        setUser(null);
+        setSelectedBranchState(null);
       }
     }
 
@@ -322,7 +346,13 @@ export function useAuth() {
         const lastGoogleEmail = localStorage.getItem(LAST_GOOGLE_EMAIL_KEY);
         const hintUsed = !!lastGoogleEmail && /^[^\s@]{1,64}@[^\s@]{1,255}$/.test(lastGoogleEmail);
         if (lastGoogleEmail && !hintUsed) localStorage.removeItem(LAST_GOOGLE_EMAIL_KEY);
-        if (hintUsed) provider.setCustomParameters({ login_hint: lastGoogleEmail! });
+        if (hintUsed) {
+          provider.setCustomParameters({ login_hint: lastGoogleEmail! });
+        } else {
+          // 힌트가 없으면(최초 로그인 또는 "다른 계정으로 로그인" 후) 계정 선택창을 강제한다 —
+          // 안 그러면 브라우저에 구글 계정이 하나뿐일 때 그 계정으로 자동 로그인돼 선택창이 안 뜬다(Codex 지적 2026-07-27).
+          provider.setCustomParameters({ prompt: "select_account" });
+        }
         try {
           await signInWithPopup(auth, provider);
         } catch (popupError: any) {
@@ -344,13 +374,23 @@ export function useAuth() {
         void sendEmailVerification(credential.user).catch(() => {});
       }
       const firebaseUser = auth.currentUser!;
-      let profile: UserProfile;
+      let profile: UserProfile | null;
       try {
-        const { loadOrCreateUserProfile } = await import("../api/userProfile");
-        profile = await loadOrCreateUserProfile(firebaseUser);
+        const { loadUserProfile } = await import("../api/userProfile");
+        profile = await loadUserProfile(firebaseUser.uid);
       } catch {
-        await signOut(auth);   // 유령 세션 금지: 프로필 없으면 앱 진입 불가(설계서 §4)
+        await signOut(auth);   // 유령 세션 금지: 프로필 조회 실패 시 앱 진입 불가(설계서 §4)
         throw new Error("가입 처리에 실패했습니다. 다시 로그인해 주세요.");
+      }
+      if (!profile) {
+        // 신규 사용자 — 프로필을 자동 생성하지 않고 온보딩 폼으로 보낸다.
+        // 이름·연락처·근무지점을 받아 completeOnboarding에서 생성한다.
+        setPendingOnboarding({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          suggestedName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split("@")[0] : "")
+        });
+        return true;
       }
       if (profile.status === "suspended") {
         await signOut(auth);
@@ -424,6 +464,15 @@ export function useAuth() {
       const { verifyGatePin } = await import("../api/gateAuth");
       const pinHash = await verifyGatePin(target, pin);
       const profile = pendingGate.profile;
+      // 관리자 승인 전 개인계정 — 회사 PIN은 통과했지만 데이터 접근은 불가(firestore.rules canAccessWork와 짝).
+      // role admin도 예외 없이 승인(reviewedByAdmin)을 요구한다 — 미승인 admin 우회 차단(Codex 지적 2026-07-27).
+      if (!profile.reviewedByAdmin) {
+        localStorage.setItem(ATTEMPTS_KEY, "0");
+        setFailedAttempts(0);
+        setPendingGate(null);
+        setPendingApproval(profile);
+        return true;
+      }
       const branchSetting = target.kind === "branch"
         ? { branchName: target.branch.branchName, brand: target.branch.brand || target.branch.branchName, role: "branch" as const }
         : { branchName: "관리자", brand: "본사", role: "admin" as const };
@@ -461,6 +510,41 @@ export function useAuth() {
     }
   }, [pendingGate, failedAttempts]);
 
+  // 온보딩 폼 제출 — 신규 개인계정의 이름·연락처·근무지점을 받아 프로필을 생성하고,
+  // 이어서 회사 게이트(지점 선택·PIN)로 넘긴다. 실패 시 유령 세션을 남기지 않는다.
+  const completeOnboarding = useCallback(async (input: { name: string; phone: string; workBranch: string }): Promise<boolean> => {
+    if (!pendingOnboarding) return false;
+    setLoading(true);
+    setError(null);
+    try {
+      const { getAuth, signOut } = await import("firebase/auth");
+      const auth = getAuth();
+      const current = auth.currentUser;
+      // 폼 제출 시점의 세션이 온보딩을 시작한 그 사용자여야 한다 — 아니면 fail-closed.
+      if (!current || current.uid !== pendingOnboarding.uid) {
+        setPendingOnboarding(null);
+        throw new Error("로그인 상태가 만료되었습니다. 처음부터 다시 로그인해 주세요.");
+      }
+      let profile;
+      try {
+        const { createUserProfile } = await import("../api/userProfile");
+        profile = await createUserProfile({ uid: current.uid, email: current.email }, input);
+      } catch {
+        await signOut(auth);   // 유령 세션 금지: 프로필 생성 실패 시 세션도 폐기(설계서 §4)
+        setPendingOnboarding(null);
+        throw new Error("가입 정보 저장에 실패했습니다. 다시 시도해 주세요.");
+      }
+      setPendingOnboarding(null);
+      setPendingGate({ profile });   // 이어서 회사 게이트(지점 선택·PIN)로
+      return true;
+    } catch (err: any) {
+      setError(translateAuthError(err));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [pendingOnboarding]);
+
   const selectBranch = useCallback((branch: BranchSetting | null) => {
     if (branch && branch.branchName) {
       sessionStorage.setItem(SELECTED_BRANCH_KEY, JSON.stringify(branch));
@@ -471,19 +555,23 @@ export function useAuth() {
     setSelectedBranchState(branch);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback((opts?: { forgetGoogle?: boolean }) => {
     // 연속 로그아웃 시 먼저 끝난 쪽의 finally가 나중 것을 지우지 않도록, 자기 자신일 때만 비운다.
     const tracked: Promise<void> = import("../api/firebaseAuth")
       .then(({ logoutFirebase }) => logoutFirebase())
       .catch(() => {})
       .finally(() => { if (logoutInFlight === tracked) logoutInFlight = null; });
     logoutInFlight = tracked;
+    // "다른 계정으로 로그인" — 마지막 구글 계정 힌트를 지워, 다음 구글 로그인에서 계정 선택창이 뜨게 한다.
+    if (opts?.forgetGoogle) localStorage.removeItem(LAST_GOOGLE_EMAIL_KEY);
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SELECTED_BRANCH_KEY);
     sessionStorage.removeItem("erp_branch_list_cache");
     setUser(null);
     setSelectedBranchState(null);
     setPendingGate(null);
+    setPendingOnboarding(null);
+    setPendingApproval(null);
     setError(null);
   }, []);
 
@@ -502,6 +590,9 @@ export function useAuth() {
     signUpWithEmail,
     sendPasswordReset,
     pendingGate,
-    completeGate
+    completeGate,
+    pendingOnboarding,
+    completeOnboarding,
+    pendingApproval
   };
 }
