@@ -95,11 +95,11 @@ function doPost(e) {
       // 액션명만 알면 아무나 호출할 수 있기 때문(직원 삭제·휴직 같은 쓰기가 특히 위험).
       case "getKakaoTaxiOrders":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = getKakaoTaxiOrders(requestData.month);
+        result = getKakaoTaxiOrders(requestData.month, requestData.forceRefresh === true);
         break;
       case "getKakaoTaxiGroups":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = getKakaoTaxiGroups();
+        result = getKakaoTaxiGroups(requestData.forceRefresh === true);
         break;
       case "getKakaoTaxiMembers":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
@@ -1215,7 +1215,9 @@ function kakaoTaxiCredentials() {
   return { corpId: corpId, secret: secret };
 }
 
-function kakaoTaxiFetch(method, path, query, body) {
+// 서명된 요청 객체를 만든다 — UrlFetchApp.fetch(단건)와 fetchAll(병렬 페이지 수집) 양쪽에서 쓴다.
+// 요청마다 nonce·timestamp 가 달라야 하므로 재사용하지 말고 매번 새로 만들 것.
+function kakaoTaxiBuildRequest(method, path, query, body) {
   const cred = kakaoTaxiCredentials();
   // [주의] 서명 URL에는 쿼리 파라미터를 넣지 않는다.
   // 넣으면 카카오가 90003("인증 토큰이 유효하지 않습니다")을 돌려준다 — 2026-07-24 실계정에서 확인.
@@ -1226,7 +1228,8 @@ function kakaoTaxiFetch(method, path, query, body) {
   const token = Utilities.base64Encode(
     Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_1, message, cred.secret)
   );
-  const options = {
+  const request = {
+    url: KAKAO_TAXI_BASE + path + (query ? "?" + query : ""),
     method: method.toLowerCase(),
     muteHttpExceptions: true,
     headers: {
@@ -1237,10 +1240,13 @@ function kakaoTaxiFetch(method, path, query, body) {
     }
   };
   if (body) {
-    options.contentType = "application/json";
-    options.payload = JSON.stringify(body);
+    request.contentType = "application/json";
+    request.payload = JSON.stringify(body);
   }
-  const res = UrlFetchApp.fetch(KAKAO_TAXI_BASE + path + (query ? "?" + query : ""), options);
+  return request;
+}
+
+function kakaoTaxiParseResponse(res) {
   const code = res.getResponseCode();
   const text = res.getContentText();
   if (code < 200 || code >= 300) {
@@ -1255,6 +1261,55 @@ function kakaoTaxiFetch(method, path, query, body) {
   try { return JSON.parse(text); } catch (ignore) { return null; }
 }
 
+function kakaoTaxiFetch(method, path, query, body) {
+  const req = kakaoTaxiBuildRequest(method, path, query, body);
+  const res = UrlFetchApp.fetch(req.url, req);
+  return kakaoTaxiParseResponse(res);
+}
+
+// [성능] 카카오 목록 API(100건/페이지)를 순차 왕복하면 페이지당 3~5초가 누적된다.
+// 1페이지로 총 건수를 알아낸 뒤 나머지 페이지를 fetchAll 로 한꺼번에 받는다.
+// per=100 × 50페이지 = 5,000건 상한 — 월 200여 건 규모에서 사실상 무제한이자 폭주 방지선.
+function kakaoTaxiFetchAllPages(path, baseQuery, listKey) {
+  const pageQuery = function (page) {
+    return (baseQuery ? baseQuery + "&" : "") + "per=100&page=" + page;
+  };
+  const first = kakaoTaxiFetch("GET", path, pageQuery(1), null);
+  const firstBatch = (first && first[listKey]) || [];
+  const reportedCount = (first && typeof first.count === "number") ? first.count : firstBatch.length;
+  const items = firstBatch.slice();
+  const totalPages = Math.min(50, Math.ceil(reportedCount / 100));
+  if (firstBatch.length >= 100 && totalPages > 1) {
+    const requests = [];
+    for (let page = 2; page <= totalPages; page++) {
+      requests.push(kakaoTaxiBuildRequest("GET", path, pageQuery(page), null));
+    }
+    const responses = UrlFetchApp.fetchAll(requests);
+    for (let r = 0; r < responses.length; r++) {
+      // 한 페이지라도 실패하면 전체를 실패로 처리한다 — 일부 누락본을 정상 자료처럼 돌려주지 않는다.
+      const parsed = kakaoTaxiParseResponse(responses[r]);
+      const batch = (parsed && parsed[listKey]) || [];
+      for (let j = 0; j < batch.length; j++) items.push(batch[j]);
+    }
+  }
+  // count 는 카카오가 보고한 총 건수 — 수집 도중 새 건이 생기면 수집본과 어긋날 수 있고, 화면이 경고한다.
+  return { count: reportedCount, items: items };
+}
+
+// 이 수집본을 "완전한 스냅샷"으로 캐시해도 되는가.
+// 화면(normalizeKakaoTaxiOrders)은 id 중복을 걸러낸 뒤 건수를 비교하므로, 원본 길이만 보면
+// '중복+누락이 상쇄된' 불량 스냅샷이 통과한다 — id 가 전부 존재하고 서로 달라야만 캐시한다.
+function kakaoTaxiSnapshotComplete(items, count) {
+  if (items.length !== count) return false;
+  const seen = {};
+  for (let i = 0; i < items.length; i++) {
+    const id = String((items[i] && items[i].id) || "");
+    if (!id || seen[id]) return false;
+    seen[id] = true;
+  }
+  return true;
+}
+
 function kakaoTaxiMonthRange(month) {
   if (!/^\d{4}-\d{2}$/.test(String(month || ""))) {
     throw new Error("조회 월 형식이 올바르지 않습니다(YYYY-MM): " + month);
@@ -1265,29 +1320,64 @@ function kakaoTaxiMonthRange(month) {
   return { start: month + "-01", end: month + "-" + (lastDay < 10 ? "0" + lastDay : String(lastDay)) };
 }
 
-// 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
-function getKakaoTaxiOrders(month) {
-  const range = kakaoTaxiMonthRange(month);
-  const orders = [];
-  let reportedCount = 0;
-  // per=100 × 50페이지 = 5,000건 상한 — 월 200여 건 규모에서 사실상 무제한이자 무한루프 방지선
-  for (let page = 1; page <= 50; page++) {
-    const res = kakaoTaxiFetch(
-      "GET", "/external/v2/orders",
-      "start_date=" + range.start + "&end_date=" + range.end + "&per=100&page=" + page,
-      null
-    );
-    const batch = (res && res.orders) || [];
-    reportedCount = (res && typeof res.count === "number") ? res.count : reportedCount;
-    for (let i = 0; i < batch.length; i++) orders.push(batch[i]);
-    if (batch.length < 100 || orders.length >= reportedCount) break;
-  }
-  // count 는 카카오가 보고한 총 건수. 수집본과 다르면(조회 도중 새 이용 발생 등) 화면이 경고를 띄운다.
-  return { month: month, count: reportedCount, orders: orders };
+// [성능] 이용내역 캐시 — 지나간 달은 마감된 불변 자료라 길게(ScriptCache 최대 6시간),
+// 당월은 새 이용이 계속 생기므로 짧게 둔다. 화면 '새로고침'은 forceRefresh 로 캐시를 우회한다.
+var KAKAO_ORDERS_CACHE_TTL_CURRENT = 180;  // 초
+var KAKAO_ORDERS_CACHE_TTL_CLOSED = 21600; // 초 (ScriptCache 상한)
+
+function kakaoTaxiOrdersCacheKey(month) {
+  // 세대 번호 포함 — 직원 쓰기 시 kakaoTaxiInvalidateOrdersCache 가 번호를 올려 전 월 캐시를 무효화한다
+  return "kakao_taxi_orders_v1_" + kakaoTaxiOrdersCacheVersion() + "_" + month;
 }
 
-function getKakaoTaxiGroups() {
-  return kakaoTaxiFetch("GET", "/external/v1/groups", null, null) || [];
+// 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
+function getKakaoTaxiOrders(month, forceRefresh) {
+  const range = kakaoTaxiMonthRange(month); // 형식 검증 겸용 — 캐시 키에 이상값이 섞이지 않게 먼저 부른다
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  const cacheKey = kakaoTaxiOrdersCacheKey(month);
+  if (cache && !forceRefresh) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+    }
+  }
+  const res = kakaoTaxiFetchAllPages(
+    "/external/v2/orders",
+    "start_date=" + range.start + "&end_date=" + range.end,
+    "orders"
+  );
+  // count 는 카카오가 보고한 총 건수. 수집본과 다르면(조회 도중 새 이용 발생 등) 화면이 경고를 띄운다.
+  const result = { month: month, count: res.count, orders: res.items };
+  // 건수가 어긋나거나 id 중복/누락이 있는 스냅샷은 캐시하지 않는다 — 캐시하면 '새로고침' 전까지 경고가 반복된다.
+  if (cache && kakaoTaxiSnapshotComplete(res.items, res.count)) {
+    const nowMonth = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM");
+    const ttl = month < nowMonth ? KAKAO_ORDERS_CACHE_TTL_CLOSED : KAKAO_ORDERS_CACHE_TTL_CURRENT;
+    // 캐시 값은 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
+    try { cache.put(cacheKey, JSON.stringify(result), ttl); } catch (e) {}
+  }
+  return result;
+}
+
+// [성능] 그룹 캐시 — 그룹 생성/변경은 카카오 관리 웹에서만 일어나는 드문 외부 변경이라 짧은 TTL 로 충분.
+// 직원 관리 '새로고침'은 forceRefresh 로 우회해 즉시 최신을 받는다.
+var KAKAO_GROUPS_CACHE_KEY = "kakao_taxi_groups_v1";
+var KAKAO_GROUPS_CACHE_TTL = 300; // 초
+
+function getKakaoTaxiGroups(forceRefresh) {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache && !forceRefresh) {
+    const cached = cache.get(KAKAO_GROUPS_CACHE_KEY);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+    }
+  }
+  const groups = kakaoTaxiFetch("GET", "/external/v1/groups", null, null) || [];
+  if (cache) {
+    try { cache.put(KAKAO_GROUPS_CACHE_KEY, JSON.stringify(groups), KAKAO_GROUPS_CACHE_TTL); } catch (e) {}
+  }
+  return groups;
 }
 
 // 인증완료 직원 전량 수집. 카카오는 인증완료(connected) 직원만 목록 조회를 제공한다 —
@@ -1303,6 +1393,30 @@ var KAKAO_MEMBERS_CACHE_TTL = 90; // 초. 외부 인증 반영 지연을 줄이�
 
 function kakaoTaxiInvalidateMembersCache() {
   try { CacheService.getScriptCache().remove(KAKAO_MEMBERS_CACHE_KEY); } catch (e) {}
+  // 직원 정보(특히 부서=지점)를 고치면 이용내역의 지점/직원 집계도 달라진다 — 카카오가 이용내역에
+  // 조회 시점의 직원 정보(member_department 등)를 실어 주기 때문. 이용내역 캐시도 함께 무효화해
+  // "부서를 고쳤는데 집계가 그대로"인 상황을 막는다. 모든 직원 쓰기 경로가 이 함수를 지난다.
+  kakaoTaxiInvalidateOrdersCache();
+}
+
+// ScriptCache 는 키 열거·일괄 삭제가 안 돼 월별 이용내역 키를 직접 지울 수 없다 —
+// 캐시 키에 들어가는 세대 번호를 올려 기존 항목 전부를 자연 만료(TTL)로 흘려보낸다.
+var KAKAO_ORDERS_CACHE_VER_PROP = "KAKAO_TAXI_ORDERS_CACHE_VER";
+
+function kakaoTaxiOrdersCacheVersion() {
+  try { return PROPERTIES.getProperty(KAKAO_ORDERS_CACHE_VER_PROP) || "0"; } catch (e) { return "0"; }
+}
+
+function kakaoTaxiInvalidateOrdersCache() {
+  // [실패 허용] 카카오 쓰기는 이미 성공한 뒤라 여기서 던지면 성공한 변경이 실패로 보인다 — 삼킨다.
+  // 속성 저장이 실패하면 묵은 집계가 TTL 까지 남을 수 있지만, 화면 '새로고침'(forceRefresh)이
+  // 그 월 캐시를 신선한 데이터로 덮어써 자가 복구된다.
+  // [동시 쓰기] 두 쓰기가 같은 번호를 읽고 같이 +1 해도 무해 — 각 쓰기가 카카오 반영 '이후'에
+  // 번호를 올리므로, 마지막 쓰기 이후 최소 1회 증가가 보장되어 묵은 항목은 어느 경우든 죽는다.
+  try {
+    const cur = Number(kakaoTaxiOrdersCacheVersion()) || 0;
+    PROPERTIES.setProperty(KAKAO_ORDERS_CACHE_VER_PROP, String(cur + 1));
+  } catch (e) {}
 }
 
 function getKakaoTaxiMembers(forceRefresh) {
@@ -1314,16 +1428,8 @@ function getKakaoTaxiMembers(forceRefresh) {
       try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
     }
   }
-  const members = [];
-  let reportedCount = 0;
-  for (let page = 1; page <= 50; page++) {
-    const res = kakaoTaxiFetch("GET", "/external/v2/members/connected", "per=100&page=" + page, null);
-    const batch = (res && res.members) || [];
-    reportedCount = (res && typeof res.count === "number") ? res.count : reportedCount;
-    for (let i = 0; i < batch.length; i++) members.push(batch[i]);
-    if (batch.length < 100 || members.length >= reportedCount) break;
-  }
-  const result = { count: reportedCount, members: members };
+  const res = kakaoTaxiFetchAllPages("/external/v2/members/connected", "", "members");
+  const result = { count: res.count, members: res.items };
   // 캐시 값은 최대 100KB — 인원이 많아 초과하면 put 이 던지므로, 캐싱 실패는 무시하고 그대로 반환.
   if (cache) {
     try { cache.put(KAKAO_MEMBERS_CACHE_KEY, JSON.stringify(result), KAKAO_MEMBERS_CACHE_TTL); } catch (e) {}
@@ -1398,7 +1504,9 @@ function registerKakaoTaxiMember(member) {
 function kakaoTaxiGroupIdForBranch(branchName) {
   const target = String(branchName || "").trim();
   if (!target) return null;
-  const groups = getKakaoTaxiGroups() || [];
+  // [쓰기 경로] 이 그룹 id 로 실제 카카오 등록이 실행된다 — 조회용 캐시(최대 5분 묵음)를 쓰면
+  // 방금 만든/바꾼 그룹을 못 찾아 오등록될 수 있으니 항상 실시간 조회한다.
+  const groups = getKakaoTaxiGroups(true) || [];
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
     if (String(g.status) !== "enabled") continue;
