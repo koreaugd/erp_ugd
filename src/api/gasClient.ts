@@ -770,12 +770,13 @@ export const gasClient = {
   // GAS 웹앱 URL은 공개돼 있으므로 모든 카카오 액션은 adminPinHash(로그인 세션의 pinHash)를
   // 함께 보내야 하고, 백엔드가 관리자 여부를 검증한다.
   // ----------------------------------------------------
-  async getKakaoTaxiOrders(month: string, adminPinHash: string): Promise<KakaoTaxiOrdersResult> {
-    return callApi("getKakaoTaxiOrders", { month, adminPinHash });
+  // forceRefresh=true 면 백엔드 캐시(당월 3분·지나간 달 6시간)를 우회해 카카오에서 실시간 조회한다 — 화면 '새로고침'용.
+  async getKakaoTaxiOrders(month: string, adminPinHash: string, forceRefresh?: boolean): Promise<KakaoTaxiOrdersResult> {
+    return callApi("getKakaoTaxiOrders", { month, adminPinHash, forceRefresh });
   },
 
-  async getKakaoTaxiGroups(adminPinHash: string): Promise<KakaoTaxiGroup[]> {
-    return callApi("getKakaoTaxiGroups", { adminPinHash });
+  async getKakaoTaxiGroups(adminPinHash: string, forceRefresh?: boolean): Promise<KakaoTaxiGroup[]> {
+    return callApi("getKakaoTaxiGroups", { adminPinHash, forceRefresh });
   },
 
   // forceRefresh=true 면 백엔드가 ScriptCache 를 우회해 카카오에서 실시간 조회한다(화면 '새로고침'용).
