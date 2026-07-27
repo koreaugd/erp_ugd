@@ -62,7 +62,13 @@ service cloud.firestore {
         && request.resource.data.allowedTabs == "all"   // 신규 = 전 탭 허용(사용자 지시 2026-07-25). 제한은 관리자가 계정 관리 탭에서.
         && request.resource.data.allowedBranches == "all"
         && request.resource.data.status == "active"
-        && request.resource.data.reviewedByAdmin == false;  // 신규는 항상 미승인 — 관리자 승인 전엔 canAccessWork 실패
+        // 원칙: 신규는 미승인. 예외: 2026-07-29 00:00 KST(=1785250800000ms) 전 가입은 자동승인 허용(지점 전환 편의).
+        // 이 시각이 지나면 reviewedByAdmin==true 가입이 규칙에서 거부되어 자동으로 승인제로 복귀한다(코드가 안 닫혀도 규칙이 닫는다).
+        // role=="branch"는 위에서 이미 강제 — 자동승인이어도 관리자 계정은 만들어지지 않는다. userProfile.ts AUTO_APPROVE_UNTIL_MS와 일치.
+        && (
+          request.resource.data.reviewedByAdmin == false
+          || (request.time.toMillis() < 1785250800000 && request.resource.data.reviewedByAdmin == true)
+        );
       // 수정·삭제는 개인 관리자만, 본인 문서는 관리자라도 불가(셀프 정지해제·권한조작 차단).
       // 주의: PIN 관리자(admin@ugd-erp.example)는 여기서 의도적으로 배제 — isAdmin() 쓰지 말 것.
       allow update, delete: if isPersonalAdmin() && request.auth.uid != uid;

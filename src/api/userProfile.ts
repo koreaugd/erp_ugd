@@ -57,13 +57,18 @@ export async function createUserProfile(
   input: { name: string; phone: string; workBranch: string }
 ): Promise<UserProfile> {
   const ref = doc(db, "users", user.uid);
+  // 지점 전환 편의: 2026-07-29 00:00 KST(=1785250800000ms) 전 가입은 자동 승인한다.
+  // 이후 가입은 다시 관리자 승인 필요(미승인). 이 값은 firestore.rules의 시간 조건과 반드시 일치시킬 것.
+  // role은 항상 NEW_PROFILE_DEFAULTS의 "branch" 유지 — 자동승인은 reviewedByAdmin만 바꾼다(관리자 자동생성 금지).
+  const AUTO_APPROVE_UNTIL_MS = 1785250800000;
   const profile: Omit<UserProfile, "uid"> = {
     name: input.name.trim(),
     email: user.email || "",
     phone: input.phone.trim(),
     workBranch: input.workBranch.trim(),
     createdAt: new Date().toISOString(),
-    ...NEW_PROFILE_DEFAULTS
+    ...NEW_PROFILE_DEFAULTS,
+    reviewedByAdmin: Date.now() < AUTO_APPROVE_UNTIL_MS
   };
   await setDoc(ref, profile);
   return { uid: user.uid, ...profile };
