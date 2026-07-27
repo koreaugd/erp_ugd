@@ -380,18 +380,20 @@ export async function firebaseSaveSharedData(dataKey: string, value: unknown) {
     const currentSnapshot = await getDoc(recordRef);
     if (currentSnapshot.exists()) {
       const current = currentSnapshot.data();
-      await setDoc(doc(db, "shared_data_backups", `${encodedKey}--${now.getTime()}`), {
+      // 백업은 '요일 슬롯' 7개에 돌려쓴다(--slot0 ~ --slot6). 같은 요일에 다시 저장하면 그 슬롯을 덮어써서
+      // 최근 7일치가 자동으로 유지되고, 오래된 백업이 쌓이지 않아 별도 정리(삭제)가 필요 없다.
+      //
+      // 예전에는 타임스탬프 ID로 쌓고 컬렉션 전체를 훑어 오래된 것을 지웠는데, 그 전체 조회는
+      // 급여대장 백업에 지점별 권한이 생긴 뒤로 권한 없는 사용자에게 거부된다 —
+      // 그러면 정리가 조용히 멈춰 급여·주민번호·계좌가 담긴 옛 백업이 무한정 남는다(Codex 지적 2026-07-27).
+      // 문서 ID 앞부분은 그대로라 규칙의 급여 판별(isSalaryKey/salaryBranchOf)은 동일하게 동작한다.
+      const slot = now.getDay();   // 0=일 ~ 6=토
+      await setDoc(doc(db, "shared_data_backups", `${encodedKey}--slot${slot}`), {
         dataKey,
         value: current.value ?? null,
         sourceUpdatedAt: current.updatedAt || current._updatedAt || null,
         backedUpAt: nowIso
       });
-
-      const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const backupSnapshot = await getDocs(collection(db, "shared_data_backups"));
-      await Promise.all(backupSnapshot.docs
-        .filter((item) => item.data().dataKey === dataKey && String(item.data().backedUpAt || "") < cutoff)
-        .map((item) => deleteDoc(item.ref)));
     }
   } catch (error) {
     console.warn("[Shared Data Backup] Backup skipped; continuing primary save.", error);

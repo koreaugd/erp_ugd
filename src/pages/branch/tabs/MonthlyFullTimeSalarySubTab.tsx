@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Plus, Lock, Check, ShieldCheck, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { useAuthContext } from "../../../contexts/AuthContext";
+import { canReadSalaryBranch } from "../../../utils/salaryAccess";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatResidentNumber, formatWithCommas } from "../helpers/formatters";
@@ -149,6 +151,9 @@ export function MonthlyFullTimeSalarySubTab({
   triggerToast: (msg: string, type?: "success" | "error") => void;
   isLocked?: boolean;
 }) {
+  // 급여대장 열람 권한 판정용 세션(계정별 허용 지점) — 판정은 canReadSalaryBranch가 한다.
+  const { user } = useAuthContext();
+
   // ---- 비밀번호 잠금 (기기 간 일관성을 위해 공유 백엔드의 비밀번호를 우선 사용, 실패 시 로컬/기본값) ----
   const [unlocked, setUnlocked] = useState(fullTimeSalaryUnlocked);
   const [passInput, setPassInput] = useState("");
@@ -175,7 +180,11 @@ export function MonthlyFullTimeSalarySubTab({
       .catch(() => setPassStatus("error"));
   }, []);
 
-  useEffect(() => { loadPasscode(); }, [loadPasscode]);
+  // 열람 권한이 있을 때만 보안 설정을 조회한다 — 권한 없는 계정이 이 탭을 열어도 백엔드 요청이 나가지 않게(격리 목적).
+  useEffect(() => {
+    if (!canReadSalaryBranch(user, branchName)) return;
+    loadPasscode();
+  }, [loadPasscode, user, branchName]);
 
   // 보안 재잠금: (1) 급여대장 탭을 떠나면(언마운트) 다시 잠근다. (2) 화면이 1분 이상 숨겨졌다 다시 열리면
   //   (노트북을 닫았다 다른 사람이 여는 경우 등) 다시 잠근다. 잠깐 alt-tab에는 잠기지 않는다.
@@ -286,6 +295,9 @@ export function MonthlyFullTimeSalarySubTab({
   }, []);
 
   useEffect(() => {
+    // 권한이 없으면 급여 데이터를 아예 요청하지 않는다 — 아래 안내 화면은 렌더 단계라 이 effect보다 늦게 걸린다.
+    // 막지 않으면 권한 없는 계정도 급여 조회를 시도해 permission-denied 오류가 나고, 로컬 캐시가 화면에 남을 수 있다.
+    if (!canReadSalaryBranch(user, branchName)) return;
     let cancelled = false;
     const load = async () => {
       let saved: FullTimeSalaryRow[] = [];
@@ -356,12 +368,14 @@ export function MonthlyFullTimeSalarySubTab({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchName, selectedMonth]);
+  }, [branchName, selectedMonth, user]);
 
   // 초과근무일지(자동 기록 + 수기 대장)에서 이번 달 직원별 초과시간을 읽어와 참고용으로만 보여준다.
   // 급여 행에 자동으로 넣지 않는다 — 초과근무를 당월 급여 대신 휴무로 받는 직원이 있어,
   // 지급 대상만 지점이 직접 연장근무 '근무시간' 칸에 옮겨 적는다(읽기 전용이라 저장 경로도 오염되지 않는다).
   useEffect(() => {
+    // 급여 참고 자료도 열람 권한이 있을 때만 불러온다(위 로드 effect와 같은 이유).
+    if (!canReadSalaryBranch(user, branchName)) return;
     let cancelled = false;
     setOtSummary(null);
     setOtError(false);
@@ -408,7 +422,7 @@ export function MonthlyFullTimeSalarySubTab({
       }
     })();
     return () => { cancelled = true; };
-  }, [branchName, selectedMonth]);
+  }, [branchName, selectedMonth, user]);
 
   const persist = useCallback((next: FullTimeSalaryRow[]) => {
     setRows(next);
@@ -485,6 +499,25 @@ export function MonthlyFullTimeSalarySubTab({
   // 아래에 두면 잠겨 있을 때는 이 훅이 호출되지 않다가 잠금을 풀면 갑자기 호출되어
   // 훅 순서가 바뀌고 React가 터진다.
   const { cellProps, isActive } = useSheetKeyboardNav({ rowCount: rows.length, colCount: 14 });
+
+  // ---- 열람 권한 화면 ----
+  // 계정에 이 지점의 급여대장 열람 권한이 없으면 비밀번호 단계까지 가지 않고 안내만 보여준다.
+  // 화면 차단은 안내일 뿐이고 실제 차단은 firestore.rules(canReadSalary)가 한다 — 둘의 판정 기준을 salaryAccess로 공유한다.
+  if (!canReadSalaryBranch(user, branchName)) {
+    return (
+      <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6" data-guide="fulltime-salary-table">
+        <div className="w-14 h-14 rounded-2xl bg-zinc-100 flex items-center justify-center text-zinc-500 mb-4">
+          <Lock className="w-7 h-7" />
+        </div>
+        <h3 className="text-sm font-black text-zinc-900">열람 권한이 없습니다</h3>
+        <p className="mt-2 text-xs font-bold text-zinc-500 text-center leading-relaxed">
+          {branchName} 지점의 정직원 급여대장을 열람할 권한이 없습니다.
+          <br />
+          열람이 필요하면 본사 관리자에게 요청해 주세요.
+        </p>
+      </div>
+    );
+  }
 
   // ---- 잠금 화면 ----
   // 개발 서버(localhost:3000, npm run dev)에서는 비밀번호 없이 열람한다 — 테스트 편의.
