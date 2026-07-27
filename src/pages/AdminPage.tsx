@@ -14,6 +14,7 @@ import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AccountManagementSection } from "./admin/AccountManagementSection";
 import { listUserProfiles } from "../api/userProfile";
 import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
+import { kakaoTaxiRequestsKey, type KakaoTaxiRequest } from "./admin/helpers/kakaoTaxiRequests";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, type AdminPermKey } from "./admin/adminTabRegistry";
@@ -125,11 +126,14 @@ export default function AdminPage() {
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
   const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
-  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  // taxiRequests/laborContractsPending 의 null = "조회 실패"다. 0(없음)과 구분해 화면에 경고를 띄운다
+  // — 실패를 0건으로 삼키면 '확인할 항목 없음'으로 오도된다(Codex P1 2026-07-27).
+  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
   const anomalyRequestRef = useRef(0);
+  const dashboardAlertsRequestRef = useRef(0);
   // 지점별 일일마감 이력 캐시(이상치 표) — 날짜를 바꿔도 다시 읽지 않게. 실패는 캐시하지 않는다.
   const anomalyCacheRef = useRef(new Map<string, { records: any[]; at: number }>());
   const detailRequestRef = useRef(0);
@@ -281,6 +285,9 @@ export default function AdminPage() {
 
   const loadDashboardAlerts = useCallback(async () => {
     if (!isAdminSession) return;
+    // 새로고침 연타 시 늦게 끝난 이전 요청이 최신 결과를 덮지 않도록 최신 요청 표식을 쓴다
+    // (dailyList/anomaly 로더와 같은 패턴 — Codex P1 2026-07-27).
+    const gen = ++dashboardAlertsRequestRef.current;
     try {
       setDashboardAlertsLoading(true);
       // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
@@ -288,7 +295,7 @@ export default function AdminPage() {
       // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
       // 신규 가입 알림은 개인 관리자 세션에서만 조회한다 — PIN 관리자는 users 컬렉션 읽기 권한이 없어
       // (firestore.rules: isPersonalAdmin()만 read 허용) 그대로 부르면 permission-denied로 거부된다.
-      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles] = await Promise.all([
+      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
         gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
@@ -297,7 +304,25 @@ export default function AdminPage() {
         // (권한 있는 배지가 뜨는데 눌러도 안내만 나오면 혼란 — 사용자 지시 2026-07-25).
         user?.loginType === "personal" && isAdminTabAllowed(user.allowedAdminTabs, "accounts")
           ? listUserProfiles().catch(() => [])
-          : Promise.resolve([])
+          : Promise.resolve([]),
+        // 법인택시 대기 신청 수 — 신청 관리 탭과 같은 지점별 공유데이터를 센다(대기만; 처리중은 이미 다른 관리자가 선점).
+        // 실패는 0이 아니라 null 로 돌려 화면에 '조회 실패'를 알린다 — 지점 한 곳이라도 못 읽으면 전체를 실패로 본다
+        // (일부만 세면 실제보다 적은 수가 '정상'처럼 보인다).
+        isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
+          ? (async () => {
+              const branches = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+              const lists = await Promise.all(branches.map((b: any) =>
+                gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(kakaoTaxiRequestsKey(b.branchName))
+              ));
+              return lists.flat().filter((r: any) => r?.status === "pending").length;
+            })().catch(() => null)
+          : Promise.resolve(0),
+        // 근로계약서 발송 대기 수 — 지점이 등록한 발송대상 중 아직 '발송 대기' 상태인 건. 실패는 null(조회 실패).
+        isAdminTabAllowed(allowedAdminTabs, "laborContracts")
+          ? gasClient.getAllLaborContracts()
+              .then((rows) => (rows || []).filter((row: any) => (row?.status || "발송 대기") === "발송 대기").length)
+              .catch(() => null)
+          : Promise.resolve(0)
       ]);
       const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
       const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
@@ -312,24 +337,27 @@ export default function AdminPage() {
         const value = fields.map((field) => item?.[field]).find(Boolean) || "";
         return String(value) > max ? String(value) : max;
       }, "");
+      if (gen !== dashboardAlertsRequestRef.current) return;   // 더 새 요청이 이미 시작됨 — 결과 폐기
       setDashboardAlerts({
         editLogs: editNew.length,
         manualOvertimes: manualNew.length,
         newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length,
+        taxiRequests: taxiRequestCount,
+        laborContractsPending: laborContractsPendingCount,
         latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
         latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
       });
     } finally {
-      setDashboardAlertsLoading(false);
+      if (gen === dashboardAlertsRequestRef.current) setDashboardAlertsLoading(false);
     }
-  }, [user, isAdminSession]);
+  }, [user, isAdminSession, allowedAdminTabs]);
 
   useEffect(() => {
     if (!isAdminSession) return;
     if (adminSection === "dashboard" && isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection))) void loadDashboardAlerts();
   }, [adminSection, loadDashboardAlerts, allowedAdminTabs, isAdminSession]);
 
-  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts") => {
+  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts") => {
     if (target === "dailyPending") {
       setAdminSection("dailySettlement");
       setDailySettlementTab("status");
@@ -338,6 +366,16 @@ export default function AdminPage() {
     if (target === "accounts") {
       // 확인 처리는 계정 관리 화면에서 개별 '확인 처리' 버튼으로 한다(reviewedByAdmin) — 여기서는 이동만.
       setAdminSection("accounts");
+      return;
+    }
+    if (target === "taxiRequests") {
+      // 승인/반려는 신청 관리 화면에서 처리 — 여기서는 이동만(카운트는 상태가 바뀌면 저절로 빠진다).
+      setAdminSection("kakaoTaxi");
+      setKakaoTaxiTab("requests");
+      return;
+    }
+    if (target === "laborContracts") {
+      setAdminSection("laborContracts");
       return;
     }
     setAdminSection("dailySettlement");
@@ -771,10 +809,8 @@ export default function AdminPage() {
                 </div>
               </section>
 
-              {/* 전지점 매출 종합 — 대시보드의 본체. 예전 KPI 4칸(미제출·현금차이·기타메모·월말마감)과
-                  마감현황 표는 전부 '전일' 성격이라 전일 정산현황 탭으로 옮겼다(2026-07-22). */}
-              <AdminSalesOverviewSection />
-
+              {/* 새로 확인할 항목 + 공지 등록을 맨 위로, 매출 종합은 아래로(사용자 지시 2026-07-27) —
+                  관리자가 접속하자마자 처리할 일(가입승인·법인택시·근로계약서 등)부터 보이게. */}
               <div className="admin-dashboard-compact-grid">
                 <AdminDashboardAlertHub
                   pendingDailyCount={stats.pending}
@@ -785,6 +821,10 @@ export default function AdminPage() {
                 />
                 <AdminNoticeManager />
               </div>
+
+              {/* 전지점 매출 종합. 예전 KPI 4칸(미제출·현금차이·기타메모·월말마감)과
+                  마감현황 표는 전부 '전일' 성격이라 전일 정산현황 탭으로 옮겼다(2026-07-22). */}
+              <AdminSalesOverviewSection />
 
             </>
           )}
@@ -1393,12 +1433,17 @@ function AdminDashboardAlertHub({
   onOpen
 }: {
   pendingDailyCount: number;
-  alerts: { editLogs: number; manualOvertimes: number; newSignups: number };
+  alerts: { editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null };
   loading: boolean;
   onRefresh: () => void;
-  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts") => void;
+  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts") => void;
 }) {
-  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups;
+  // null = 조회 실패 — 합계에선 빼되 아래에서 별도 경고를 띄운다(0건 '이상 없음'으로 오도 금지).
+  const failedCounts = [
+    ...(alerts.taxiRequests === null ? ["법인택시 신청"] : []),
+    ...(alerts.laborContractsPending === null ? ["근로계약서 발송 요청"] : []),
+  ];
+  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0);
 
   return (
     <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
@@ -1412,32 +1457,51 @@ function AdminDashboardAlertHub({
         </button>
       </div>
 
-      {totalAlerts === 0 ? (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-sm font-bold text-emerald-700">
+      {/* 초록 '이상 없음'은 모든 카운트가 정상 조회됐을 때만 — 조회 실패가 있으면 성공처럼 보이면 안 된다. */}
+      {totalAlerts === 0 && failedCounts.length === 0 ? (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-[11px] font-black text-emerald-700">
           새로 확인할 항목이 없습니다.
         </div>
-      ) : (
+      ) : totalAlerts === 0 ? null : (
+        /* 버튼 폰트는 관리자 디자인 기준(§6-0-1: 버튼 11px/900)을 따른다 — 기존 text-sm 레거시도 함께 정리(2026-07-27). */
         <div className="admin-dashboard-alert-actions flex flex-col gap-2">
           {pendingDailyCount > 0 && (
-            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-sm font-black hover:bg-amber-100">
+            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black hover:bg-amber-100 cursor-pointer">
               일일정산 미제출: {pendingDailyCount}건
             </button>
           )}
           {alerts.editLogs > 0 && (
-            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-sm font-black hover:bg-blue-100">
+            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-black hover:bg-blue-100 cursor-pointer">
               정산 변경: {alerts.editLogs}건
             </button>
           )}
           {alerts.manualOvertimes > 0 && (
-            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-sm font-black hover:bg-violet-100">
+            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-black hover:bg-violet-100 cursor-pointer">
               초과근무 수기작성: {alerts.manualOvertimes}건
             </button>
           )}
           {alerts.newSignups > 0 && (
-            <button onClick={() => onOpen("accounts")} className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-sm font-black hover:bg-emerald-100">
-              신규 가입: {alerts.newSignups}건
+            <button onClick={() => onOpen("accounts")} className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-black hover:bg-emerald-100 cursor-pointer">
+              계정 가입 승인 대기: {alerts.newSignups}건
             </button>
           )}
+          {(alerts.taxiRequests ?? 0) > 0 && (
+            <button onClick={() => onOpen("taxiRequests")} className="px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black hover:bg-sky-100 cursor-pointer">
+              법인택시 신청 대기: {alerts.taxiRequests}건
+            </button>
+          )}
+          {(alerts.laborContractsPending ?? 0) > 0 && (
+            <button onClick={() => onOpen("laborContracts")} className="px-4 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-100 text-[11px] font-black hover:bg-orange-100 cursor-pointer">
+              근로계약서 발송 요청: {alerts.laborContractsPending}건
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 조회 실패는 0건과 다르다 — 숨기지 말고 알린다(Codex P1 2026-07-27). */}
+      {failedCounts.length > 0 && (
+        <div className="rounded-xl bg-rose-50 border border-rose-100 p-3 text-[11px] font-black text-rose-700">
+          {failedCounts.join(" · ")} 건수를 불러오지 못했습니다. '새로고침'을 누르거나 해당 탭에서 직접 확인해 주세요.
         </div>
       )}
     </section>
