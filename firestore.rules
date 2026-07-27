@@ -10,29 +10,59 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == 'admin@ugd-erp.example';
     }
 
-    // 개인 계정 관리자 판정 — users 문서 기반. status까지 확인한다(정지된 관리자 배제).
+    // 개인 계정 관리자 판정 — users 문서 기반. status + 승인(reviewedByAdmin)까지 확인한다.
+    // reviewedByAdmin을 빼면 미승인 상태의 role:admin 계정이 업무 데이터에 접근하는 구멍이 생긴다(Codex 지적 2026-07-27).
+    // 첫 관리자는 Firebase 콘솔에서 role='admin' · status='active' · reviewedByAdmin=true 로 직접 설정한다.
     function isPersonalAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.reviewedByAdmin == true;
+    }
+
+    // PIN 로그인 계정을 이메일로 명시 판정한다(admin@ / branch-NN@ 패턴).
+    // "users 문서 없음"으로 판정하면 온보딩 완료 전·미승인·삭제된 개인계정(users 문서가 아직/이미 없음)이
+    // PIN 계정으로 오인되어 업무 데이터에 접근하는 우회 구멍이 생긴다(Codex 지적 2026-07-27, no-ship).
+    function isPinAccount() {
+      return signedIn() && (
+        request.auth.token.email == 'admin@ugd-erp.example'
+        || request.auth.token.email.matches('^branch-[0-9]+@ugd-erp[.]example$')
+      );
+    }
+
+    // 승인된 개인계정 — 관리자가 reviewedByAdmin=true로 승인해야 업무 데이터에 접근할 수 있다(2026-07-27).
+    function isApprovedPersonal() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.reviewedByAdmin == true;
+    }
+
+    // 업무 데이터 접근 자격: 기존 PIN 계정이거나, 승인된 개인계정(관리자 포함).
+    // 미승인 개인계정은 로그인은 되지만 여기서 막혀 어떤 업무 데이터도 읽거나 쓸 수 없다.
+    function canAccessWork() {
+      return isPinAccount() || isApprovedPersonal() || isPersonalAdmin();
     }
 
     // 개인 계정 프로필. PIN 로그인 계정은 이 컬렉션을 사용하지 않는다.
     match /users/{uid} {
       // 본인 문서 읽기 + 개인 관리자 전체 읽기
       allow read: if signedIn() && (request.auth.uid == uid || isPersonalAdmin());
-      // 본인 생성은 "신규 기본값 그대로"일 때만 — 셀프 권한 상향 차단
+      // 본인 생성은 "신규 기본값 그대로"일 때만 — 셀프 권한 상향 차단.
+      // 가입 시 이름·연락처·근무지점을 필수로 받는다(2026-07-27). hasOnly 목록은 userProfile.ts와 함께 유지.
       allow create: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(["name","email","role","allowedTabs","allowedBranches","status","createdAt","reviewedByAdmin"])
+        && request.resource.data.keys().hasOnly(["name","email","phone","workBranch","role","allowedTabs","allowedBranches","status","createdAt","reviewedByAdmin"])
         && request.resource.data.name is string
         && request.resource.data.email is string
+        && request.resource.data.phone is string
+        && request.resource.data.workBranch is string
         && request.resource.data.createdAt is string
         && request.resource.data.role == "branch"
         && request.resource.data.allowedTabs == "all"   // 신규 = 전 탭 허용(사용자 지시 2026-07-25). 제한은 관리자가 계정 관리 탭에서.
         && request.resource.data.allowedBranches == "all"
         && request.resource.data.status == "active"
-        && request.resource.data.reviewedByAdmin == false;
+        && request.resource.data.reviewedByAdmin == false;  // 신규는 항상 미승인 — 관리자 승인 전엔 canAccessWork 실패
       // 수정·삭제는 개인 관리자만, 본인 문서는 관리자라도 불가(셀프 정지해제·권한조작 차단).
       // 주의: PIN 관리자(admin@ugd-erp.example)는 여기서 의도적으로 배제 — isAdmin() 쓰지 말 것.
       allow update, delete: if isPersonalAdmin() && request.auth.uid != uid;
@@ -46,39 +76,39 @@ service cloud.firestore {
 
     // 지점 설정 및 PIN 관련 데이터는 인증 후에만 읽고, 관리 계정만 변경합니다.
     match /settings/{branchId} {
-      allow read: if signedIn();
+      allow read: if canAccessWork();
       allow create, update, delete: if isAdmin() || isPersonalAdmin();
     }
 
-    // 일일마감 원본 데이터입니다. 공통 지점 PIN 정책이므로 로그인한 사용자가 조회·저장합니다.
+    // 일일마감 원본 데이터입니다. 공통 지점 PIN 정책이므로 승인된 사용자가 조회·저장합니다.
     match /daily_settles/{recordId} {
-      allow read: if signedIn();
-      allow create, update: if signedIn()
+      allow read: if canAccessWork();
+      allow create, update: if canAccessWork()
         && request.resource.data.recordId is string
         && request.resource.data.master is map
         && request.resource.data.expenses is list
         && request.resource.data.staff is list;
-      allow delete: if signedIn();
+      allow delete: if canAccessWork();
     }
 
     match /staff_rosters/{branchId} {
-      allow read, write: if signedIn();
+      allow read, write: if canAccessWork();
     }
 
     match /branch_own_rosters/{branchId} {
-      allow read, write: if signedIn();
+      allow read, write: if canAccessWork();
     }
 
     match /shared_data/{dataKey} {
-      allow read, write: if signedIn();
+      allow read, write: if canAccessWork();
     }
 
     match /shared_data_backups/{backupId} {
-      allow read, write: if signedIn();
+      allow read, write: if canAccessWork();
     }
 
     match /edit_logs/{logId} {
-      allow read, create: if signedIn();
+      allow read, create: if canAccessWork();
       allow update, delete: if isAdmin() || isPersonalAdmin();
     }
 

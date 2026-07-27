@@ -46,6 +46,7 @@ export function SalesLineChart({
   formatValue = (value: number) => `${value.toLocaleString("ko-KR")}원`,
   compact = false,
   autoScale = false,
+  showValues = false,
 }: {
   current: ChartPoint[];
   compare: ChartPoint[];
@@ -61,6 +62,8 @@ export function SalesLineChart({
   compact?: boolean;
   /** 0 기준 대신 데이터 구간에 맞춰 확대해 변화를 크게 보여준다(비율 추이 등). */
   autoScale?: boolean;
+  /** 점마다 값 라벨을 찍는다(hover 없이도 숫자가 읽히게 — PnlComboChart 의 showValues 와 같은 문법). */
+  showValues?: boolean;
 }) {
   const clipId = useId();
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -69,14 +72,16 @@ export function SalesLineChart({
     return <p className="py-16 text-center text-xs font-bold text-gray-400">표시할 매출 기록이 없습니다.</p>;
   }
 
+  // 값 라벨을 켜면 맨 위 점 위에 글자가 들어갈 자리가 필요하다.
+  const pad = showValues ? { ...PAD, top: PAD.top + 10 } : PAD;
   const viewW = compact ? 520 : VIEW_W;
   const viewH = VIEW_H;
-  const plotW = viewW - PAD.left - PAD.right;
-  const plotH = viewH - PAD.top - PAD.bottom;
+  const plotW = viewW - pad.left - pad.right;
+  const plotH = viewH - pad.top - pad.bottom;
   const count = current.length;
   // 점이 하나면 0으로 나누게 되므로 분모를 최소 1로 둔다.
   const stepX = count > 1 ? plotW / (count - 1) : 0;
-  const xAt = (index: number) => PAD.left + (count > 1 ? index * stepX : plotW / 2);
+  const xAt = (index: number) => pad.left + (count > 1 ? index * stepX : plotW / 2);
 
   // autoScale=true 면 0 기준을 버리고 **데이터 구간에 맞춰 확대**한다 — 식재료율 25~46% 처럼
   // 좁은 구간에 몰린 값이 0부터 그려지면 선이 거의 평평해져 변화가 안 보인다(2026-07-22 사용자 지시).
@@ -91,7 +96,7 @@ export function SalesLineChart({
     ? dataLo - Math.max((dataHi - dataLo) * 0.25, Math.abs(dataLo) * 0.05)
     : minRaw < 0 ? -niceCeil(-minRaw) : 0;
   const span = maxValue - minValue || 1; // 값이 전부 같으면 0 나눗셈이 된다
-  const yAt = (value: number) => PAD.top + plotH - ((value - minValue) / span) * plotH;
+  const yAt = (value: number) => pad.top + plotH - ((value - minValue) / span) * plotH;
 
   const pathOf = (points: ChartPoint[]) =>
     points
@@ -137,23 +142,23 @@ export function SalesLineChart({
           if (rect.width === 0) return;
           // 화면 좌표 → viewBox 좌표로 환산한 뒤 가장 가까운 점을 고른다.
           const viewX = ((event.clientX - rect.left) / rect.width) * viewW;
-          const index = count > 1 ? Math.round((viewX - PAD.left) / stepX) : 0;
+          const index = count > 1 ? Math.round((viewX - pad.left) / stepX) : 0;
           setHoverIndex(Math.min(count - 1, Math.max(0, index)));
         }}
       >
         <defs>
           <clipPath id={clipId}>
-            <rect x={PAD.left} y={PAD.top} width={plotW} height={plotH} />
+            <rect x={pad.left} y={pad.top} width={plotW} height={plotH} />
           </clipPath>
         </defs>
 
         {gridLines.map((ratio) => {
           const value = maxValue - span * ratio;
-          const y = PAD.top + plotH * ratio;
+          const y = pad.top + plotH * ratio;
           return (
             <g key={ratio}>
-              <line x1={PAD.left} y1={y} x2={PAD.left + plotW} y2={y} stroke="rgba(33,33,33,0.10)" strokeWidth="1" />
-              <text x={PAD.left - 10} y={y + 4} textAnchor="end" fontSize="12" fontWeight="700" fill="rgba(33,33,33,0.55)">
+              <line x1={pad.left} y1={y} x2={pad.left + plotW} y2={y} stroke="rgba(33,33,33,0.10)" strokeWidth="1" />
+              <text x={pad.left - 10} y={y + 4} textAnchor="end" fontSize="12" fontWeight="700" fill="rgba(33,33,33,0.55)">
                 {formatAxis(value)}
               </text>
             </g>
@@ -161,7 +166,7 @@ export function SalesLineChart({
         })}
         {/* 음수 구간이 있으면 0원 기준선을 또렷하게 — 어디부터 적자인지 한눈에 보이게. */}
         {minValue < 0 && (
-          <line x1={PAD.left} y1={yAt(0)} x2={PAD.left + plotW} y2={yAt(0)} stroke="rgba(33,33,33,0.45)" strokeWidth="1.5" />
+          <line x1={pad.left} y1={yAt(0)} x2={pad.left + plotW} y2={yAt(0)} stroke="rgba(33,33,33,0.45)" strokeWidth="1.5" />
         )}
 
         {current.map((point, index) =>
@@ -181,9 +186,66 @@ export function SalesLineChart({
           {count === 1 && <circle cx={xAt(0)} cy={yAt(current[0].y)} r="4" fill={CURRENT_COLOR} />}
         </g>
 
+        {/* 값 라벨 — hover 해야만 숫자를 볼 수 있으면 인쇄·캡처본에서 값이 사라진다(2026-07-23 사용자 지시).
+            두 계열이 겹치지 않게, 그 달에 **위에 있는 계열은 점 위 / 아래 있는 계열은 점 아래**로 갈라 놓는다.
+            흰 테두리(paintOrder=stroke)를 둘러 선이 라벨을 지나가도 글자가 묻히지 않게 한다. */}
+        {showValues && current.slice(0, count).map((point, index) => {
+          const cy = yAt(point.y);
+          const other = compare[index];
+          const oy = other ? yAt(other.y) : null;
+          // 값이 같거나 상대 계열이 없으면 현재 계열을 위로 둔다.
+          const currentOnTop = oy === null || cy <= oy;
+          // 라벨이 그려질 수 있는 세로 한계. 위/아래로 갈라 놓아도 두 점이 차트 맨 위(또는 맨 아래)에 몰리면
+          // 두 라벨이 이 한계에 **함께 눌려** 6~7px 간격으로 포개진다(10px 글자에는 모자란다 — Codex P1).
+          // 클램프한 뒤 최소 간격을 다시 확보한다.
+          const topLimit = pad.top + 8;
+          const botLimit = pad.top + plotH - 3;
+          const MIN_GAP = 12;
+          const clampY = (y: number) => Math.min(botLimit, Math.max(topLimit, y));
+          let upperY = clampY((currentOnTop ? cy : (oy ?? cy)) - 9);
+          let lowerY = clampY((currentOnTop ? (oy ?? cy) : cy) + 15);
+          if (oy !== null && lowerY - upperY < MIN_GAP) {
+            lowerY = upperY + MIN_GAP;
+            // 아래로 못 벌리면(바닥에 닿음) 위쪽 라벨을 대신 올린다.
+            if (lowerY > botLimit) { lowerY = botLimit; upperY = Math.max(topLimit, botLimit - MIN_GAP); }
+          }
+          const currentLabelY = currentOnTop ? upperY : lowerY;
+          const otherLabelY = currentOnTop ? lowerY : upperY;
+          // 양 끝 점의 라벨은 점 바로 위에 두면 뷰박스 밖으로 삐져나가 잘린다("1,234,567원"처럼 긴 값에서 특히).
+          // 글자 폭을 어림해(10px 볼드 ≈ 5.6px/자) 라벨 상자가 항상 뷰박스 안에 들어오게 가운데 x를 민다.
+          const labelX = (text: string) => {
+            const half = (text.length * 5.6) / 2 + 3;
+            return Math.min(viewW - half, Math.max(half, xAt(index)));
+          };
+          const currentText = formatValue(point.y);
+          return (
+            <g key={`v-${point.x}-${index}`}>
+              <circle cx={xAt(index)} cy={cy} r="2.75" fill={CURRENT_COLOR} />
+              <text
+                x={labelX(currentText)} y={currentLabelY} textAnchor="middle"
+                fontSize="10" fontWeight="900" fill={CURRENT_COLOR}
+                stroke="#ffffff" strokeWidth="2.6" paintOrder="stroke" strokeLinejoin="round"
+              >{currentText}</text>
+              {other && (() => {
+                const otherText = formatValue(other.y);
+                return (
+                  <>
+                    <circle cx={xAt(index)} cy={yAt(other.y)} r="2.75" fill="rgba(33,33,33,0.55)" />
+                    <text
+                      x={labelX(otherText)} y={otherLabelY} textAnchor="middle"
+                      fontSize="10" fontWeight="900" fill="rgba(33,33,33,0.78)"
+                      stroke="#ffffff" strokeWidth="2.6" paintOrder="stroke" strokeLinejoin="round"
+                    >{otherText}</text>
+                  </>
+                );
+              })()}
+            </g>
+          );
+        })}
+
         {hovered !== null && (
           <g>
-            <line x1={xAt(hovered)} y1={PAD.top} x2={xAt(hovered)} y2={PAD.top + plotH} stroke="rgba(33,33,33,0.28)" strokeWidth="1" />
+            <line x1={xAt(hovered)} y1={pad.top} x2={xAt(hovered)} y2={pad.top + plotH} stroke="rgba(33,33,33,0.28)" strokeWidth="1" />
             {compare[hovered] && <circle cx={xAt(hovered)} cy={yAt(compare[hovered].y)} r="4" fill={COMPARE_COLOR} />}
             <circle cx={xAt(hovered)} cy={yAt(current[hovered].y)} r="4.5" fill={CURRENT_COLOR} />
           </g>

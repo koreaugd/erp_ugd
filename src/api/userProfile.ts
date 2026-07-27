@@ -11,6 +11,10 @@ export interface UserProfile {
   uid: string;
   name: string;
   email: string;
+  // 가입 시 필수 입력(2026-07-27). 구글 가입도 온보딩 폼에서 연락처·근무지점을 받아 채운다.
+  // firestore.rules users create hasOnly 목록과 반드시 함께 유지할 것.
+  phone: string;
+  workBranch: string;
   role: "admin" | "branch";
   allowedTabs: string[] | "all";
   allowedBranches: string[] | "all";
@@ -34,18 +38,30 @@ const NEW_PROFILE_DEFAULTS = {
 };
 
 /**
- * users/{uid} 로드. 없으면 기본값으로 생성한다.
- * 생성 실패 시 throw — 호출부(useAuth)는 반드시 signOut 후 오류를 안내한다(설계서 §4: 유령 세션 금지).
+ * users/{uid} 로드. 없으면 null — 자동 생성하지 않는다(온보딩 폼에서만 생성).
+ * 신규 사용자(null)는 호출부(useAuth)가 온보딩 단계로 보낸다.
  */
-export async function loadOrCreateUserProfile(user: { uid: string; displayName: string | null; email: string | null }): Promise<UserProfile> {
+export async function loadUserProfile(uid: string): Promise<UserProfile | null> {
+  const snapshot = await getDoc(doc(db, "users", uid));
+  return snapshot.exists() ? { uid, ...(snapshot.data() as Omit<UserProfile, "uid">) } : null;
+}
+
+/**
+ * 온보딩 폼 제출 시 호출 — 이름·연락처·근무지점을 받아 users 문서를 생성한다.
+ * 권한 기본값(NEW_PROFILE_DEFAULTS)은 여기서만 부여하며, firestore.rules create 조건과
+ * 글자 단위로 일치해야 한다(어긋나면 가입이 죽는다).
+ * 생성 실패 시 throw — 호출부는 반드시 signOut 후 오류를 안내한다(설계서 §4: 유령 세션 금지).
+ */
+export async function createUserProfile(
+  user: { uid: string; email: string | null },
+  input: { name: string; phone: string; workBranch: string }
+): Promise<UserProfile> {
   const ref = doc(db, "users", user.uid);
-  const snapshot = await getDoc(ref);
-  if (snapshot.exists()) {
-    return { uid: user.uid, ...(snapshot.data() as Omit<UserProfile, "uid">) };
-  }
   const profile: Omit<UserProfile, "uid"> = {
-    name: user.displayName || (user.email ? user.email.split("@")[0] : "이름없음"),
+    name: input.name.trim(),
     email: user.email || "",
+    phone: input.phone.trim(),
+    workBranch: input.workBranch.trim(),
     createdAt: new Date().toISOString(),
     ...NEW_PROFILE_DEFAULTS
   };

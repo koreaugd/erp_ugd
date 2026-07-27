@@ -202,8 +202,13 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
   const markReviewed = async (uid: string) => {
     setConfirmingUid(uid);
     try {
-      await updateUserProfile(uid, { reviewedByAdmin: true });
-      setProfiles((prev) => prev && prev.map((p) => (p.uid === uid ? { ...p, reviewedByAdmin: true } : p)));
+      // 승인은 권한 편집 상태와 원자적으로 저장한다 — 관리자가 조정한 지점·탭 제한이 승인과 함께 반영되도록.
+      // 승인만 따로 저장하면 신규 기본값(all 탭/all 지점)이 그대로 남아 의도보다 넓은 권한이 부여된다(Codex 지적 2026-07-27).
+      // 편집을 안 건드렸으면 edit은 startEdit이 로드한 현재값(신규=all)이라 정책(신규 전체 허용, 이후 제한)과 일치한다.
+      const patch = (uid === editingUid && edit) ? { ...edit, reviewedByAdmin: true } : { reviewedByAdmin: true };
+      await updateUserProfile(uid, patch);
+      setProfiles((prev) => prev && prev.map((p) => (p.uid === uid ? { ...p, ...patch } : p)));
+      if (uid === editingUid) cancelEdit();
     } catch (e) {
       console.error("확인 처리 실패:", e);
       window.alert("확인 처리에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.");
@@ -326,6 +331,11 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               <h4 className="text-[11px] font-black text-[#212121]">{editingProfile.name} ({editingProfile.email})</h4>
               <button onClick={cancelEdit} className="text-[11px] font-black text-zinc-400 cursor-pointer">닫기</button>
             </div>
+
+            {/* 가입 시 받은 연락처·근무지점 — 관리자가 누구를 승인하는지 확인하는 근거(2026-07-27). */}
+            <p className="text-[11px] font-bold text-zinc-500">
+              근무지점: {editingProfile.workBranch || "-"} · 연락처: {editingProfile.phone || "-"}
+            </p>
 
             {!editingProfile.reviewedByAdmin && (
               <div className="rounded-xl border border-gray-200 bg-[var(--admin-ghost)] px-4 py-3 flex items-center justify-between gap-3">

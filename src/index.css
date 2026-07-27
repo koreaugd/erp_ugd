@@ -830,10 +830,12 @@ input[type=number] {
   background: #B3261E;
 }
 
-/* 손익계산서 합계 행(총매출·총지출·이익금) — 줄무늬/호버보다 진하게 구분선을 준다. */
+/* 손익계산서 합계 행(총매출·총지출·이익금) — 줄무늬/호버보다 진하게 구분선을 준다.
+   예전 배경(ghost 60% + 흰색)은 흰 본문 셀과 거의 같은 색이라 합계행이 안 보였다(2026-07-23 사용자 지적).
+   구획 밴드=바닐라 / 합계행=엘리스 / 이익금=네이비 로 세 단계를 색으로 갈라 놓는다. */
 .admin-redesign .admin-statement-strong > td {
   border-top: 1px solid var(--admin-black);
-  background: color-mix(in srgb, var(--admin-ghost) 60%, #ffffff);
+  background: var(--admin-alice);
 }
 
 /* 손익계산서 구획 밴드(매출부/지출부) — 제출현황 법인 밴드와 같은 문법(연한 바닐라 띠). */
@@ -1027,7 +1029,15 @@ input[type=number] {
 .admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1000px) { .admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .admin-hq-kpi-grid, .admin-hq-kpi-grid.admin-hq-kpi-4 { grid-template-columns: 1fr; } }
-.admin-redesign .admin-hq-kpi { padding: 10px 14px; }
+/* [배치] 라벨은 윗줄, **숫자와 전월대비 증감은 같은 줄**에 나란히 둔다(2026-07-23 사용자 지시 — 3줄이라 세로가 길었다).
+   flex-wrap 이라 증감 문구가 길어 자리가 모자라면 알아서 아랫줄로 내려가 잘리지 않는다. */
+.admin-redesign .admin-hq-kpi {
+  padding: 8px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
 .admin-redesign .admin-hq-kpi + .admin-hq-kpi { border-left: 1px solid rgba(33, 33, 33, 0.18); }
 /* 4열이 2열/1열로 접히면 세로 경계선도 필요하다(줄바꿈된 칸의 왼쪽 선은 위 규칙으로 남고, 윗줄과의 구분은 이것). */
 @media (max-width: 1000px) {
@@ -1038,19 +1048,24 @@ input[type=number] {
 @media (max-width: 700px) {
   .admin-redesign .admin-hq-kpi + .admin-hq-kpi { border-left: 0; border-top: 1px solid rgba(33, 33, 33, 0.18); }
 }
-.admin-redesign .admin-hq-kpi span { display: block; color: rgba(33, 33, 33, 0.55); font-weight: 800; }
-.admin-redesign .admin-hq-kpi strong {
+/* [주의] 자식 선택자(`>`)로 좁힌다 — 그냥 `span` 으로 두면 증감 옆의 "전월" 같은 안쪽 <span> 까지
+   block 이 되어 줄이 하나 더 생긴다(예전에 실제로 그렇게 렌더됐다). */
+.admin-redesign .admin-hq-kpi > span {
+  flex: 0 0 100%;
   display: block;
-  margin-top: 2px;
+  color: rgba(33, 33, 33, 0.55);
+  font-weight: 800;
+}
+.admin-redesign .admin-hq-kpi > strong {
+  margin-top: 1px;
   font-size: 19px !important; /* 금액은 KPI 라 통일 규칙에서 예외 */
   font-weight: 900;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
-.admin-redesign .admin-hq-kpi strong em { font-size: 12px !important; margin-left: 4px; }
-/* 컴팩트 변형(지점 손익계산서 4칸) — 증감과 "전월 대비"를 한 줄에 붙여 세로를 줄인다. */
-.admin-redesign .admin-hq-kpi small { display: block; margin-top: 2px; font-weight: 800; white-space: nowrap; }
-.admin-redesign .admin-hq-kpi-4 .admin-hq-kpi { padding: 8px 12px; }
+.admin-redesign .admin-hq-kpi > strong em { font-size: 12px !important; margin-left: 4px; }
+.admin-redesign .admin-hq-kpi > small { font-weight: 800; }
+.admin-redesign .admin-hq-kpi-4 .admin-hq-kpi { padding: 7px 12px; }
 .admin-redesign .admin-hq-kpi-4 .admin-hq-kpi strong { font-size: 17px !important; }
 
 /* 본사 손익계산서 표 — 요약표와 같은 엑셀형 문법(헤더 바닐라·검정 격자) */
@@ -1078,7 +1093,7 @@ input[type=number] {
   border-top: 1px solid var(--admin-black);
 }
 .admin-redesign .admin-hq-statement tr.admin-statement-strong td {
-  background: color-mix(in srgb, var(--admin-ghost) 60%, #ffffff);
+  background: var(--admin-alice);
   border-top: 1px solid var(--admin-black);
 }
 /* 이익금 행 — PNG 처럼 네이비 채움 + 밝은 글자 */
@@ -1196,6 +1211,14 @@ input[type=number] {
 .admin-design-preview .admin-daily-settlement-section button[class*="bg-emerald-600"] {
   background: var(--admin-black) !important;
   color: var(--admin-ghost) !important;
+}
+
+/* 마감 이상치 분류 탭 — 전역 알약 규칙(`button[class*="border-b-2"]`)이 padding 10px 18px 라 탭 줄이 두꺼웠다.
+   전일 정산현황을 컴팩트하게 바꾸면서 이 줄만 좁힌다(2026-07-23). 클래스 하나를 더 껴 특이성으로 이긴다. */
+.admin-redesign .admin-anomaly-tabs button[class*="border-b-2"] {
+  padding: 5px 12px;
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .admin-design-preview .admin-monthly-closing-status-section {

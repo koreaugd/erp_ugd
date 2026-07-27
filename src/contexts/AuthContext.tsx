@@ -1,9 +1,10 @@
 // src/contexts/AuthContext.tsx
 import React, { createContext, useContext, ReactNode } from "react";
-import { useAuth, UserSession, PendingGate } from "../hooks/useAuth";
+import { useAuth, UserSession, PendingGate, PendingOnboarding } from "../hooks/useAuth";
 import { BranchSetting } from "../api/gasClient";
 import type { LoginBranch } from "../api/firebaseAuth";
 import type { GateTarget } from "../api/gateAuth";
+import type { UserProfile } from "../api/userProfile";
 
 interface AuthContextType {
   user: UserSession | null;
@@ -12,7 +13,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   login: (branch: LoginBranch | null, pin: string) => Promise<boolean>;
-  logout: () => void;
+  logout: (opts?: { forgetGoogle?: boolean }) => void;
   failedAttempts: number;
   setError: (msg: string | null) => void;
   loginWithGoogle: () => Promise<boolean>;
@@ -21,6 +22,9 @@ interface AuthContextType {
   sendPasswordReset: (email: string) => Promise<void>;
   pendingGate: PendingGate | null;
   completeGate: (target: GateTarget, pin: string) => Promise<boolean>;
+  pendingOnboarding: PendingOnboarding | null;
+  completeOnboarding: (input: { name: string; phone: string; workBranch: string }) => Promise<boolean>;
+  pendingApproval: UserProfile | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);

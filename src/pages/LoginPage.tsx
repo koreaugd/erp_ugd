@@ -6,6 +6,8 @@ import { useAuthContext } from "../contexts/AuthContext";
 import { warmPersonalAuth } from "../hooks/useAuth";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GateStep from "./login/GateStep";
+import OnboardingStep from "./login/OnboardingStep";
+import ApprovalPendingStep from "./login/ApprovalPendingStep";
 import type { LoginBranch } from "../api/firebaseAuth";
 import { ensureLatestAppVersion } from "../utils/appVersion";
 
@@ -15,7 +17,8 @@ type EmailFormMode = "signin" | "signup" | "reset";
 export default function LoginPage() {
   const {
     user, login, loading, error, failedAttempts, setError,
-    loginWithGoogle, loginWithEmail, signUpWithEmail, sendPasswordReset, pendingGate
+    loginWithGoogle, loginWithEmail, signUpWithEmail, sendPasswordReset, pendingGate,
+    pendingOnboarding, pendingApproval
   } = useAuthContext();
   const navigate = useNavigate();
 
@@ -189,7 +192,11 @@ export default function LoginPage() {
           </div>
         )}
 
-        {pendingGate ? (
+        {pendingOnboarding ? (
+          <OnboardingStep pending={pendingOnboarding} />
+        ) : pendingApproval ? (
+          <ApprovalPendingStep profile={pendingApproval} />
+        ) : pendingGate ? (
           <GateStep profile={pendingGate.profile} />
         ) : mode === "personal" ? (
           <div className="space-y-4" id="personal-login-section">

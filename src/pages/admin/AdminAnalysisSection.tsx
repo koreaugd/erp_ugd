@@ -99,6 +99,56 @@ function renderHqLine(line: HqStatementLine) {
   );
 }
 
+/**
+ * 지점 손익계산서 탭의 지점 선택 — 드롭다운 대신 **전 지점을 한 줄에 펼친다**(2026-07-23 사용자 지시:
+ * "드롭다운이 불편하다"). WAI-ARIA 탭 패턴대로 tablist/tab + ←/→·Home/End 를 배선하고, 마우스만 쓰는
+ * 사람을 위해 좌우 화살표 버튼도 함께 둔다. 칩 모양은 다른 관리자 토글과 같은 `.admin-period-chip`.
+ */
+function BranchTabPicker({ branches, value, onChange }: { branches: string[]; value: string; onChange: (branch: string) => void }) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const index = Math.max(0, branches.indexOf(value));
+  /** 순환 이동. 키보드로 옮겼을 때만 그 칩에 포커스를 옮긴다 —
+   *  화살표 버튼 클릭에서까지 옮기면 연속 클릭 중에 포커스가 버튼에서 빠져나간다. */
+  const move = (next: number, focusChip: boolean) => {
+    if (branches.length === 0) return;
+    const bounded = ((next % branches.length) + branches.length) % branches.length;
+    onChange(branches[bounded]);
+    if (focusChip) listRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']")[bounded]?.focus();
+  };
+  if (branches.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5">
+      <button type="button" aria-label="이전 지점" onClick={() => move(index - 1, false)}
+        className="admin-period-chip h-7 w-7 shrink-0 rounded-full text-[13px] font-black leading-none cursor-pointer">‹</button>
+      <div ref={listRef} role="tablist" aria-label="지점 선택" className="flex flex-wrap gap-1 min-w-0">
+        {branches.map((b, i) => (
+          <button
+            key={b}
+            type="button"
+            role="tab"
+            aria-selected={b === value}
+            // 탭 목록은 통째로 탭키 정지점 하나만 갖는다(선택된 칩). 그 안에서는 방향키로 옮긴다.
+            tabIndex={b === value ? 0 : -1}
+            onClick={() => onChange(b)}
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1
+                : e.key === "Home" ? 0 : e.key === "End" ? branches.length - 1 : null;
+              if (step === null) return;
+              e.preventDefault();
+              move(step, true);
+            }}
+            className={`admin-period-chip h-7 px-2.5 rounded-full text-[11px] font-black cursor-pointer ${b === value ? "is-active" : ""}`}
+          >
+            {b}
+          </button>
+        ))}
+      </div>
+      <button type="button" aria-label="다음 지점" onClick={() => move(index + 1, false)}
+        className="admin-period-chip h-7 w-7 shrink-0 rounded-full text-[13px] font-black leading-none cursor-pointer">›</button>
+    </div>
+  );
+}
+
 /** PRIME 상태 배지 — 목표(60%) 이하 허니 / 60~70 바닐라 / 70 초과 빨강(05 PNG 의 PRIME 배지). */
 function PrimeBadge({ value }: { value: number | null }) {
   if (value === null) return <span className="admin-delta-flat font-mono font-black">—</span>;
@@ -208,12 +258,14 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
   const rows = payload?.rows || [];
   const ops = payload?.branchOps || {};
   const months = useMemo(() => availableMonths(rows), [rows]);
-  const branchNames = useMemo(
-    () => Array.from(new Set<string>(rows.filter((r) => r.지점 !== HQ_NAME).map((r) => r.지점))).sort((a, b) => a.localeCompare(b, "ko")),
-    [rows]
-  );
-
   const curRows = useMemo(() => branchRowsOf(rows, month), [rows, month]);
+  // [선택한 달 기준] 전 기간에 한 번이라도 나온 지점을 전부 뿌리면, 그 달에 없는 지점(개점 전·폐점 후)까지
+  // 고를 수 있어 "데이터가 없습니다"만 뜬다(2026-07-23 사용자 지적 — 대골뼈국은 2026-04 한 달치뿐).
+  // 그 달에 행이 있는 지점만 세운다. 달을 바꾸면 목록이 그 달 것으로 갈리고, 선택도 아래 branch 에서 보정된다.
+  const branchNames = useMemo(
+    () => Array.from(new Set<string>(curRows.filter((r) => r.지점 !== HQ_NAME).map((r) => r.지점))).sort((a, b) => a.localeCompare(b, "ko")),
+    [curRows]
+  );
   const prevRows = useMemo(() => branchRowsOf(rows, prevMonthOf(month)), [rows, month]);
   const totals = useMemo(() => hqTotalsOf(curRows), [curRows]);
 
@@ -312,13 +364,8 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
             className="h-8 rounded-lg border border-gray-200 px-2 text-[11px] font-bold" aria-label="분석 월 선택">
             {months.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
-          {view === "branch" && (
-            <select value={branch} onChange={(e) => setBranchPick(e.target.value)}
-              className="h-8 rounded-lg border border-gray-200 px-2 text-[11px] font-bold" aria-label="지점 선택">
-              {branchNames.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          )}
-          {uploadedAtLabel && <span className="text-[11px] font-bold text-gray-400">마지막 업로드: {uploadedAtLabel}</span>}
+          {/* 지점 선택은 드롭다운을 걷어내고 아래 전용 줄(BranchTabPicker)로 옮겼다(2026-07-23 사용자 지시). */}
+          {uploadedAtLabel &&<span className="text-[11px] font-bold text-gray-400">마지막 업로드: {uploadedAtLabel}</span>}
           <div className="ml-auto flex items-center gap-2">
             <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" aria-label="db파일 업로드"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUpload(f); }} />
@@ -371,7 +418,9 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
             <div className="admin-analysis-uniform space-y-5">
               <section className="admin-hq-kpi-grid">
                 <div className="admin-hq-kpi">
-                  <span>총매출</span>
+                  {/* 본사의 '총매출'은 각 지점이 올린 이익금의 합계다(05 본사 대시보드와 같은 정의).
+                      그냥 '총매출'이라고만 적으면 전 지점 매출 합계로 오해한다 — 괄호로 밝힌다(2026-07-23 사용자 지적). */}
+                  <span>총매출 (지점 이익금 합계)</span>
                   <strong>{formatNumber(hqOverview.총매출)}</strong>
                   <small>
                     <SummaryMomText mom={hqOverview.lines.find((l) => l.label === "총매출")?.mom || "—"}
@@ -390,21 +439,9 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                 </div>
               </section>
 
-              {/* 그래프와 손익계산서를 한 줄에 나란히 — 각각 전폭을 먹지 않게(2026-07-22 사용자 지시) */}
+              {/* 그래프와 손익계산서를 한 줄에 나란히 — 각각 전폭을 먹지 않게(2026-07-22 사용자 지시).
+                  왼쪽=손익계산서 / 오른쪽=추이 (2026-07-23 사용자 지시로 좌우 교환 — 지점 손익계산서 탭과 같은 순서). */}
               <div className="admin-chart-grid">
-              <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-                <h2 className="admin-pill-title">매출 &amp; 이익 추이</h2>
-                <PnlComboChart
-                  showValues
-                  lineZeroBase={false}
-                  categories={hqTrendMonths}
-                  series={[
-                    { label: "매출", tone: "alice", values: hqTrendVals((f) => f.display매출) },
-                    { label: "이익", tone: "vanilla", values: hqTrendVals((f) => f.이익금) },
-                  ]}
-                  line={{ label: "이익률(%)", values: hqTrendVals((f) => f.이익률) }} />
-              </section>
-
               <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
                 <h2 className="admin-pill-title">손익계산서</h2>
                 <div className="overflow-x-auto">
@@ -427,6 +464,20 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                   </table>
                 </div>
                 <p className="text-gray-400">비율은 총매출 대비(이익금만 전사 총매출 대비) · 총지출·이익금의 전월대비는 비율 증감(%p)</p>
+              </section>
+
+              <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+                <h2 className="admin-pill-title">매출 &amp; 이익 추이</h2>
+                {/* '매출' 계열도 위 KPI·손익계산서와 같은 값(전 지점 이익금 합계)이다 — 범례에 그대로 밝힌다. */}
+                <PnlComboChart
+                  showValues
+                  lineZeroBase={false}
+                  categories={hqTrendMonths}
+                  series={[
+                    { label: "매출(지점 이익금 합계)", tone: "alice", values: hqTrendVals((f) => f.display매출) },
+                    { label: "이익", tone: "vanilla", values: hqTrendVals((f) => f.이익금) },
+                  ]}
+                  line={{ label: "이익률(%)", values: hqTrendVals((f) => f.이익률) }} />
               </section>
               </div>
             </div>
@@ -698,6 +749,14 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
 
       {/* ─────────────── ③ 지점 손익계산서 ───────────────
           손익 종합·본사 종합과 같은 타이포(11px)·컴팩트 KPI·2열 배치로 통일(2026-07-22 사용자 지시) */}
+      {/* [바깥에 둔다] 아래 본문은 '그 달 그 지점 데이터가 없으면' 안내문만 렌더한다. 지점 선택줄이 그 안에 있으면
+          데이터 없는 지점을 고른 순간 선택줄이 사라져 다른 지점으로 돌아올 수 없다. */}
+      {/* 카드 껍데기는 위 필터 바와 같은 문법(admin-sales-filter-section = 검정 테두리 카드). */}
+      {!loading && view === "branch" && branchNames.length > 0 && (
+        <section className="admin-sales-filter-section bg-white rounded-2xl border border-gray-100 px-3 py-2">
+          <BranchTabPicker branches={branchNames} value={branch} onChange={setBranchPick} />
+        </section>
+      )}
       {!loading && view === "branch" && (
         branchRow === null ? (
           curRows.length > 0 && <p className="text-xs font-black text-rose-600">{branch}의 {month} 데이터가 없습니다.</p>
@@ -786,7 +845,7 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
               {(() => {
                 const pair = trendPairOf(branch, (mr) => (mr[0] ? foodRateOf(mr[0]) : null), (mr) => (mr[0] ? laborRateOf(mr[0]) : null));
                 return (
-                  <SalesLineChart compact autoScale granularity="month" currentLabel="식재료율" compareLabel="인건비율"
+                  <SalesLineChart compact autoScale showValues granularity="month" currentLabel="식재료율" compareLabel="인건비율"
                     formatAxis={percentAxis} formatValue={percentValue}
                     current={pair.a} compare={pair.b} />
                 );
