@@ -21,6 +21,14 @@ export interface UserProfile {
   // 관리자 화면 탭 권한(2026-07-25 신설). 옵셔널 — 필드가 없으면 "all"로 취급한다(기존 관리자 문서 하위호환).
   // NEW_PROFILE_DEFAULTS에는 절대 넣지 말 것: firestore.rules create hasOnly 목록과 어긋나면 가입이 죽는다.
   allowedAdminTabs?: string[] | "all";
+  // 정직원 급여대장 열람 허용 지점(2026-07-27). 개인정보(급여·주민번호·계좌)라 별도 권한으로 격리한다.
+  // "all"=총관리자(전 지점), string[]=해당 지점만, 없음/[]=열람 불가(기본).
+  // 옵셔널 — 기존 문서에는 없다(없으면 열람 불가로 취급). firestore.rules의 canReadSalary와 짝.
+  salaryBranches?: string[] | "all";
+  // 위 목록의 encodeURIComponent 형태. shared_data 문서 ID가 인코딩되어 저장되는데
+  // Firestore 규칙에는 URL 디코딩이 없어 한글 지점명을 원문과 비교할 수 없다 —
+  // 그래서 규칙이 그대로 비교할 수 있도록 인코딩본을 함께 저장한다(saveSalaryBranches가 항상 같이 갱신).
+  salaryBranchesEncoded?: string[] | "all";
   status: "active" | "suspended";
   createdAt: string;
   reviewedByAdmin: boolean;
@@ -91,7 +99,20 @@ export async function listUserProfiles(): Promise<UserProfile[]> {
  */
 export async function updateUserProfile(uid: string, patch: Partial<Omit<UserProfile, "uid" | "createdAt" | "email">>): Promise<void> {
   const { updateDoc } = await import("firebase/firestore");
-  await updateDoc(doc(db, "users", uid), patch);
+  await updateDoc(doc(db, "users", uid), withEncodedSalaryBranches(patch));
+}
+
+/**
+ * salaryBranches를 쓸 때 규칙이 비교할 인코딩본(salaryBranchesEncoded)을 항상 함께 채운다.
+ * 둘이 어긋나면 화면과 규칙의 판정이 달라지므로(권한이 있는데 데이터가 막히는 사고) 반드시 이 경로로만 저장할 것.
+ */
+export function withEncodedSalaryBranches<T extends { salaryBranches?: string[] | "all" }>(patch: T): T & { salaryBranchesEncoded?: string[] | "all" } {
+  if (!("salaryBranches" in patch) || patch.salaryBranches === undefined) return patch;
+  const value = patch.salaryBranches;
+  return {
+    ...patch,
+    salaryBranchesEncoded: value === "all" ? "all" : value.map((b) => encodeURIComponent(String(b || "").trim()))
+  };
 }
 
 /**

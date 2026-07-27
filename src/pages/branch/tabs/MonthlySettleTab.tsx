@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AlertTriangle, BookOpen, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
+import { useAuthContext } from "../../../contexts/AuthContext";
+import { canReadSalaryBranch } from "../../../utils/salaryAccess";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
 import { fullTimeSalaryGuideSteps, purchaseSalesGuideSteps } from "../helpers/guideSteps";
@@ -24,6 +26,8 @@ interface MonthlySettleTabProps {
 }
 
 export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: MonthlySettleTabProps) {
+  // 급여대장 열람 권한 판정용 세션 — 마감 컨트롤 노출/실행 가드에 쓴다(자식 탭과 같은 판정).
+  const { user } = useAuthContext();
   const [adminSettings, setAdminSettings] = useState(() => {
     const saved = localStorage.getItem("erp_admin_settings");
     if (saved) {
@@ -283,6 +287,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     }
     // 급여대장/매입매출은 마감 확정 전에 이 기기의 입력을 서버에 반영 보장(실패 시 중단).
     if (section === "salary") {
+      // 열람 권한이 없으면 급여 데이터를 읽거나 쓰지 않는다 — flush가 먼저 서버 조회/저장을 시도하므로
+      // 그 앞에서 fail-closed로 막는다(권한 없는 계정이 마감 버튼으로 급여 요청을 보내는 우회 차단).
+      if (!canReadSalaryBranch(user, branchName)) {
+        triggerToast("정직원 급여대장 열람 권한이 없어 마감할 수 없습니다. 본사 관리자에게 문의해주세요.", "error");
+        return;
+      }
       const flush = await flushFullTimeSalaryForClose(branchName, selectedMonth);
       if (flush.blocked) {
         triggerToast("정직원 급여대장에 저장된 데이터가 없거나 서버 반영에 실패했습니다. 급여대장 탭에서 데이터를 확인·입력한 뒤 다시 시도해주세요.", "error");
@@ -328,9 +338,14 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 저장에 실패했습니다.", "error");
     }
-  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts]);
+  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts, user]);
 
   const handleEdit = useCallback(async (section: CloseSection) => {
+    // 급여 섹션의 마감상태 변경도 열람 권한이 있어야 한다 — 낡은 화면/세션으로 재개·취소하는 우회 차단(fail-closed).
+    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
+      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+      return;
+    }
     // '마감수정' = 편집을 연다. 사유는 이제 수정 전이 아니라, 수정을 마치고 '마감제출'(재확정)할 때 인라인 사유칸으로 받는다.
     // 확정본을 여는지(=사유 필요) 여부는 saveSectionClose가 '서버 최신값' 기준으로 판정해 editedAfterConfirm에 남기고,
     // 제출 시 그 값을 보고 인라인 사유칸이 뜬다. 확정 여부 서버 재조회는 saveSectionClose 내부(serverReopen)가 수행한다.
@@ -341,7 +356,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 수정 상태 저장에 실패했습니다.", "error");
     }
-  }, [saveSectionClose, selectedMonth, triggerToast]);
+  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName]);
 
   const resetMonthlyPurchaseAmounts = useCallback(async () => {
     let purchaseRows: any[] = [];
@@ -369,6 +384,11 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   }, [branchName, selectedMonth]);
 
   const handleCancel = useCallback(async (section: CloseSection) => {
+    // 급여 섹션 마감취소도 열람 권한 필요(handleEdit와 동일한 fail-closed 가드).
+    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
+      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+      return;
+    }
     if (section === "purchase") {
       if (!window.confirm("매입매출 마감을 취소하고 거래처 금액 입력값만 초기화할까요?\n거래처명, 은행, 계좌, 기타내용은 유지됩니다.")) return;
       // 초기화 실패 시 되돌릴 '취소 직전 상태'를 미리 캡처한다(하드코딩 confirmed 금지 — 실제 이전 상태로 복원).
@@ -410,9 +430,14 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 취소에 실패했습니다.", "error");
     }
-  }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast]);
+  }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast, user, branchName]);
 
   const handleCancelEdit = useCallback(async (section: CloseSection) => {
+    // 급여 섹션 '수정취소'도 열람 권한 필요(handleEdit/handleCancel와 동일한 fail-closed 가드).
+    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
+      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+      return;
+    }
     try {
       // 마감수정 취소 = 수정을 제출하지 않고 확정으로 되돌림 → 사유를 요구하지 않는다(cancelEdit). 입력하던 사유 초안도 비운다.
       await saveSectionClose(section, "confirmed", "", { cancelEdit: true });
@@ -423,7 +448,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 수정 취소에 실패했습니다.", "error");
     }
-  }, [saveSectionClose, selectedMonth, triggerToast]);
+  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName]);
 
   useEffect(() => {
     fetchHistory();
@@ -536,7 +561,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             />
             {/* '이력 갱신' 버튼은 없앴다 — 탭을 열 때와 결산월을 바꿀 때 자동으로 다시 불러오고,
                 지출·현금관리 탭에서 수정·삭제하면 그쪽에서 refreshHistory를 부른다. 손으로 누를 일이 없다. */}
-            {activeSubTab === "fullTimeSalary" && renderCloseControls("salary")}
+            {/* 급여대장 열람 권한이 없으면 마감 컨트롤 자체를 숨긴다(위 handleConfirm 가드와 이중 방어). */}
+            {activeSubTab === "fullTimeSalary" && canReadSalaryBranch(user, branchName) && renderCloseControls("salary")}
             {activeSubTab === "purchaseSales" && renderCloseControls("purchase")}
           </div>
           <div className="flex items-center gap-2">

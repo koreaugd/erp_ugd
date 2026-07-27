@@ -17,6 +17,9 @@ export interface UserSession {
   allowedTabs: string[] | "all";      // pin 로그인은 "all"
   allowedBranches: string[] | "all";  // pin 로그인은 "all"
   allowedAdminTabs: string[] | "all"; // 관리자 화면 탭 권한. pin 로그인/지점 role은 "all"
+  // 정직원 급여대장 열람 허용 지점. "all"=전 지점, string[]=해당 지점만, []=열람 불가.
+  // PIN 로그인은 전환기 호환을 위해 "all"(기존 동작 유지 — 비밀번호 잠금이 1차 방어).
+  salaryBranches: string[] | "all";
   pinHash: string;
 }
 
@@ -146,7 +149,9 @@ export function useAuth() {
                 role: profile.role,
                 allowedTabs: profile.role === "admin" ? "all" : profile.allowedTabs,
                 allowedBranches: profile.allowedBranches,
-                allowedAdminTabs: profile.role === "admin" ? (profile.allowedAdminTabs ?? "all") : "all"
+                allowedAdminTabs: profile.role === "admin" ? (profile.allowedAdminTabs ?? "all") : "all",
+                // 급여대장 권한도 매번 fresh 프로필에서 다시 읽는다 — 관리자가 회수하면 새로고침 시 반영된다.
+                salaryBranches: profile.salaryBranches ?? []
               };
               sessionStorage.setItem(SESSION_KEY, JSON.stringify(freshSession));
               setUser(freshSession);
@@ -218,6 +223,12 @@ export function useAuth() {
           if (parsedSession && parsedSession.loginType && parsedSession.branchName) {
             // 구버전 v2 세션(allowedAdminTabs 필드 신설 이전) 복구 대비 — 없으면 "all"로 보정.
             if (parsedSession.allowedAdminTabs === undefined) parsedSession.allowedAdminTabs = "all";
+            // 구버전 v2 세션(salaryBranches 신설 이전) 보정 — 배포 직후 열려 있던 세션이 급여대장에서 튕기는 것을 막는다.
+            // PIN 로그인은 전환기 호환으로 "all"(규칙의 isPinAccount와 같은 취급), 개인 계정은
+            // 아래 recoverPersonalSession이 fresh 프로필 값으로 다시 채우므로 임시로 빈 목록을 둔다.
+            if (parsedSession.salaryBranches === undefined) {
+              parsedSession.salaryBranches = parsedSession.loginType === "pin" ? "all" : [];
+            }
             hasV2Session = true;
             if (parsedSession.loginType === "personal") {
               await recoverPersonalSession(parsedSession);
@@ -291,6 +302,8 @@ export function useAuth() {
         allowedTabs: "all",
         allowedBranches: "all",
         allowedAdminTabs: "all",
+        // PIN 로그인은 전환기 동안 기존 동작 유지 — 급여대장은 탭의 비밀번호 잠금이 1차 방어.
+        salaryBranches: "all",
         pinHash
       };
 
@@ -487,6 +500,8 @@ export function useAuth() {
         allowedTabs: profile.role === "admin" ? "all" : profile.allowedTabs,
         allowedBranches: profile.allowedBranches,
         allowedAdminTabs: profile.role === "admin" ? (profile.allowedAdminTabs ?? "all") : "all",
+        // 급여대장 열람 권한 — 미지정(기존 문서)은 열람 불가로 취급한다(fail-closed).
+        salaryBranches: profile.salaryBranches ?? [],
         pinHash
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));

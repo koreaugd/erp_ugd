@@ -49,6 +49,8 @@ type EditState = {
   allowedTabs: string[] | "all";
   allowedBranches: string[] | "all";
   allowedAdminTabs: string[] | "all";
+  // 정직원 급여대장 열람 허용 지점. "all"=총관리자(전 지점), []=열람 불가(기본).
+  salaryBranches: string[] | "all";
 };
 
 function summarizeTabs(allowedTabs: string[] | "all"): string {
@@ -116,6 +118,8 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
       allowedTabs: profile.allowedTabs === "all" ? "all" : [...profile.allowedTabs],
       allowedBranches: profile.allowedBranches === "all" ? "all" : [...profile.allowedBranches],
       allowedAdminTabs: profile.allowedAdminTabs === undefined || profile.allowedAdminTabs === "all" ? "all" : [...profile.allowedAdminTabs],
+      // 미지정(기존 문서)은 열람 불가([])로 시작 — 권한은 관리자가 명시적으로 준다(fail-closed).
+      salaryBranches: profile.salaryBranches === "all" ? "all" : [...(profile.salaryBranches ?? [])],
     });
   };
 
@@ -156,6 +160,16 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
   const toggleAllBranches = (checked: boolean) => {
     if (!edit) return;
     setEdit({ ...edit, allowedBranches: checked ? "all" : [] });
+  };
+  // 급여대장 열람 지점 — 일반 지점 권한(allowedBranches)과 별개로 관리한다(급여는 개인정보라 더 좁게).
+  const toggleSalaryBranch = (branchName: string) => {
+    if (!edit || edit.salaryBranches === "all") return;
+    const has = edit.salaryBranches.includes(branchName);
+    setEdit({ ...edit, salaryBranches: has ? edit.salaryBranches.filter((b) => b !== branchName) : [...edit.salaryBranches, branchName] });
+  };
+  const toggleAllSalaryBranches = (checked: boolean) => {
+    if (!edit) return;
+    setEdit({ ...edit, salaryBranches: checked ? "all" : [] });
   };
 
   const save = async () => {
@@ -450,6 +464,31 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
                       checked={edit.allowedBranches === "all" || edit.allowedBranches.includes(b.branchName)}
                       disabled={edit.allowedBranches === "all"}
                       onChange={() => toggleBranch(b.branchName)}
+                    />
+                    {b.branchName}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* 정직원 급여대장 열람 지점 — 급여·주민번호·계좌가 담긴 자료라 일반 지점 권한과 분리해 좁게 준다.
+                체크한 지점만 그 계정이 급여대장을 볼 수 있다(firestore.rules canReadSalary가 실제로 차단). */}
+            <div className="space-y-2 rounded-xl border border-gray-200 bg-[var(--admin-ghost)] p-4">
+              <div className="space-y-0.5">
+                <p className="text-[11px] font-black text-gray-700">정직원 급여대장 열람 지점</p>
+                <p className="text-[10px] font-bold text-zinc-500">체크한 지점의 급여대장만 열람할 수 있습니다. 아무것도 체크하지 않으면 열람할 수 없습니다.</p>
+              </div>
+              <label className="flex items-center gap-2 text-[11px] font-black text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={edit.salaryBranches === "all"} onChange={(e) => toggleAllSalaryBranches(e.target.checked)} />
+                전체 지점 (총관리자)
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {branches.map((b) => (
+                  <label key={b.branchId} className={`flex items-center gap-1.5 text-[11px] font-bold ${edit.salaryBranches === "all" ? "text-zinc-300" : "text-gray-600 cursor-pointer"}`}>
+                    <input type="checkbox"
+                      checked={edit.salaryBranches === "all" || edit.salaryBranches.includes(b.branchName)}
+                      disabled={edit.salaryBranches === "all"}
+                      onChange={() => toggleSalaryBranch(b.branchName)}
                     />
                     {b.branchName}
                   </label>
