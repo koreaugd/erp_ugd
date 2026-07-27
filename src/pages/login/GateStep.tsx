@@ -143,8 +143,8 @@ export default function GateStep({ profile }: { profile: UserProfile }) {
         className="w-full rounded-xl bg-black px-4 py-4 text-sm font-bold text-white hover:bg-zinc-800 disabled:opacity-50">
         {loading || checkingVersion ? <LoadingSpinner size="sm" light /> : "입장하기"}
       </button>
-      <button type="button" onClick={logout} className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4">
-        로그아웃 (다른 계정으로 로그인)
+      <button type="button" onClick={() => logout({ forgetGoogle: true })} className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4">
+        다른 계정으로 로그인
       </button>
     </form>
   );
