@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/MonthlyFullTimeSalarySubTab.tsx
 // 월말마감정산 - 정직원 급여대장 탭 (비밀번호 잠금 + 직원현황 자동연동, 전 컬럼 수정 가능)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Lock, Check, ShieldCheck, X } from "lucide-react";
+import { Plus, Check, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch } from "../../../utils/salaryAccess";
@@ -32,10 +32,6 @@ interface FullTimeSalaryRow {
   memo: string;
   isManual?: boolean;
 }
-
-// 잠금 해제 상태(모듈 전역). 급여대장 탭을 떠나면(언마운트) / 화면이 오래 숨겨졌다 열리면 아래 effect가 false로 되돌려 재잠금한다.
-let fullTimeSalaryUnlocked = false;
-
 
 const num = (v: string) => Number(cleanNumeric(String(v || ""))) || 0;
 // 연장근무 '시간'은 소수(예: 2.5)를 허용하므로 cleanNumeric(정수화) 대신 소수점 하나만 남긴다.
@@ -154,74 +150,9 @@ export function MonthlyFullTimeSalarySubTab({
   // 급여대장 열람 권한 판정용 세션(계정별 허용 지점) — 판정은 canReadSalaryBranch가 한다.
   const { user } = useAuthContext();
 
-  // ---- 비밀번호 잠금 (기기 간 일관성을 위해 공유 백엔드의 비밀번호를 우선 사용, 실패 시 로컬/기본값) ----
-  const [unlocked, setUnlocked] = useState(fullTimeSalaryUnlocked);
-  const [passInput, setPassInput] = useState("");
-  const [passError, setPassError] = useState("");
-  const [passcode, setPasscode] = useState<string>("");
-  const [passStatus, setPassStatus] = useState<"loading" | "ready" | "error" | "unconfigured">("loading");
-
-  // 비밀번호는 캐시가 아닌 '서버 값'으로 검증한다. 서버에 실제로 비밀번호가 설정돼 있어야만(ready) 해제를 허용한다.
-  // - 서버에 비밀번호 미설정 → unconfigured (하드코딩 기본값으로 뚫지 않고 관리자 설정 요구)
-  // - 서버 도달 실패 → error (스테일 캐시로 해제 금지, 재시도 요구)
-  const loadPasscode = useCallback(() => {
-    setPassStatus("loading");
-    gasClient.getSharedDataFromServer<any>("admin_settings")
-      .then((remote) => {
-        const pc = remote && typeof remote === "object" ? String(remote.fullTimeSalaryPasscode ?? "").trim() : "";
-        // 빈값 또는 과거 하드코딩 기본값("1234")은 '설정 안 됨'으로 간주 → 레거시 서버 값이 유효하게 남지 않도록 거부.
-        if (pc !== "" && pc !== "1234") {
-          setPasscode(pc);
-          setPassStatus("ready");
-        } else {
-          setPassStatus("unconfigured");
-        }
-      })
-      .catch(() => setPassStatus("error"));
-  }, []);
-
-  // 열람 권한이 있을 때만 보안 설정을 조회한다 — 권한 없는 계정이 이 탭을 열어도 백엔드 요청이 나가지 않게(격리 목적).
-  useEffect(() => {
-    if (!canReadSalaryBranch(user, branchName)) return;
-    loadPasscode();
-  }, [loadPasscode, user, branchName]);
-
-  // 보안 재잠금: (1) 급여대장 탭을 떠나면(언마운트) 다시 잠근다. (2) 화면이 1분 이상 숨겨졌다 다시 열리면
-  //   (노트북을 닫았다 다른 사람이 여는 경우 등) 다시 잠근다. 잠깐 alt-tab에는 잠기지 않는다.
-  useEffect(() => {
-    let hiddenAt = 0;
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        hiddenAt = Date.now();
-      } else if (hiddenAt && Date.now() - hiddenAt > 60000) {
-        fullTimeSalaryUnlocked = false;
-        setUnlocked(false);
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      fullTimeSalaryUnlocked = false; // 탭을 떠나면 재잠금
-    };
-  }, []);
-
-  const tryUnlock = () => {
-    if (passStatus !== "ready") {
-      setPassError(
-        passStatus === "loading" ? "보안 설정을 불러오는 중입니다. 잠시만 기다려주세요."
-        : passStatus === "unconfigured" ? "급여대장 열람 비밀번호가 서버에 설정돼 있지 않습니다. 관리자 설정에서 먼저 비밀번호를 설정해주세요."
-        : "보안 설정을 서버에서 확인하지 못했습니다. 네트워크 확인 후 '다시 시도'를 눌러주세요."
-      );
-      return;
-    }
-    if (passInput.trim() === passcode) {
-      fullTimeSalaryUnlocked = true;
-      setUnlocked(true);
-      setPassError("");
-    } else {
-      setPassError("비밀번호가 올바르지 않습니다.");
-    }
-  };
+  // 잠금(역할 권한 + 비밀번호)은 이 탭을 감싸는 SalaryAccessGate가 맡는다.
+  // 이 컴포넌트가 마운트됐다는 것은 이미 두 관문을 통과했다는 뜻이다.
+  // 아래 데이터 로드에 남아 있는 canReadSalaryBranch 확인은 이중 방어로 그대로 둔다.
 
   // ---- 데이터 상태 ----
   const [rows, setRows] = useState<FullTimeSalaryRow[]>([]);
@@ -495,83 +426,9 @@ export function MonthlyFullTimeSalarySubTab({
   // 엑셀식 칸 이동. 행은 직원명부에서 오므로 행 추가는 없다(onAppendRow 없음).
   // 편집 가능한 칸만 센다 — '총 금액'은 자동계산이라 커서가 서지 않는다.
   //
-  // 반드시 아래 잠금 화면 return보다 위에 있어야 한다.
-  // 아래에 두면 잠겨 있을 때는 이 훅이 호출되지 않다가 잠금을 풀면 갑자기 호출되어
-  // 훅 순서가 바뀌고 React가 터진다.
+  // 잠금 화면(역할 권한·비밀번호)은 이 컴포넌트 밖 SalaryAccessGate가 맡는다 — 잠긴 동안에는 이 컴포넌트가
+  // 아예 마운트되지 않으므로, 예전처럼 "훅을 잠금 return 위로 올려야 하는" 제약은 사라졌다.
   const { cellProps, isActive } = useSheetKeyboardNav({ rowCount: rows.length, colCount: 14 });
-
-  // ---- 열람 권한 화면 ----
-  // 계정에 이 지점의 급여대장 열람 권한이 없으면 비밀번호 단계까지 가지 않고 안내만 보여준다.
-  // 화면 차단은 안내일 뿐이고 실제 차단은 firestore.rules(canReadSalary)가 한다 — 둘의 판정 기준을 salaryAccess로 공유한다.
-  if (!canReadSalaryBranch(user, branchName)) {
-    return (
-      <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6" data-guide="fulltime-salary-table">
-        <div className="w-14 h-14 rounded-2xl bg-zinc-100 flex items-center justify-center text-zinc-500 mb-4">
-          <Lock className="w-7 h-7" />
-        </div>
-        <h3 className="text-sm font-black text-zinc-900">열람 권한이 없습니다</h3>
-        <p className="mt-2 text-xs font-bold text-zinc-500 text-center leading-relaxed">
-          {branchName} 지점의 정직원 급여대장을 열람할 권한이 없습니다.
-          <br />
-          열람이 필요하면 본사 관리자에게 요청해 주세요.
-        </p>
-      </div>
-    );
-  }
-
-  // ---- 잠금 화면 ----
-  // 개발 서버(localhost:3000, npm run dev)에서는 비밀번호 없이 열람한다 — 테스트 편의.
-  // import.meta.env.DEV는 vite build(배포본)에서 자동으로 false가 되므로, 배포하면 다시 비밀번호를 요구한다.
-  // (hostname 판별을 쓰면 안 된다 — 이 프로젝트의 hostname 목록엔 운영(run.app)도 들어 있다.)
-  const devUnlockBypass = Boolean((import.meta as any).env?.DEV);
-  if (!unlocked && !devUnlockBypass) {
-    return (
-      // data-guide: 작성방법 말풍선(fulltime-salary-table)의 앵커는 잠금 해제 후의 표에 있다.
-      // 잠금 화면에도 같은 앵커를 달아, 잠긴 상태에서 '작성방법 보기'를 눌러도 말풍선이 여기 위에 뜨게 한다
-      // (앵커가 없으면 GuideCallouts가 조용히 건너뛰어 버튼이 무반응처럼 보인다).
-      <div className="flex flex-col items-center justify-center animate-fade-in min-h-[320px] py-6" data-guide="fulltime-salary-table">
-        <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-4">
-          <Lock className="w-7 h-7" />
-        </div>
-        <h3 className="text-sm font-black text-zinc-900">정직원 급여대장 - 보안 잠금</h3>
-        <div className="flex items-center gap-2 mt-5">
-          <input
-            type="password"
-            value={passInput}
-            onChange={(e) => { setPassInput(e.target.value); setPassError(""); }}
-            onKeyDown={(e) => { if (e.key === "Enter") tryUnlock(); }}
-            placeholder="비밀번호"
-            className="p-2.5 px-4 border border-gray-200 rounded-xl text-sm font-bold text-center tracking-widest focus:outline-none focus:border-indigo-500"
-            autoFocus
-          />
-          {passStatus === "error" ? (
-            <button
-              onClick={loadPasscode}
-              className="p-2.5 px-5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-black flex items-center gap-1.5 cursor-pointer transition-colors"
-            >
-              <ShieldCheck className="w-4 h-4" /> 다시 시도
-            </button>
-          ) : (
-            <button
-              onClick={tryUnlock}
-              disabled={passStatus !== "ready"}
-              className="p-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-black flex items-center gap-1.5 cursor-pointer transition-colors disabled:bg-indigo-300 disabled:cursor-not-allowed"
-            >
-              <ShieldCheck className="w-4 h-4" /> {passStatus === "ready" ? "열람" : passStatus === "unconfigured" ? "설정 필요" : "불러오는 중"}
-            </button>
-          )}
-        </div>
-        {passError
-          ? <p className="text-[11px] text-rose-600 font-bold mt-3">{passError}</p>
-          : passStatus === "unconfigured"
-          ? <p className="text-[11px] text-rose-600 font-bold mt-3">관리자 설정에서 급여대장 열람 비밀번호를 먼저 설정해주세요.</p>
-          : passStatus === "error"
-          ? <p className="text-[11px] text-rose-600 font-bold mt-3">보안 설정을 서버에서 확인하지 못했습니다. '다시 시도'를 눌러주세요.</p>
-          : null}
-        <p className="text-[10px] text-gray-300 font-semibold mt-4">비밀번호는 관리자 설정에서 변경할 수 있습니다.</p>
-      </div>
-    );
-  }
 
   // ---- 급여대장 표 (엑셀형 격자, 파트타이머 급여대장과 동일 규칙) ----
   // sheet-cell-input: index.css에서 전역 input 배경/테두리 !important를 ID 특이성(#fulltime-salary-subtab)으로

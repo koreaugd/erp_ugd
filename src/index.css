@@ -1804,36 +1804,131 @@ input[type=number] {
   color: var(--branch-black) !important;
 }
 
-/* Branch dashboard: mirror the admin reference palette and section treatment. */
+/* Branch dashboard: mirror the admin reference palette and section treatment.
+   2026-07-28 — 위치 선택자(`> div:first-child`, `> section:nth-of-type(1)`, `> div > section`)를 걷어내고
+   카드마다 붙인 클래스로 못 박는다. 위치로 색을 주면 화면 구성이 바뀔 때마다 엉뚱한 카드가 물든다
+   (미결·공지를 2열로 옮기고 매출 그래프를 더하면서 실제로 그렇게 됐다). */
 .branch-redesign .branch-dashboard-tab {
   color: var(--branch-black);
 }
 
-.branch-redesign .branch-dashboard-tab > div:first-child,
-.branch-redesign .branch-dashboard-tab > section,
-.branch-redesign .branch-dashboard-tab > div > section {
-  border: 1px solid var(--branch-black) !important;
-  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045) !important;
+/* 제목 알약은 공용 클래스 `.branch-pill-title` 하나만 쓴다(DESIGN.md §6-0-2 [P0]).
+   여기에 같은 값을 다시 쓰면 탭마다 제목 규칙이 흩어지던 옛 사고가 되풀이된다. */
+
+/* 섹션 카드 규격 — DESIGN.md §4: 모서리 28px · 1px 검정 테두리 · 안쪽 여백 16px(p-4). */
+.branch-redesign .branch-dashboard-tab .branch-dash-card {
+  border: 1px solid var(--branch-black);
+  border-radius: 28px;
+  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.branch-redesign .branch-dashboard-tab > div:first-child {
-  background: var(--branch-alice) !important;
+/* 섹션 카드 바탕은 셋 다 고스트 — 제목 알약(바닐라)이 카드 위에서 또렷하게 보여야 한다.
+   카드마다 배경색을 달리하면 알약이 같은 색 위에 얹혀 묻힌다(바닐라 카드 위 바닐라 알약). */
+.branch-redesign .branch-dashboard-tab .branch-dash-issues,
+.branch-redesign .branch-dashboard-tab .branch-dash-notices,
+.branch-redesign .branch-dashboard-tab .branch-dash-chart,
+.branch-redesign .branch-dashboard-tab .branch-dash-calendar { background: var(--branch-ghost); }
+
+/* 매출 달력 — 표 헤더는 바닐라+검정 테두리, 칸은 얇은 격자(DESIGN.md §9 표 규칙). */
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-head {
+  background: var(--branch-vanilla);
+  border: 1px solid var(--branch-black);
+  color: var(--branch-black);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 5px 2px;
+  text-align: center;
 }
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
-  background: var(--branch-vanilla) !important;
-  border-color: var(--branch-black) !important;
+/* 매출 그래프와 한 줄에 놓느라 칸이 좁다 — 여백을 줄이고 금액은 10px로 적어 8열이 들어가게 한다. */
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-cell {
+  border: 1px solid rgba(33, 33, 33, 0.14);
+  height: 48px;
+  padding: 3px 4px;
+  vertical-align: top;
+  text-align: right;
 }
 
-.branch-redesign .branch-dashboard-tab > div > section {
-  background: var(--branch-honey) !important;
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-day {
+  display: block;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.55;
 }
 
-.branch-redesign .branch-dashboard-tab section[class*="from-rose"],
-.branch-redesign .branch-dashboard-tab section[class*="to-amber"],
-.branch-redesign .branch-dashboard-tab section[class*="via-white"] {
-  background: var(--branch-vanilla) !important;
-  border-color: var(--branch-black) !important;
+/* 달력 칸이 넓어졌으므로(그래프를 좁히고 달력을 키움) 금액을 다시 11px로 읽기 편하게 둔다. */
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-amount {
+  display: block;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.3;
+  color: var(--branch-black);
+}
+
+/* 미제출은 색이 아니라 글자로 알린다 — 0원과 헷갈리지 않게. */
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-empty {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.35;
+}
+
+/* 최고·최저 배지는 금액 옆이 아니라 아랫줄에 둔다 — 좁은 칸에서 옆에 붙이면 금액이 줄바꿈된다. */
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-tag {
+  display: inline-block;
+  margin-top: 1px;
+  border-radius: 999px;
+  border: 1px solid var(--branch-black);
+  background: var(--branch-vanilla);
+  padding: 0 4px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.branch-redesign .branch-dashboard-tab .branch-dash-cal-weektotal {
+  background: var(--branch-alice);
+  font-weight: 900;
+  vertical-align: middle;
+}
+
+/* 종류 칩·이름 칩 — 흰 바탕에 검정 실선. 색으로 뜻을 나누지 않는다. */
+.branch-redesign .branch-dashboard-tab .branch-dash-chip,
+.branch-redesign .branch-dashboard-tab .branch-dash-name {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(33, 33, 33, 0.25);
+  background: rgba(255, 255, 255, 0.75);
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 900;
+  color: var(--branch-black);
+}
+
+/* 이름 칩은 종류 칩과 나란히 놓이므로 바탕을 채워 구분한다 — 같은 흰 칩이 붙어 있으면 어디까지가
+   '종류'이고 어디부터 '사람 이름'인지 읽히지 않는다(사용자 지적 2026-07-28). */
+.branch-redesign .branch-dashboard-tab .branch-dash-name {
+  font-weight: 700;
+  background: var(--branch-alice);
+  border-color: var(--branch-black);
+}
+
+.branch-redesign .branch-dashboard-tab .branch-dash-mini-button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--branch-black);
+  color: var(--branch-ghost);
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .branch-redesign .branch-dashboard-tab .bg-white,
@@ -2009,54 +2104,15 @@ input[type=number] {
   background: var(--branch-ghost) !important;
 }
 
-.branch-redesign .branch-dashboard-tab > div:first-child {
-  background: var(--branch-alice) !important;
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
-  background: var(--branch-ghost) !important;
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) > div:first-child {
-  border-bottom: 1px solid var(--branch-alice);
-  padding-bottom: 14px;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .inline-flex {
-  background: var(--branch-vanilla) !important;
-  border: 1px solid var(--branch-black) !important;
-  color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > div {
-  background: var(--branch-alice) !important;
-  border: 1px solid var(--branch-black) !important;
-  box-shadow: none !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section {
-  background: var(--branch-ghost) !important;
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section .grid > div,
-.branch-redesign .branch-dashboard-tab > div > section [class*="rounded-2xl"] {
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n + 1) {
-  background: var(--branch-vanilla) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n + 2) {
-  background: var(--branch-alice) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section .grid > div:nth-child(3n) {
-  background: var(--branch-honey) !important;
-}
 
 .branch-redesign #tab-view-settle > div,
 .branch-redesign #tab-view-orders > div,
@@ -2153,38 +2209,11 @@ input[type=number] {
   color: rgba(33, 33, 33, 0.4) !important;
 }
 
-.branch-redesign .branch-dashboard-tab .branch-notice-unchecked {
-  background: var(--branch-vanilla) !important;
-  border-color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-checked {
-  background: var(--branch-honey) !important;
-  border-color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-check-button {
-  background: var(--branch-black) !important;
-  color: var(--branch-ghost) !important;
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-check-button:hover {
-  background: var(--branch-ghost) !important;
-  color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-cancel-button {
-  background: var(--branch-ghost) !important;
-  color: var(--branch-black) !important;
-  border: 1px solid var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-check-name {
-  background: var(--branch-ghost) !important;
-  color: var(--branch-black) !important;
-  border: 1px solid rgba(33, 33, 33, 0.18) !important;
-}
 
 .branch-redesign #staff-attendance-section .branch-standard-hours-select {
   border-color: transparent !important;
@@ -2213,9 +2242,6 @@ input[type=number] {
   background: var(--branch-alice) !important;
 }
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) h3 {
-  margin-top: 0 !important;
-}
 
 .branch-redesign #tab-view-settle [class*="rounded-2xl"],
 .branch-redesign #tab-view-settle [class*="rounded-3xl"] {
@@ -2595,25 +2621,8 @@ html body .branch-redesign.branch-redesign .sticky {
   background-color: #F6F5FA !important;
 }
 
-html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) {
-  background: #F6F5FA !important;
-  background-color: #F6F5FA !important;
-  background-image: none !important;
-}
 
-html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab .branch-notice-card.branch-notice-card.branch-notice-unchecked,
-html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) .grid.grid > .branch-notice-card.branch-notice-card.branch-notice-unchecked {
-  background: #D8DFE9 !important;
-  background-color: #D8DFE9 !important;
-  background-image: none !important;
-}
 
-html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab .branch-notice-card.branch-notice-card.branch-notice-checked,
-html body .branch-redesign.branch-redesign .branch-dashboard-tab.branch-dashboard-tab > section:nth-of-type(1) .grid.grid > .branch-notice-card.branch-notice-card.branch-notice-checked {
-  background: #CFDECA !important;
-  background-color: #CFDECA !important;
-  background-image: none !important;
-}
 
 html body .branch-redesign.branch-redesign #existing-record-warning-box {
   display: block !important;
@@ -2811,34 +2820,10 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   border-radius: 28px !important;
 }
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
-  background: #ffffff !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-card,
-.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-unchecked,
-.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked,
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-unchecked,
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-checked {
-  background: #ffffff !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-card > p:first-child {
-  display: inline-flex !important;
-  width: fit-content !important;
-  background: var(--branch-vanilla) !important;
-  border: 1px solid var(--branch-black) !important;
-  border-radius: 999px !important;
-  padding: 6px 12px !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked > p:first-child {
-  background: var(--branch-honey) !important;
-}
 
-.branch-redesign .branch-dashboard-tab .branch-notice-card .branch-notice-body {
-  color: #212121 !important;
-}
 
 .branch-redesign #staff-attendance-section .branch-division-select.branch-division-idle {
   background: var(--branch-ghost) !important;
@@ -2930,27 +2915,9 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   color: var(--branch-ghost) !important;
 }
 
-.branch-redesign .branch-dashboard-tab > div:first-child,
-.branch-redesign .branch-dashboard-tab > section,
-.branch-redesign .branch-dashboard-tab > div > section {
-  border: 1px solid var(--branch-black) !important;
-  border-radius: 28px !important;
-  box-shadow: 0 18px 44px rgba(33, 33, 33, 0.045) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div:first-child {
-  background: var(--branch-alice) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) {
-  background: #F6F5FA !important;
-  background-color: #F6F5FA !important;
-  background-image: none !important;
-}
 
-.branch-redesign .branch-dashboard-tab > div > section {
-  background: var(--branch-ghost) !important;
-}
 
 .branch-redesign #monthly-settle-tab-root .monthly-action-refresh {
   background: var(--branch-alice) !important;
@@ -3186,27 +3153,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 }
 
 /* Branch reference-palette pass: keep all branch tabs visually aligned with admin. */
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-unchecked,
-.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-unchecked,
-.branch-redesign .branch-dashboard-tab [class*="grid"] > .branch-notice-card.branch-notice-unchecked {
-  background: var(--branch-alice) !important;
-  background-color: var(--branch-alice) !important;
-  background-image: none !important;
-  border-color: var(--branch-black) !important;
-  color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .grid > .branch-notice-card.branch-notice-checked,
-.branch-redesign .branch-dashboard-tab .branch-notice-card.branch-notice-checked,
-.branch-redesign .branch-dashboard-tab [class*="grid"] > .branch-notice-card.branch-notice-checked {
-  background: var(--branch-honey) !important;
-  background-color: var(--branch-honey) !important;
-  background-image: none !important;
-  border-color: var(--branch-black) !important;
-  color: var(--branch-black) !important;
-}
 
-.branch-redesign .branch-dashboard-tab > section:nth-of-type(1) .inline-flex,
 .branch-redesign #tab-view-settle #settle-header-controls label,
 .branch-redesign #tab-view-settle #sales-section > h3,
 .branch-redesign #tab-view-settle #expenses-section h3,
