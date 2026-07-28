@@ -35,6 +35,7 @@ export const DEFAULT_TAXI_THRESHOLDS: TaxiAnomalyThresholds = {
 export const TAXI_ANOMALY_EXEMPT_MEMBERS = new Set([
   "acct1|JE1T6UC2", // [이름]
   "acct1|OGKR9ACV", // [이름]
+  "acct2|NLWTEFS2", // [이름] (사카바단단) — 사용자 지시 2026-07-28
 ]);
 
 export function isAnomalyExempt(accountKey: string, memberId: string | null | undefined): boolean {
