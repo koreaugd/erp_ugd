@@ -1527,10 +1527,10 @@ function AdminDashboardAlertHub({
               법인택시 신청 대기: {alerts.taxiRequests}건
             </button>
           )}
-          {/* [색 주의] rose 는 쓰지 않는다 — 관리자 스코프 자동 치환 목록(amber·orange→바닐라 /
-              blue·sky→엘리스 / emerald·green→허니, DESIGN_ADMIN §3)에 없어서 혼자만 진짜 빨강으로
-              남고, 바로 아래 '조회 실패' 경고 배너(bg-rose-50/text-rose-700)와 구분이 안 된다.
-              버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
+          {/* [색 주의] 알림 버튼에 rose 를 쓰지 않는다 — 관리자 스코프 자동 치환 목록(amber·orange→
+              바닐라 / blue·sky→엘리스 / emerald·green→허니, DESIGN_ADMIN §3)에 없어 혼자만 진짜
+              빨강으로 남고, 아래 '조회 실패' 오류 배너(#FDE2E2/#B91C1C)와 헷갈린다. 빨강은 이 허브에서
+              오류 전용이다. 버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
           {(alerts.taxiAnomalies ?? 0) > 0 && (
             <button onClick={() => onOpen("taxiAnomalies")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black hover:bg-amber-100 cursor-pointer">
               법인택시 점검 대상: {alerts.taxiAnomalies}건
@@ -1544,9 +1544,12 @@ function AdminDashboardAlertHub({
         </div>
       )}
 
-      {/* 조회 실패는 0건과 다르다 — 숨기지 말고 알린다(Codex P1 2026-07-27). */}
+      {/* 조회 실패는 0건과 다르다 — 숨기지 말고 알린다(Codex P1 2026-07-27).
+          [색] 관리자 스코프는 text-rose-*를 검정으로, bg-rose-50 을 연한 토큰으로 죽여서
+          rose 로 칠하면 "오류"로 안 읽힌다 — 오류 색은 hex 로 못 박는다(DESIGN_ADMIN §2-1).
+          같은 파일 '이번 달 미작성 지점' 오류 문구와 같은 색을 쓴다(Codex stop-time 2026-07-29). */}
       {failedCounts.length > 0 && (
-        <div className="rounded-xl bg-rose-50 border border-rose-100 p-3 text-[11px] font-black text-rose-700">
+        <div className="rounded-xl border border-[#C93A3A] bg-[#FDE2E2] p-3 text-[11px] font-black text-[#B91C1C]">
           {failedCounts.join(" · ")} 건수를 불러오지 못했습니다. '새로고침'을 누르거나 해당 탭에서 직접 확인해 주세요.
         </div>
       )}
