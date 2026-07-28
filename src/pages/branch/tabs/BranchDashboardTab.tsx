@@ -52,15 +52,19 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
   };
 
   // 그래프가 보여줄 날짜(어제부터 7일). 이 목록이 곧 서버에서 읽을 문서 수다.
-  const chartDates = useMemo(
-    () => Array.from({ length: CHART_DAYS }, (_, index) => getDateStr(-(CHART_DAYS - index))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 날짜는 '오늘' 기준 고정값이라 매 렌더 새로 만들 필요가 없다.
-    []
+  //
+  // 상태로 두고 load() 때마다 다시 만든다 — 지점은 화면을 하루 종일 열어 두므로,
+  // 마운트 시점에 고정하면 자정을 넘겨도 어제 기준 날짜가 그대로 남는다(Codex 지적 2026-07-28).
+  const [chartDates, setChartDates] = useState<string[]>(
+    () => Array.from({ length: CHART_DAYS }, (_, index) => getDateStr(-(CHART_DAYS - index)))
   );
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      // 새로고침할 때마다 '어제까지 7일'을 다시 계산한다(자정을 넘겨 열어 둔 화면 대응).
+      const dates = Array.from({ length: CHART_DAYS }, (_, index) => getDateStr(-(CHART_DAYS - index)));
+      setChartDates(dates);
       // 근로계약서는 ":" 키가 기준이고 "_" 키는 옛 클라이언트용 사본이다(LaborContractTab과 같은 규칙).
       // 문서 자체가 없을 때(null)만 옛 키를 본다 — 빈 배열([])은 "전부 지웠다"는 유효한 값이라 되살리면 안 된다.
       const readContracts = async (): Promise<LaborContract[]> => {
@@ -75,14 +79,10 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
         gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null),
         gasClient.getSharedData<Record<string, { name: string; checkedAt: string }>>(noticeCheckKey).catch(() => ({})),
         readContracts(),
-        // 지점 마감 기록을 서버에서 통째로 읽는다.
-        //
-        // 왜 '날짜 지정 조회'를 쓰지 않는가: 문서 ID(`지점--날짜`)로 콕 집어 읽으면 읽는 양이 줄지만,
-        // ID 규칙이 생기기 전 만들어진 옛 문서(무작위 ID)를 못 찾아 **마감한 날이 미제출로 보인다.**
-        // 매출 화면에서 그 오류는 재입력·오판으로 이어지므로, 옛 문서 ID를 정리하기 전까지는
-        // 느리더라도 빠짐없는 쪽을 쓴다(사용자에게 별건으로 제안한 정리 작업).
+        // 그래프에 쓸 7일치만 문서 ID로 콕 집어 읽는다 — 지점 전체 히스토리를 훑지 않는다.
+        // (옛 문서 4건을 규칙 ID로 옮겨 규칙 밖 문서가 0건임을 확인한 뒤 이 방식으로 바꿨다. 2026-07-28)
         // 실패는 삼키지 않는다: []를 받으면 "매출 0"과 구분할 수 없어 조회 실패가 조용히 묻힌다.
-        gasClient.getBranchHistoryFromServer(branchName).then(
+        gasClient.getDailyMastersByDates(branchName, dates).then(
           (rows) => ({ ok: true as const, rows }),
           (error) => {
             console.warn("매출 조회 실패:", error);
@@ -230,8 +230,8 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
     if (calendarDates.length === 0) return;
     setCalendarLoading(true);
     setCalendarFailed(false);
-    // 달력도 같은 이유로 지점 전체 조회를 쓴다(위 주석) — 한 달 중 하루라도 빠지면 안 된다.
-    gasClient.getBranchHistoryFromServer(branchName, calendarMonth)
+    // 달력은 그 달 날짜만 읽는다(최대 31건). 달을 넘길 때만 다시 읽는다.
+    gasClient.getDailyMastersByDates(branchName, calendarDates)
       .then((rows) => { if (!cancelled) setCalendarRows(Array.isArray(rows) ? rows : []); })
       .catch((error) => {
         if (cancelled) return;
@@ -241,7 +241,7 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
       })
       .finally(() => { if (!cancelled) setCalendarLoading(false); });
     return () => { cancelled = true; };
-  }, [branchName, calendarMonth, calendarDates.length]);
+  }, [branchName, calendarDates]);
 
   const calendar = useMemo(() => {
     const byDate = new Map<string, number>();
