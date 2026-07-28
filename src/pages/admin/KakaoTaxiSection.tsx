@@ -10,8 +10,9 @@ import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
 import { addMonthsToMonthInputValue } from "../branch/helpers/formatters";
 import {
-  accountLabel, aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES, memberAmountMap,
-  normalizeKakaoTaxiOrders, verifyBranchTotals, verticalLabel, type NormalizedTaxiOrder,
+  accountLabel, aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES,
+  kakaoTaxiAccountForBranch, memberAmountMap, normalizeKakaoTaxiOrders, verifyBranchTotals, verticalLabel,
+  type NormalizedTaxiOrder,
 } from "./helpers/kakaoTaxi";
 import {
   DEFAULT_TAXI_THRESHOLDS, TAXI_ANOMALY_LABEL, detectMemberSurges, flagTaxiOrders,
@@ -29,6 +30,20 @@ const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2]
 const MEMBER_STATUS_LABEL: Record<string, string> = {
   created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "휴직",
 };
+
+// 그룹 선택 드롭다운(등록·승인) 전용 합성 키 — 계정마다 카카오가 그룹 id 를 따로 채번해
+// 서로 다른 계정의 그룹이 같은 id 를 가질 수 있다("계정|id" 로 묶지 않으면 잘못된 계정의
+// 그룹을 골라 그 계정으로 등록·발송하는 사고가 난다 — F1, 코덱스 리뷰 2026-07-28).
+function groupOptionKey(g: KakaoTaxiGroup): string {
+  return `${g.account_key}|${g.id}`;
+}
+function findGroupByOptionKey(groups: KakaoTaxiGroup[], key: string): KakaoTaxiGroup | undefined {
+  const idx = key.indexOf("|");
+  if (idx < 0) return undefined;
+  const accountKey = key.slice(0, idx);
+  const id = key.slice(idx + 1);
+  return groups.find((g) => g.account_key === accountKey && g.id === id);
+}
 
 interface OrdersData {
   month: string;
@@ -259,10 +274,17 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   // 직원 관리는 membersData 에 실려 있다. 전역 상태 하나를 두 로드가 덮어쓰던 이전 방식은 다른 뷰의
   // 조회가 끝난 뒤 탭을 오가면(캐시 표식 때문에 재조회가 안 되어) 실제로는 여전히 값이 빠진 화면인데도
   // 배너가 사라지는 문제가 있었다(코덱스 리뷰 2026-07-28) — 데이터에 귀속시켜 이 문제를 없앤다.
+  // requests 뷰도 membersData 로 승인 UI(그룹·회원 목록)를 그리므로 members 와 같은 배너를 본다
+  // (F4, 코덱스 리뷰 2026-07-28 — 신청 승인 화면이 정작 계정 조회 실패를 경고받지 못하던 문제).
   const visibleAccountErrors =
     view === "orders" || view === "anomaly" ? (ordersData?.accountErrors ?? [])
-    : view === "members" ? (membersData?.accountErrors ?? [])
+    : view === "members" || view === "requests" ? (membersData?.accountErrors ?? [])
     : [];
+  // 배너 라벨 중복 제거 — 회원 조회 실패와 그룹 조회 실패가 같은 계정이면(멤버·그룹 두 API 가 같은
+  // 계정에서 함께 실패) 라벨이 "2계정, 2계정"으로 겹쳐 보인다(F5). 계정(key) 기준 첫 항목만 남긴다.
+  const dedupedAccountErrors = visibleAccountErrors.filter(
+    (e, i) => visibleAccountErrors.findIndex((x) => x.key === e.key) === i
+  );
   const shownMonth = ordersData?.month ?? month;
   const stale = ordersData != null && ordersData.month !== month;
   const branchTotals = useMemo(() => aggregateByBranch(rows), [rows]);
@@ -441,14 +463,15 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (!regGroupId) { window.alert("그룹을 선택해주세요."); return; }
     // 등록 계정은 선택한 그룹이 속한 계정을 그대로 쓴다 — 그룹 드롭다운이 이미 두 계정 그룹을 모두
     // 담고 있으므로, 화면에 계정 선택지를 따로 두지 않고 그룹 선택으로 계정까지 결정한다.
-    const selectedGroup = membersData?.groups.find((g) => g.id === regGroupId);
+    // [F1] 값은 "계정|그룹id" 합성키 — id 만으로 찾으면 계정이 다른 동일 id 그룹을 잘못 집을 수 있다.
+    const selectedGroup = findGroupByOptionKey(membersData?.groups || [], regGroupId);
     if (!selectedGroup) { window.alert("선택한 그룹을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 선택해주세요."); return; }
-    const groupName = groupNameById.get(regGroupId) || regGroupId;
+    const groupName = selectedGroup.name;
     if (!window.confirm(`카카오T 비즈니스에 직원을 등록할까요?\n\n이름: ${regName.trim()}\n휴대전화: ${phone}\n그룹: ${groupName}${regDepartment.trim() ? `\n부서(지점): ${regDepartment.trim()}` : ""}`)) return;
     setRegBusy(true);
     try {
       const input: KakaoTaxiMemberInput = {
-        identifier, mobile_phone: phone, group_ids: [regGroupId], name: regName.trim(),
+        identifier, mobile_phone: phone, group_ids: [selectedGroup.id], name: regName.trim(),
         ...(regDepartment.trim() ? { department: regDepartment.trim() } : {}),
       };
       const created = await gasClient.registerKakaoTaxiMember(input, adminPinHash, selectedGroup.account_key);
@@ -496,8 +519,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   // 그룹 선택지: 활성 그룹 전부 + (비활성이거나 목록에 없는) 직원의 현재 소속 그룹.
   // 현재 소속을 빼고 그리면 저장 시 소속이 조용히 떨어져 나간다 — 반드시 포함해 보여준다.
+  // [F6] 반드시 이 직원이 속한 계정의 그룹으로만 좁힌다 — 안 그러면 다른 계정의 그룹을(계정 간
+  // id 가 우연히 같을 수도 있어) 저장 시 group_ids 에 잘못 태그해 넣을 수 있다(코덱스 리뷰 2026-07-28).
   const editGroupOptions = useMemo(() => {
-    const groups = membersData?.groups ?? [];
+    const groups = editing ? (membersData?.groups ?? []).filter((g) => g.account_key === editing.account_key) : [];
     const known = new Set(groups.map((g) => g.id));
     const extras = (editing?.group_ids || []).filter((id) => !known.has(id)).map((id) => ({ id, name: `(알 수 없는 그룹 ${id})` }));
     return [
@@ -796,11 +821,18 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     return Date.now() - claimed >= STUCK_AFTER_MS;
   };
 
-  /** 등록 신청 승인 폼의 그룹 기본값 — 지점명과 그룹명이 겹치면 추천, 아니면 관리자가 직접 선택 */
+  /**
+   * 등록 신청 승인 폼의 그룹 기본값 — 지점명과 그룹명이 겹치면 추천, 아니면 관리자가 직접 선택.
+   * [F1] 반드시 그 지점이 매핑된 계정의 그룹으로만 좁혀서 이름을 비교한다 — 계정 #1 에도
+   * '사카바단단'·'8번대물집' 이름의 껍데기 그룹이 남아 있어, 계정을 안 가리면 이름매칭이
+   * 그 껍데기 그룹을 집어 엉뚱한 계정으로 등록하는 사고가 난다(코덱스 리뷰 2026-07-28).
+   * 반환값은 승인 드롭다운의 "계정|그룹id" 합성키 — 후보가 없으면 빈 문자열(관리자 직접 선택).
+   */
   const guessGroupId = (branch: string): string => {
-    const enabled = (membersData?.groups || []).filter((g) => g.status === "enabled");
+    const account = kakaoTaxiAccountForBranch(branch);
+    const enabled = (membersData?.groups || []).filter((g) => g.status === "enabled" && g.account_key === account);
     const hit = enabled.find((g) => branch.includes(g.name) || g.name.includes(branch));
-    return hit?.id || "";
+    return hit ? groupOptionKey(hit) : "";
   };
 
   const executeApproveRegister = async () => {
@@ -809,10 +841,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (!request.phone) { window.alert("신청에 휴대전화번호가 없습니다 — 반려 처리해주세요."); return; }
     if (!approveGroupId) { window.alert("등록할 그룹을 선택해주세요."); return; }
     // 등록 계정 = 선택한 그룹의 소속 계정. 신규 등록 폼(submitRegister)과 같은 규칙 —
-    // 그룹 드롭다운이 두 계정 그룹을 모두 담고 있으므로 그룹 선택이 곧 계정 선택이다.
-    const approveGroup = membersData?.groups.find((g) => g.id === approveGroupId);
+    // 그룹 드롭다운 값은 "계정|그룹id" 합성키(F1)이므로 둘 다로 찾는다(id 만으로 찾으면
+    // 계정이 다른 동일 id 그룹을 잘못 집을 수 있다).
+    const approveGroup = findGroupByOptionKey(membersData?.groups || [], approveGroupId);
     if (!approveGroup) { window.alert("선택한 그룹을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 선택해주세요."); return; }
-    const groupName = groupNameById.get(approveGroupId) || approveGroupId;
+    const groupName = approveGroup.name;
     if (!window.confirm(
       `승인하고 카카오T 비즈니스에 등록할까요?\n\n지점: ${request.branchName}\n이름: ${request.name}\n휴대전화: ${request.phone}\n그룹: ${groupName}\n\n등록되면 직원 휴대폰으로 카카오T 인증 알림톡이 발송됩니다.`
     )) return;
@@ -824,7 +857,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       const created = await gasClient.registerKakaoTaxiMember({
         identifier: request.name,
         mobile_phone: request.phone,
-        group_ids: [approveGroupId],
+        group_ids: [approveGroup.id],
         name: request.name,
         department: request.branchName, // 부서=지점명 — 이용내역이 이 지점으로 집계되게 한다
       }, adminPinHash, approveGroup.account_key);
@@ -876,7 +909,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // 그 직원의 account_key 를 쓴다(고정값 "acct1" 을 추측해서 쓰지 않는다: Task 8 전까지는 이 방법뿐).
     // 목록에 없으면(다른 기기에서 이미 삭제됐거나 목록 로드가 실패한 경우) 계정을 알 수 없으니
     // 잘못된 계정으로 삭제를 쏘지 않고 여기서 막는다.
-    const targetMember = (membersData?.members || []).find((x) => x.id === request.memberId);
+    // [F2] id 만으로 찾으면 계정이 다른 동명이인 id 충돌에 걸려 엉뚱한 계정의 직원을 삭제할 수
+    // 있다 — 신청 지점이 매핑된 계정까지 함께 확인해야 그 사고를 막는다(코덱스 리뷰 2026-07-28).
+    const targetMember = (membersData?.members || []).find(
+      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+    );
     if (!targetMember) {
       window.alert("삭제 대상 인원을 현재 직원 목록에서 찾지 못해 어느 계정인지 알 수 없습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
       return;
@@ -935,7 +972,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
    */
   const startUpdateApproval = (request: KakaoTaxiRequest) => {
     if (anyWriteBusy) return;
-    const member = (membersData?.members || []).find((x) => x.id === request.memberId);
+    // [F2] id 만으로 찾으면 계정이 다른 동일 id 충돌에 걸려 엉뚱한 계정의 직원 카드를 열 수 있다 —
+    // 신청 지점이 매핑된 계정까지 함께 확인한다(코덱스 리뷰 2026-07-28).
+    const member = (membersData?.members || []).find(
+      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+    );
     if (!member) {
       window.alert("대상 인원을 인증완료 목록에서 찾지 못했습니다.\n이미 삭제됐거나 미인증 상태일 수 있으니 확인 후 반려 처리해주세요.");
       return;
@@ -1014,11 +1055,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       {needsMonth && ordersError && <div className={ERROR_BANNER}>{ordersError}</div>}
       {view === "members" && membersError && <div className={ERROR_BANNER}>{membersError}</div>}
       {/* 계정 일부 조회 실패 — 지금 뷰가 그리는 데이터(ordersData/membersData)에 실린 값만 본다.
-          로드가 아직 안 끝났거나 실패해 데이터 자체가 없으면(옛 조회의 잔재와 헷갈리지 않게) 보여주지 않는다. */}
-      {((needsMonth && !ordersLoading && ordersData) || (view === "members" && !membersLoading && membersData)) && visibleAccountErrors.length > 0 && (
+          로드가 아직 안 끝났거나 실패해 데이터 자체가 없으면(옛 조회의 잔재와 헷갈리지 않게) 보여주지 않는다.
+          requests 뷰는 membersData 로 승인 UI를 그리므로 members 와 같은 로딩 상태로 게이트한다(F4). */}
+      {((needsMonth && !ordersLoading && ordersData) || ((view === "members" || view === "requests") && !membersLoading && membersData)) && dedupedAccountErrors.length > 0 && (
         <div className={ERROR_BANNER}>
-          {visibleAccountErrors.map((e) => e.label).join(", ")} 조회 실패 — 아래 집계에 해당 계정 내역이 빠져 있습니다.
-          잠시 후 새로고침해주세요. ({visibleAccountErrors[0].message})
+          {dedupedAccountErrors.map((e) => e.label).join(", ")} 조회 실패 — 아래 집계에 해당 계정 내역이 빠져 있습니다.
+          잠시 후 새로고침해주세요. ({dedupedAccountErrors[0].message})
         </div>
       )}
       {needsMonth && !ordersLoading && ordersData && countMismatch && (
@@ -1309,9 +1351,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     <select value={approveGroupId} onChange={(e) => setApproveGroupId(e.target.value)} disabled={requestBusy}
                       className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white disabled:opacity-50" aria-label="등록할 그룹">
                       <option value="">그룹 선택 (필수)</option>
-                      {(membersData?.groups || []).filter((g) => g.status === "enabled").map((g) => (
-                        <option key={g.id} value={g.id}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
-                      ))}
+                      {/* [F1] 이 신청 지점이 매핑된 계정의 그룹만 보여준다 — 계정 #1 의 껍데기 그룹까지
+                          섞어 보여주면 이름이 같은 그룹을 잘못 골라 엉뚱한 계정에 등록하게 된다. */}
+                      {(membersData?.groups || [])
+                        .filter((g) => g.status === "enabled" && g.account_key === kakaoTaxiAccountForBranch(approveTarget.branchName))
+                        .map((g) => (
+                          <option key={groupOptionKey(g)} value={groupOptionKey(g)}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
+                        ))}
                     </select>
                     <button onClick={() => void executeApproveRegister()} disabled={anyWriteBusy}
                       className="h-8 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white disabled:opacity-50">
@@ -1479,8 +1525,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                   <select value={regGroupId} onChange={(e) => setRegGroupId(e.target.value)}
                     className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white" aria-label="그룹 (필수)">
                     <option value="">그룹 선택 (필수)</option>
+                    {/* 관리자 직접 등록은 특정 지점에 매인 폼이 아니라 두 계정 그룹을 모두 보여준다
+                        (라벨에 계정 표시가 이미 있음) — [F1] 값은 "계정|그룹id" 합성키로 충돌을 막는다. */}
                     {(membersData.groups || []).filter((g) => g.status === "enabled").map((g) => (
-                      <option key={g.id} value={g.id}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
+                      <option key={groupOptionKey(g)} value={groupOptionKey(g)}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
                     ))}
                   </select>
                   <input value={regDepartment} onChange={(e) => setRegDepartment(e.target.value)} placeholder="부서/지점명 (선택)"
