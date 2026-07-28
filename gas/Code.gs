@@ -1219,19 +1219,42 @@ function requireKakaoTaxiAdmin(adminPinHash) {
   if (!setting || setting.role !== "admin") throw denied;
 }
 
-function kakaoTaxiCredentials() {
-  const corpId = PROPERTIES.getProperty("KAKAO_T_CORP_ID");
-  const secret = PROPERTIES.getProperty("KAKAO_T_SECRET");
-  if (!corpId || !secret) {
+// 카카오T 비즈니스 계정 레지스트리.
+// 계정 #1 은 기존 속성 이름을 그대로 쓴다 — 속성 재등록 없이 기존 동작이 유지된다.
+// [동기화] server.ts 의 KAKAO_TAXI_ACCOUNTS, src/pages/admin/helpers/kakaoTaxi.ts 의 계정 라벨.
+var KAKAO_TAXI_ACCOUNTS = [
+  { key: "acct1", label: "1계정", corpIdProp: "KAKAO_T_CORP_ID", secretProp: "KAKAO_T_SECRET" },
+  { key: "acct2", label: "2계정", corpIdProp: "KAKAO_T_CORP_ID_2", secretProp: "KAKAO_T_SECRET_2" }
+];
+
+// 스크립트 속성이 등록된 계정만 돌려준다. 코드가 먼저 배포되고 속성 등록이 늦어도
+// 기존 계정만으로 지금과 똑같이 동작한다(배포 순서 사고 방지).
+function kakaoTaxiAccounts() {
+  var out = [];
+  for (var i = 0; i < KAKAO_TAXI_ACCOUNTS.length; i++) {
+    var acc = KAKAO_TAXI_ACCOUNTS[i];
+    var corpId = PROPERTIES.getProperty(acc.corpIdProp);
+    var secret = PROPERTIES.getProperty(acc.secretProp);
+    if (corpId && secret) out.push({ key: acc.key, label: acc.label, corpId: corpId, secret: secret });
+  }
+  if (!out.length) {
     throw new Error("카카오T 연동 정보가 등록되지 않았습니다. Apps Script 스크립트 속성에 KAKAO_T_CORP_ID / KAKAO_T_SECRET 를 등록해주세요.");
   }
-  return { corpId: corpId, secret: secret };
+  return out;
+}
+
+function kakaoTaxiCredentials(accountKey) {
+  var accounts = kakaoTaxiAccounts();
+  for (var i = 0; i < accounts.length; i++) {
+    if (accounts[i].key === accountKey) return accounts[i];
+  }
+  throw new Error("등록되지 않은 카카오T 계정입니다: " + accountKey);
 }
 
 // 서명된 요청 객체를 만든다 — UrlFetchApp.fetch(단건)와 fetchAll(병렬 페이지 수집) 양쪽에서 쓴다.
 // 요청마다 nonce·timestamp 가 달라야 하므로 재사용하지 말고 매번 새로 만들 것.
-function kakaoTaxiBuildRequest(method, path, query, body) {
-  const cred = kakaoTaxiCredentials();
+function kakaoTaxiBuildRequest(accountKey, method, path, query, body) {
+  const cred = kakaoTaxiCredentials(accountKey);
   // [주의] 서명 URL에는 쿼리 파라미터를 넣지 않는다.
   // 넣으면 카카오가 90003("인증 토큰이 유효하지 않습니다")을 돌려준다 — 2026-07-24 실계정에서 확인.
   const signUrl = KAKAO_TAXI_BASE + path;
@@ -1274,8 +1297,8 @@ function kakaoTaxiParseResponse(res) {
   try { return JSON.parse(text); } catch (ignore) { return null; }
 }
 
-function kakaoTaxiFetch(method, path, query, body) {
-  const req = kakaoTaxiBuildRequest(method, path, query, body);
+function kakaoTaxiFetch(accountKey, method, path, query, body) {
+  const req = kakaoTaxiBuildRequest(accountKey, method, path, query, body);
   const res = UrlFetchApp.fetch(req.url, req);
   return kakaoTaxiParseResponse(res);
 }
@@ -1283,11 +1306,11 @@ function kakaoTaxiFetch(method, path, query, body) {
 // [성능] 카카오 목록 API(100건/페이지)를 순차 왕복하면 페이지당 3~5초가 누적된다.
 // 1페이지로 총 건수를 알아낸 뒤 나머지 페이지를 fetchAll 로 한꺼번에 받는다.
 // per=100 × 50페이지 = 5,000건 상한 — 월 200여 건 규모에서 사실상 무제한이자 폭주 방지선.
-function kakaoTaxiFetchAllPages(path, baseQuery, listKey) {
+function kakaoTaxiFetchAllPages(accountKey, path, baseQuery, listKey) {
   const pageQuery = function (page) {
     return (baseQuery ? baseQuery + "&" : "") + "per=100&page=" + page;
   };
-  const first = kakaoTaxiFetch("GET", path, pageQuery(1), null);
+  const first = kakaoTaxiFetch(accountKey, "GET", path, pageQuery(1), null);
   const firstBatch = (first && first[listKey]) || [];
   const reportedCount = (first && typeof first.count === "number") ? first.count : firstBatch.length;
   const items = firstBatch.slice();
@@ -1295,7 +1318,7 @@ function kakaoTaxiFetchAllPages(path, baseQuery, listKey) {
   if (firstBatch.length >= 100 && totalPages > 1) {
     const requests = [];
     for (let page = 2; page <= totalPages; page++) {
-      requests.push(kakaoTaxiBuildRequest("GET", path, pageQuery(page), null));
+      requests.push(kakaoTaxiBuildRequest(accountKey, "GET", path, pageQuery(page), null));
     }
     const responses = UrlFetchApp.fetchAll(requests);
     for (let r = 0; r < responses.length; r++) {
@@ -1307,6 +1330,32 @@ function kakaoTaxiFetchAllPages(path, baseQuery, listKey) {
   }
   // count 는 카카오가 보고한 총 건수 — 수집 도중 새 건이 생기면 수집본과 어긋날 수 있고, 화면이 경고한다.
   return { count: reportedCount, items: items };
+}
+
+// 등록된 계정을 순회하며 collect(account) 를 부르고 결과를 합친다.
+// 한 계정이 실패해도 나머지는 살린다 — 대신 실패 사실을 accountErrors 로 올려보내
+// 화면이 "이 집계에 빠진 계정이 있다"고 빨간 배너로 알린다(조용한 금액 축소 방지).
+// 전부 실패하면 기존처럼 오류를 던진다.
+function kakaoTaxiCollect(collect) {
+  var accounts = kakaoTaxiAccounts();
+  var items = [];
+  var errors = [];
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    try {
+      var got = collect(acc) || [];
+      for (var j = 0; j < got.length; j++) {
+        got[j].account_key = acc.key;   // 화면 계정 컬럼·필터·memberKey 의 근거
+        items.push(got[j]);
+      }
+    } catch (e) {
+      errors.push({ key: acc.key, label: acc.label, message: String((e && e.message) || e) });
+    }
+  }
+  if (errors.length === accounts.length) {
+    throw new Error("카카오T 조회에 실패했습니다: " + errors[0].message);
+  }
+  return { items: items, accountErrors: errors };
 }
 
 // 이 수집본을 "완전한 스냅샷"으로 캐시해도 되는가.
@@ -1338,9 +1387,10 @@ function kakaoTaxiMonthRange(month) {
 var KAKAO_ORDERS_CACHE_TTL_CURRENT = 180;  // 초
 var KAKAO_ORDERS_CACHE_TTL_CLOSED = 21600; // 초 (ScriptCache 상한)
 
-function kakaoTaxiOrdersCacheKey(month) {
-  // 세대 번호 포함 — 직원 쓰기 시 kakaoTaxiInvalidateOrdersCache 가 번호를 올려 전 월 캐시를 무효화한다
-  return "kakao_taxi_orders_v1_" + kakaoTaxiOrdersCacheVersion() + "_" + month;
+function kakaoTaxiOrdersCacheKey(accountKey, month) {
+  // 세대 번호 포함 — 직원 쓰기 시 kakaoTaxiInvalidateOrdersCache 가 번호를 올려 전 월 캐시를 무효화한다.
+  // 계정별로 따로 캐싱한다 — 한쪽이 실패해도 다른 쪽 캐시가 살아 있고, 100KB 상한도 분산된다.
+  return "kakao_taxi_orders_v2_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
 }
 
 // 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
@@ -1348,28 +1398,38 @@ function getKakaoTaxiOrders(month, forceRefresh) {
   const range = kakaoTaxiMonthRange(month); // 형식 검증 겸용 — 캐시 키에 이상값이 섞이지 않게 먼저 부른다
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  const cacheKey = kakaoTaxiOrdersCacheKey(month);
-  if (cache && !forceRefresh) {
-    const cached = cache.get(cacheKey);
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+  const nowMonth = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM");
+
+  const collected = kakaoTaxiCollect(function (acc) {
+    const cacheKey = kakaoTaxiOrdersCacheKey(acc.key, month);
+    if (cache && !forceRefresh) {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+      }
     }
-  }
-  const res = kakaoTaxiFetchAllPages(
-    "/external/v2/orders",
-    "start_date=" + range.start + "&end_date=" + range.end,
-    "orders"
-  );
-  // count 는 카카오가 보고한 총 건수. 수집본과 다르면(조회 도중 새 이용 발생 등) 화면이 경고를 띄운다.
-  const result = { month: month, count: res.count, orders: res.items };
-  // 건수가 어긋나거나 id 중복/누락이 있는 스냅샷은 캐시하지 않는다 — 캐시하면 '새로고침' 전까지 경고가 반복된다.
-  if (cache && kakaoTaxiSnapshotComplete(res.items, res.count)) {
-    const nowMonth = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM");
-    const ttl = month < nowMonth ? KAKAO_ORDERS_CACHE_TTL_CLOSED : KAKAO_ORDERS_CACHE_TTL_CURRENT;
-    // 캐시 값은 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
-    try { cache.put(cacheKey, JSON.stringify(result), ttl); } catch (e) {}
-  }
-  return result;
+    const res = kakaoTaxiFetchAllPages(
+      acc.key,
+      "/external/v2/orders",
+      "start_date=" + range.start + "&end_date=" + range.end,
+      "orders"
+    );
+    // 건수가 어긋나거나 id 중복/누락이 있는 스냅샷은 캐시하지 않는다 — 캐시하면 '새로고침' 전까지 경고가 반복된다.
+    if (cache && kakaoTaxiSnapshotComplete(res.items, res.count)) {
+      const ttl = month < nowMonth ? KAKAO_ORDERS_CACHE_TTL_CLOSED : KAKAO_ORDERS_CACHE_TTL_CURRENT;
+      // 캐시 값은 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
+      try { cache.put(cacheKey, JSON.stringify(res.items), ttl); } catch (e) {}
+    }
+    return res.items;
+  });
+
+  // count 는 수집본 기준. 계정별 카카오 보고 건수와의 대사는 kakaoTaxiSnapshotComplete 가 이미 했다.
+  return {
+    month: month,
+    count: collected.items.length,
+    orders: collected.items,
+    accountErrors: collected.accountErrors
+  };
 }
 
 // [성능] 그룹 캐시 — 그룹 생성/변경은 카카오 관리 웹에서만 일어나는 드문 외부 변경이라 짧은 TTL 로 충분.
@@ -1377,20 +1437,36 @@ function getKakaoTaxiOrders(month, forceRefresh) {
 var KAKAO_GROUPS_CACHE_KEY = "kakao_taxi_groups_v1";
 var KAKAO_GROUPS_CACHE_TTL = 300; // 초
 
+function kakaoTaxiGroupsCacheKey(accountKey) {
+  return KAKAO_GROUPS_CACHE_KEY + "_" + accountKey;
+}
+
+// 쓰기 경로 전용 — 특정 계정의 그룹만 실시간으로 받는다(캐시 미사용).
+// 방금 만든/바꾼 그룹을 못 찾아 오등록되는 것을 막기 위해 조회용 캐시를 쓰지 않는다.
+function kakaoTaxiAccountGroups(accountKey) {
+  const groups = kakaoTaxiFetch(accountKey, "GET", "/external/v1/groups", null, null) || [];
+  for (var i = 0; i < groups.length; i++) groups[i].account_key = accountKey;
+  return groups;
+}
+
 function getKakaoTaxiGroups(forceRefresh) {
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  if (cache && !forceRefresh) {
-    const cached = cache.get(KAKAO_GROUPS_CACHE_KEY);
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+  const collected = kakaoTaxiCollect(function (acc) {
+    const key = kakaoTaxiGroupsCacheKey(acc.key);
+    if (cache && !forceRefresh) {
+      const cached = cache.get(key);
+      if (cached) {
+        try { return JSON.parse(cached); } catch (e) { /* 손상 시 재조회 */ }
+      }
     }
-  }
-  const groups = kakaoTaxiFetch("GET", "/external/v1/groups", null, null) || [];
-  if (cache) {
-    try { cache.put(KAKAO_GROUPS_CACHE_KEY, JSON.stringify(groups), KAKAO_GROUPS_CACHE_TTL); } catch (e) {}
-  }
-  return groups;
+    const groups = kakaoTaxiFetch(acc.key, "GET", "/external/v1/groups", null, null) || [];
+    if (cache) {
+      try { cache.put(key, JSON.stringify(groups), KAKAO_GROUPS_CACHE_TTL); } catch (e) {}
+    }
+    return groups;
+  });
+  return { groups: collected.items, accountErrors: collected.accountErrors };
 }
 
 // 인증완료 직원 전량 수집. 카카오는 인증완료(connected) 직원만 목록 조회를 제공한다 —
@@ -1404,8 +1480,18 @@ function getKakaoTaxiGroups(forceRefresh) {
 var KAKAO_MEMBERS_CACHE_KEY = "kakao_taxi_members_v1";
 var KAKAO_MEMBERS_CACHE_TTL = 90; // 초. 외부 인증 반영 지연을 줄이려 5분→90초. 새로고침은 forceRefresh 로 우회.
 
-function kakaoTaxiInvalidateMembersCache() {
-  try { CacheService.getScriptCache().remove(KAKAO_MEMBERS_CACHE_KEY); } catch (e) {}
+// 특정 계정의 직원 캐시를 지운다. accountKey 를 안 주면 전 계정을 지운다(안전 쪽).
+function kakaoTaxiInvalidateMembersCache(accountKey) {
+  try {
+    var cache = CacheService.getScriptCache();
+    if (accountKey) {
+      cache.remove(kakaoTaxiMembersCacheKey(accountKey));
+    } else {
+      for (var i = 0; i < KAKAO_TAXI_ACCOUNTS.length; i++) {
+        cache.remove(kakaoTaxiMembersCacheKey(KAKAO_TAXI_ACCOUNTS[i].key));
+      }
+    }
+  } catch (e) {}
   // 직원 정보(특히 부서=지점)를 고치면 이용내역의 지점/직원 집계도 달라진다 — 카카오가 이용내역에
   // 조회 시점의 직원 정보(member_department 등)를 실어 주기 때문. 이용내역 캐시도 함께 무효화해
   // "부서를 고쳤는데 집계가 그대로"인 상황을 막는다. 모든 직원 쓰기 경로가 이 함수를 지난다.
@@ -1432,22 +1518,29 @@ function kakaoTaxiInvalidateOrdersCache() {
   } catch (e) {}
 }
 
+function kakaoTaxiMembersCacheKey(accountKey) {
+  return KAKAO_MEMBERS_CACHE_KEY + "_" + accountKey;
+}
+
 function getKakaoTaxiMembers(forceRefresh) {
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  if (cache && !forceRefresh) {
-    var cached = cache.get(KAKAO_MEMBERS_CACHE_KEY);
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+  const collected = kakaoTaxiCollect(function (acc) {
+    const key = kakaoTaxiMembersCacheKey(acc.key);
+    if (cache && !forceRefresh) {
+      var cached = cache.get(key);
+      if (cached) {
+        try { return JSON.parse(cached); } catch (e) { /* 손상 시 재조회 */ }
+      }
     }
-  }
-  const res = kakaoTaxiFetchAllPages("/external/v2/members/connected", "", "members");
-  const result = { count: res.count, members: res.items };
-  // 캐시 값은 최대 100KB — 인원이 많아 초과하면 put 이 던지므로, 캐싱 실패는 무시하고 그대로 반환.
-  if (cache) {
-    try { cache.put(KAKAO_MEMBERS_CACHE_KEY, JSON.stringify(result), KAKAO_MEMBERS_CACHE_TTL); } catch (e) {}
-  }
-  return result;
+    const res = kakaoTaxiFetchAllPages(acc.key, "/external/v2/members/connected", "", "members");
+    // 캐시 값은 최대 100KB — 인원이 많아 초과하면 put 이 던지므로, 캐싱 실패는 무시하고 그대로 반환.
+    if (cache) {
+      try { cache.put(key, JSON.stringify(res.items), KAKAO_MEMBERS_CACHE_TTL); } catch (e) {}
+    }
+    return res.items;
+  });
+  return { count: collected.items.length, members: collected.items, accountErrors: collected.accountErrors };
 }
 
 // 검증은 정규화(숫자만 남긴 전화·공백 제거한 그룹id) 이후 값으로 한다 — raw 값만 보면
@@ -1507,7 +1600,8 @@ function registerKakaoTaxiMember(member) {
   };
   if (m.name) body.name = String(m.name);
   if (m.department) body.department = String(m.department);
-  const res = kakaoTaxiFetch("POST", "/external/v1/members", null, body);
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  const res = kakaoTaxiFetch("acct1", "POST", "/external/v1/members", null, body);
   kakaoTaxiInvalidateMembersCache();
   return res;
 }
@@ -1519,7 +1613,8 @@ function kakaoTaxiGroupIdForBranch(branchName) {
   if (!target) return null;
   // [쓰기 경로] 이 그룹 id 로 실제 카카오 등록이 실행된다 — 조회용 캐시(최대 5분 묵음)를 쓰면
   // 방금 만든/바꾼 그룹을 못 찾아 오등록될 수 있으니 항상 실시간 조회한다.
-  const groups = getKakaoTaxiGroups(true) || [];
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  const groups = kakaoTaxiAccountGroups("acct1") || [];
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
     if (String(g.status) !== "enabled") continue;
@@ -1551,7 +1646,7 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   // 중복 방지 — 같은 전화번호가 이미 인증완료 인원에 있으면 '어느 소속(지점)'인지 알려주고 거부.
   // 다른 지점에서 전입한 직원이 이전 지점으로 이미 등록돼 있을 때 지점이 상황을 알 수 있게 한다.
   var existing = (getKakaoTaxiMembers().members) || [];
-  var allGroups = getKakaoTaxiGroups() || [];
+  var allGroups = (getKakaoTaxiGroups() || {}).groups || [];
   for (var j = 0; j < existing.length; j++) {
     if (String(existing[j].mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
       var ex = existing[j];
@@ -1626,7 +1721,8 @@ function updateKakaoTaxiMember(memberId, member) {
     name: m.name ? String(m.name) : "",
     department: m.department ? String(m.department) : ""
   };
-  const res = kakaoTaxiFetch("PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  const res = kakaoTaxiFetch("acct1", "PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
   kakaoTaxiInvalidateMembersCache();
   return res;
 }
@@ -1635,7 +1731,8 @@ function setKakaoTaxiMemberBlocked(memberIds, blocked) {
   const ids = (Array.isArray(memberIds) ? memberIds : []).filter(function (id) { return !!id; }).map(String);
   if (!ids.length) throw new Error("휴직 처리할 직원이 지정되지 않았습니다.");
   const path = blocked ? "/external/v1/members/block" : "/external/v1/members/unblock";
-  const results = kakaoTaxiFetch("POST", path, null, { members: ids.join(",") }) || [];
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  const results = kakaoTaxiFetch("acct1", "POST", path, null, { members: ids.join(",") }) || [];
   // 카카오는 건별 성공/실패를 배열로 돌려준다. 하나라도 실패면 화면이 성공으로 오해하지 않게 에러로 알린다.
   const failed = results.filter(function (r) { return r && r.status_code !== 0; });
   // 부분 성공(일부만 실패)이어도 성공한 변경이 캐시 뒤에 숨지 않도록, throw 보다 먼저 무효화한다.
@@ -1648,13 +1745,15 @@ function setKakaoTaxiMemberBlocked(memberIds, blocked) {
 
 function deleteKakaoTaxiMember(memberId) {
   if (!memberId) throw new Error("삭제할 직원이 지정되지 않았습니다.");
-  kakaoTaxiFetch("DELETE", "/external/v1/members/" + encodeURIComponent(memberId), null, null);
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  kakaoTaxiFetch("acct1", "DELETE", "/external/v1/members/" + encodeURIComponent(memberId), null, null);
   kakaoTaxiInvalidateMembersCache();
   return { success: true };
 }
 
 function sendKakaoTaxiMemberTms(memberId) {
   if (!memberId) throw new Error("알림톡을 보낼 직원이 지정되지 않았습니다.");
-  kakaoTaxiFetch("POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms", null, null);
+  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
+  kakaoTaxiFetch("acct1", "POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms", null, null);
   return { success: true };
 }
