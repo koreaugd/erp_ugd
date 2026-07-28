@@ -1473,7 +1473,9 @@ var KAKAO_ORDERS_CACHE_TTL_CLOSED = 21600; // 초 (ScriptCache 상한)
 function kakaoTaxiOrdersCacheKey(accountKey, month) {
   // 세대 번호 포함 — 직원 쓰기 시 kakaoTaxiInvalidateOrdersCache 가 번호를 올려 전 월 캐시를 무효화한다.
   // 계정별로 따로 캐싱한다 — 한쪽이 실패해도 다른 쪽 캐시가 살아 있고, 100KB 상한도 분산된다.
-  return "kakao_taxi_orders_v2_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
+  // v3: 캐시 값을 {count, items} 로 바꿔 카카오 "보고" 건수도 함께 저장한다(B2 건수 대사 복원) —
+  // 옛 v2 는 배열만 저장했으므로 잘못 읽지 않도록 버전을 올렸다.
+  return "kakao_taxi_orders_v3_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
 }
 
 // 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
@@ -1482,13 +1484,18 @@ function getKakaoTaxiOrders(month, forceRefresh) {
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
   const nowMonth = Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM");
+  var reportedCounts = {}; // 계정별 카카오 "보고" 건수 — 성공한 계정만 채워진다(B2).
 
   const collected = kakaoTaxiCollect(function (acc) {
     const cacheKey = kakaoTaxiOrdersCacheKey(acc.key, month);
     if (cache && !forceRefresh) {
       const cached = cache.get(cacheKey);
       if (cached) {
-        try { return JSON.parse(cached); } catch (e) { /* 손상 시 아래에서 재조회 */ }
+        try {
+          const parsed = JSON.parse(cached);
+          reportedCounts[acc.key] = parsed.count;
+          return parsed.items;
+        } catch (e) { /* 손상 시 아래에서 재조회 */ }
       }
     }
     const res = kakaoTaxiFetchAllPages(
@@ -1497,19 +1504,29 @@ function getKakaoTaxiOrders(month, forceRefresh) {
       "start_date=" + range.start + "&end_date=" + range.end,
       "orders"
     );
+    reportedCounts[acc.key] = res.count;
     // 건수가 어긋나거나 id 중복/누락이 있는 스냅샷은 캐시하지 않는다 — 캐시하면 '새로고침' 전까지 경고가 반복된다.
     if (cache && kakaoTaxiSnapshotComplete(res.items, res.count)) {
       const ttl = month < nowMonth ? KAKAO_ORDERS_CACHE_TTL_CLOSED : KAKAO_ORDERS_CACHE_TTL_CURRENT;
       // 캐시 값은 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
-      try { cache.put(cacheKey, JSON.stringify(res.items), ttl); } catch (e) {}
+      try { cache.put(cacheKey, JSON.stringify({ count: res.count, items: res.items }), ttl); } catch (e) {}
     }
     return res.items;
   });
 
-  // count 는 수집본 기준. 계정별 카카오 보고 건수와의 대사는 kakaoTaxiSnapshotComplete 가 이미 했다.
+  // [B2] count = 성공한 계정들의 카카오 "보고" 건수 합. collected.items.length(수집본 길이)를 쓰면
+  // 화면의 "수집본 vs 카카오 보고" 건수 대사 경고가 절대 안 뜬다 — 실패한 계정은 accountErrors 로
+  // 이미 알리므로 이 합계에서는 자연히 제외된다(reportedCounts 에 안 채워짐).
+  // 캐시 적중 시에는 kakaoTaxiSnapshotComplete 가 캐시 전에 이미 count === items.length 를 보장했으므로
+  // 이 합계도 결국 items.length 와 같다 — 대사는 라이브 조회 도중 드리프트가 난 경우에만 실제로 작동한다.
+  var reportedTotal = 0;
+  for (var accKey in reportedCounts) {
+    if (Object.prototype.hasOwnProperty.call(reportedCounts, accKey)) reportedTotal += reportedCounts[accKey];
+  }
+
   return {
     month: month,
-    count: collected.items.length,
+    count: reportedTotal,
     orders: collected.items,
     accountErrors: collected.accountErrors
   };
@@ -1747,7 +1764,13 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
 
   // 중복 방지 — 같은 전화번호가 이미 인증완료 인원에 있으면 '어느 소속(지점)'인지 알려주고 거부.
   // 다른 지점에서 전입한 직원이 이전 지점으로 이미 등록돼 있을 때 지점이 상황을 알 수 있게 한다.
-  var existing = (getKakaoTaxiMembers().members) || [];
+  var membersResult = getKakaoTaxiMembers();
+  // [B1][이중과금 방지] 계정 조회가 일부 실패하면 그 계정에 이미 등록된 번호를 놓치고 중복 통과시켜
+  // 다른 계정에 또 등록(이중 청구)할 수 있다 — 확인 불가 상태로는 등록을 진행하지 않는다(fail-closed).
+  if (membersResult.accountErrors && membersResult.accountErrors.length) {
+    throw new Error("카카오T 일부 계정 조회에 실패해 중복 확인을 할 수 없습니다. 잠시 후 다시 시도해주세요.");
+  }
+  var existing = membersResult.members || [];
   var allGroups = (getKakaoTaxiGroups() || {}).groups || [];
   for (var j = 0; j < existing.length; j++) {
     if (String(existing[j].mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
@@ -1761,7 +1784,12 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
         }
       }
       if (!where) where = "다른 지점";
-      throw new Error((ex.name || cleanName) + " 님(" + cleanPhone + ")은 이미 '" + where + "'에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.");
+      // [B3] 어느 계정에 등록돼 있는지도 함께 안내 — 계정이 둘이라 지점명만으로는 헷갈릴 수 있다.
+      var acctLabel = "";
+      for (var la = 0; la < KAKAO_TAXI_ACCOUNTS.length; la++) {
+        if (KAKAO_TAXI_ACCOUNTS[la].key === ex.account_key) { acctLabel = KAKAO_TAXI_ACCOUNTS[la].label; break; }
+      }
+      throw new Error((ex.name || cleanName) + " 님(" + cleanPhone + ")은 이미 '" + where + "'" + (acctLabel ? "(" + acctLabel + ")" : "") + "에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.");
     }
   }
 
