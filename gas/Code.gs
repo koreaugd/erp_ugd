@@ -841,7 +841,20 @@ function submitDaily(master, expenses, staff) {
       return _updateDailyCore(dupCheck.recordId, m, expenses || [], staff || [], "system_overwrite");
     }
 
-    const recordId = m.recordId || m.record_id || generateUUID();
+    // 무작위 ID(generateUUID)로 떨어뜨리지 않는다 — 이 값이 Firestore 문서 ID로도 쓰이는데,
+    // 규칙(`encodeURIComponent(지점)--날짜`)을 벗어나면 대시보드의 '지점+날짜로 콕 집어 읽기'가
+    // 그 문서를 못 찾아 마감한 날이 '미제출'로 보인다(Codex 지적 2026-07-28).
+    // firebaseDirect.ts 의 firebaseRecordId 와 같은 형식이어야 한다.
+    //
+    // 지점명이나 날짜가 없으면 규칙 ID를 만들 수 없다. 이때는 무작위 ID로 저장하지 않고 **거부**한다 —
+    // 그렇게 저장된 마감은 지점·날짜로 찾을 수 없어 화면에서 영영 '미제출'로 남고, 집계에서도 빠진다.
+    // 조용히 받아 두는 것보다 제출 시점에 실패를 알리는 편이 낫다.
+    const idBranch = m.branchName || m.branch_name || "";
+    const idDate = m.settleDate || m.settle_date || "";
+    if (!m.recordId && !m.record_id && (!idBranch || !idDate)) {
+      throw new Error("지점명과 정산일이 있어야 마감을 저장할 수 있습니다.");
+    }
+    const recordId = m.recordId || m.record_id || (encodeURIComponent(idBranch) + "--" + idDate);
     const submittedAt = new Date();
     const totalSales = Number(m.cashSales || m.cash_sales || 0) +
                        Number(m.cardSales || m.card_sales || 0) +

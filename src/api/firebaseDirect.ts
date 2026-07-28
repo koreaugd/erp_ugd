@@ -177,6 +177,39 @@ export async function firebaseGetDailyDetailFromServer(recordId: string) {
   return { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
 }
 
+/**
+ * 지정한 날짜들의 마감 기록만 문서 ID로 콕 집어 읽는다(대시보드 그래프·달력 전용).
+ *
+ * 왜: firebaseGetBranchHistory 는 그 지점의 **모든** 마감을 읽은 뒤 JS에서 거른다. 화면에는 7일이나
+ * 한 달만 쓰는데 해가 갈수록 읽는 양이 계속 늘어난다. 문서 ID가 `encodeURIComponent(지점)--YYYY-MM-DD`
+ * 로 정해져 있으므로(firebaseRecordId) 날짜만 알면 그만큼만 읽으면 된다.
+ *
+ * 전제: 모든 마감 문서가 이 ID 규칙을 따른다. 규칙 밖 문서는 여기서 못 찾아 '미제출'로 보이므로,
+ * 2026-07-28 에 scripts/normalize-daily-doc-ids.mjs 로 옛 문서 4건을 규칙 ID로 옮겨 0건으로 만들었다.
+ * 새 마감은 firebaseSubmitDaily 가 항상 규칙 ID로 저장한다. **규칙 밖 문서가 다시 생기면 이 함수는
+ * 그 날을 미제출로 보여준다** — 위 스크립트를 다시 돌려 확인할 것.
+ *
+ * getDoc 이 아니라 getDocFromServer 를 쓰는 이유: getDoc 은 서버에 못 닿으면 조용히 캐시로 떨어지고,
+ * 캐시에 없으면 예외 없이 "문서 없음"을 준다 — 서버엔 마감이 있는데 화면엔 미제출로 뜬다.
+ * 실패도 삼키지 않는다. 한 날짜라도 실패하면 그대로 throw 하고 호출부가 "불러오지 못했습니다"를 띄운다.
+ */
+export async function firebaseGetDailyMastersByDates(branchName: string, dates: string[]): Promise<MasterDaily[]> {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const results = await Promise.all(
+    dates.map(async (settleDate) => {
+      const snapshot = await getDocFromServer(doc(db, "daily_settles", firebaseRecordId(branchName, settleDate)));
+      if (!snapshot.exists()) return null;   // 서버가 확인해 준 '문서 없음' = 정말로 미제출
+      const data: any = snapshot.data();
+      // 문서는 있는데 master 가 없으면 데이터가 깨진 것이다. null 로 넘기면 '미제출'처럼 보여
+      // 손상을 정상 상태로 감춘다 — 그대로 알린다(Codex 지적 2026-07-28).
+      if (!data?.master) throw new Error(`마감 기록이 손상되었습니다(${branchName} ${settleDate}).`);
+      return toMaster(data.master);
+    })
+  );
+  return results.filter((master): master is MasterDaily => !!master);
+}
+
 export async function firebaseGetBranchHistory(branchName: string, month?: string): Promise<MasterDaily[]> {
   return (await findDailyDocs(branchName)).map((item: any) => toMaster(item.master))
     .filter((master) => !month || master.settleDate.startsWith(month))

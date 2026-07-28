@@ -859,11 +859,15 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         const expenses = Array.isArray(req.body.expenses) ? req.body.expenses : [];
         const staff = Array.isArray(req.body.staff) ? req.body.staff : [];
         const m = master || masterData || {};
-        const recordId = m.recordId || m.record_id || `uid-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        
+
         // 중복 체크 및 구글 시크릿 오버라이트 대응
         const bName = m.branchName || m.branch_name || "Unknown Branch";
         const sDate = m.settleDate || m.settle_date || new Date().toISOString().split('T')[0];
+        // 이 값이 Firestore daily_settles 의 문서 ID가 된다(아래 safeBackupToFirestore).
+        // 무작위 ID로 떨어지면 '지점+날짜로 콕 집어 읽기'가 그 문서를 못 찾아 대시보드가 그 날을
+        // '미제출'로 보여준다. 클라이언트가 recordId 를 안 보낸 경우에도 규칙 ID로 맞춘다
+        // (firebaseDirect.ts firebaseRecordId 와 같은 형식, Codex 지적 2026-07-28).
+        const recordId = m.recordId || m.record_id || `${encodeURIComponent(bName)}--${sDate}`;
         const dupIdx = db.master.findIndex(item => item.branch_name === bName && item.settle_date === sDate);
         
         const totalSales = Number(m.cashSales || m.cash_sales || 0) + 
