@@ -83,9 +83,16 @@ export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnom
   // 사유별로 묶고, 묶음 안에서는 최근 이용이 위로 온다(사용자 지시 2026-07-28).
   // [대표 사유] 한 건에 사유가 여럿이면 TAXI_ANOMALY_REASON_ORDER 상 첫 사유의 묶음에 넣는다.
   // 사유마다 건을 복제하면 화면의 '점검 대상 N건'이 실제보다 부풀어 보인다.
+  // [Codex P2] 목록에 없는 사유는 indexOf 가 -1 이라 그냥 쓰면 모든 사유보다 위로 튄다.
+  // 규칙을 새로 추가하고 TAXI_ANOMALY_REASON_ORDER 갱신을 잊었을 때 조용히 순서가 뒤집히지
+  // 않도록, 모르는 사유는 맨 뒤로 보낸다.
+  const reasonRank = (reason: TaxiAnomalyReason | undefined) => {
+    const i = reason ? TAXI_ANOMALY_REASON_ORDER.indexOf(reason) : -1;
+    return i < 0 ? TAXI_ANOMALY_REASON_ORDER.length : i;
+  };
   return flagged.sort((a, b) => {
-    const rankA = TAXI_ANOMALY_REASON_ORDER.indexOf(a.reasons[0]);
-    const rankB = TAXI_ANOMALY_REASON_ORDER.indexOf(b.reasons[0]);
+    const rankA = reasonRank(a.reasons[0]);
+    const rankB = reasonRank(b.reasons[0]);
     if (rankA !== rankB) return rankA - rankB;
     // timeText 는 "YYYY-MM-DD HH:mm:ss" 고정 형식이라 문자열 비교가 곧 시간 비교다.
     // 시각을 모르는 건(빈 값)은 묶음 맨 뒤로 — 최신인 척 위로 올라오면 안 된다.

@@ -1520,11 +1520,16 @@ function kakaoTaxiEncodeOrdersCache(payload) {
 
 // 캐시 조회 디코딩. 옛 버전 잔존·손상 등 무엇이 실패하든 절대 던지지 않는다 — null 을 돌려주면
 // 호출부가 그대로 라이브 조회로 넘어간다(캐시 오류가 화면 오류로 번지지 않게).
+// [Codex P1 2026-07-28] 압축·JSON 해독에 성공해도 모양이 어긋나면(items 가 배열이 아니거나
+// count 가 숫자가 아님) null 을 돌려준다. 그냥 통과시키면 그 계정이 "0건 성공"으로 처리돼
+// accountErrors 없이 조용히 비고, 라이브 재조회도 안 한다 — 캐시가 데이터를 삼키는 최악의 경우다.
 function kakaoTaxiDecodeOrdersCache(b64) {
   try {
     const blob = Utilities.newBlob(Utilities.base64Decode(b64), "application/x-gzip", "c.gz");
     const json = Utilities.ungzip(blob).getDataAsString("UTF-8");
-    return JSON.parse(json);
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed.count !== "number" || !Array.isArray(parsed.items)) return null;
+    return parsed;
   } catch (e) {
     return null;
   }
