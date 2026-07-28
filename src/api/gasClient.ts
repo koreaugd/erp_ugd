@@ -845,41 +845,30 @@ export const gasClient = {
 // 카카오T 비즈니스(법인택시) 타입 — 카카오 응답 필드명(snake_case)을 그대로 쓴다.
 // 임의로 camelCase 로 바꾸면 GAS·server.ts 두 백엔드와 화면이 서로 어긋난다.
 // ----------------------------------------------------
-export interface KakaoTaxiPaymentItem {
-  id: number;
-  status: string; // "paid" 등
-  item_type: string; // "fare" 등
-  amount: number;
-  approval_no: string;
-  org_date_time: string;
-  card_number: string;
-}
-
+// [성능][동기화] gas/Code.gs, server.ts 와 세 곳을 같게 유지할 것.
+// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·
+// waypoints·platform_fee·group_id·car_model·total_distance 등을 더 보내지만, 백엔드가
+// kakaoTaxiFetchAllPages 직후 슬림화해서 이 18개만 내려준다 — 330건 기준 307KB 로
+// ScriptCache 100KB(계정당) 상한을 넘겨 cache.put 이 조용히 실패했었다(캐시가 죽어
+// 화면 로드마다 카카오 재조회, 5~12초). 이 타입은 실제로 오는 응답 형태와 일치해야 한다.
 export interface KakaoTaxiOrder {
   id: string;
   service_fare: number;
   toll: number;
-  platform_fee: number;
   call_time: string; // "YYYY-MM-DD HH:mm:ss"
   departure_time: string;
-  arrival_time: string;
   departure_point: string;
   arrival_point: string;
-  waypoints: string | null;
   member_id: string;
   member_name: string;
   member_identifier: string;
   member_department: string;
-  group_id: string;
   group_name: string;
-  car_model: string;
   car_number: string;
   taxi_company_name: string;
   taxi_kind: string;
   vertical_code: string; // "taxi" | "quick" 등
   vertical_product_name: string;
-  total_distance: number;
-  payment_items: KakaoTaxiPaymentItem[];
   /** 어느 카카오T 계정에서 온 건인지 — 백엔드가 주입한다. 계정 2개를 합쳐 보여주므로 필수. */
   account_key: string;
 }

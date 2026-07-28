@@ -1465,6 +1465,37 @@ function kakaoTaxiMonthRange(month) {
   return { start: month + "-01", end: month + "-" + (lastDay < 10 ? "0" + lastDay : String(lastDay)) };
 }
 
+// [성능][동기화] server.ts, src/api/gasClient.ts(KakaoTaxiOrder 타입)와 세 곳을 같게 유지할 것.
+// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
+// platform_fee·group_id·car_model·total_distance 등을 더 보낸다. 원본 그대로면 330건에 307KB —
+// ScriptCache 는 항목당 100KB 상한이라 cache.put 이 조용히 실패해(예외를 삼킴) 캐시가 죽고
+// 화면 로드마다 카카오를 재조회했다(5~12초, 2026-07-28 실측). 화면이 실제로 쓰는 필드만 남긴다.
+// account_key 는 목록에 있지만 여기서 채우지 않는다 — kakaoTaxiCollect 가 나중에 주입한다.
+var KAKAO_TAXI_ORDER_KEEP_FIELDS = [
+  "id", "service_fare", "toll", "call_time", "departure_time",
+  "departure_point", "arrival_point", "member_id", "member_name",
+  "member_identifier", "member_department", "group_name", "car_number",
+  "taxi_company_name", "taxi_kind", "vertical_code", "vertical_product_name",
+  "account_key"
+];
+
+// 카카오 원본 주문 1건을 슬림 필드만 남긴 새 객체로 만든다(원본 객체는 손대지 않는다).
+function kakaoTaxiSlimOrder(raw) {
+  var out = {};
+  for (var i = 0; i < KAKAO_TAXI_ORDER_KEEP_FIELDS.length; i++) {
+    var key = KAKAO_TAXI_ORDER_KEEP_FIELDS[i];
+    if (key === "account_key") continue; // kakaoTaxiCollect 가 나중에 채운다
+    out[key] = raw[key];
+  }
+  return out;
+}
+
+function kakaoTaxiSlimOrders(items) {
+  var out = [];
+  for (var i = 0; i < items.length; i++) out.push(kakaoTaxiSlimOrder(items[i]));
+  return out;
+}
+
 // [성능] 이용내역 캐시 — 지나간 달은 마감된 불변 자료라 길게(ScriptCache 최대 6시간),
 // 당월은 새 이용이 계속 생기므로 짧게 둔다. 화면 '새로고침'은 forceRefresh 로 캐시를 우회한다.
 var KAKAO_ORDERS_CACHE_TTL_CURRENT = 180;  // 초
@@ -1475,7 +1506,28 @@ function kakaoTaxiOrdersCacheKey(accountKey, month) {
   // 계정별로 따로 캐싱한다 — 한쪽이 실패해도 다른 쪽 캐시가 살아 있고, 100KB 상한도 분산된다.
   // v3: 캐시 값을 {count, items} 로 바꿔 카카오 "보고" 건수도 함께 저장한다(B2 건수 대사 복원) —
   // 옛 v2 는 배열만 저장했으므로 잘못 읽지 않도록 버전을 올렸다.
-  return "kakao_taxi_orders_v3_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
+  // v4: 캐시 값을 gzip 압축 후 base64 문자열로 저장한다. 항목을 18개 필드로 슬림화해도
+  // 원본 기준 acct1 225KB·acct2 106KB 로 여전히 100KB 상한을 넘는 계정이 있어 압축을 더했다.
+  // 옛 v3 는 압축 안 된 평문 JSON 이라 그대로 두면 ungzip 이 던진다 — 버전을 올려 아예 안 읽게 한다.
+  return "kakao_taxi_orders_v4_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
+}
+
+// 캐시 저장 인코딩 — gzip 압축 후 base64 문자열. put 실패(100KB 초과)는 호출부가 삼킨다.
+function kakaoTaxiEncodeOrdersCache(payload) {
+  const gz = Utilities.gzip(Utilities.newBlob(JSON.stringify(payload)));
+  return Utilities.base64Encode(gz.getBytes());
+}
+
+// 캐시 조회 디코딩. 옛 버전 잔존·손상 등 무엇이 실패하든 절대 던지지 않는다 — null 을 돌려주면
+// 호출부가 그대로 라이브 조회로 넘어간다(캐시 오류가 화면 오류로 번지지 않게).
+function kakaoTaxiDecodeOrdersCache(b64) {
+  try {
+    const blob = Utilities.newBlob(Utilities.base64Decode(b64), "application/x-gzip", "c.gz");
+    const json = Utilities.ungzip(blob).getDataAsString("UTF-8");
+    return JSON.parse(json);
+  } catch (e) {
+    return null;
+  }
 }
 
 // 월별 이용내역 전량 수집. 조회 기간은 카카오 제한(최대 1개월)에 맞춰 항상 한 달 단위다.
@@ -1491,11 +1543,11 @@ function getKakaoTaxiOrders(month, forceRefresh) {
     if (cache && !forceRefresh) {
       const cached = cache.get(cacheKey);
       if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
+        const parsed = kakaoTaxiDecodeOrdersCache(cached); // 손상/구버전이면 null → 아래에서 재조회
+        if (parsed) {
           reportedCounts[acc.key] = parsed.count;
           return parsed.items;
-        } catch (e) { /* 손상 시 아래에서 재조회 */ }
+        }
       }
     }
     const res = kakaoTaxiFetchAllPages(
@@ -1504,12 +1556,14 @@ function getKakaoTaxiOrders(month, forceRefresh) {
       "start_date=" + range.start + "&end_date=" + range.end,
       "orders"
     );
+    // [성능] 캐시 전에 슬림화 — 캐시 payload 도 작아야 압축해도 100KB 상한을 지킨다.
+    res.items = kakaoTaxiSlimOrders(res.items);
     reportedCounts[acc.key] = res.count;
     // 건수가 어긋나거나 id 중복/누락이 있는 스냅샷은 캐시하지 않는다 — 캐시하면 '새로고침' 전까지 경고가 반복된다.
     if (cache && kakaoTaxiSnapshotComplete(res.items, res.count)) {
       const ttl = month < nowMonth ? KAKAO_ORDERS_CACHE_TTL_CLOSED : KAKAO_ORDERS_CACHE_TTL_CURRENT;
-      // 캐시 값은 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
-      try { cache.put(cacheKey, JSON.stringify({ count: res.count, items: res.items }), ttl); } catch (e) {}
+      // 캐시 값은 압축 후에도 최대 100KB — 초과하면 put 이 던지므로 실패는 무시(그 달만 실시간 조회로 동작).
+      try { cache.put(cacheKey, kakaoTaxiEncodeOrdersCache({ count: res.count, items: res.items }), ttl); } catch (e) {}
     }
     return res.items;
   });
