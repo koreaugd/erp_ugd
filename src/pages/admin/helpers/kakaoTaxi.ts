@@ -16,6 +16,25 @@ export const KAKAO_BRANCH_ALIASES: Record<string, string> = {
   "대물섬종로점": "대물섬 종로점", // 붙여쓰기 변형, 실측 3건
 };
 
+// 카카오T 비즈니스 계정 표시명. 백엔드 KAKAO_TAXI_ACCOUNTS 의 key 와 같게 유지할 것
+// ([동기화] gas/Code.gs, server.ts).
+export const KAKAO_TAXI_ACCOUNT_LABEL: Record<string, string> = {
+  acct1: "1계정",
+  acct2: "2계정",
+};
+
+export function accountLabel(key: string): string {
+  return KAKAO_TAXI_ACCOUNT_LABEL[key] || key || "";
+}
+
+// 퇴사자 과거 내역 귀속 보정표 — 키는 `${account_key}|${member_id}`.
+// 카카오에서 회원을 삭제하면 그 사람의 과거 주문에서 member_department 가 null 이 된다(실측).
+// 이름으로 매칭하면 동명이인을 가를 수 없어(정윤기 사례) 반드시 member_id 로 지정한다.
+// 삭제 전에 부서를 채워두면 애초에 필요 없다 — 운영 지침은 "퇴사자 존치"다.
+export const KAKAO_RETIRED_MEMBER_BRANCH: Record<string, string> = {
+  "acct2|ZB2L167I": "사카바단단", // 김태호, 2026-05 10건 90,700원
+};
+
 export interface NormalizedTaxiOrder {
   order: KakaoTaxiOrder;
   /** ERP 표준 지점명 (매핑 실패 시 카카오 원문 표기 그대로) */
@@ -28,11 +47,16 @@ export interface NormalizedTaxiOrder {
   timeText: string;
   /** timeText 의 시(hour). 파싱 불가 시 null — 시간대 규칙 평가에서 제외하고 화면에 원문만 보여준다 */
   hour: number | null;
-  /** 직원 구분 키 — 동명이인 대비 사번(identifier)까지 붙인다 */
+  /** 어느 카카오T 계정 건인지 — 화면 계정 컬럼·필터와 memberKey 구성에 쓴다 */
+  accountKey: string;
+  /** 직원 구분 키 — 계정이 다르면 동명이인이므로 계정까지 포함한다 */
   memberKey: string;
 }
 
-function resolveBranchName(order: KakaoTaxiOrder, erpBranchNames: Set<string>): { branchName: string; unmapped: boolean } {
+function resolveBranchName(
+  order: KakaoTaxiOrder,
+  erpBranchNames: Set<string>
+): { branchName: string; unmapped: boolean } {
   const candidates = [order.member_department, order.group_name]
     .map((v) => (v || "").trim())
     .filter(Boolean);
@@ -41,6 +65,9 @@ function resolveBranchName(order: KakaoTaxiOrder, erpBranchNames: Set<string>): 
     const alias = KAKAO_BRANCH_ALIASES[raw];
     if (alias && erpBranchNames.has(alias)) return { branchName: alias, unmapped: false };
   }
+  // 부서·그룹으로 못 찾았다 — 카카오에서 삭제된 퇴사자일 수 있으니 보정표를 마지막으로 본다.
+  const retired = KAKAO_RETIRED_MEMBER_BRANCH[`${order.account_key}|${order.member_id}`];
+  if (retired && erpBranchNames.has(retired)) return { branchName: retired, unmapped: false };
   // 매핑 실패 — 부서 원문(없으면 그룹 원문)을 그대로 보여준다. 숨기면 금액이 사라진 것처럼 보인다.
   return { branchName: candidates[0] || "미지정", unmapped: true };
 }
@@ -61,14 +88,16 @@ export function normalizeKakaoTaxiOrders(orders: KakaoTaxiOrder[], erpBranchName
     const { branchName, unmapped } = resolveBranchName(order, nameSet);
     const timeText = order.departure_time || order.call_time || "";
     const hourMatch = /\b(\d{2}):\d{2}/.exec(timeText);
+    const accountKey = String(order.account_key || "acct1");
     return {
       order,
+      accountKey,
       branchName,
       unmapped,
       amount: (Number(order.service_fare) || 0) + (Number(order.toll) || 0),
       timeText,
       hour: hourMatch ? Number(hourMatch[1]) : null,
-      memberKey: `${(order.member_name || "").trim()}|${(order.member_identifier || "").trim()}`,
+      memberKey: `${accountKey}|${(order.member_name || "").trim()}|${(order.member_identifier || "").trim()}`,
     };
   });
 }
@@ -120,8 +149,9 @@ export function verticalLabel(code: string): string {
 }
 
 export function buildOrdersExcelRows(rows: NormalizedTaxiOrder[]) {
-  return rows.map(({ order, branchName, unmapped, amount, timeText }) => ({
+  return rows.map(({ order, accountKey, branchName, unmapped, amount, timeText }) => ({
     "이용일시": timeText,
+    "계정": accountLabel(accountKey),
     "직원": order.member_name,
     "사번": order.member_identifier,
     "지점": branchName + (unmapped ? " (미매핑)" : ""),
