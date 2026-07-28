@@ -82,3 +82,10 @@
 - `gas/Code.gs`를 변경한 경우에는 Apps Script 프로젝트에도 푸시하고, 기존 웹앱 배포를 새 버전으로 갱신한다. 새 배포를 만들지 않아 `/exec` URL을 유지한다.
 - 배포 후에는 실제 웹앱 URL과 GAS 응답을 확인한다.
 - 배포된 `VITE_GAS_URL`만 사용한다. 기기별 `custom_gas_url` 값으로 공통 백엔드를 덮어쓰지 않는다.
+
+### 카카오T 비즈니스 2계정
+- 계정 #1(기존)과 계정 #2가 있다. 계정 #2 = 사카바단단·8번대물집 인원 전용.
+- 자격증명은 GAS 스크립트 속성(`KAKAO_T_CORP_ID_2`/`KAKAO_T_SECRET_2`)·로컬 `.env` 에만. 저장소 금지.
+- 지점→계정 매핑(`KAKAO_ACCOUNT_BY_BRANCH`)은 `gas/Code.gs`·`server.ts`·`src/pages/admin/helpers/kakaoTaxi.ts` 세 곳을 같게 유지한다.
+- **퇴사자를 카카오에서 삭제하지 말 것.** 삭제하면 그 사람 과거 주문의 `member_department` 가 null 이 되어 지점 비용에서 빠진다. 이미 지운 건은 `KAKAO_RETIRED_MEMBER_BRANCH` 에 `계정|member_id` 로 추가한다.
+- 카카오 코드를 고쳤으면 앱 푸시만으로 끝나지 않는다 — `gas/Code.gs` 는 clasp 재배포까지 해야 반영된다.
