@@ -90,12 +90,16 @@ export function normalizeKakaoTaxiOrders(orders: KakaoTaxiOrder[], erpBranchName
   const nameSet = new Set(erpBranchNames.map((n) => n.trim()).filter(Boolean));
   // 페이지 조회 도중 같은 건이 두 페이지에 걸쳐 중복 응답될 수 있다 — id 기준으로 걸러
   // 이중 집계를 막는다. 걸러서 건수가 줄면 카카오 보고 count 와 어긋나 화면 경고가 뜬다(의도).
+  // [F3] 계정이 서로 다르면 카카오가 매긴 주문 id 가 우연히 같을 수 있다(계정별로 따로 채번) —
+  // id 만으로 dedup 하면 서로 다른 계정의 서로 다른 실제 이용 건이 하나로 뭉개진다.
+  // "계정|id" 로 묶어야 같은 계정 안에서만 진짜 중복을 걸러낸다(코덱스 리뷰 2026-07-28).
   const seen = new Set<string>();
   const deduped = (orders || []).filter((order) => {
     const id = String(order.id || "");
     if (!id) return true; // id 없는 건은 진위를 판단할 수 없으니 버리지 않는다
-    if (seen.has(id)) return false;
-    seen.add(id);
+    const key = `${String(order.account_key || "acct1")}|${id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
   return deduped.map((order) => {
