@@ -115,27 +115,48 @@ function doPost(e) {
         break;
       case "registerKakaoTaxiMember":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = registerKakaoTaxiMember(requestData.member);
+        result = registerKakaoTaxiMember(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.member
+        );
         break;
       case "updateKakaoTaxiMember":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = updateKakaoTaxiMember(requestData.memberId, requestData.member);
+        result = updateKakaoTaxiMember(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.memberId,
+          requestData.member
+        );
         break;
       case "blockKakaoTaxiMember":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = setKakaoTaxiMemberBlocked(requestData.memberIds, true);
+        result = setKakaoTaxiMemberBlocked(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.memberIds,
+          true
+        );
         break;
       case "unblockKakaoTaxiMember":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = setKakaoTaxiMemberBlocked(requestData.memberIds, false);
+        result = setKakaoTaxiMemberBlocked(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.memberIds,
+          false
+        );
         break;
       case "deleteKakaoTaxiMember":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = deleteKakaoTaxiMember(requestData.memberId);
+        result = deleteKakaoTaxiMember(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.memberId
+        );
         break;
       case "sendKakaoTaxiMemberTms":
         requireKakaoTaxiAdmin(requestData.adminPinHash);
-        result = sendKakaoTaxiMemberTms(requestData.memberId);
+        result = sendKakaoTaxiMemberTms(
+          requireKakaoAccountKey(requestData.accountKey),
+          requestData.memberId
+        );
         break;
       default:
         throw new Error("정의되지 않은 액션명입니다: " + action);
@@ -1219,6 +1240,14 @@ function requireKakaoTaxiAdmin(adminPinHash) {
   if (!setting || setting.role !== "admin") throw denied;
 }
 
+// 쓰기 액션 전용 — 계정을 반드시 명시받는다. 기본값을 두면 엉뚱한 계정에 삭제·수정이 나간다.
+function requireKakaoAccountKey(accountKey) {
+  var key = String(accountKey || "").trim();
+  if (!key) throw new Error("대상 카카오T 계정이 지정되지 않았습니다. 화면을 새로고침한 뒤 다시 시도해주세요.");
+  kakaoTaxiCredentials(key); // 등록된 계정인지 확인 — 아니면 던진다
+  return key;
+}
+
 // 카카오T 비즈니스 계정 레지스트리.
 // 계정 #1 은 기존 속성 이름을 그대로 쓴다 — 속성 재등록 없이 기존 동작이 유지된다.
 // [동기화] server.ts 의 KAKAO_TAXI_ACCOUNTS, src/pages/admin/helpers/kakaoTaxi.ts 의 계정 라벨.
@@ -1565,6 +1594,17 @@ var KAKAO_TAXI_BRANCH_ALIASES = {
   "대물섬종로점": "대물섬 종로점"
 };
 
+// 지점 → 카카오T 계정. 미기재 지점은 계정 #1(기본값).
+// [동기화] server.ts, src/pages/admin/helpers/kakaoTaxi.ts 와 세 곳을 같게 유지할 것.
+var KAKAO_ACCOUNT_BY_BRANCH = {
+  "사카바단단": "acct2",
+  "8번대물집": "acct2"
+};
+
+function kakaoTaxiAccountForBranch(branchName) {
+  return KAKAO_ACCOUNT_BY_BRANCH[String(branchName || "").trim()] || "acct1";
+}
+
 // 지점 화면용 — 요청한 PIN 의 지점(관리자는 임의 지점)에 매핑되는 인증완료 인원만 반환.
 // 타 지점 직원의 이름·전화번호가 지점에 노출되지 않도록 필터는 반드시 여기(백엔드)에서 한다.
 function getKakaoTaxiBranchMembers(pinHash, branchName, forceRefresh) {
@@ -1587,7 +1627,7 @@ function getKakaoTaxiBranchMembers(pinHash, branchName, forceRefresh) {
   });
 }
 
-function registerKakaoTaxiMember(member) {
+function registerKakaoTaxiMember(accountKey, member) {
   const m = member || {};
   const norm = kakaoTaxiNormalizeContact(m);
   if (!m.identifier || !norm.phone || !norm.groupIds.length) {
@@ -1600,28 +1640,36 @@ function registerKakaoTaxiMember(member) {
   };
   if (m.name) body.name = String(m.name);
   if (m.department) body.department = String(m.department);
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const res = kakaoTaxiFetch("acct1", "POST", "/external/v1/members", null, body);
-  kakaoTaxiInvalidateMembersCache();
+  const res = kakaoTaxiFetch(accountKey, "POST", "/external/v1/members", null, body);
+  kakaoTaxiInvalidateMembersCache(accountKey);
   return res;
 }
 
-// 지점명 → 활성(enabled) 카카오 그룹 id. 지점 자동등록은 지점이 그룹을 직접 고르지 않으므로
-// 지점명과 일치하는(별칭 포함) enabled 그룹을 백엔드가 정한다. 못 찾으면 null → 호출부가 거부(오등록 방지).
+// 지점명 → { 계정, 활성(enabled) 그룹 id }. 지점 자동등록은 지점이 그룹을 직접 고르지 않으므로
+// 백엔드가 정한다. 못 찾으면 groupId 가 null → 호출부가 거부(오등록 방지).
+// [주의] 계정 #1 에도 사카바단단·8번대물집 이름의 껍데기 그룹이 있으므로 반드시 매핑표가 정한
+// 계정 안에서만 찾는다. 계정 전체를 뒤지면 엉뚱한 계정에 등록된다.
 function kakaoTaxiGroupIdForBranch(branchName) {
   const target = String(branchName || "").trim();
-  if (!target) return null;
-  // [쓰기 경로] 이 그룹 id 로 실제 카카오 등록이 실행된다 — 조회용 캐시(최대 5분 묵음)를 쓰면
-  // 방금 만든/바꾼 그룹을 못 찾아 오등록될 수 있으니 항상 실시간 조회한다.
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const groups = kakaoTaxiAccountGroups("acct1") || [];
+  const accountKey = kakaoTaxiAccountForBranch(target);
+  if (!target) return { accountKey: accountKey, groupId: null };
+  // [쓰기 경로] 조회용 캐시(최대 5분 묵음)를 쓰면 방금 만든/바꾼 그룹을 못 찾아 오등록될 수 있으니
+  // 항상 실시간 조회한다.
+  const groups = kakaoTaxiAccountGroups(accountKey) || [];
+  var fallback = null;
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
     if (String(g.status) !== "enabled") continue;
     var gn = String(g.name || "").trim();
-    if (gn === target || KAKAO_TAXI_BRANCH_ALIASES[gn] === target) return g.id;
+    if (gn === target || KAKAO_TAXI_BRANCH_ALIASES[gn] === target) return { accountKey: accountKey, groupId: g.id };
+    fallback = fallback === null ? g.id : fallback;
   }
-  return null;
+  // 계정 #2 처럼 지점명 그룹이 없고 활성 그룹이 '기본그룹' 하나뿐이면 그 그룹에 넣는다.
+  // 지점 판정은 부서(department=지점명) 우선이라 집계는 정상 동작한다.
+  var enabledCount = 0;
+  for (var k = 0; k < groups.length; k++) if (String(groups[k].status) === "enabled") enabledCount++;
+  if (enabledCount === 1 && fallback) return { accountKey: accountKey, groupId: fallback };
+  return { accountKey: accountKey, groupId: null };
 }
 
 // 지점 화면 '이용신청' 자동 처리 — 관리자 승인 없이 지점 PIN 으로 바로 카카오 등록 + 인증 알림톡 발송.
@@ -1640,7 +1688,9 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   if (!cleanName) throw new Error("이름을 입력해주세요.");
   if (!/^01[0-9]{8,9}$/.test(cleanPhone)) throw new Error("휴대전화번호를 확인해주세요. (예: 01012345678)");
 
-  var groupId = kakaoTaxiGroupIdForBranch(branchName);
+  var resolved = kakaoTaxiGroupIdForBranch(branchName);
+  var groupId = resolved.groupId;
+  var accountKey = resolved.accountKey;
   if (!groupId) throw new Error("이 지점에 해당하는 카카오T 그룹을 찾지 못했습니다. 관리자에게 문의해주세요.");
 
   // 중복 방지 — 같은 전화번호가 이미 인증완료 인원에 있으면 '어느 소속(지점)'인지 알려주고 거부.
@@ -1652,7 +1702,11 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
       var ex = existing[j];
       var where = String(ex.department || "").trim();
       if (!where && ex.group_ids && ex.group_ids.length) {
-        for (var g = 0; g < allGroups.length; g++) { if (allGroups[g].id === ex.group_ids[0]) { where = String(allGroups[g].name || ""); break; } }
+        for (var g = 0; g < allGroups.length; g++) {
+          if (allGroups[g].id === ex.group_ids[0] && allGroups[g].account_key === ex.account_key) {
+            where = String(allGroups[g].name || ""); break;
+          }
+        }
       }
       if (!where) where = "다른 지점";
       throw new Error((ex.name || cleanName) + " 님(" + cleanPhone + ")은 이미 '" + where + "'에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.");
@@ -1670,7 +1724,7 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   // register 는 카카오가 이미 존재하는 번호(인증 대기 등 connected 목록에 안 보이는 경우)를 400 으로 막는다 — 친절히 안내.
   var member;
   try {
-    member = registerKakaoTaxiMember({
+    member = registerKakaoTaxiMember(accountKey, {
       identifier: cleanName,      // 사번 문화가 없어 이름을 사번으로 쓰는 기존 관례
       mobile_phone: cleanPhone,
       group_ids: [groupId],
@@ -1691,7 +1745,7 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   var tmsSent = false;
   if (member && member.id) {
     for (var t = 0; t < 3 && !tmsSent; t++) {
-      try { sendKakaoTaxiMemberTms(member.id); tmsSent = true; }
+      try { sendKakaoTaxiMemberTms(accountKey, member.id); tmsSent = true; }
       catch (e2) { if (t < 2) { try { Utilities.sleep(700); } catch (e8) {} } }
     }
   }
@@ -1705,7 +1759,7 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   return { member: member, tmsSent: tmsSent };
 }
 
-function updateKakaoTaxiMember(memberId, member) {
+function updateKakaoTaxiMember(accountKey, memberId, member) {
   if (!memberId) throw new Error("수정할 직원이 지정되지 않았습니다.");
   const m = member || {};
   const norm = kakaoTaxiNormalizeContact(m);
@@ -1721,39 +1775,35 @@ function updateKakaoTaxiMember(memberId, member) {
     name: m.name ? String(m.name) : "",
     department: m.department ? String(m.department) : ""
   };
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const res = kakaoTaxiFetch("acct1", "PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
-  kakaoTaxiInvalidateMembersCache();
+  const res = kakaoTaxiFetch(accountKey, "PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
+  kakaoTaxiInvalidateMembersCache(accountKey);
   return res;
 }
 
-function setKakaoTaxiMemberBlocked(memberIds, blocked) {
+function setKakaoTaxiMemberBlocked(accountKey, memberIds, blocked) {
   const ids = (Array.isArray(memberIds) ? memberIds : []).filter(function (id) { return !!id; }).map(String);
   if (!ids.length) throw new Error("휴직 처리할 직원이 지정되지 않았습니다.");
   const path = blocked ? "/external/v1/members/block" : "/external/v1/members/unblock";
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const results = kakaoTaxiFetch("acct1", "POST", path, null, { members: ids.join(",") }) || [];
+  const results = kakaoTaxiFetch(accountKey, "POST", path, null, { members: ids.join(",") }) || [];
   // 카카오는 건별 성공/실패를 배열로 돌려준다. 하나라도 실패면 화면이 성공으로 오해하지 않게 에러로 알린다.
   const failed = results.filter(function (r) { return r && r.status_code !== 0; });
   // 부분 성공(일부만 실패)이어도 성공한 변경이 캐시 뒤에 숨지 않도록, throw 보다 먼저 무효화한다.
-  kakaoTaxiInvalidateMembersCache();
+  kakaoTaxiInvalidateMembersCache(accountKey);
   if (failed.length) {
     throw new Error("일부 직원 처리 실패: " + failed.map(function (r) { return r.id + "(" + (r.status_msg || "실패") + ")"; }).join(", "));
   }
   return results;
 }
 
-function deleteKakaoTaxiMember(memberId) {
+function deleteKakaoTaxiMember(accountKey, memberId) {
   if (!memberId) throw new Error("삭제할 직원이 지정되지 않았습니다.");
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  kakaoTaxiFetch("acct1", "DELETE", "/external/v1/members/" + encodeURIComponent(memberId), null, null);
-  kakaoTaxiInvalidateMembersCache();
+  kakaoTaxiFetch(accountKey, "DELETE", "/external/v1/members/" + encodeURIComponent(memberId), null, null);
+  kakaoTaxiInvalidateMembersCache(accountKey);
   return { success: true };
 }
 
-function sendKakaoTaxiMemberTms(memberId) {
+function sendKakaoTaxiMemberTms(accountKey, memberId) {
   if (!memberId) throw new Error("알림톡을 보낼 직원이 지정되지 않았습니다.");
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  kakaoTaxiFetch("acct1", "POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms", null, null);
+  kakaoTaxiFetch(accountKey, "POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms", null, null);
   return { success: true };
 }

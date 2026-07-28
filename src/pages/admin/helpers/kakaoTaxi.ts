@@ -35,6 +35,20 @@ export const KAKAO_RETIRED_MEMBER_BRANCH: Record<string, string> = {
   "acct2|ZB2L167I": "사카바단단", // 김태호, 2026-05 10건 90,700원
 };
 
+// 지점 → 카카오T 계정. 미기재 지점은 계정 #1(기본값)이다.
+// 계정 #2(기업ID 25648071)는 사카바단단·8번대물집 두 지점 인원만 쓴다(2026-07-28 확인).
+// [동기화] gas/Code.gs, server.ts 의 같은 이름 상수와 세 곳을 같게 유지할 것.
+// [주의] 계정 #1 에도 '사카바단단'·'8번대물집' 이름의 그룹이 껍데기로 남아 있다 —
+// 이 표가 없으면 지점 자동등록이 그 껍데기 그룹을 찾아 엉뚱한 계정에 등록한다.
+export const KAKAO_ACCOUNT_BY_BRANCH: Record<string, string> = {
+  "사카바단단": "acct2",
+  "8번대물집": "acct2",
+};
+
+export function kakaoTaxiAccountForBranch(branchName: string): string {
+  return KAKAO_ACCOUNT_BY_BRANCH[String(branchName || "").trim()] || "acct1";
+}
+
 export interface NormalizedTaxiOrder {
   order: KakaoTaxiOrder;
   /** ERP 표준 지점명 (매핑 실패 시 카카오 원문 표기 그대로) */
