@@ -5,12 +5,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuthContext } from "../../contexts/AuthContext";
 import { gasClient } from "../../api/gasClient";
-import type { KakaoTaxiGroup, KakaoTaxiMember, KakaoTaxiMemberInput } from "../../api/gasClient";
+import type { KakaoTaxiAccountError, KakaoTaxiGroup, KakaoTaxiMember, KakaoTaxiMemberInput } from "../../api/gasClient";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
 import { addMonthsToMonthInputValue } from "../branch/helpers/formatters";
 import {
-  aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES, memberAmountMap,
+  accountLabel, aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES, memberAmountMap,
   normalizeKakaoTaxiOrders, verifyBranchTotals, verticalLabel, type NormalizedTaxiOrder,
 } from "./helpers/kakaoTaxi";
 import {
@@ -70,7 +70,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   const [branchFilter, setBranchFilter] = useState("all");
   const [memberFilter, setMemberFilter] = useState("all"); // 상세내역 직원 필터 (memberKey — 동명이인 구분)
+  const [accountFilter, setAccountFilter] = useState("all"); // 계정 필터 — "all" | "acct1" | "acct2"
   const [highFare, setHighFare] = useState(DEFAULT_TAXI_THRESHOLDS.highFare);
+  /** 카카오T 계정 중 일부 조회가 실패했을 때 — 성공한 계정 데이터만으로 화면을 그리므로 배너로 알린다.
+   * 이용내역 로드와 직원 로드가 각자 자신의 응답으로 이 상태를 덮어쓴다(뷰마다 별도 상태를 두지 않은
+   * 단순화 — 방금 조회한 쪽의 실패만 보이며, 예를 들어 직원 탭을 본 뒤 이용내역 탭으로 돌아가도
+   * 이용내역이 재조회되지 않으면 배너는 직원 로드의 실패로 남아 있을 수 있다). */
+  const [accountErrors, setAccountErrors] = useState<KakaoTaxiAccountError[]>([]);
 
   // ---------- 지점 신청 관리 ----------
   const [requestsData, setRequestsData] = useState<{ items: KakaoTaxiRequest[]; failed: string[] } | null>(null);
@@ -116,6 +122,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         current: normalizeKakaoTaxiOrders(curr.orders, erpNames),
         prev: null, // 전월은 아래에서 도착하는 대로 채운다
       });
+      // 당월 조회의 계정 실패만 배너에 반영한다. 전월(prev)은 급증 비교용 보조 자료일 뿐이라
+      // 실패해도 이미 "전월 자료를 불러오지 못해 급증 비교를 건너뛰었습니다" 안내가 별도로 뜬다 —
+      // 여기서까지 겹쳐 보여주면 당월 조회 실패처럼 오인될 수 있어 의도적으로 무시한다.
+      setAccountErrors(curr.accountErrors || []);
       setBranchFilter("all");
       setMemberFilter("all");
       void prevPromise.then((prev) => {
@@ -148,19 +158,22 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     setMembersLoading(true);
     setMembersError("");
     try {
-      const [membersRes, groups, branchList] = await Promise.all([
+      const [membersRes, groupsRes, branchList] = await Promise.all([
         gasClient.getKakaoTaxiMembers(adminPinHash, forceRefresh),
         gasClient.getKakaoTaxiGroups(adminPinHash, forceRefresh),
         // 부서 드롭다운용 ERP 지점 목록 — 실패해도 직원 목록은 보여준다(드롭다운만 비게 됨)
         gasClient.getBranchList().catch(() => []),
       ]);
       const members = membersRes.members || [];
+      const groups = groupsRes.groups || [];
       if (membersGenRef.current === gen) {
-        setMembersData({ members, groups: groups || [] });
+        setMembersData({ members, groups });
         setErpBranches(Array.from(new Set([
           ...(branchList || []).filter((b) => b.role === "branch").map((b) => b.branchName).filter(Boolean),
           "본사",
         ])).sort((a, b) => a.localeCompare(b, "ko")));
+        // 직원 목록 조회와 그룹 목록 조회는 계정별로 각각 실패할 수 있다 — 두 실패 목록을 합쳐서 보여준다.
+        setAccountErrors([...(membersRes.accountErrors || []), ...(groupsRes.accountErrors || [])]);
       }
       return members;
     } catch (e: any) {
@@ -231,13 +244,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   }, [view, month, loadOrders, loadMembers, loadRequests]);
 
   // ---------- 파생 데이터 ----------
-  const rows = ordersData?.current ?? [];
+  // allRows = 계정 필터 적용 전 정규화 결과(카카오 보고 건수 대사·엑셀 오류 메시지는 이 값을 써야 한다 —
+  // 계정 필터가 걸려 있어도 "수집 자체가 누락됐는지"는 전체 기준으로 판단해야 하므로).
+  const allRows = ordersData?.current ?? [];
+  // rows = 계정 필터가 적용된 정규화 결과. 아래 집계(aggregateByBranch·aggregateByMember)·이상 점검·
+  // 상세 내역이 전부 이 rows 를 받으므로 계정 필터가 자동으로 반영된다.
+  const rows = useMemo(
+    () => (accountFilter === "all" ? allRows : allRows.filter((r) => r.accountKey === accountFilter)),
+    [allRows, accountFilter]
+  );
   const shownMonth = ordersData?.month ?? month;
   const stale = ordersData != null && ordersData.month !== month;
   const branchTotals = useMemo(() => aggregateByBranch(rows), [rows]);
   const memberTotals = useMemo(() => aggregateByMember(rows), [rows]);
   const totalsOk = useMemo(() => verifyBranchTotals(rows, branchTotals), [rows, branchTotals]);
-  const countMismatch = ordersData != null && ordersData.reportedCount !== rows.length;
+  const countMismatch = ordersData != null && ordersData.reportedCount !== allRows.length;
   const totalAmount = useMemo(() => rows.reduce((acc, r) => acc + r.amount, 0), [rows]);
   const visibleRows = useMemo(
     () => {
@@ -322,7 +343,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (stale || ordersLoading) { window.alert(`선택하신 ${month} 자료를 아직 불러오지 못했습니다. 조회가 끝난 뒤 다시 시도해주세요.`); return; }
     if (countMismatch) {
       // 불완전한 파일은 만들지 않는다 — 카카오 보고 건수와 수집 건수가 다르면 누락 가능성이 있다.
-      window.alert(`카카오가 보고한 건수(${formatNumber(ordersData!.reportedCount)}건)와 수집된 건수(${formatNumber(rows.length)}건)가 달라 다운로드를 취소했습니다.\n'새로고침'을 눌러 다시 조회해주세요.`);
+      window.alert(`카카오가 보고한 건수(${formatNumber(ordersData!.reportedCount)}건)와 수집된 건수(${formatNumber(allRows.length)}건)가 달라 다운로드를 취소했습니다.\n'새로고침'을 눌러 다시 조회해주세요.`);
       return;
     }
     if (!visibleRows.length) { window.alert("내려받을 이용내역이 없습니다."); return; }
@@ -384,7 +405,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (!window.confirm(`${member.name || member.identifier} 님에게 카카오T 인증 알림톡을 보낼까요?`)) return;
     setMemberBusyId(member.id);
     try {
-      await gasClient.sendKakaoTaxiMemberTms(member.id, adminPinHash);
+      await gasClient.sendKakaoTaxiMemberTms(member.id, adminPinHash, member.account_key);
       window.alert("인증 알림톡을 보냈습니다.");
     } catch (e: any) {
       window.alert(`알림톡 발송에 실패했습니다.\n${String(e?.message || e)}`);
@@ -408,6 +429,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (!regName.trim()) { window.alert("이름을 입력해주세요."); return; }
     if (!/^01[0-9]{8,9}$/.test(phone)) { window.alert("휴대전화번호를 확인해주세요. (예: 01012345678)"); return; }
     if (!regGroupId) { window.alert("그룹을 선택해주세요."); return; }
+    // 등록 계정은 선택한 그룹이 속한 계정을 그대로 쓴다 — 그룹 드롭다운이 이미 두 계정 그룹을 모두
+    // 담고 있으므로, 화면에 계정 선택지를 따로 두지 않고 그룹 선택으로 계정까지 결정한다.
+    const selectedGroup = membersData?.groups.find((g) => g.id === regGroupId);
+    if (!selectedGroup) { window.alert("선택한 그룹을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 선택해주세요."); return; }
     const groupName = groupNameById.get(regGroupId) || regGroupId;
     if (!window.confirm(`카카오T 비즈니스에 직원을 등록할까요?\n\n이름: ${regName.trim()}\n휴대전화: ${phone}\n그룹: ${groupName}${regDepartment.trim() ? `\n부서(지점): ${regDepartment.trim()}` : ""}`)) return;
     setRegBusy(true);
@@ -416,13 +441,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         identifier, mobile_phone: phone, group_ids: [regGroupId], name: regName.trim(),
         ...(regDepartment.trim() ? { department: regDepartment.trim() } : {}),
       };
-      const created = await gasClient.registerKakaoTaxiMember(input, adminPinHash);
+      const created = await gasClient.registerKakaoTaxiMember(input, adminPinHash, selectedGroup.account_key);
       markOrdersStaleAfterMemberWrite();
       setRegName(""); setRegIdentifier(""); setRegPhone(""); setRegDepartment("");
       // 등록 직후엔 '미인증' 상태라 인증완료 목록에 아직 안 보인다 — 알림톡으로 인증을 유도해야 목록에 들어온다.
       if (created?.id && window.confirm("등록되었습니다. 지금 바로 인증 알림톡을 보낼까요?\n(직원이 카카오T 앱에서 인증해야 법인택시를 쓸 수 있습니다)")) {
         try {
-          await gasClient.sendKakaoTaxiMemberTms(created.id, adminPinHash);
+          await gasClient.sendKakaoTaxiMemberTms(created.id, adminPinHash, selectedGroup.account_key);
           window.alert("인증 알림톡을 보냈습니다. 직원이 인증을 마치면 아래 목록에 나타납니다.");
         } catch (e: any) {
           window.alert(`등록은 되었지만 알림톡 발송에 실패했습니다.\n${String(e?.message || e)}`);
@@ -544,7 +569,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         group_ids: editGroupIds,
         name: editName.trim(),
         department: editDept.trim(),
-      }, adminPinHash);
+      }, adminPinHash, editing.account_key);
       markOrdersStaleAfterMemberWrite();
       // 쓰기 성공 알림은 재조회로 실제 반영을 확인한 뒤에만 — runMemberAction 과 같은 규약
       const list = await loadMembers();
@@ -773,6 +798,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     const request = approveTarget;
     if (!request.phone) { window.alert("신청에 휴대전화번호가 없습니다 — 반려 처리해주세요."); return; }
     if (!approveGroupId) { window.alert("등록할 그룹을 선택해주세요."); return; }
+    // 등록 계정 = 선택한 그룹의 소속 계정. 신규 등록 폼(submitRegister)과 같은 규칙 —
+    // 그룹 드롭다운이 두 계정 그룹을 모두 담고 있으므로 그룹 선택이 곧 계정 선택이다.
+    const approveGroup = membersData?.groups.find((g) => g.id === approveGroupId);
+    if (!approveGroup) { window.alert("선택한 그룹을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 선택해주세요."); return; }
     const groupName = groupNameById.get(approveGroupId) || approveGroupId;
     if (!window.confirm(
       `승인하고 카카오T 비즈니스에 등록할까요?\n\n지점: ${request.branchName}\n이름: ${request.name}\n휴대전화: ${request.phone}\n그룹: ${groupName}\n\n등록되면 직원 휴대폰으로 카카오T 인증 알림톡이 발송됩니다.`
@@ -788,12 +817,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         group_ids: [approveGroupId],
         name: request.name,
         department: request.branchName, // 부서=지점명 — 이용내역이 이 지점으로 집계되게 한다
-      }, adminPinHash);
+      }, adminPinHash, approveGroup.account_key);
       markOrdersStaleAfterMemberWrite();
       let tmsNote = "인증 알림톡 발송됨";
       if (created?.id) {
         try {
-          await gasClient.sendKakaoTaxiMemberTms(created.id, adminPinHash);
+          await gasClient.sendKakaoTaxiMemberTms(created.id, adminPinHash, approveGroup.account_key);
         } catch {
           tmsNote = "인증 알림톡 발송 실패 — 직원 관리에서 재발송 필요";
         }
@@ -833,13 +862,22 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const executeApproveDelete = async (request: KakaoTaxiRequest) => {
     if (anyWriteBusy) return;
     if (!request.memberId) { window.alert("대상 인원 정보가 없는 신청입니다 — 반려 처리해주세요."); return; }
+    // 신청 레코드는 계정을 저장하지 않는다 — 삭제할 계정은 현재 불러온 직원 목록에서 대상 id 로 찾아
+    // 그 직원의 account_key 를 쓴다(고정값 "acct1" 을 추측해서 쓰지 않는다: Task 8 전까지는 이 방법뿐).
+    // 목록에 없으면(다른 기기에서 이미 삭제됐거나 목록 로드가 실패한 경우) 계정을 알 수 없으니
+    // 잘못된 계정으로 삭제를 쏘지 않고 여기서 막는다.
+    const targetMember = (membersData?.members || []).find((x) => x.id === request.memberId);
+    if (!targetMember) {
+      window.alert("삭제 대상 인원을 현재 직원 목록에서 찾지 못해 어느 계정인지 알 수 없습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
+      return;
+    }
     if (!window.confirm(`삭제 요청을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n카카오T 비즈니스에서 즉시 삭제됩니다.`)) return;
     setRequestBusyId(request.id);
     let claimed = false;
     try {
       if (!(await claimForProcessing(request))) return;
       claimed = true;
-      await gasClient.deleteKakaoTaxiMember(request.memberId, adminPinHash);
+      await gasClient.deleteKakaoTaxiMember(request.memberId, adminPinHash, targetMember.account_key);
       markOrdersStaleAfterMemberWrite();
       const list = await loadMembers();
       const note = list === null
@@ -965,9 +1003,17 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
       {needsMonth && ordersError && <div className={ERROR_BANNER}>{ordersError}</div>}
       {view === "members" && membersError && <div className={ERROR_BANNER}>{membersError}</div>}
+      {/* 계정 일부 조회 실패 — 이용내역/이상 점검은 당월 조회 결과가 있을 때만, 직원 관리는 직원 목록이
+          있을 때만 보여준다(로드가 아직 안 끝났거나 실패해 상태가 옛 조회의 잔재일 때 헷갈리지 않게). */}
+      {((needsMonth && !ordersLoading && ordersData) || (view === "members" && !membersLoading && membersData)) && accountErrors.length > 0 && (
+        <div className={ERROR_BANNER}>
+          {accountErrors.map((e) => e.label).join(", ")} 조회 실패 — 아래 집계에 해당 계정 내역이 빠져 있습니다.
+          잠시 후 새로고침해주세요. ({accountErrors[0].message})
+        </div>
+      )}
       {needsMonth && !ordersLoading && ordersData && countMismatch && (
         <div className={ERROR_BANNER}>
-          카카오가 보고한 건수({formatNumber(ordersData.reportedCount)}건)와 수집된 건수({formatNumber(rows.length)}건)가 다릅니다.
+          카카오가 보고한 건수({formatNumber(ordersData.reportedCount)}건)와 수집된 건수({formatNumber(allRows.length)}건)가 다릅니다.
           조회 도중 새 이용이 생겼을 수 있으니 '새로고침'을 눌러주세요.
         </div>
       )}
@@ -1059,6 +1105,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-100">
               <h2 className="admin-pill-title">상세 내역</h2>
               <select
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
+                aria-label="계정 필터"
+              >
+                <option value="all">전체 계정</option>
+                <option value="acct1">1계정</option>
+                <option value="acct2">2계정</option>
+              </select>
+              <select
                 value={branchFilter}
                 onChange={(e) => setBranchFilter(e.target.value)}
                 className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
@@ -1076,9 +1132,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 <option value="all">전체 직원</option>
                 {memberTotals.map((m) => <option key={m.memberKey} value={m.memberKey}>{m.name} ({m.branchName})</option>)}
               </select>
-              {(branchFilter !== "all" || memberFilter !== "all") && (
+              {(accountFilter !== "all" || branchFilter !== "all" || memberFilter !== "all") && (
                 <button
-                  onClick={() => { setBranchFilter("all"); setMemberFilter("all"); }}
+                  onClick={() => { setAccountFilter("all"); setBranchFilter("all"); setMemberFilter("all"); }}
                   className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[11px] font-black text-[#212121]"
                 >필터 해제</button>
               )}
@@ -1088,6 +1144,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               <table className="w-full text-xs whitespace-nowrap">
                 <thead><tr className="text-left">
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이용일시</th>
+                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">계정</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">직원</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">지점</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">출발지 → 도착지</th>
@@ -1096,9 +1153,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 </tr></thead>
                 <tbody>
                   {/* id 없는 주문이 섞여도 key 가 중복되지 않게 순번으로 폴백 — 필터/정렬 결과라 순번 key 로 충분 */}
-                  {visibleRows.map(({ order, branchName, unmapped, amount, timeText }, i) => (
+                  {visibleRows.map(({ order, accountKey, branchName, unmapped, amount, timeText }, i) => (
                     <tr key={order.id || `noid-${i}`} className="border-t border-gray-100">
                       <td className="px-4 py-2">{timeText}</td>
+                      <td className="px-4 py-2">{accountLabel(accountKey)}</td>
                       <td className="px-4 py-2 font-bold text-[#212121]">{order.member_name || "(이름 없음)"}</td>
                       <td className="px-4 py-2">
                         {branchName}
@@ -1112,7 +1170,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     </tr>
                   ))}
                   {!visibleRows.length && (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">이용내역이 없습니다.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">이용내역이 없습니다.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1242,7 +1300,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                       className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white disabled:opacity-50" aria-label="등록할 그룹">
                       <option value="">그룹 선택 (필수)</option>
                       {(membersData?.groups || []).filter((g) => g.status === "enabled").map((g) => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
+                        <option key={g.id} value={g.id}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
                       ))}
                     </select>
                     <button onClick={() => void executeApproveRegister()} disabled={anyWriteBusy}
@@ -1412,7 +1470,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white" aria-label="그룹 (필수)">
                     <option value="">그룹 선택 (필수)</option>
                     {(membersData.groups || []).filter((g) => g.status === "enabled").map((g) => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
+                      <option key={g.id} value={g.id}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
                     ))}
                   </select>
                   <input value={regDepartment} onChange={(e) => setRegDepartment(e.target.value)} placeholder="부서/지점명 (선택)"
@@ -1490,6 +1548,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
                   <table className="w-full text-xs whitespace-nowrap">
                     <thead><tr className="text-left">
+                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">계정</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이름</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">부서/지점</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
@@ -1503,6 +1562,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                         const busy = memberWriteBusy || regBusy;
                         return (
                           <tr key={m.id} className="border-t border-gray-100">
+                            <td className="px-4 py-2">{accountLabel(m.account_key)}</td>
                             <td className="px-4 py-2 font-bold text-[#212121]">{m.name || "(이름 없음)"}</td>
                             <td className="px-4 py-2">{m.department || "-"}</td>
                             <td className="px-4 py-2">{m.mobile_phone || "-"}</td>
@@ -1515,16 +1575,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 <button onClick={() => void sendTms(m)} disabled={busy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">알림톡</button>
                                 {m.status === "blocked" ? (
-                                  <button onClick={() => void runMemberAction(m, "휴직 해제", () => gasClient.unblockKakaoTaxiMember([m.id], adminPinHash),
+                                  <button onClick={() => void runMemberAction(m, "휴직 해제", () => gasClient.unblockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     // 재조회 목록에 여전히 있고 blocked 가 풀렸으면 확인, 목록에서 사라졌으면 판정 불가
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status !== "blocked" : null; })} disabled={busy}
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">휴직 해제</button>
                                 ) : (
-                                  <button onClick={() => void runMemberAction(m, "휴직", () => gasClient.blockKakaoTaxiMember([m.id], adminPinHash),
+                                  <button onClick={() => void runMemberAction(m, "휴직", () => gasClient.blockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status === "blocked" : null; })} disabled={busy}
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">휴직</button>
                                 )}
-                                <button onClick={() => void runMemberAction(m, "삭제", () => gasClient.deleteKakaoTaxiMember(m.id, adminPinHash),
+                                <button onClick={() => void runMemberAction(m, "삭제", () => gasClient.deleteKakaoTaxiMember(m.id, adminPinHash, m.account_key),
                                   // 삭제는 목록에서 사라져야 반영된 것 — 남아 있으면 미반영으로 알린다
                                   (list) => !list.some((x) => x.id === m.id))} disabled={busy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black text-[#B91C1C] bg-white border border-[#C93A3A] disabled:opacity-50">삭제</button>
@@ -1534,7 +1594,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                         );
                       })}
                       {!visibleMembers.length && (
-                        <tr><td colSpan={6} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">
+                        <tr><td colSpan={7} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">
                           {memberBranchFilter === "all" ? "인증완료 직원이 없습니다." : "이 필터에 해당하는 직원이 없습니다."}
                         </td></tr>
                       )}
