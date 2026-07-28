@@ -10,6 +10,7 @@ import {
   accountLabel,
   type NormalizedTaxiOrder,
 } from "../src/pages/admin/helpers/kakaoTaxi";
+import { flagTaxiOrders, isAnomalyExempt, DEFAULT_TAXI_THRESHOLDS } from "../src/pages/admin/helpers/kakaoTaxiAnomaly";
 import type { KakaoTaxiOrder } from "../src/api/gasClient";
 
 let failed = 0;
@@ -79,6 +80,19 @@ console.log("[5] 계정 라벨");
 check("acct1 라벨", accountLabel("acct1") === "1계정");
 check("acct2 라벨", accountLabel("acct2") === "2계정");
 check("미등록 키는 원문", accountLabel("acct9") === "acct9");
+
+console.log("[6] 이상 점검 면제는 계정+id 쌍으로만 적용된다");
+{
+  check("계정1 서광엽 면제", isAnomalyExempt("acct1", "JE1T6UC2") === true);
+  check("계정2의 같은 id 는 면제 아님", isAnomalyExempt("acct2", "JE1T6UC2") === false);
+  const rows = normalizeKakaoTaxiOrders([
+    order({ id: "g", account_key: "acct1", member_id: "JE1T6UC2", member_department: "본사", service_fare: 90000 }),
+    order({ id: "h", account_key: "acct2", member_id: "JE1T6UC2", member_department: "사카바단단", service_fare: 90000 }),
+  ], [...ERP_BRANCHES, "본사"]);
+  const flagged = flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS);
+  check("고액 표식은 계정2 건에만", flagged.length === 1 && flagged[0].row.accountKey === "acct2",
+    flagged.map((f) => f.row.accountKey).join(","));
+}
 
 if (failed) { console.error(`\n실패 ${failed}건`); process.exit(1); }
 console.log("\n전부 통과");
