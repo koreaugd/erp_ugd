@@ -454,6 +454,34 @@ async function kakaoTaxiFetchAllPages(accountKey: string, apiPath: string, baseQ
   return { count: reportedCount, items };
 }
 
+// [성능][동기화] gas/Code.gs, src/api/gasClient.ts(KakaoTaxiOrder 타입)와 세 곳을 같게 유지할 것.
+// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
+// platform_fee·group_id·car_model·total_distance 등을 더 보낸다. 원본 그대로면 330건에 307KB —
+// GAS ScriptCache 는 항목당 100KB 상한이라 cache.put 이 조용히 실패해 캐시가 죽고 화면 로드마다
+// 카카오를 재조회했다(5~12초, 2026-07-28 실측). 로컬(server.ts)은 캐시가 없지만 GAS 와 같은
+// 응답 형태를 유지하려 여기서도 똑같이 슬림화한다. account_key 는 목록에 있지만 여기서 채우지
+// 않는다 — kakaoTaxiCollect 가 나중에 주입한다.
+const KAKAO_TAXI_ORDER_KEEP_FIELDS = [
+  "id", "service_fare", "toll", "call_time", "departure_time",
+  "departure_point", "arrival_point", "member_id", "member_name",
+  "member_identifier", "member_department", "group_name", "car_number",
+  "taxi_company_name", "taxi_kind", "vertical_code", "vertical_product_name",
+  "account_key",
+] as const;
+
+function kakaoTaxiSlimOrder(raw: any): any {
+  const out: any = {};
+  for (const key of KAKAO_TAXI_ORDER_KEEP_FIELDS) {
+    if (key === "account_key") continue; // kakaoTaxiCollect 가 나중에 채운다
+    out[key] = raw[key];
+  }
+  return out;
+}
+
+function kakaoTaxiSlimOrders(items: any[]): any[] {
+  return items.map(kakaoTaxiSlimOrder);
+}
+
 // 이용내역 — 로컬은 캐시 없이 매번 실시간 조회한다(GAS 의 ScriptCache 최적화는 운영 전용).
 // gas/Code.gs getKakaoTaxiOrders 와 같은 반환 형태(account_key 는 kakaoTaxiCollect 가 채운다).
 async function kakaoTaxiOrders(month: string) {
@@ -463,7 +491,8 @@ async function kakaoTaxiOrders(month: string) {
     const res = await kakaoTaxiFetchAllPages(acc.key, "/external/v2/orders",
       `start_date=${range.start}&end_date=${range.end}`, "orders");
     reportedCounts[acc.key] = res.count;
-    return res.items;
+    // [성능] GAS 캐시와 같은 슬림 응답 형태를 유지한다.
+    return kakaoTaxiSlimOrders(res.items);
   });
   // [B2] count = 성공한 계정들의 카카오 "보고" 건수 합 — collected.items.length(수집본 길이)를 쓰면
   // 화면의 "수집본 vs 카카오 보고" 건수 대사 경고가 절대 안 뜬다. 실패한 계정은 accountErrors 로
