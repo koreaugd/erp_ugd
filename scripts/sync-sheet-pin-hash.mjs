@@ -124,14 +124,21 @@ async function main() {
   }
 
   if (dryRun) {
-    for (const v of verified) results.push({ label: v.branchName, ok: true, note: `PIN 검증 통과 (dry-run, 미기입) hash=${sha256Hex(v.pin).slice(0, 12)}…` });
+    for (const v of verified) results.push({ label: v.branchName, ok: true, note: "PIN 검증 통과 (dry-run, 미기입)" });
   } else if (verified.length) {
-    // 2단계: 관리자로 로그인해 시트 + Firestore 미러를 함께 기입.
+    // 2단계: 관리자로 로그인해 Firestore 미러 → 시트 순서로 기입.
+    //
+    // 순서가 중요하다(Codex P1 2026-07-28). 둘 중 하나만 성공했을 때 어느 쪽이 남는지가 다르다:
+    //   미러 먼저: 미러=새값 / 시트=옛값 → 택시 게이트는 아직 실패하지만, 복원을 돌리면
+    //              미러의 새 해시가 시트로 흘러가 스스로 수렴한다(자기 치유).
+    //   시트 먼저: 시트=새값 / 미러=옛값(빈값) → 화면은 고쳐진 듯 보이다가, 복원이 한 번
+    //              돌면 빈값이 시트를 덮어 장애가 조용히 재발한다(자기 파괴).
+    // 그래서 미러를 먼저 쓴다. 부분 적용이 생기면 아래에서 어느 쪽이 적용됐는지 명시한다.
     await signInAsAdmin(app);
     for (const v of verified) {
       const pinHash = sha256Hex(v.pin);
+      let mirrorDone = false;
       try {
-        await callGas("updateBranchPin", { branchName: v.branchName, pinHash });
         // 이름 키 미러 — 앱 tryDirectBackup("setting") 과 동일 필드 구성(전체 메타 포함).
         // merge:true 라 기존 문서의 다른 필드를 지우지 않는다.
         await setDoc(doc(db, "settings", v.branchName), {
@@ -142,9 +149,17 @@ async function main() {
           brand: v.brand,
           _updatedAt: new Date().toISOString()
         }, { merge: true });
-        results.push({ label: v.branchName, ok: true, note: `시트+미러 기입 완료 hash=${pinHash.slice(0, 12)}…` });
+        mirrorDone = true;
+        await callGas("updateBranchPin", { branchName: v.branchName, pinHash });
+        results.push({ label: v.branchName, ok: true, note: "시트+미러 기입 완료" });
       } catch (e) {
-        results.push({ label: v.branchName, ok: false, note: `기입 실패: ${String(e?.message || e)}` });
+        results.push({
+          label: v.branchName,
+          ok: false,
+          note: mirrorDone
+            ? `부분 적용 — Firestore 미러만 기입됨(시트 실패). 이 지점은 택시 탭이 아직 거부되니 재실행하세요: ${String(e?.message || e)}`
+            : `미적용 — 아무것도 바뀌지 않았습니다: ${String(e?.message || e)}`
+        });
       }
     }
     await signOut(auth);

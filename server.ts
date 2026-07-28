@@ -233,6 +233,20 @@ function findLocalSettingByPinHash(db: LocalDB, pinHash: unknown) {
   });
 }
 
+// 한 행의 pin_hash 가 입력 해시와 맞는지 — gas/Code.gs pinRowMatches_ 와 같은 규칙
+// (완전일치 · admin 레거시 해시 · 시트에 평문 PIN 이 적혀 있던 하위 호환)으로 유지할 것.
+const ADMIN_LEGACY_HASHES = [
+  "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf",
+  "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95"
+];
+function localPinRowMatches(hashInDb: string, cleanPinHash: string, role: unknown) {
+  if (!cleanPinHash || !hashInDb) return false;
+  if (hashInDb === cleanPinHash) return true;
+  if (role === "admin" && ADMIN_LEGACY_HASHES.includes(hashInDb) && ADMIN_LEGACY_HASHES.includes(cleanPinHash)) return true;
+  if (hashInDb.length < 32 && crypto.createHash("sha256").update(hashInDb, "utf8").digest("hex") === cleanPinHash) return true;
+  return false;
+}
+
 // 지점 화면 게이트 — "이 PIN 이 이 지점의 PIN 인가"를 그 지점 행에서 직접 확인한다.
 // findLocalSettingByPinHash(역방향: PIN → 행)를 쓰면 안 되는 이유 — 2026-07-28 운영 사고:
 // 여러 지점이 같은 공통 PIN 을 쓰면 먼저 나오는 한 행만 매칭돼 나머지 전 지점이 거부됐다.
@@ -243,11 +257,20 @@ function verifyLocalBranchPinOrAdmin(db: LocalDB, pinHash: unknown, branchName: 
   const cleanPinHash = String(pinHash || "").trim().toLowerCase();
   if (!target || !cleanPinHash) return undefined;
 
-  const admin = findLocalSettingByPinHash(db, cleanPinHash);
-  if (admin?.role === "admin") return { branchName: target, role: "admin", brand: admin.brand };
+  // 복원 데이터가 boolean 대신 "FALSE" 문자열을 실어 올 수 있다 — 문자열 "FALSE" 는 truthy 라
+  // 그냥 두면 비활성 지점이 게이트를 통과한다(GAS 는 "TRUE" 정확매칭이라 배제 — 파리티 유지).
+  const isActiveRow = (v: unknown) => v === true || String(v).trim().toUpperCase() === "TRUE";
+  // 지점 행은 첫 매칭만 채택한다 — 중복 행이 있어도 GAS 와 같은 행을 고르게(파리티).
+  const row = db.settings.find(s => isActiveRow(s.is_active) && String(s.branch_name || "").trim() === target);
+  // 관리자 PIN 도 "실제로 있는 활성 지점"에만 통과시킨다 — 임의 문자열이 카카오 부서명으로
+  // 등록되는 것을 막는다(Codex P1 2026-07-28).
+  if (!row) return undefined;
 
-  const row = db.settings.find(s => s.is_active && String(s.branch_name || "").trim() === target);
-  if (row && String(row.pin_hash || "").trim().toLowerCase() === cleanPinHash) {
+  const adminRow = db.settings.find(s => isActiveRow(s.is_active) && s.role === "admin"
+    && localPinRowMatches(String(s.pin_hash || "").trim().toLowerCase(), cleanPinHash, "admin"));
+  if (adminRow) return { branchName: target, role: "admin", brand: row.brand };
+
+  if (localPinRowMatches(String(row.pin_hash || "").trim().toLowerCase(), cleanPinHash, row.role)) {
     return { branchName: target, role: row.role, brand: row.brand };
   }
   return undefined;
