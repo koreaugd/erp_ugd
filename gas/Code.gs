@@ -372,17 +372,22 @@ function verifyBranchPinOrAdmin(pinHash, branchName) {
   var sheet = getSpreadsheet().getSheetByName(SHEETS.SETTING);
   var data = sheet.getDataRange().getValues();
   var branchRow = null;
+  var adminMatched = false;
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     if (String(row[3]).toUpperCase() !== "TRUE") continue;
-    var hashInDb = String(row[1] || "").trim().toLowerCase();
-    // 관리자 PIN 은 지점 행을 볼 것 없이 통과
-    if (row[2] === "admin" && pinRowMatches_(hashInDb, cleanPinHash, "admin")) {
-      return { branchName: target, role: "admin", brand: row[4] };
+    // 지점 행은 첫 매칭만 채택한다 — 중복 행이 있어도 server.ts 와 같은 행을 고르게(파리티).
+    if (!branchRow && String(row[0] || "").trim() === target) branchRow = row;
+    if (!adminMatched && row[2] === "admin"
+      && pinRowMatches_(String(row[1] || "").trim().toLowerCase(), cleanPinHash, "admin")) {
+      adminMatched = true;
     }
-    if (String(row[0] || "").trim() === target) branchRow = row;
   }
-  if (branchRow && pinRowMatches_(String(branchRow[1] || "").trim().toLowerCase(), cleanPinHash, branchRow[2])) {
+  // 관리자 PIN 도 "실제로 있는 활성 지점"에만 통과시킨다 — 임의 문자열이 그대로 카카오 부서명으로
+  // 등록되는 것을 막는다(Codex P1 2026-07-28).
+  if (!branchRow) return null;
+  if (adminMatched) return { branchName: target, role: "admin", brand: branchRow[4] };
+  if (pinRowMatches_(String(branchRow[1] || "").trim().toLowerCase(), cleanPinHash, branchRow[2])) {
     return { branchName: target, role: branchRow[2], brand: branchRow[4] };
   }
   return null;
