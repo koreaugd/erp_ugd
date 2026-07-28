@@ -243,6 +243,15 @@ function requireKakaoTaxiAdmin(db: LocalDB, adminPinHash: unknown) {
   if (!setting || setting.role !== "admin") throw denied;
 }
 
+// 쓰기 액션 전용 — 계정을 반드시 명시받는다. 기본값을 두면 엉뚱한 계정에 삭제·수정이 나간다.
+// gas/Code.gs requireKakaoAccountKey 와 동일 로직.
+function requireKakaoAccountKey(accountKey: unknown): string {
+  const key = String(accountKey || "").trim();
+  if (!key) throw new Error("대상 카카오T 계정이 지정되지 않았습니다. 화면을 새로고침한 뒤 다시 시도해주세요.");
+  kakaoTaxiCredentials(key); // 등록된 계정인지 확인 — 아니면 던진다
+  return key;
+}
+
 // 카카오T 액션 목록 — 이 액션들은 GAS 웹앱과 같은 규약으로 응답한다(오류도 HTTP 200 + success:false).
 // 500으로 주면 클라이언트 callApi 가 본문을 읽지 않아 사용자에게 "HTTP Error 500"만 보인다.
 const KAKAO_TAXI_ACTIONS = new Set([
@@ -260,25 +269,25 @@ async function runKakaoTaxiAction(action: string, body: any): Promise<any> {
     case "getKakaoTaxiMembers":
       return kakaoTaxiMembers();
     case "registerKakaoTaxiMember":
-      return kakaoTaxiRegisterMember(body.member);
+      return kakaoTaxiRegisterMember(requireKakaoAccountKey(body.accountKey), body.member);
     case "updateKakaoTaxiMember":
-      return kakaoTaxiUpdateMember(String(body.memberId || ""), body.member);
+      return kakaoTaxiUpdateMember(requireKakaoAccountKey(body.accountKey), String(body.memberId || ""), body.member);
     case "blockKakaoTaxiMember":
-      return kakaoTaxiSetBlocked(body.memberIds, true);
+      return kakaoTaxiSetBlocked(requireKakaoAccountKey(body.accountKey), body.memberIds, true);
     case "unblockKakaoTaxiMember":
-      return kakaoTaxiSetBlocked(body.memberIds, false);
+      return kakaoTaxiSetBlocked(requireKakaoAccountKey(body.accountKey), body.memberIds, false);
     case "deleteKakaoTaxiMember": {
+      const accountKey = requireKakaoAccountKey(body.accountKey);
       const memberId = String(body.memberId || "");
       if (!memberId) throw new Error("삭제할 직원이 지정되지 않았습니다.");
-      // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-      await kakaoTaxiFetch("acct1", "DELETE", "/external/v1/members/" + encodeURIComponent(memberId));
+      await kakaoTaxiFetch(accountKey, "DELETE", "/external/v1/members/" + encodeURIComponent(memberId));
       return { success: true };
     }
     case "sendKakaoTaxiMemberTms": {
+      const accountKey = requireKakaoAccountKey(body.accountKey);
       const memberId = String(body.memberId || "");
       if (!memberId) throw new Error("알림톡을 보낼 직원이 지정되지 않았습니다.");
-      // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-      await kakaoTaxiFetch("acct1", "POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms");
+      await kakaoTaxiFetch(accountKey, "POST", "/external/v1/members/" + encodeURIComponent(memberId) + "/send_tms");
       return { success: true };
     }
     default:
@@ -446,6 +455,17 @@ const KAKAO_TAXI_BRANCH_ALIASES: Record<string, string> = {
   "대물섬종로점": "대물섬 종로점",
 };
 
+// 지점 → 카카오T 계정. 미기재 지점은 계정 #1(기본값).
+// [동기화] gas/Code.gs, src/pages/admin/helpers/kakaoTaxi.ts 와 세 곳을 같게 유지할 것.
+const KAKAO_ACCOUNT_BY_BRANCH: Record<string, string> = {
+  "사카바단단": "acct2",
+  "8번대물집": "acct2",
+};
+
+function kakaoTaxiAccountForBranch(branchName: string): string {
+  return KAKAO_ACCOUNT_BY_BRANCH[String(branchName || "").trim()] || "acct1";
+}
+
 // 지점 화면용 — 타 지점 직원 정보가 새지 않도록 필터는 반드시 백엔드에서. gas/Code.gs 동일 로직.
 async function kakaoTaxiBranchMembers(db: LocalDB, pinHash: unknown, branchName: string) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
@@ -474,7 +494,7 @@ function kakaoTaxiNormalizeContact(member: any) {
   };
 }
 
-async function kakaoTaxiRegisterMember(member: any) {
+async function kakaoTaxiRegisterMember(accountKey: string, member: any) {
   const m = member || {};
   const norm = kakaoTaxiNormalizeContact(m);
   if (!m.identifier || !norm.phone || !norm.groupIds.length) {
@@ -487,28 +507,37 @@ async function kakaoTaxiRegisterMember(member: any) {
   };
   if (m.name) body.name = String(m.name);
   if (m.department) body.department = String(m.department);
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지). gas/Code.gs 와 동일.
-  return kakaoTaxiFetch("acct1", "POST", "/external/v1/members", null, body);
+  return kakaoTaxiFetch(accountKey, "POST", "/external/v1/members", null, body);
 }
 
 // [P1] 지점별 자동등록 쿨다운(반복 알림톡 방지). 프로세스 메모리 — 로컬 dev 재시작 시 리셋된다.
 const kakaoRegCooldown = new Map<string, number>();
 
-// 지점명 → 활성(enabled) 카카오 그룹 id. 지점 자동등록은 지점이 그룹을 직접 고르지 않으므로
-// 지점명과 일치하는(별칭 포함) enabled 그룹을 백엔드가 정한다. 못 찾으면 null → 호출부가 거부(오등록 방지).
+interface KakaoGroupResolution { accountKey: string; groupId: string | null }
+
+// 지점명 → { 계정, 활성(enabled) 그룹 id }. 지점 자동등록은 지점이 그룹을 직접 고르지 않으므로
+// 백엔드가 정한다. 못 찾으면 groupId 가 null → 호출부가 거부(오등록 방지).
+// [주의] 계정 #1 에도 사카바단단·8번대물집 이름의 껍데기 그룹이 있으므로 반드시 매핑표가 정한
+// 계정 안에서만 찾는다. 계정 전체를 뒤지면 엉뚱한 계정에 등록된다.
 // gas/Code.gs kakaoTaxiGroupIdForBranch 와 동일 로직으로 유지할 것.
-async function kakaoTaxiGroupIdForBranch(branchName: string): Promise<string | null> {
+async function kakaoTaxiGroupIdForBranch(branchName: string): Promise<KakaoGroupResolution> {
   const target = String(branchName || "").trim();
-  if (!target) return null;
+  const accountKey = kakaoTaxiAccountForBranch(target);
+  if (!target) return { accountKey, groupId: null };
   // [쓰기 경로] 이 그룹 id 로 실제 카카오 등록이 실행된다 — 항상 실시간 조회한다(캐시 미사용).
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const groups = await kakaoTaxiAccountGroups("acct1");
+  const groups = await kakaoTaxiAccountGroups(accountKey);
+  let fallback: string | null = null;
   for (const g of groups) {
     if (String(g.status) !== "enabled") continue;
     const gn = String(g.name || "").trim();
-    if (gn === target || KAKAO_TAXI_BRANCH_ALIASES[gn] === target) return g.id;
+    if (gn === target || KAKAO_TAXI_BRANCH_ALIASES[gn] === target) return { accountKey, groupId: g.id };
+    fallback = fallback === null ? g.id : fallback;
   }
-  return null;
+  // 계정 #2 처럼 지점명 그룹이 없고 활성 그룹이 '기본그룹' 하나뿐이면 그 그룹에 넣는다.
+  // 지점 판정은 부서(department=지점명) 우선이라 집계는 정상 동작한다.
+  const enabledCount = groups.filter((g: any) => String(g.status) === "enabled").length;
+  if (enabledCount === 1 && fallback) return { accountKey, groupId: fallback };
+  return { accountKey, groupId: null };
 }
 
 // 지점 자동 등록 — 지점 PIN 게이트로 관리자 승인 없이 카카오 등록 + 인증 알림톡 발송.
@@ -526,7 +555,9 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
   if (!cleanName) throw new Error("이름을 입력해주세요.");
   if (!/^01[0-9]{8,9}$/.test(cleanPhone)) throw new Error("휴대전화번호를 확인해주세요. (예: 01012345678)");
 
-  const groupId = await kakaoTaxiGroupIdForBranch(branchName);
+  const resolved = await kakaoTaxiGroupIdForBranch(branchName);
+  const groupId = resolved.groupId;
+  const accountKey = resolved.accountKey;
   if (!groupId) throw new Error("이 지점에 해당하는 카카오T 그룹을 찾지 못했습니다. 관리자에게 문의해주세요.");
 
   // 중복 방지 — 어느 소속(지점)에 이미 있는지 알려주고 거부(전입 직원이 이전 지점으로 등록된 상황 파악).
@@ -537,7 +568,8 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
     if (String(m.mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
       let where = String(m.department || "").trim();
       if (!where && Array.isArray(m.group_ids) && m.group_ids.length) {
-        const g = allGroups.find((x: any) => x.id === m.group_ids[0]);
+        // 그룹 id 대조에 account_key 를 함께 본다 — 계정이 다르면 같은 그룹 id 가 존재할 수 있다.
+        const g = allGroups.find((x: any) => x.id === m.group_ids[0] && x.account_key === m.account_key);
         if (g) where = String(g.name || "");
       }
       if (!where) where = "다른 지점";
@@ -554,7 +586,7 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
   // register 는 카카오가 이미 존재하는 번호(인증 대기 등 connected 목록에 안 보이는 경우)를 400 으로 막는다 — 친절히 안내.
   let member: any;
   try {
-    member = await kakaoTaxiRegisterMember({
+    member = await kakaoTaxiRegisterMember(accountKey, {
       identifier: cleanName, mobile_phone: cleanPhone, group_ids: [groupId], name: cleanName, department: branchName
     });
   } catch (e: any) {
@@ -571,8 +603,7 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
   if (member?.id) {
     for (let t = 0; t < 3 && !tmsSent; t++) {
       try {
-        // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-        await kakaoTaxiFetch("acct1", "POST", "/external/v1/members/" + encodeURIComponent(member.id) + "/send_tms");
+        await kakaoTaxiFetch(accountKey, "POST", "/external/v1/members/" + encodeURIComponent(member.id) + "/send_tms");
         tmsSent = true;
       } catch { if (t < 2) await new Promise((r) => setTimeout(r, 700)); }
     }
@@ -580,7 +611,7 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
   return { member, tmsSent };
 }
 
-async function kakaoTaxiUpdateMember(memberId: string, member: any) {
+async function kakaoTaxiUpdateMember(accountKey: string, memberId: string, member: any) {
   if (!memberId) throw new Error("수정할 직원이 지정되지 않았습니다.");
   const m = member || {};
   const norm = kakaoTaxiNormalizeContact(m);
@@ -595,16 +626,14 @@ async function kakaoTaxiUpdateMember(memberId: string, member: any) {
     name: m.name ? String(m.name) : "",
     department: m.department ? String(m.department) : ""
   };
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  return kakaoTaxiFetch("acct1", "PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
+  return kakaoTaxiFetch(accountKey, "PUT", "/external/v1/members/" + encodeURIComponent(memberId), null, body);
 }
 
-async function kakaoTaxiSetBlocked(memberIds: unknown, blocked: boolean) {
+async function kakaoTaxiSetBlocked(accountKey: string, memberIds: unknown, blocked: boolean) {
   const ids = (Array.isArray(memberIds) ? memberIds : []).filter(Boolean).map(String);
   if (!ids.length) throw new Error("휴직 처리할 직원이 지정되지 않았습니다.");
   const apiPath = blocked ? "/external/v1/members/block" : "/external/v1/members/unblock";
-  // [임시] Task 8 에서 계정 라우팅이 들어오기 전까지 1계정 고정(기존 동작 유지).
-  const results: any[] = (await kakaoTaxiFetch("acct1", "POST", apiPath, null, { members: ids.join(",") })) || [];
+  const results: any[] = (await kakaoTaxiFetch(accountKey, "POST", apiPath, null, { members: ids.join(",") })) || [];
   const failed = results.filter((r) => r && r.status_code !== 0);
   if (failed.length) {
     throw new Error("일부 직원 처리 실패: " + failed.map((r) => `${r.id}(${r.status_msg || "실패"})`).join(", "));
