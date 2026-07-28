@@ -103,5 +103,22 @@ check("그 외 지점은 1계정", kakaoTaxiAccountForBranch("대물섬 한남�
 check("빈 지점명도 1계정", kakaoTaxiAccountForBranch("") === "acct1");
 check("매핑표에 acct2 만 기재", Object.values(KAKAO_ACCOUNT_BY_BRANCH).every((v) => v === "acct2"));
 
+console.log("[8] 주문 dedup 은 계정으로 한정된다(F3)");
+{
+  // 계정이 다르면 카카오가 매긴 id 가 우연히 같을 수 있다 — id 만으로 걸렀다면 아래는 1건으로 뭉개진다.
+  const crossAccount = normalizeKakaoTaxiOrders([
+    order({ id: "same-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
+    order({ id: "same-id", account_key: "acct2", member_department: "사카바단단", service_fare: 2000 }),
+  ], ERP_BRANCHES);
+  check("계정이 다르면 같은 id 라도 둘 다 남는다", crossAccount.length === 2, String(crossAccount.length));
+
+  // 같은 계정 안에서 id 가 같으면 여전히 중복으로 걸러야 한다(기존 동작 유지 확인).
+  const sameAccount = normalizeKakaoTaxiOrders([
+    order({ id: "dup-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
+    order({ id: "dup-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
+  ], ERP_BRANCHES);
+  check("같은 계정의 같은 id 는 1건으로 합쳐진다", sameAccount.length === 1, String(sameAccount.length));
+}
+
 if (failed) { console.error(`\n실패 ${failed}건`); process.exit(1); }
 console.log("\n전부 통과");
