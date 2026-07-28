@@ -4,7 +4,7 @@
 // 이 컬렉션은 firestore.rules에서 개인 관리자(loginType "personal")만 읽고 쓸 수 있다(isPersonalAdmin()).
 // PIN 관리자(admin@ugd-erp.example)는 규칙에서 의도적으로 배제돼 있어 목록 조회 자체가 permission-denied로
 // 거부된다 — 그래서 로드를 시도하기 전에 currentUid(개인 계정일 때만 전달됨)로 걸러 안내만 보여준다.
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { listUserProfiles, updateUserProfile, type UserProfile } from "../../api/userProfile";
@@ -40,7 +40,14 @@ const TAB_GROUPS: Array<{ label: string; keys: PermKey[] }> = [
   { label: "인사 · 기타", keys: ["laborContract", "businessTaxi", "annualLeave"] },
 ];
 
-const ROLE_LABEL: Record<UserProfile["role"], string> = { admin: "관리자", branch: "지점" };
+// 화면에 보이는 이름만 바꾼 것이다 — 내부 값 "admin"은 규칙·세션·기존 문서가 모두 쓰고 있어 절대 바꾸지 않는다(설계서 §15.1).
+const ROLE_LABEL: Record<UserProfile["role"], string> = { admin: "총괄", branchAdmin: "지점관리자", branch: "지점" };
+// 역할 드롭다운 순서 — 권한이 낮은 것부터.
+const ROLE_OPTIONS: Array<{ value: UserProfile["role"]; label: string; hint: string }> = [
+  { value: "branch", label: "지점", hint: "지점 업무만. 급여대장은 볼 수 없습니다." },
+  { value: "branchAdmin", label: "지점관리자", hint: "허용된 지점의 급여대장을 보고 작성할 수 있습니다." },
+  { value: "admin", label: "총괄", hint: "관리자 화면 + 전 지점 급여대장." },
+];
 const STATUS_LABEL: Record<UserProfile["status"], string> = { active: "사용중", suspended: "정지" };
 
 type EditState = {
@@ -82,6 +89,21 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [confirmingUid, setConfirmingUid] = useState<string | null>(null);
+  // 기존 계정 허용지점 일괄 축소 패널(2026-07-28 전환 작업)
+  const [scopePanelOpen, setScopePanelOpen] = useState(false);
+  const [scopeRunning, setScopeRunning] = useState(false);
+  const [scopeResult, setScopeResult] = useState<{ done: number; failed: string[] } | null>(null);
+  // 아래 목록 인라인 편집·인덱스 복구·지점 필터용 상태.
+  // ⚠ 훅은 전부 여기(조기 return 위)에 모아 둔다 — 아래쪽 `if (!isPersonalAdminSession) return`보다 뒤에 두면
+  //   PIN 관리자↔개인 관리자로 세션이 바뀔 때 렌더마다 훅 개수가 달라져 React가 터진다.
+  const [rowSavingUid, setRowSavingUid] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ uid: string; message: string } | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [branchFilter, setBranchFilter] = useState<string>("");
+  // '전체 지점 펼치기'는 저장 전에 지점 목록을 다시 받아오는 구간이 있어, 그 사이 두 번째 클릭이 들어올 수 있다.
+  // 상태 갱신은 즉시 반영되지 않으므로(같은 tick의 두 클릭이 둘 다 통과) 판정은 ref로, 버튼 비활성화는 state로 한다.
+  const expandingRef = useRef(false);
+  const [expandingUid, setExpandingUid] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!isPersonalAdminSession) return;
@@ -177,8 +199,9 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
     setSaving(true);
     setSaveError("");
     try {
-      await updateUserProfile(editingUid, edit);
-      const patch = edit;
+      // 저장 직전에 한 번 더 맞춘다 — 역할을 바꾼 뒤 지점을 만지는 순서로도 규칙이 어긋나지 않게(fail-closed).
+      const patch = { ...edit, salaryBranches: normalizeSalaryBranches(edit.role, edit.salaryBranches, edit.allowedBranches) };
+      await updateUserProfile(editingUid, patch);
       setProfiles((prev) => prev && prev.map((p) => (p.uid === editingUid ? { ...p, ...patch } : p)));
       cancelEdit();
     } catch (e) {
@@ -219,7 +242,11 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
       // 승인은 권한 편집 상태와 원자적으로 저장한다 — 관리자가 조정한 지점·탭 제한이 승인과 함께 반영되도록.
       // 승인만 따로 저장하면 신규 기본값(all 탭/all 지점)이 그대로 남아 의도보다 넓은 권한이 부여된다(Codex 지적 2026-07-27).
       // 편집을 안 건드렸으면 edit은 startEdit이 로드한 현재값(신규=all)이라 정책(신규 전체 허용, 이후 제한)과 일치한다.
-      const patch = (uid === editingUid && edit) ? { ...edit, reviewedByAdmin: true } : { reviewedByAdmin: true };
+      // 편집과 함께 승인할 때도 급여 허용 지점을 역할에 맞게 정리한다 — 이 경로만 빠지면
+      // 지점 범위를 줄이며 승인한 계정에 옛 급여 범위가 남는다(Codex 지적 2026-07-28).
+      const patch = (uid === editingUid && edit)
+        ? { ...edit, salaryBranches: normalizeSalaryBranches(edit.role, edit.salaryBranches, edit.allowedBranches), reviewedByAdmin: true }
+        : { reviewedByAdmin: true };
       await updateUserProfile(uid, patch);
       setProfiles((prev) => prev && prev.map((p) => (p.uid === uid ? { ...p, ...patch } : p)));
       if (uid === editingUid) cancelEdit();
@@ -246,6 +273,210 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
 
   const editingProfile = (profiles || []).find((p) => p.uid === editingUid) || null;
 
+  // 역할을 바꿀 때 급여대장 허용 지점을 함께 손본다(설계서 §15.3).
+  // - 지점관리자로 올리면: 그 사람의 근무지점을 자동으로 넣어 준다. 매번 따로 체크하지 않아도 자기 지점은 바로 열린다.
+  // - 지점으로 내리면: 급여 허용 지점을 비운다. 권한 데이터가 남아 있다가 나중에 역할이 다시 올라갈 때
+  //   의도치 않게 되살아나는 것을 막는다(fail-closed).
+  // - 총괄은 지점 목록과 무관하게 전 지점이므로 건드리지 않는다.
+  const changeRole = (nextRole: UserProfile["role"]) => {
+    if (!edit) return;
+    const home = String(editingProfile?.workBranch || "").trim();
+    const seeded = nextRole === "branchAdmin" && edit.salaryBranches !== "all" && home && !edit.salaryBranches.includes(home)
+      ? [...edit.salaryBranches, home]
+      : edit.salaryBranches;
+    setEdit({ ...edit, role: nextRole, salaryBranches: normalizeSalaryBranches(nextRole, seeded, edit.allowedBranches) });
+  };
+
+  // ---- 기존 계정 허용지점 일괄 축소 (2026-07-28 전환 작업, 설계서 §11) ----
+  //
+  // 왜 화면에서 하나: users 문서는 firestore.rules 상 '개인 관리자'만 쓸 수 있고, PIN 관리자 계정은
+  // 의도적으로 배제돼 있다. 스크립트는 PIN 계정으로만 로그인할 수 있어 users를 읽지도 쓰지도 못한다.
+  // 그래서 이 정리는 총괄이 로그인한 이 화면에서 돌린다 — 대상은 한 번에 다 처리하므로 '일괄'은 그대로다.
+  //
+  // 대상: 역할이 '지점'이고 허용지점이 '전체'인 계정. 근무지점(workBranch) 한 곳으로 좁힌다.
+  // 건너뜀: 근무지점이 비었거나 현재 지점 목록에 없는 이름 — 임의로 추정하지 않고 그대로 남긴다(fail-closed).
+  const scopeTargets = (profiles || []).filter(
+    (p) => p.role === "branch" && p.allowedBranches === "all" && p.uid !== currentUid
+  );
+  const branchNameSet = new Set(branches.map((b) => String(b.branchName || "").trim()));
+  const scopeReady = scopeTargets.filter((p) => {
+    const home = String(p.workBranch || "").trim();
+    return home !== "" && branchNameSet.has(home);
+  });
+  const scopeSkipped = scopeTargets.filter((p) => !scopeReady.includes(p));
+
+  // ---- 목록에서 바로 고치기(행 안 드롭다운) ----
+  //
+  // 역할·허용지점·상태는 자주 손대는 값이라, 아래 상세 패널을 열지 않고 행에서 바로 바꾸고 즉시 저장한다.
+  // 저장 중인 행은 흐리게 처리하고, 실패하면 그 행 아래에 사유를 남긴다(조용히 삼키지 않는다).
+  /**
+   * 역할에 맞게 급여대장 허용 지점을 정리한다. 화면·규칙·저장이 같은 규칙을 쓰도록 한 곳에 둔다.
+   *   총괄       : 목록과 무관하게 전 지점이므로 건드리지 않는다.
+   *   지점       : 급여 권한 없음 → 비운다(fail-closed).
+   *   지점관리자 : '전체'는 쓸 수 없고(사용자 지시: 전체매장이 아니라 허용된 지점만),
+   *                허용지점 밖의 지점도 남기지 않는다(못 들어가는 지점의 급여를 볼 수는 없다).
+   */
+  const normalizeSalaryBranches = (
+    role: UserProfile["role"],
+    salary: string[] | "all",
+    allowed: string[] | "all"
+  ): string[] | "all" => {
+    if (role === "admin") return salary;
+    if (role !== "branchAdmin") return [];
+    const list = salary === "all" ? (allowed === "all" ? [] : [...allowed]) : salary;
+    if (allowed === "all") return list;
+    return list.filter((b) => allowed.includes(b));
+  };
+
+  /** 행에서 고친 값을 바로 저장한다. 급여 허용 지점은 위 규칙으로 함께 맞춘다. */
+  const applyRowPatch = async (profile: UserProfile, patch: Partial<UserProfile>) => {
+    if (rowSavingUid || profile.uid === currentUid) return;
+    const nextRole = (patch.role ?? profile.role) as UserProfile["role"];
+    const nextAllowed = (patch.allowedBranches ?? profile.allowedBranches) as string[] | "all";
+    const currentSalary = profile.salaryBranches === "all" ? "all" : [...(profile.salaryBranches ?? [])];
+    // 지점관리자로 올릴 때는 근무지점을 기본으로 넣어 준다(허용지점 안에 있을 때만).
+    const seeded = nextRole === "branchAdmin" && currentSalary !== "all"
+      ? (() => {
+          const home = String(profile.workBranch || "").trim();
+          const inScope = home && (nextAllowed === "all" || nextAllowed.includes(home));
+          return inScope && !currentSalary.includes(home) ? [...currentSalary, home] : currentSalary;
+        })()
+      : currentSalary;
+    const nextSalary = normalizeSalaryBranches(nextRole, seeded, nextAllowed);
+    // allowedBranches를 항상 함께 보낸다 — 규칙이 보는 인코딩본(allowedBranchesEncoded)이 이때 갱신된다.
+    // 역할만 바꾸고 지점을 안 보내면 인코딩본이 없는 채로 남아, 방금 올린 지점관리자가 규칙에서 막힌다.
+    const fullPatch = { ...patch, allowedBranches: nextAllowed, salaryBranches: nextSalary };
+
+    setRowSavingUid(profile.uid);
+    setRowError(null);
+    try {
+      await updateUserProfile(profile.uid, fullPatch);
+      setProfiles((prev) => prev && prev.map((p) => (p.uid === profile.uid ? { ...p, ...fullPatch } : p)));
+    } catch (e) {
+      console.error("계정 즉시 수정 실패:", e);
+      setRowError({ uid: profile.uid, message: "저장하지 못했습니다. 본인 계정이거나 권한·네트워크 문제일 수 있습니다." });
+    } finally {
+      setRowSavingUid(null);
+    }
+  };
+
+  const addAllowedBranch = (profile: UserProfile, branchName: string) => {
+    if (!branchName) return;
+    if (branchName === "__all__") {
+      void applyRowPatch(profile, { allowedBranches: "all" });
+      return;
+    }
+    const current = profile.allowedBranches === "all" ? [] : [...profile.allowedBranches];
+    if (current.includes(branchName)) return;
+    void applyRowPatch(profile, { allowedBranches: [...current, branchName] });
+  };
+
+  const removeAllowedBranch = (profile: UserProfile, branchName: string) => {
+    // '전체'에서 하나를 빼는 것은 뜻이 모호하다 — 전체 해제는 칩의 '전체' 배지를 눌러 목록형으로 바꾼 뒤 고른다.
+    if (profile.allowedBranches === "all") return;
+    const next = profile.allowedBranches.filter((b) => b !== branchName);
+    // 마지막 하나를 빼면 그 계정은 어느 지점에도 못 들어간다 — 실수로 접근을 끊는 일이 잦은 자리라 한 번 묻는다.
+    if (next.length === 0
+      && !window.confirm(`${String(profile.name || profile.email || "이 계정")}의 허용 지점이 하나도 남지 않습니다.\n이 계정은 어느 지점에도 들어갈 수 없게 됩니다. 계속할까요?`)) {
+      return;
+    }
+    void applyRowPatch(profile, { allowedBranches: next });
+  };
+
+  /**
+   * '전체 지점' → 목록형 전환. 빈 목록이 아니라 '지금 있는 모든 지점'을 펼친다.
+   * 빈 목록으로 떨어뜨리면 지점을 다시 고르기 전까지 그 계정이 전 지점 접근을 잃는다(Codex 지적 2026-07-28).
+   * 펼친 직후에는 접근 범위가 그대로이고, 관리자가 필요 없는 지점을 하나씩 빼면 된다.
+   */
+  const expandAllBranches = async (profile: UserProfile) => {
+    // 목록을 다시 받는 동안 두 번째 클릭이 같은 저장을 또 시작하지 않게 막는다(Codex 지적 2026-07-28).
+    if (rowSavingUid || expandingRef.current) return;
+    expandingRef.current = true;
+    setExpandingUid(profile.uid);
+    try {
+      // 화면을 연 뒤 지점이 새로 생겼을 수 있다. 그때 화면에 남아 있던 옛 목록을 그대로 굳혀 저장하면
+      // '전체'였던 계정이 새 지점만 조용히 잃는다 — 그래서 저장 직전에 목록을 다시 받는다.
+      let list = branches;
+      try {
+        const fresh = await getFirebaseLoginBranches();
+        if (!Array.isArray(fresh) || fresh.length === 0) throw new Error("빈 지점 목록");
+        list = fresh;
+        setBranches(fresh);
+      } catch (e) {
+        console.error("지점 목록 갱신 실패:", e);
+        window.alert("지점 목록을 새로 불러오지 못해 전환을 멈췄습니다. 네트워크 확인 후 다시 시도해주세요.");
+        return;   // 옛 목록으로 굳히지 않는다(fail-closed)
+      }
+      const all = list.map((b) => String(b.branchName || "").trim()).filter(Boolean);
+      if (all.length === 0) return;
+      await applyRowPatch(profile, { allowedBranches: all });
+    } finally {
+      expandingRef.current = false;
+      setExpandingUid(null);
+    }
+  };
+
+  // ---- 권한 인덱스 복구 ----
+  //
+  // firestore.rules는 한글 지점명을 원문으로 비교할 수 없어(규칙에 URL 디코딩이 없다) 인코딩본
+  // (salaryBranchesEncoded / allowedBranchesEncoded)을 본다. 이 값은 이 화면의 저장 경로가 채운다.
+  // 앱 밖(콘솔 등)에서 직접 만든 문서에는 빠져 있을 수 있고, 그러면 화면은 통과하는데 급여 문서만
+  // 조용히 막힌다 — 원인을 찾기 어려운 고장이라 눈에 보이게 두고 한 번에 고친다.
+  const indexBrokenProfiles = (profiles || []).filter(
+    (p) => p.role === "branchAdmin" && (p.allowedBranchesEncoded === undefined || p.salaryBranchesEncoded === undefined)
+  );
+  const repairPermissionIndexes = async () => {
+    if (repairing || indexBrokenProfiles.length === 0) return;
+    setRepairing(true);
+    try {
+      for (const p of indexBrokenProfiles) {
+        // 값은 그대로 두고 다시 저장한다 — 저장 경로가 인코딩본을 채워 준다.
+        await updateUserProfile(p.uid, {
+          allowedBranches: p.allowedBranches,
+          salaryBranches: p.salaryBranches === "all" ? "all" : [...(p.salaryBranches ?? [])]
+        });
+      }
+      await load();
+    } catch (e) {
+      console.error("권한 인덱스 복구 실패:", e);
+      window.alert("권한 인덱스 복구에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.");
+    } finally {
+      setRepairing(false);
+    }
+  };
+
+  // ---- 지점 필터 ----
+  // 그 지점과 관련된 계정만 본다: 가입할 때 고른 지점이거나, 허용지점에 들어 있는 계정.
+  // 허용지점이 '전체'인 계정은 어느 지점을 골라도 나온다 — 실제로 그 지점에 들어갈 수 있기 때문이다.
+  const matchesBranchFilter = (p: UserProfile) => {
+    if (!branchFilter) return true;
+    if (String(p.workBranch || "").trim() === branchFilter) return true;
+    if (p.allowedBranches === "all") return true;
+    return Array.isArray(p.allowedBranches) && p.allowedBranches.includes(branchFilter);
+  };
+  const visibleProfiles = (profiles || []).filter(matchesBranchFilter);
+
+  const runBranchScopeCleanup = async () => {
+    if (scopeRunning || scopeReady.length === 0) return;
+    setScopeRunning(true);
+    setScopeResult(null);
+    const failed: string[] = [];
+    let done = 0;
+    // 한 건씩 순차 처리한다 — 한 계정이 실패해도 나머지는 계속 진행하고, 실패한 이름만 그대로 보고한다.
+    for (const profile of scopeReady) {
+      try {
+        await updateUserProfile(profile.uid, { allowedBranches: [String(profile.workBranch).trim()] });
+        done += 1;
+      } catch (e) {
+        console.error("허용지점 축소 실패:", profile.uid, e);
+        failed.push(String(profile.name || profile.email || profile.uid));
+      }
+    }
+    setScopeResult({ done, failed });
+    setScopeRunning(false);
+    await load();
+  };
+
   return (
     <section className="space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -262,6 +493,12 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               신규 {newSignups}건
             </span>
           )}
+          {scopeTargets.length > 0 && (
+            <button onClick={() => { setScopePanelOpen((open) => !open); setScopeResult(null); }}
+              className="p-2 px-3 rounded-xl border border-[#212121] bg-[var(--admin-vanilla)] text-xs font-black cursor-pointer">
+              허용지점 정리 {scopeTargets.length}건
+            </button>
+          )}
           <button onClick={() => void load()} disabled={loading}
             className="p-2 px-3 rounded-xl border border-gray-200 text-xs font-black cursor-pointer disabled:opacity-40">
             {loading ? "확인 중..." : "새로고침"}
@@ -269,64 +506,223 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
         </div>
       </div>
 
+      {/* 허용지점 일괄 축소 — 가입 기본값이 '전체'이던 시절 계정을 근무지점 한 곳으로 좁힌다.
+          되돌리기가 없으므로 무엇이 바뀌는지 전부 보여준 뒤에만 실행한다. */}
+      {scopePanelOpen && scopeTargets.length > 0 && (
+        <div className="rounded-2xl border border-[#212121] bg-white p-4 space-y-3">
+          <div className="space-y-1">
+            <p className="text-xs font-black text-[#212121]">기존 계정 허용지점 정리</p>
+            <p className="text-[11px] font-bold text-zinc-500">
+              허용지점이 '전체'인 지점 계정을, 가입할 때 고른 근무지점 한 곳으로 좁힙니다.
+              여러 지점을 오가던 사람은 한 곳만 보이게 되므로, 필요한 계정은 정리 후 개별로 다시 넓혀 주세요.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-black text-gray-700">바꿀 계정 {scopeReady.length}건</p>
+            {scopeReady.length === 0 ? (
+              <p className="text-[11px] font-bold text-zinc-400">바꿀 계정이 없습니다.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                {scopeReady.map((p) => (
+                  <p key={p.uid} className="text-[11px] font-bold text-zinc-600">
+                    {String(p.name || p.email || p.uid)} · 전체 → <span className="font-black text-[#212121]">{String(p.workBranch).trim()}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {scopeSkipped.length > 0 && (
+            <div className="space-y-1.5 rounded-xl border border-gray-200 bg-[var(--admin-ghost)] p-3">
+              <p className="text-[11px] font-black text-[#B91C1C]">건너뛸 계정 {scopeSkipped.length}건</p>
+              <p className="text-[10px] font-bold text-zinc-500">
+                근무지점이 비었거나 지금 지점 목록에 없는 이름입니다. 임의로 정하지 않고 그대로 두니, 계정을 눌러 직접 지정해 주세요.
+              </p>
+              {scopeSkipped.map((p) => (
+                <p key={p.uid} className="text-[11px] font-bold text-zinc-600">
+                  {String(p.name || p.email || p.uid)} · 근무지점 "{String(p.workBranch || "").trim() || "(없음)"}"
+                </p>
+              ))}
+            </div>
+          )}
+
+          {scopeResult && (
+            <div className="rounded-xl border border-gray-200 px-3 py-2 text-[11px] font-bold text-zinc-600">
+              {scopeResult.done}건 반영 완료
+              {scopeResult.failed.length > 0 && (
+                <span className="block text-[#B91C1C]">실패 {scopeResult.failed.length}건: {scopeResult.failed.join(", ")}</span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => void runBranchScopeCleanup()} disabled={scopeRunning || scopeReady.length === 0}
+              className="p-2 px-4 rounded-xl border border-[#212121] bg-[var(--admin-honey)] text-xs font-black cursor-pointer disabled:opacity-40">
+              {scopeRunning ? "반영 중..." : `${scopeReady.length}건 반영`}
+            </button>
+            <button onClick={() => setScopePanelOpen(false)} disabled={scopeRunning}
+              className="p-2 px-4 rounded-xl border border-gray-200 text-xs font-black cursor-pointer disabled:opacity-40">
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
+
       {loadError && (
         <div className="rounded-2xl border border-[#C93A3A] bg-[#FDE2E2] px-4 py-3 text-xs font-bold text-[#B91C1C]">{loadError}</div>
+      )}
+
+      {indexBrokenProfiles.length > 0 && (
+        <div className="rounded-2xl border border-[#C93A3A] bg-[#FDE2E2] px-4 py-3 space-y-2">
+          <p className="text-xs font-black text-[#B91C1C]">급여대장 권한이 서버에서 막히는 계정 {indexBrokenProfiles.length}건</p>
+          <p className="text-[11px] font-bold text-[#B91C1C]">
+            {indexBrokenProfiles.map((p) => String(p.name || p.email || p.uid)).join(", ")} — 지점관리자인데 권한 인덱스가 없습니다.
+            화면에서는 권한이 있어 보여도 급여대장 데이터를 못 읽습니다. 아래 버튼을 누르면 값은 그대로 두고 인덱스만 다시 만듭니다.
+          </p>
+          <button onClick={() => void repairPermissionIndexes()} disabled={repairing}
+            className="p-2 px-4 rounded-xl border border-[#212121] bg-white text-xs font-black cursor-pointer disabled:opacity-40">
+            {repairing ? "복구 중..." : "권한 인덱스 복구"}
+          </button>
+        </div>
+      )}
+
+      {/* 지점 필터 — 그 지점 소속(가입 시 선택)이거나 그 지점에 들어갈 수 있는 계정만 추린다. */}
+      {profiles !== null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-black text-gray-700">지점</span>
+          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}
+            className="p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold">
+            <option value="">전체 지점</option>
+            {branches.map((b) => (
+              <option key={b.branchId} value={b.branchName}>{b.branchName}</option>
+            ))}
+          </select>
+          <span className="text-[11px] font-bold text-zinc-400">
+            {branchFilter
+              ? `${visibleProfiles.length}건 · 선택지점이 ${branchFilter}이거나 허용지점에 ${branchFilter}이 포함된 계정`
+              : `${visibleProfiles.length}건`}
+          </span>
+        </div>
       )}
 
       {/* 카드=검정 1px 테두리, 헤더 라벨=엘리스 배경+100% 검정 11px 볼드(DESIGN.md §4·§9-1 — text-gray-*는 흐려져 금지) */}
       {loading ? <LoadingSpinner /> : profiles === null ? null : (
         <div className="bg-white rounded-2xl border border-[#212121] overflow-x-auto">
-          <table className="w-full min-w-[900px] text-xs">
+          <table className="w-full min-w-[1080px] text-xs">
             <thead className="bg-[var(--admin-alice)]">
               <tr className="text-[11px] font-black text-[#212121]">
-                <th className="px-4 py-3 text-left">이름</th>
-                <th className="px-4 py-3 text-left">이메일</th>
-                <th className="px-4 py-3 text-left">역할</th>
-                <th className="px-4 py-3 text-left">허용 탭</th>
-                <th className="px-4 py-3 text-left">허용 지점</th>
-                <th className="px-4 py-3 text-left">상태</th>
-                <th className="px-4 py-3 text-left">가입일</th>
-                <th className="px-4 py-3 text-left"></th>
+                <th className="px-3 py-2 text-left">이름</th>
+                <th className="px-3 py-2 text-left">이메일</th>
+                <th className="px-3 py-2 text-left">역할</th>
+                {/* 선택지점 = 가입할 때 본인이 고른 근무지점(workBranch). 허용 지점을 넓혀도 이 칸은 바뀌지 않는다. */}
+                <th className="px-3 py-2 text-left">선택지점</th>
+                <th className="px-3 py-2 text-left">허용 탭</th>
+                <th className="px-3 py-2 text-left">허용 지점</th>
+                <th className="px-3 py-2 text-left">상태</th>
+                <th className="px-3 py-2 text-left">가입일</th>
+                <th className="px-3 py-2 text-left"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {profiles.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-16 text-center text-gray-400">등록된 개인 계정이 없습니다.</td></tr>
-              ) : profiles.map((p) => {
+              {visibleProfiles.length === 0 ? (
+                <tr><td colSpan={9} className="px-5 py-16 text-center text-gray-400">
+                  {profiles.length === 0 ? "등록된 개인 계정이 없습니다." : "이 지점에 해당하는 계정이 없습니다."}
+                </td></tr>
+              ) : visibleProfiles.map((p) => {
                 const isSelf = p.uid === currentUid;
                 const isEditingRow = p.uid === editingUid;
+                const rowBusy = rowSavingUid === p.uid || expandingUid === p.uid;
+                // 본인 계정은 규칙상 수정 불가(firestore.rules) — 드롭다운도 잠근다.
+                const rowLocked = isSelf || rowBusy;
+                const allowedList = p.allowedBranches === "all" ? [] : p.allowedBranches;
+                const addableBranches = branches.filter((b) => !allowedList.includes(b.branchName));
                 return (
-                  <tr key={p.uid}
-                    onClick={() => startEdit(p)}
-                    className={`hover:bg-gray-50/60 cursor-pointer ${isEditingRow ? "bg-[var(--admin-alice)]/40" : ""}`}
-                  >
-                    <td className="px-4 py-3 font-bold whitespace-nowrap">
-                      {String(p.name || "")}
-                      {!p.reviewedByAdmin && <span className="ml-1.5 inline-block rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[9px] font-black">신규</span>}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-500 whitespace-nowrap">{String(p.email || "")}</td>
-                    <td className="px-4 py-3">{ROLE_LABEL[p.role]}</td>
-                    <td className="px-4 py-3">
-                      {summarizeTabs(p.allowedTabs)}
-                      {p.role === "admin" && (
-                        <span className="block text-[10px] font-bold text-zinc-400 mt-0.5">관리자탭: {summarizeAdminTabs(p.allowedAdminTabs)}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{summarizeBranches(p.allowedBranches)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block rounded-full border border-[#212121] px-2 py-0.5 text-[10px] font-black ${p.status === "active" ? "bg-[var(--admin-honey)]" : "bg-white"}`}>
-                        {STATUS_LABEL[p.status]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-zinc-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {isSelf ? (
-                        <span className="text-[10px] font-bold text-zinc-400">본인 계정</span>
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5 text-zinc-300 ml-auto" />
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={p.uid}>
+                    <tr
+                      onClick={() => startEdit(p)}
+                      className={`hover:bg-gray-50/60 cursor-pointer ${isEditingRow ? "bg-[var(--admin-alice)]/40" : ""} ${rowBusy ? "opacity-50" : ""}`}
+                    >
+                      <td className="px-3 py-1.5 font-bold whitespace-nowrap">
+                        {String(p.name || "")}
+                        {!p.reviewedByAdmin && <span className="ml-1.5 inline-block rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[9px] font-black">신규</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{String(p.email || "")}</td>
+                      {/* 아래 세 칸은 상세 패널을 열지 않고 그 자리에서 바꾼다. 행 클릭(상세 열기)과 겹치지 않게 stopPropagation. */}
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                        <select value={p.role} disabled={rowLocked}
+                          onChange={(e) => void applyRowPatch(p, { role: e.target.value as UserProfile["role"] })}
+                          className="h-7 px-2 border border-gray-200 rounded-lg text-[11px] font-bold bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                          {ROLE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-1.5 whitespace-nowrap">{String(p.workBranch || "").trim() || "-"}</td>
+                      <td className="px-3 py-1.5">
+                        {summarizeTabs(p.allowedTabs)}
+                        {p.role === "admin" && (
+                          <span className="block text-[10px] font-bold text-zinc-400 mt-0.5">관리자탭: {summarizeAdminTabs(p.allowedAdminTabs)}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 min-w-[240px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {p.allowedBranches === "all" ? (
+                            <button type="button" disabled={rowLocked || branches.length === 0}
+                              onClick={() => void expandAllBranches(p)}
+                              title="누르면 전 지점이 목록으로 펼쳐집니다. 접근 범위는 그대로이고, 필요 없는 지점을 하나씩 빼면 됩니다."
+                              className="rounded-full border border-[#212121] bg-[var(--admin-honey)] px-2 py-0.5 text-[10px] font-black cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                              전체 지점
+                            </button>
+                          ) : allowedList.length === 0 ? (
+                            <span className="text-[10px] font-bold text-[#B91C1C]">없음</span>
+                          ) : (
+                            allowedList.map((b) => (
+                              <span key={b} className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-black">
+                                {b}
+                                <button type="button" disabled={rowLocked} onClick={() => removeAllowedBranch(p, b)}
+                                  aria-label={`${b} 제거`} title="이 지점을 뺍니다"
+                                  className="text-zinc-400 hover:text-[#B91C1C] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                                  ×
+                                </button>
+                              </span>
+                            ))
+                          )}
+                          {/* 추가 버튼 — 여러 지점을 맡는 계정은 여기서 하나씩 더한다. */}
+                          <select value="" disabled={rowLocked || (p.allowedBranches !== "all" && addableBranches.length === 0)}
+                            onChange={(e) => addAllowedBranch(p, e.target.value)}
+                            className="h-6 px-1.5 border border-gray-200 rounded-lg text-[10px] font-black bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            <option value="">+ 추가</option>
+                            {p.allowedBranches !== "all" && <option value="__all__">전체 지점</option>}
+                            {addableBranches.map((b) => (
+                              <option key={b.branchId} value={b.branchName}>{b.branchName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                        <select value={p.status} disabled={rowLocked}
+                          onChange={(e) => void applyRowPatch(p, { status: e.target.value as UserProfile["status"] })}
+                          className={`h-7 px-2 border border-[#212121] rounded-lg text-[11px] font-black cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${p.status === "active" ? "bg-[var(--admin-honey)]" : "bg-white"}`}>
+                          <option value="active">{STATUS_LABEL.active}</option>
+                          <option value="suspended">{STATUS_LABEL.suspended}</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{formatDate(p.createdAt)}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {isSelf ? (
+                          <span className="text-[10px] font-bold text-zinc-400">본인 계정</span>
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-zinc-300 ml-auto" />
+                        )}
+                      </td>
+                    </tr>
+                    {rowError?.uid === p.uid && (
+                      <tr>
+                        <td colSpan={9} className="px-4 pb-3 text-[10px] font-black text-[#B91C1C]">{rowError.message}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -371,11 +767,15 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">역할</span>
-                <select value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value as UserProfile["role"] })}
+                <select value={edit.role} onChange={(e) => changeRole(e.target.value as UserProfile["role"])}
                   className="w-full p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold">
-                  <option value="branch">지점</option>
-                  <option value="admin">관리자</option>
+                  {ROLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
+                <span className="block text-[10px] font-bold text-zinc-500">
+                  {ROLE_OPTIONS.find((option) => option.value === edit.role)?.hint}
+                </span>
               </label>
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">상태</span>
@@ -471,16 +871,27 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               </div>
             </div>
 
-            {/* 정직원 급여대장 열람 지점 — 급여·주민번호·계좌가 담긴 자료라 일반 지점 권한과 분리해 좁게 준다.
-                체크한 지점만 그 계정이 급여대장을 볼 수 있다(firestore.rules canReadSalary가 실제로 차단). */}
+            {/* 급여대장 열람 지점 — 급여·주민번호·계좌가 담긴 자료라 일반 지점 권한과 분리해 좁게 준다.
+                체크한 지점만 그 계정이 급여대장을 볼 수 있다(firestore.rules canReadSalary가 실제로 차단).
+                정직원·파트타이머 두 대장에 같은 목록이 적용된다(2026-07-28). */}
             <div className="space-y-2 rounded-xl border border-gray-200 bg-[var(--admin-ghost)] p-4">
               <div className="space-y-0.5">
-                <p className="text-[11px] font-black text-gray-700">정직원 급여대장 열람 지점</p>
-                <p className="text-[10px] font-bold text-zinc-500">체크한 지점의 급여대장만 열람할 수 있습니다. 아무것도 체크하지 않으면 열람할 수 없습니다.</p>
+                <p className="text-[11px] font-black text-gray-700">급여대장 열람 지점 (정직원 · 파트타이머)</p>
+                <p className="text-[10px] font-bold text-zinc-500">체크한 지점의 급여대장만 열람·작성할 수 있습니다. 아무것도 체크하지 않으면 열람할 수 없습니다.</p>
+                {edit.role === "branch" && (
+                  <p className="text-[10px] font-black text-[#B91C1C]">
+                    지점 역할은 급여대장을 열 수 없습니다. 여기서 지점을 체크해도 적용되지 않습니다 — 먼저 역할을 지점관리자로 바꿔 주세요.
+                  </p>
+                )}
+                {edit.role === "admin" && (
+                  <p className="text-[10px] font-bold text-zinc-500">총괄은 이 목록과 무관하게 전 지점을 열람·작성합니다.</p>
+                )}
               </div>
-              <label className="flex items-center gap-2 text-[11px] font-black text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={edit.salaryBranches === "all"} onChange={(e) => toggleAllSalaryBranches(e.target.checked)} />
-                전체 지점 (총관리자)
+              {/* '전체 지점'은 총괄만 쓸 수 있다 — 지점관리자에게 전체를 주는 것은 요구사항에 어긋난다. */}
+              <label className={`flex items-center gap-2 text-[11px] font-black ${edit.role === "admin" ? "text-gray-700 cursor-pointer" : "text-zinc-300"}`}>
+                <input type="checkbox" disabled={edit.role !== "admin"}
+                  checked={edit.salaryBranches === "all"} onChange={(e) => toggleAllSalaryBranches(e.target.checked)} />
+                전체 지점 (총괄 전용)
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {branches.map((b) => (

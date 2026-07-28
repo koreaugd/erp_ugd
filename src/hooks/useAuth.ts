@@ -11,7 +11,8 @@ export interface UserSession {
   uid?: string;                       // personal만
   name: string;                       // personal=profile.name, pin=branchName("직원"/"관리자")
   email?: string;
-  role: "admin" | "branch";
+  // 2026-07-28: 역할 3단계(지점/지점관리자/총괄). PIN 로그인 세션은 "branch" 또는 "admin"만 만든다.
+  role: "admin" | "branchAdmin" | "branch";
   branchName: string;
   brand: string;
   allowedTabs: string[] | "all";      // pin 로그인은 "all"

@@ -281,10 +281,35 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   }, [membersData?.members, memberBranchOf]);
 
   const visibleMembers = useMemo(() => {
-    const list = membersData?.members || [];
-    if (memberBranchFilter === "all") return list;
-    if (memberBranchFilter === "unassigned") return list.filter((m) => !(m.department || "").trim());
-    return list.filter((m) => memberBranchOf(m) === memberBranchFilter);
+    const all = membersData?.members || [];
+    const list =
+      memberBranchFilter === "all" ? all
+      : memberBranchFilter === "unassigned" ? all.filter((m) => !(m.department || "").trim())
+      : all.filter((m) => memberBranchOf(m) === memberBranchFilter);
+
+    // 최근 등록순으로 보여준다(사용자 지시 2026-07-28).
+    // 카카오 목록 응답은 우리가 타입으로 선언한 필드 말고도 그대로 넘어오므로, 등록 시각으로 쓸 만한
+    // 필드를 순서대로 찾아 쓴다. 하나도 없으면 시각을 지어내지 않고 받은 순서의 역순으로 둔다
+    // (목록이 오래된 순으로 오는 것을 전제한 차선책 — 순서가 기대와 다르면 ERP 등록로그를 기준으로 바꿔야 한다).
+    const registeredAt = (member: KakaoTaxiMember) => {
+      const raw = member as unknown as Record<string, unknown>;
+      for (const key of ["created_at", "createdAt", "registered_at", "registeredAt", "confirmed_at"]) {
+        const value = String(raw[key] ?? "").trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    return list
+      .map((member, index) => ({ member, index }))
+      .sort((a, b) => {
+        const left = registeredAt(a.member);
+        const right = registeredAt(b.member);
+        if (left && right && left !== right) return right.localeCompare(left);
+        if (left && !right) return -1;
+        if (!left && right) return 1;
+        return b.index - a.index;
+      })
+      .map((entry) => entry.member);
   }, [membersData?.members, memberBranchFilter, memberBranchOf]);
 
   const groupNameById = useMemo(() => {
