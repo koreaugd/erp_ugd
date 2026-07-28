@@ -879,6 +879,8 @@ export interface KakaoTaxiOrder {
   vertical_product_name: string;
   total_distance: number;
   payment_items: KakaoTaxiPaymentItem[];
+  /** 어느 카카오T 계정에서 온 건인지 — 백엔드가 주입한다. 계정 2개를 합쳐 보여주므로 필수. */
+  account_key: string;
 }
 
 export interface KakaoTaxiOrdersResult {
@@ -892,6 +894,7 @@ export interface KakaoTaxiGroup {
   name: string;
   status: string; // "enabled" | "deactivated"
   description: string;
+  account_key: string;
 }
 
 export interface KakaoTaxiMember {
@@ -903,6 +906,7 @@ export interface KakaoTaxiMember {
   status: string; // created | connected | refused | blocked
   confirmed_at: string | null;
   group_ids: string[];
+  account_key: string;
 }
 
 export interface KakaoTaxiMemberInput {
