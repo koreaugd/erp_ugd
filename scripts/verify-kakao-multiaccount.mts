@@ -8,6 +8,8 @@ import {
   aggregateByBranch,
   memberAmountMap,
   accountLabel,
+  KAKAO_ACCOUNT_BY_BRANCH,
+  kakaoTaxiAccountForBranch,
   type NormalizedTaxiOrder,
 } from "../src/pages/admin/helpers/kakaoTaxi";
 import { flagTaxiOrders, isAnomalyExempt, DEFAULT_TAXI_THRESHOLDS } from "../src/pages/admin/helpers/kakaoTaxiAnomaly";
@@ -93,6 +95,13 @@ console.log("[6] 이상 점검 면제는 계정+id 쌍으로만 적용된다");
   check("고액 표식은 계정2 건에만", flagged.length === 1 && flagged[0].row.accountKey === "acct2",
     flagged.map((f) => f.row.accountKey).join(","));
 }
+
+console.log("[7] 지점→계정 매핑");
+check("사카바단단은 2계정", kakaoTaxiAccountForBranch("사카바단단") === "acct2");
+check("8번대물집은 2계정", kakaoTaxiAccountForBranch("8번대물집") === "acct2");
+check("그 외 지점은 1계정", kakaoTaxiAccountForBranch("대물섬 한남점") === "acct1");
+check("빈 지점명도 1계정", kakaoTaxiAccountForBranch("") === "acct1");
+check("매핑표에 acct2 만 기재", Object.values(KAKAO_ACCOUNT_BY_BRANCH).every((v) => v === "acct2"));
 
 if (failed) { console.error(`\n실패 ${failed}건`); process.exit(1); }
 console.log("\n전부 통과");
