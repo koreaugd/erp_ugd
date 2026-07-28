@@ -50,6 +50,10 @@ export const TAXI_ANOMALY_LABEL: Record<TaxiAnomalyReason, string> = {
   unmapped: "지점 미매핑",
 };
 
+// 점검 대상 표의 사유 묶음 순서. flagTaxiOrders 가 규칙을 평가하는 순서와 같게 유지할 것 —
+// 한 건에 사유가 여럿이면 이 순서상 첫 사유를 대표 사유로 보고 그 묶음에 넣는다.
+const TAXI_ANOMALY_REASON_ORDER: TaxiAnomalyReason[] = ["highFare", "daytime", "unmapped"];
+
 export interface FlaggedTaxiOrder {
   row: NormalizedTaxiOrder;
   reasons: TaxiAnomalyReason[];
@@ -76,8 +80,22 @@ export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnom
     if (row.unmapped) reasons.push("unmapped");
     if (reasons.length) flagged.push({ row, reasons });
   }
-  // 금액 큰 순 — 관리자가 위에서부터 훑는다
-  return flagged.sort((a, b) => b.row.amount - a.row.amount);
+  // 사유별로 묶고, 묶음 안에서는 최근 이용이 위로 온다(사용자 지시 2026-07-28).
+  // [대표 사유] 한 건에 사유가 여럿이면 TAXI_ANOMALY_REASON_ORDER 상 첫 사유의 묶음에 넣는다.
+  // 사유마다 건을 복제하면 화면의 '점검 대상 N건'이 실제보다 부풀어 보인다.
+  return flagged.sort((a, b) => {
+    const rankA = TAXI_ANOMALY_REASON_ORDER.indexOf(a.reasons[0]);
+    const rankB = TAXI_ANOMALY_REASON_ORDER.indexOf(b.reasons[0]);
+    if (rankA !== rankB) return rankA - rankB;
+    // timeText 는 "YYYY-MM-DD HH:mm:ss" 고정 형식이라 문자열 비교가 곧 시간 비교다.
+    // 시각을 모르는 건(빈 값)은 묶음 맨 뒤로 — 최신인 척 위로 올라오면 안 된다.
+    const ta = a.row.timeText || "";
+    const tb = b.row.timeText || "";
+    if (!ta || !tb) return (ta ? 0 : 1) - (tb ? 0 : 1);
+    if (ta !== tb) return tb < ta ? -1 : 1;
+    // 같은 시각이면 금액 큰 순 — 정렬이 실행마다 흔들리지 않게 순서를 확정한다.
+    return b.row.amount - a.row.amount;
+  });
 }
 
 /**
