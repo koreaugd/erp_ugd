@@ -24,13 +24,13 @@ function check(name: string, cond: boolean, detail = "") {
 
 function order(o: Partial<KakaoTaxiOrder>): KakaoTaxiOrder {
   return {
-    id: "x", service_fare: 0, toll: 0, platform_fee: 0,
-    call_time: "2026-07-01 12:00:00", departure_time: "2026-07-01 12:00:00", arrival_time: "",
-    departure_point: "", arrival_point: "", waypoints: null,
+    id: "x", service_fare: 0, toll: 0,
+    call_time: "2026-07-01 12:00:00", departure_time: "2026-07-01 12:00:00",
+    departure_point: "", arrival_point: "",
     member_id: "M1", member_name: "홍길동", member_identifier: "홍길동", member_department: "",
-    group_id: "", group_name: "", car_model: "", car_number: "", taxi_company_name: "",
-    taxi_kind: "", vertical_code: "taxi", vertical_product_name: "", total_distance: 0,
-    payment_items: [], account_key: "acct1",
+    group_name: "", car_number: "", taxi_company_name: "",
+    taxi_kind: "", vertical_code: "taxi", vertical_product_name: "",
+    account_key: "acct1",
     ...o,
   } as KakaoTaxiOrder;
 }
@@ -118,6 +118,26 @@ console.log("[8] 주문 dedup 은 계정으로 한정된다(F3)");
     order({ id: "dup-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
   ], ERP_BRANCHES);
   check("같은 계정의 같은 id 는 1건으로 합쳐진다", sameAccount.length === 1, String(sameAccount.length));
+}
+
+console.log("[9] 점검 대상은 사유별로 묶이고 묶음 안에서는 최근 이용이 위로 온다");
+{
+  // 금액을 일부러 뒤섞어 둔다 — 예전 '금액 큰 순' 정렬이 남아 있으면 이 순서가 깨진다.
+  const rows = normalizeKakaoTaxiOrders([
+    order({ id: "n1", member_department: "사카바단단", service_fare: 31000, departure_time: "2026-07-01 22:00:00" }),
+    order({ id: "n2", member_department: "사카바단단", service_fare: 99000, departure_time: "2026-07-20 23:00:00" }),
+    order({ id: "n3", member_department: "사카바단단", service_fare: 1000, departure_time: "2026-07-05 09:00:00" }),
+    order({ id: "n4", member_department: "사카바단단", service_fare: 2000, departure_time: "2026-07-25 10:00:00" }),
+    order({ id: "n5", member_department: "", group_name: "기본그룹", member_id: "NOMAP1", service_fare: 500, departure_time: "2026-07-03 21:00:00" }),
+    order({ id: "n6", member_department: "", group_name: "기본그룹", member_id: "NOMAP2", service_fare: 500, departure_time: "2026-07-27 21:00:00" }),
+  ], ERP_BRANCHES);
+  const flagged = flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS);
+  const seq = flagged.map((f) => f.row.order.id).join(",");
+  // 고액(n2 07-20 → n1 07-01) → 낮 시간대(n4 07-25 → n3 07-05) → 미매핑(n6 07-27 → n5 07-03)
+  check("사유 묶음 + 묶음별 최신순", seq === "n2,n1,n4,n3,n6,n5", seq);
+  const firstReasons = flagged.map((f) => f.reasons[0]).join(",");
+  check("대표 사유가 묶음 순서대로", firstReasons === "highFare,highFare,daytime,daytime,unmapped,unmapped", firstReasons);
+  check("건이 사유마다 복제되지 않는다", flagged.length === 6, String(flagged.length));
 }
 
 if (failed) { console.error(`\n실패 ${failed}건`); process.exit(1); }
