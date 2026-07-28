@@ -1494,8 +1494,15 @@ function AdminDashboardAlertHub({
         </button>
       </div>
 
-      {/* 초록 '이상 없음'은 모든 카운트가 정상 조회됐을 때만 — 조회 실패가 있으면 성공처럼 보이면 안 된다. */}
-      {totalAlerts === 0 && failedCounts.length === 0 ? (
+      {/* 초록 '이상 없음'은 모든 카운트가 정상 조회됐을 때만 — 조회 실패가 있으면 성공처럼 보이면 안 된다.
+          [로딩 중 금지] 조회가 끝나기 전에는 초록을 띄우지 않는다. 카운트 초기값이 전부 0 이라
+          아직 아무것도 못 받은 상태가 '이상 없음'으로 보인다. 법인택시 점검 대상이 붙으면서
+          카카오 왕복만큼 대기가 길어져 이 창이 눈에 띄게 커졌다(Codex P2 2026-07-29). */}
+      {loading ? (
+        <div className="rounded-xl bg-gray-50 border border-gray-100 p-4 text-[11px] font-black text-[#212121]/60">
+          확인할 항목을 불러오는 중입니다…
+        </div>
+      ) : totalAlerts === 0 && failedCounts.length === 0 ? (
         <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-[11px] font-black text-emerald-700">
           새로 확인할 항목이 없습니다.
         </div>
