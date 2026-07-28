@@ -458,11 +458,19 @@ async function kakaoTaxiFetchAllPages(accountKey: string, apiPath: string, baseQ
 // gas/Code.gs getKakaoTaxiOrders 와 같은 반환 형태(account_key 는 kakaoTaxiCollect 가 채운다).
 async function kakaoTaxiOrders(month: string) {
   const range = kakaoTaxiMonthRange(month);
-  const collected = await kakaoTaxiCollect(async (acc) =>
-    (await kakaoTaxiFetchAllPages(acc.key, "/external/v2/orders",
-      `start_date=${range.start}&end_date=${range.end}`, "orders")).items
-  );
-  return { month, count: collected.items.length, orders: collected.items, accountErrors: collected.accountErrors };
+  const reportedCounts: Record<string, number> = {}; // 계정별 카카오 "보고" 건수 — 성공한 계정만(B2).
+  const collected = await kakaoTaxiCollect(async (acc) => {
+    const res = await kakaoTaxiFetchAllPages(acc.key, "/external/v2/orders",
+      `start_date=${range.start}&end_date=${range.end}`, "orders");
+    reportedCounts[acc.key] = res.count;
+    return res.items;
+  });
+  // [B2] count = 성공한 계정들의 카카오 "보고" 건수 합 — collected.items.length(수집본 길이)를 쓰면
+  // 화면의 "수집본 vs 카카오 보고" 건수 대사 경고가 절대 안 뜬다. 실패한 계정은 accountErrors 로
+  // 이미 알리므로 reportedCounts 에 안 채워져 이 합계에서 자연히 제외된다. 로컬은 캐시가 없어
+  // 매번 라이브 조회이므로 GAS 의 "캐시 적중 시 count===items.length" 케이스는 여기 해당 없음.
+  const reportedTotal = Object.values(reportedCounts).reduce((sum, n) => sum + n, 0);
+  return { month, count: reportedTotal, orders: collected.items, accountErrors: collected.accountErrors };
 }
 
 // 그룹 목록 — 로컬은 캐시 없이 매번 실시간 조회한다. gas/Code.gs getKakaoTaxiGroups 와 같은 반환 형태.
@@ -602,7 +610,13 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
 
   // 중복 방지 — 어느 소속(지점)에 이미 있는지 알려주고 거부(전입 직원이 이전 지점으로 등록된 상황 파악).
   // 등록된 전 계정을 대상으로 확인한다(kakaoTaxiMembers/kakaoTaxiGroups 는 캐시 없이 항상 실시간).
-  const existing = (await kakaoTaxiMembers()).members || [];
+  const membersResult = await kakaoTaxiMembers();
+  // [B1][이중과금 방지] 계정 조회가 일부 실패하면 그 계정에 이미 등록된 번호를 놓치고 중복 통과시켜
+  // 다른 계정에 또 등록(이중 청구)할 수 있다 — 확인 불가 상태로는 등록을 진행하지 않는다(fail-closed).
+  if (membersResult.accountErrors && membersResult.accountErrors.length) {
+    throw new Error("카카오T 일부 계정 조회에 실패해 중복 확인을 할 수 없습니다. 잠시 후 다시 시도해주세요.");
+  }
+  const existing = membersResult.members || [];
   const allGroups = (await kakaoTaxiGroups()).groups || [];
   for (const m of existing) {
     if (String(m.mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
@@ -613,7 +627,9 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
         if (g) where = String(g.name || "");
       }
       if (!where) where = "다른 지점";
-      throw new Error(`${m.name || cleanName} 님(${cleanPhone})은 이미 '${where}'에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.`);
+      // [B3] 어느 계정에 등록돼 있는지도 함께 안내 — 계정이 둘이라 지점명만으로는 헷갈릴 수 있다.
+      const acctLabel = KAKAO_TAXI_ACCOUNTS.find((a) => a.key === m.account_key)?.label || "";
+      throw new Error(`${m.name || cleanName} 님(${cleanPhone})은 이미 '${where}'${acctLabel ? `(${acctLabel})` : ""}에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.`);
     }
   }
 
