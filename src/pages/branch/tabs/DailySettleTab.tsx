@@ -160,15 +160,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   // writer(작성자란은 수정자일 뿐 원작성자가 아니다)로 덮어쓰지 않기 위한 보존용 참조.
   const originalSubmittedByRef = useRef<{ name: string; uid: string }>({ name: "", uid: "" });
 
-  // 개인 로그인 세션에서도 마감 작성자는 지점이 직접 입력한다(사용자 지시 2026-07-26).
-  // 편의로 신규 작성 시 계정 이름을 '기본값'으로 한 번만 채워주되, 이후 자유롭게 수정할 수 있다
-  // (writer가 비어 있을 때만 채우므로 사용자가 지우거나 바꾼 값을 되돌리지 않는다).
+  // 개인 로그인 세션(구글·이메일 공통)에서도 마감 작성자는 지점이 직접 입력한다(사용자 지시 2026-07-26).
+  // 편의로 '신규 작성 폼을 여는 순간'에만 계정 이름을 기본값으로 깔아 주고, 그 뒤로는 입력칸을 절대 건드리지 않는다.
+  // 전부 지우면 지운 채로 둔다(필수 검증은 제출 시점에서 잡는다).
+  //   ※ 예전에는 writer를 의존성에 둔 effect로 채웠는데, 그러면 "한 번만 채우기"가 아니라
+  //     "빈 값이 될 때마다 다시 채우기"가 되어 세 글자를 다 지우는 순간 이름이 되살아났다(2026-07-28 수정).
   // 실제 로그인 계정은 submittedByUid/modifiedByUid 로 별도 기록되어 감사 추적은 그대로 유지된다.
+  const personalDefaultWriter = isPersonalSession ? String(user?.name ?? "").trim() : "";
+  // 폼 초기화 지점들은 비동기 로드 뒤에 실행되므로, 의존성을 늘려 부트스트랩을 다시 돌리는 대신 ref로 최신 값을 읽는다.
+  const personalDefaultWriterRef = useRef(personalDefaultWriter);
   useEffect(() => {
-    if (isPersonalSession && !hasExistingRecord && user?.name && !writer) {
-      setWriter(user.name);
-    }
-  }, [isPersonalSession, hasExistingRecord, user, writer]);
+    personalDefaultWriterRef.current = personalDefaultWriter;
+  }, [personalDefaultWriter]);
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
   const [timeErrors, setTimeErrors] = useState<Record<string, string>>({});
 
@@ -525,11 +528,27 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   // Dynamic Load & Duplicate check on Date Change
   // ----------------------------------------------------
   useEffect(() => {
+    // 날짜·지점을 빠르게 연달아 바꾸면 앞선 요청이 뒤늦게 끝나 '지금 보고 있는 날짜'의 입력칸을 덮어쓴다.
+    // 그 뒤 자동저장이 그 값을 현재 draftKey로 저장하므로 다른 날짜의 초안까지 오염된다.
+    // 그래서 await 마다 취소 여부를 확인하고, 예약해 둔 초안 복원 타이머도 정리한다(Codex 지적 2026-07-28).
+    let cancelled = false;
+    let draftRestoreTimer: number | null = null;
+    const scheduleDraftRestore = (preservePrevDayCash: string) => {
+      draftRestoreTimer = window.setTimeout(() => {
+        draftRestoreTimer = null;
+        if (cancelled) return;
+        if (restoreDraftIfAvailable({ preservePrevDayCash })) {
+          setStaffRows((current) => reconcileDraftStaffRows(current));
+        }
+      }, 0);
+    };
+
     const checkDuplicateAndLoad = async () => {
       try {
         setChecking(true);
         setDraftReady(false);
         const res = await gasClient.getDailyFormBootstrap(branchName, settleDate);
+        if (cancelled) return;
         const prevCashVal = res.previousCash || "0";
 
         if (res.exists && res.recordId) {
@@ -538,6 +557,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setIsEditApproved(false); // Reset to false and require approval warning
           // Load details
           const detail = await gasClient.getDailyDetail(res.recordId);
+          if (cancelled) return;
 
           setCashSales(String(detail.master.cashSales || "0"));
           setCardSales(String(detail.master.cardSales || "0"));
@@ -680,19 +700,19 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setCashBalance("");
           setPrevDayCash(prevCashVal);
           setCashDiffReason("");
-          setWriter("");
+          // 신규 작성 폼 — 개인 세션이면 계정 이름을 기본값으로 깔아 준다(이후 자동 개입 없음).
+          // 임시저장 초안이 있으면 바로 아래 restoreDraftIfAvailable가 사용자가 마지막에 둔 값으로 덮어쓴다.
+          setWriter(personalDefaultWriterRef.current);
           setStaffMemo("");
           setReviewMemo("");
           setOtherMemo("");
           const freshRoster = await refreshRosterCache();
+          if (cancelled) return;
           initRosterInForm(freshRoster);
-          setTimeout(() => {
-            if (restoreDraftIfAvailable({ preservePrevDayCash: prevCashVal })) {
-              setStaffRows((current) => reconcileDraftStaffRows(current));
-            }
-          }, 0);
+          scheduleDraftRestore(prevCashVal);
         }
       } catch (err: any) {
+        if (cancelled) return;
         console.error("Duplicate checking error:", err);
         triggerToast("이전 데이터를 검사하는 도중 문제가 생겼습니다.", "error");
         // Fresh start on fail
@@ -705,23 +725,28 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         setExistingRecordHadNaverReview(false);
         setPrevDayCash("0");
         setCashDiffReason("");
+        // 이 경로도 '신규 작성 폼을 연 상태'다 — 정상 경로와 같은 기본 작성자를 깔아 준다.
+        setWriter(personalDefaultWriterRef.current);
         setStaffMemo("");
         setReviewMemo("");
         setOtherMemo("");
         const freshRoster = await refreshRosterCache();
+        if (cancelled) return;
         initRosterInForm(freshRoster);
-        setTimeout(() => {
-          if (restoreDraftIfAvailable({ preservePrevDayCash: "0" })) {
-            setStaffRows((current) => reconcileDraftStaffRows(current));
-          }
-        }, 0);
+        scheduleDraftRestore("0");
       } finally {
-        setChecking(false);
-        setDraftReady(true);
+        if (!cancelled) {
+          setChecking(false);
+          setDraftReady(true);
+        }
       }
     };
 
     checkDuplicateAndLoad();
+    return () => {
+      cancelled = true;
+      if (draftRestoreTimer !== null) window.clearTimeout(draftRestoreTimer);
+    };
   }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable, refreshRosterCache]);
 
   // Real-time Sum calculations
@@ -1392,7 +1417,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setExistingRecordId(null);
     originalSubmittedByRef.current = { name: "", uid: "" };
     setIsEditApproved(true);
-    setWriter("");
+    setWriter(personalDefaultWriterRef.current);
     setTimeErrors({});
     setValidationErrors(false);
     setValidationTargets(createDailySettleValidationTargets());
@@ -2030,7 +2055,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
                     return;
                   }
-                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
+                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter(personalDefaultWriterRef.current);
                   originalSubmittedByRef.current = { name: "", uid: "" };
                   setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
@@ -2713,8 +2738,14 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       {/* FINAL SUBMIT ACTION ROW */}
       <div className="flex gap-4 items-center justify-end pt-4">
         {/* 공용기기에서 남의 이름으로 제출되는 것을 막기 위해, 실제로 기록될 작성자를 항상 눈에 보이게 둔다(설계서 §7).
-            개인 세션 + 기존 기록 열람 중에는 (신규 작성 강제와 달리) 원작성자를 그대로 보여준다. */}
-        <span className="text-sm font-bold text-zinc-700">작성자: {isPersonalSession ? (hasExistingRecord ? (writer || "-") : (user?.name || "-")) : (writer || "-")}</span>
+            작성자란을 직접 입력하게 된 뒤로는(2026-07-26) 입력칸 값이 곧 저장될 값이므로, 계정 이름이 아니라
+            입력칸 값을 그대로 비춘다. 입력한 이름이 로그인 계정과 다를 때만 실제 계정을 함께 알려 준다. */}
+        <div className="flex flex-col items-end leading-tight">
+          <span className="text-sm font-bold text-zinc-700">작성자: {writer.trim() || "-"}</span>
+          {isPersonalSession && personalDefaultWriter && writer.trim() !== personalDefaultWriter && (
+            <span className="text-xs text-zinc-500">로그인 계정: {personalDefaultWriter}</span>
+          )}
+        </div>
         <button
           onClick={handleSettleSubmit}
           disabled={submitting}
