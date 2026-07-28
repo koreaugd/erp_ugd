@@ -15,6 +15,8 @@ import { AccountManagementSection } from "./admin/AccountManagementSection";
 import { listUserProfiles } from "../api/userProfile";
 import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
 import { kakaoTaxiRequestsKey, type KakaoTaxiRequest } from "./admin/helpers/kakaoTaxiRequests";
+import { normalizeKakaoTaxiOrders } from "./admin/helpers/kakaoTaxi";
+import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, type AdminPermKey } from "./admin/adminTabRegistry";
@@ -126,9 +128,9 @@ export default function AdminPage() {
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
   const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
-  // taxiRequests/laborContractsPending 의 null = "조회 실패"다. 0(없음)과 구분해 화면에 경고를 띄운다
+  // taxiRequests/laborContractsPending/taxiAnomalies 의 null = "조회 실패"다. 0(없음)과 구분해 화면에 경고를 띄운다
   // — 실패를 0건으로 삼키면 '확인할 항목 없음'으로 오도된다(Codex P1 2026-07-27).
-  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
@@ -295,7 +297,7 @@ export default function AdminPage() {
       // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
       // 신규 가입 알림은 개인 관리자 세션에서만 조회한다 — PIN 관리자는 users 컬렉션 읽기 권한이 없어
       // (firestore.rules: isPersonalAdmin()만 read 허용) 그대로 부르면 permission-denied로 거부된다.
-      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount] = await Promise.all([
+      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount, taxiAnomalyCount] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
         gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
@@ -322,6 +324,33 @@ export default function AdminPage() {
           ? gasClient.getAllLaborContracts()
               .then((rows) => (rows || []).filter((row: any) => (row?.status || "발송 대기") === "발송 대기").length)
               .catch(() => null)
+          : Promise.resolve(0),
+        // 법인택시 이상 점검 대상 수 — '법인택시 > 이상 점검' 탭과 완전히 같은 계산(정규화 → 규칙 판정)을
+        // 이번 달 데이터로 여기서 재현한다. 두 곳(여기·KakaoTaxiSection)이 규칙을 따로 들고 있으면 언젠가
+        // 어긋나므로, 항상 helpers/kakaoTaxi·kakaoTaxiAnomaly 의 같은 순수 함수를 그대로 불러 쓴다.
+        // 당월 주문 조회와 지점 목록 조회를 병렬로 쏜다 — 지점 목록은 정규화(카카오 표기→ERP 지점명) 에만
+        // 쓰이고 서로 의존하지 않으므로 직렬로 기다릴 이유가 없다(다른 알림 항목들과 같은 절약 패턴).
+        isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
+          ? (async () => {
+              // toISOString()은 UTC 라 KST 월초 오전에 전월로 열리는 함정이 있다 — 로컬 기준으로 만든다
+              // (KakaoTaxiSection 의 month 초기값과 같은 방식).
+              const now = new Date();
+              const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+              const [ordersRes, branches] = await Promise.all([
+                gasClient.getKakaoTaxiOrders(currentMonth, user?.pinHash || ""),
+                gasClient.getBranchList()
+              ]);
+              // 계정 중 하나라도 조회 실패(accountErrors)면 그 계정 건이 통째로 빠진 채 계산한 것이다.
+              // 실제보다 적게 나온 '점검 대상 0건'은 '이상 없음'으로 오인되어 진짜 점검 대상을 놓치는
+              // 사고로 이어지므로, 부분 데이터로 낸 숫자보다 명시적 조회 실패(null)가 낫다.
+              if ((ordersRes.accountErrors || []).length > 0) return null;
+              const branchNames = Array.from(new Set([
+                ...(branches || []).map((b: any) => b.branchName).filter(Boolean),
+                "본사"
+              ]));
+              const rows = normalizeKakaoTaxiOrders(ordersRes.orders, branchNames);
+              return flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS).length;
+            })().catch(() => null)
           : Promise.resolve(0)
       ]);
       const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
@@ -344,6 +373,7 @@ export default function AdminPage() {
         newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length,
         taxiRequests: taxiRequestCount,
         laborContractsPending: laborContractsPendingCount,
+        taxiAnomalies: taxiAnomalyCount,
         latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
         latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
       });
@@ -357,7 +387,7 @@ export default function AdminPage() {
     if (adminSection === "dashboard" && isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection))) void loadDashboardAlerts();
   }, [adminSection, loadDashboardAlerts, allowedAdminTabs, isAdminSession]);
 
-  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts") => {
+  const handleDashboardAlertClick = (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts" | "taxiAnomalies") => {
     if (target === "dailyPending") {
       setAdminSection("dailySettlement");
       setDailySettlementTab("status");
@@ -372,6 +402,12 @@ export default function AdminPage() {
       // 승인/반려는 신청 관리 화면에서 처리 — 여기서는 이동만(카운트는 상태가 바뀌면 저절로 빠진다).
       setAdminSection("kakaoTaxi");
       setKakaoTaxiTab("requests");
+      return;
+    }
+    if (target === "taxiAnomalies") {
+      // 점검 처리는 이상 점검 화면에서 직접 확인 — 여기서는 이동만(카운트는 새로고침해야 갱신됨, taxiRequests와 동일 규약).
+      setAdminSection("kakaoTaxi");
+      setKakaoTaxiTab("anomaly");
       return;
     }
     if (target === "laborContracts") {
@@ -1433,17 +1469,18 @@ function AdminDashboardAlertHub({
   onOpen
 }: {
   pendingDailyCount: number;
-  alerts: { editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null };
+  alerts: { editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null };
   loading: boolean;
   onRefresh: () => void;
-  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts") => void;
+  onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts" | "taxiAnomalies") => void;
 }) {
   // null = 조회 실패 — 합계에선 빼되 아래에서 별도 경고를 띄운다(0건 '이상 없음'으로 오도 금지).
   const failedCounts = [
     ...(alerts.taxiRequests === null ? ["법인택시 신청"] : []),
     ...(alerts.laborContractsPending === null ? ["근로계약서 발송 요청"] : []),
+    ...(alerts.taxiAnomalies === null ? ["법인택시 점검 대상"] : []),
   ];
-  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0);
+  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0) + (alerts.taxiAnomalies ?? 0);
 
   return (
     <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
@@ -1488,6 +1525,11 @@ function AdminDashboardAlertHub({
           {(alerts.taxiRequests ?? 0) > 0 && (
             <button onClick={() => onOpen("taxiRequests")} className="px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black hover:bg-sky-100 cursor-pointer">
               법인택시 신청 대기: {alerts.taxiRequests}건
+            </button>
+          )}
+          {(alerts.taxiAnomalies ?? 0) > 0 && (
+            <button onClick={() => onOpen("taxiAnomalies")} className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-100 text-[11px] font-black hover:bg-rose-100 cursor-pointer">
+              법인택시 점검 대상: {alerts.taxiAnomalies}건
             </button>
           )}
           {(alerts.laborContractsPending ?? 0) > 0 && (
