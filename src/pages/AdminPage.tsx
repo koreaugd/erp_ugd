@@ -1527,8 +1527,12 @@ function AdminDashboardAlertHub({
               법인택시 신청 대기: {alerts.taxiRequests}건
             </button>
           )}
+          {/* [색 주의] rose 는 쓰지 않는다 — 관리자 스코프 자동 치환 목록(amber·orange→바닐라 /
+              blue·sky→엘리스 / emerald·green→허니, DESIGN_ADMIN §3)에 없어서 혼자만 진짜 빨강으로
+              남고, 바로 아래 '조회 실패' 경고 배너(bg-rose-50/text-rose-700)와 구분이 안 된다.
+              버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
           {(alerts.taxiAnomalies ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiAnomalies")} className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 border border-rose-100 text-[11px] font-black hover:bg-rose-100 cursor-pointer">
+            <button onClick={() => onOpen("taxiAnomalies")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black hover:bg-amber-100 cursor-pointer">
               법인택시 점검 대상: {alerts.taxiAnomalies}건
             </button>
           )}
