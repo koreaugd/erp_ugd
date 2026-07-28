@@ -339,6 +339,55 @@ function verifyPin(pinHash) {
   throw new Error("PIN 번호가 올바르지 않거나 비활성화된 계정입니다.");
 }
 
+// 한 행의 pin_hash 가 입력 해시와 맞는지 — verifyPin 의 매칭 규칙(완전일치·admin 레거시 해시·평문 폴백)과 동일.
+function pinRowMatches_(hashInDb, cleanPinHash, role) {
+  if (!cleanPinHash || !hashInDb) return false;
+  if (hashInDb === cleanPinHash) return true;
+  if (role === "admin") {
+    var LEGACY = ["406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf", "53d6316bd7b9044e6bb5deaa87fe8316c2fde3938b78f8448875b08e551ccc95"];
+    if (LEGACY.indexOf(hashInDb) >= 0 && LEGACY.indexOf(cleanPinHash) >= 0) return true;
+  }
+  // 시트에 평문 PIN 이 적혀 있던 하위 호환 케이스
+  if (hashInDb.length < 32 && getSha256(hashInDb) === cleanPinHash) return true;
+  return false;
+}
+
+/**
+ * 지점 화면 게이트 — "이 PIN 이 이 지점의 PIN 인가"를 그 지점 행에서 직접 확인한다.
+ * 통과하면 {branchName, role, brand}, 아니면 null.
+ *
+ * verifyPin(역방향: PIN → 지점)을 쓰면 안 되는 이유 — 2026-07-28 운영 사고:
+ * 여러 지점이 같은 공통 PIN 을 쓰면 verifyPin 은 시트에서 먼저 나오는 한 행(대물섬 한남점)만
+ * 돌려줘서, 그 지점을 뺀 전 지점이 "지점 인증에 실패했습니다"로 거부됐다. 지점을 먼저 특정하고
+ * 그 행의 해시와 대조하면 공통 PIN 에서도 동작하며, 나중에 지점별 PIN 을 분리하면 코드 변경
+ * 없이 그대로 진짜 지점 격리가 된다(공통 PIN 인 동안은 어차피 PIN 만으로 지점을 구분할 수 없다).
+ *
+ * 관리자 PIN 은 어느 지점이든 통과한다(관리자가 지점 화면을 볼 때). server.ts 와 동일 로직으로 유지할 것.
+ */
+function verifyBranchPinOrAdmin(pinHash, branchName) {
+  var target = String(branchName || "").trim();
+  var cleanPinHash = String(pinHash || "").trim().toLowerCase();
+  if (!target || !cleanPinHash) return null;
+
+  var sheet = getSpreadsheet().getSheetByName(SHEETS.SETTING);
+  var data = sheet.getDataRange().getValues();
+  var branchRow = null;
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (String(row[3]).toUpperCase() !== "TRUE") continue;
+    var hashInDb = String(row[1] || "").trim().toLowerCase();
+    // 관리자 PIN 은 지점 행을 볼 것 없이 통과
+    if (row[2] === "admin" && pinRowMatches_(hashInDb, cleanPinHash, "admin")) {
+      return { branchName: target, role: "admin", brand: row[4] };
+    }
+    if (String(row[0] || "").trim() === target) branchRow = row;
+  }
+  if (branchRow && pinRowMatches_(String(branchRow[1] || "").trim().toLowerCase(), cleanPinHash, branchRow[2])) {
+    return { branchName: target, role: branchRow[2], brand: branchRow[4] };
+  }
+  return null;
+}
+
 /**
  * 지점 설정 시트에서 활성화된 계정 목록을 순서대로 생성합니다.
  * PIN 인증 응답에 함께 전달하여 로그인 직후의 별도 목록 조회를 없앱니다.
@@ -1610,15 +1659,14 @@ function kakaoTaxiAccountForBranch(branchName) {
 function getKakaoTaxiBranchMembers(pinHash, branchName, forceRefresh) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
   if (!pinHash || !branchName) throw denied;
+  // 요청한 지점 행에서 직접 대조한다 — verifyPin(역방향)은 공통 PIN 에서 첫 행만 통과시킨다.
   let setting;
   try {
-    setting = verifyPin(pinHash);
+    setting = verifyBranchPinOrAdmin(pinHash, branchName);
   } catch (e) {
     throw denied;
   }
   if (!setting) throw denied;
-  // 지점 PIN 은 자기 지점만, 관리자 PIN 은 어느 지점이든 조회 가능(관리자가 지점 화면을 볼 때)
-  if (setting.role !== "admin" && setting.branchName !== branchName) throw denied;
   const all = getKakaoTaxiMembers(forceRefresh).members || [];
   return all.filter(function (m) {
     const dept = String((m && m.department) || "").trim();
@@ -1679,9 +1727,8 @@ function submitBranchKakaoRegister(pinHash, branchName, name, phone, memo) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
   if (!pinHash || !branchName) throw denied;
   var setting;
-  try { setting = verifyPin(pinHash); } catch (e) { throw denied; }
+  try { setting = verifyBranchPinOrAdmin(pinHash, branchName); } catch (e) { throw denied; }
   if (!setting) throw denied;
-  if (setting.role !== "admin" && setting.branchName !== branchName) throw denied;
 
   var cleanName = String(name || "").trim();
   var cleanPhone = String(phone || "").replace(/[^0-9]/g, "");

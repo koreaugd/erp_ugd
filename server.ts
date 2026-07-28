@@ -233,6 +233,26 @@ function findLocalSettingByPinHash(db: LocalDB, pinHash: unknown) {
   });
 }
 
+// 지점 화면 게이트 — "이 PIN 이 이 지점의 PIN 인가"를 그 지점 행에서 직접 확인한다.
+// findLocalSettingByPinHash(역방향: PIN → 행)를 쓰면 안 되는 이유 — 2026-07-28 운영 사고:
+// 여러 지점이 같은 공통 PIN 을 쓰면 먼저 나오는 한 행만 매칭돼 나머지 전 지점이 거부됐다.
+// 지점별 PIN 을 분리하면 이 코드 그대로 진짜 지점 격리가 된다.
+// 관리자 PIN 은 어느 지점이든 통과. gas/Code.gs verifyBranchPinOrAdmin 과 동일 로직으로 유지할 것.
+function verifyLocalBranchPinOrAdmin(db: LocalDB, pinHash: unknown, branchName: string) {
+  const target = String(branchName || "").trim();
+  const cleanPinHash = String(pinHash || "").trim().toLowerCase();
+  if (!target || !cleanPinHash) return undefined;
+
+  const admin = findLocalSettingByPinHash(db, cleanPinHash);
+  if (admin?.role === "admin") return { branchName: target, role: "admin", brand: admin.brand };
+
+  const row = db.settings.find(s => s.is_active && String(s.branch_name || "").trim() === target);
+  if (row && String(row.pin_hash || "").trim().toLowerCase() === cleanPinHash) {
+    return { branchName: target, role: row.role, brand: row.brand };
+  }
+  return undefined;
+}
+
 // 관리자 PIN 검증 게이트 — gas/Code.gs requireKakaoTaxiAdmin 과 같은 규칙.
 // 실패 유형과 무관하게 같은 문구로 답해 PIN 존재 여부를 밖에서 구분할 수 없게 한다.
 // [주의] 로컬 로그인은 Firebase(운영 지점목록)를 탈 수 있어, db_simulation.json 의 관리자
@@ -470,10 +490,8 @@ function kakaoTaxiAccountForBranch(branchName: string): string {
 async function kakaoTaxiBranchMembers(db: LocalDB, pinHash: unknown, branchName: string) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
   if (!pinHash || !branchName) throw denied;
-  const setting = findLocalSettingByPinHash(db, pinHash);
+  const setting = verifyLocalBranchPinOrAdmin(db, pinHash, branchName);
   if (!setting) throw denied;
-  // 지점 PIN 은 자기 지점만, 관리자 PIN 은 어느 지점이든(관리자가 지점 화면을 볼 때)
-  if (setting.role !== "admin" && setting.branch_name !== branchName) throw denied;
   const all = (await kakaoTaxiMembers()).members || [];
   return all.filter((m: any) => {
     const dept = String(m?.department || "").trim();
@@ -546,9 +564,8 @@ async function kakaoTaxiGroupIdForBranch(branchName: string): Promise<KakaoGroup
 async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, branchName: string, name: string, phone: string) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
   if (!pinHash || !branchName) throw denied;
-  const setting = findLocalSettingByPinHash(db, pinHash);
+  const setting = verifyLocalBranchPinOrAdmin(db, pinHash, branchName);
   if (!setting) throw denied;
-  if (setting.role !== "admin" && setting.branch_name !== branchName) throw denied;
 
   const cleanName = String(name || "").trim();
   const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
