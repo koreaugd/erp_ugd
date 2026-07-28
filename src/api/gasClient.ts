@@ -384,6 +384,17 @@ export const gasClient = {
     }
   },
 
+  /**
+   * 지정한 날짜들의 마감 기록만 읽는다(대시보드 그래프·달력 전용).
+   * 읽는 양이 '화면이 보여주는 날짜 수'로 고정된다 — 지점 전체 히스토리를 훑지 않는다.
+   * 실패는 삼키지 않고 throw — 호출부가 '기록 없음'과 '못 불러옴'을 구분할 수 있어야 한다.
+   * 모든 마감 문서가 ID 규칙(`지점--날짜`)을 따른다는 전제 위에 있다(firebaseGetDailyMastersByDates 주석 참고).
+   */
+  async getDailyMastersByDates(branchName: string, dates: string[]): Promise<MasterDaily[]> {
+    const { firebaseGetDailyMastersByDates } = await loadFirebaseDirect();
+    return await firebaseGetDailyMastersByDates(branchName, dates);
+  },
+
   // 서버 전용·fail-closed 히스토리 조회: 실패를 []로 삼키지 않고 그대로 throw한다.
   // 월말마감 엑셀 등 "빈/오래된 데이터로 조용히 채우면 안 되는" 정산 산출물 전용.
   async getBranchHistoryFromServer(branchName: string, month?: string): Promise<MasterDaily[]> {
