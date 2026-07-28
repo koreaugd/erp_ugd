@@ -36,6 +36,11 @@ interface OrdersData {
   current: NormalizedTaxiOrder[];
   /** 전월 정규화 내역 — 아직 도착 전이거나 조회 실패 시 null (급증 비교만 비활성, 당월 화면은 정상 표시) */
   prev: NormalizedTaxiOrder[] | null;
+  /** 당월 조회에서 실패한 계정 목록 — 이 데이터(ordersData)에 실린 채로 함께 다닌다.
+   * 전역 상태로 따로 두면 다른 뷰의 조회가 끝난 뒤 탭을 오가는 사이에 실제로는 여전히 값이 빠진
+   * 이 데이터의 실패 표시가 지워지는 문제가 있었다(코덱스 리뷰 2026-07-28) — 데이터와 함께 저장해
+   * "지금 화면에 보이는 이 데이터가 실제로 완전한지"를 항상 정확히 반영하게 한다. */
+  accountErrors: KakaoTaxiAccountError[];
 }
 
 export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
@@ -58,7 +63,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const ordersRequestedMonthRef = useRef<string | null>(null);
   const membersRequestedRef = useRef(false);
 
-  const [membersData, setMembersData] = useState<{ members: KakaoTaxiMember[]; groups: KakaoTaxiGroup[] } | null>(null);
+  // accountErrors 도 이 데이터에 함께 실어 보낸다 — 이유는 OrdersData.accountErrors 주석과 동일
+  // (탭을 오가도 "지금 이 members/groups 가 실제로 완전한지"가 항상 정확해야 한다).
+  const [membersData, setMembersData] = useState<{ members: KakaoTaxiMember[]; groups: KakaoTaxiGroup[]; accountErrors: KakaoTaxiAccountError[] } | null>(null);
   /** 직원 관리 탭의 지점(부서) 필터 — "all" | "unassigned" | 지점명 */
   const [memberBranchFilter, setMemberBranchFilter] = useState("all");
   /** ERP 지점 목록 — 직원 수정 시 부서를 드롭다운으로 고르게 한다(오타로 미매핑되는 것 방지) */
@@ -72,11 +79,6 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const [memberFilter, setMemberFilter] = useState("all"); // 상세내역 직원 필터 (memberKey — 동명이인 구분)
   const [accountFilter, setAccountFilter] = useState("all"); // 계정 필터 — "all" | "acct1" | "acct2"
   const [highFare, setHighFare] = useState(DEFAULT_TAXI_THRESHOLDS.highFare);
-  /** 카카오T 계정 중 일부 조회가 실패했을 때 — 성공한 계정 데이터만으로 화면을 그리므로 배너로 알린다.
-   * 이용내역 로드와 직원 로드가 각자 자신의 응답으로 이 상태를 덮어쓴다(뷰마다 별도 상태를 두지 않은
-   * 단순화 — 방금 조회한 쪽의 실패만 보이며, 예를 들어 직원 탭을 본 뒤 이용내역 탭으로 돌아가도
-   * 이용내역이 재조회되지 않으면 배너는 직원 로드의 실패로 남아 있을 수 있다). */
-  const [accountErrors, setAccountErrors] = useState<KakaoTaxiAccountError[]>([]);
 
   // ---------- 지점 신청 관리 ----------
   const [requestsData, setRequestsData] = useState<{ items: KakaoTaxiRequest[]; failed: string[] } | null>(null);
@@ -121,11 +123,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         reportedCount: curr.count,
         current: normalizeKakaoTaxiOrders(curr.orders, erpNames),
         prev: null, // 전월은 아래에서 도착하는 대로 채운다
+        // 당월 조회의 계정 실패만 배너에 반영한다. 전월(prev)은 급증 비교용 보조 자료일 뿐이라
+        // 실패해도 이미 "전월 자료를 불러오지 못해 급증 비교를 건너뛰었습니다" 안내가 별도로 뜬다 —
+        // 여기서까지 겹쳐 보여주면 당월 조회 실패처럼 오인될 수 있어 의도적으로 무시한다.
+        accountErrors: curr.accountErrors || [],
       });
-      // 당월 조회의 계정 실패만 배너에 반영한다. 전월(prev)은 급증 비교용 보조 자료일 뿐이라
-      // 실패해도 이미 "전월 자료를 불러오지 못해 급증 비교를 건너뛰었습니다" 안내가 별도로 뜬다 —
-      // 여기서까지 겹쳐 보여주면 당월 조회 실패처럼 오인될 수 있어 의도적으로 무시한다.
-      setAccountErrors(curr.accountErrors || []);
       setBranchFilter("all");
       setMemberFilter("all");
       void prevPromise.then((prev) => {
@@ -167,13 +169,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       const members = membersRes.members || [];
       const groups = groupsRes.groups || [];
       if (membersGenRef.current === gen) {
-        setMembersData({ members, groups });
+        // 직원 목록 조회와 그룹 목록 조회는 계정별로 각각 실패할 수 있다 — 두 실패 목록을 합쳐서
+        // membersData 에 함께 싣는다(전역 상태로 따로 두지 않는 이유는 OrdersData.accountErrors 주석 참고).
+        setMembersData({ members, groups, accountErrors: [...(membersRes.accountErrors || []), ...(groupsRes.accountErrors || [])] });
         setErpBranches(Array.from(new Set([
           ...(branchList || []).filter((b) => b.role === "branch").map((b) => b.branchName).filter(Boolean),
           "본사",
         ])).sort((a, b) => a.localeCompare(b, "ko")));
-        // 직원 목록 조회와 그룹 목록 조회는 계정별로 각각 실패할 수 있다 — 두 실패 목록을 합쳐서 보여준다.
-        setAccountErrors([...(membersRes.accountErrors || []), ...(groupsRes.accountErrors || [])]);
       }
       return members;
     } catch (e: any) {
@@ -253,6 +255,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     () => (accountFilter === "all" ? allRows : allRows.filter((r) => r.accountKey === accountFilter)),
     [allRows, accountFilter]
   );
+  // 지금 뷰가 실제로 그리고 있는 데이터의 accountErrors 만 뽑는다 — 이용내역/이상 점검은 ordersData,
+  // 직원 관리는 membersData 에 실려 있다. 전역 상태 하나를 두 로드가 덮어쓰던 이전 방식은 다른 뷰의
+  // 조회가 끝난 뒤 탭을 오가면(캐시 표식 때문에 재조회가 안 되어) 실제로는 여전히 값이 빠진 화면인데도
+  // 배너가 사라지는 문제가 있었다(코덱스 리뷰 2026-07-28) — 데이터에 귀속시켜 이 문제를 없앤다.
+  const visibleAccountErrors =
+    view === "orders" || view === "anomaly" ? (ordersData?.accountErrors ?? [])
+    : view === "members" ? (membersData?.accountErrors ?? [])
+    : [];
   const shownMonth = ordersData?.month ?? month;
   const stale = ordersData != null && ordersData.month !== month;
   const branchTotals = useMemo(() => aggregateByBranch(rows), [rows]);
@@ -1003,12 +1013,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
       {needsMonth && ordersError && <div className={ERROR_BANNER}>{ordersError}</div>}
       {view === "members" && membersError && <div className={ERROR_BANNER}>{membersError}</div>}
-      {/* 계정 일부 조회 실패 — 이용내역/이상 점검은 당월 조회 결과가 있을 때만, 직원 관리는 직원 목록이
-          있을 때만 보여준다(로드가 아직 안 끝났거나 실패해 상태가 옛 조회의 잔재일 때 헷갈리지 않게). */}
-      {((needsMonth && !ordersLoading && ordersData) || (view === "members" && !membersLoading && membersData)) && accountErrors.length > 0 && (
+      {/* 계정 일부 조회 실패 — 지금 뷰가 그리는 데이터(ordersData/membersData)에 실린 값만 본다.
+          로드가 아직 안 끝났거나 실패해 데이터 자체가 없으면(옛 조회의 잔재와 헷갈리지 않게) 보여주지 않는다. */}
+      {((needsMonth && !ordersLoading && ordersData) || (view === "members" && !membersLoading && membersData)) && visibleAccountErrors.length > 0 && (
         <div className={ERROR_BANNER}>
-          {accountErrors.map((e) => e.label).join(", ")} 조회 실패 — 아래 집계에 해당 계정 내역이 빠져 있습니다.
-          잠시 후 새로고침해주세요. ({accountErrors[0].message})
+          {visibleAccountErrors.map((e) => e.label).join(", ")} 조회 실패 — 아래 집계에 해당 계정 내역이 빠져 있습니다.
+          잠시 후 새로고침해주세요. ({visibleAccountErrors[0].message})
         </div>
       )}
       {needsMonth && !ordersLoading && ordersData && countMismatch && (
