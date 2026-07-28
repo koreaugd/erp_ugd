@@ -793,13 +793,13 @@ export const gasClient = {
     return callApi("getKakaoTaxiOrders", { month, adminPinHash, forceRefresh });
   },
 
-  async getKakaoTaxiGroups(adminPinHash: string, forceRefresh?: boolean): Promise<KakaoTaxiGroup[]> {
+  async getKakaoTaxiGroups(adminPinHash: string, forceRefresh?: boolean): Promise<{ groups: KakaoTaxiGroup[]; accountErrors: KakaoTaxiAccountError[] }> {
     return callApi("getKakaoTaxiGroups", { adminPinHash, forceRefresh });
   },
 
   // forceRefresh=true 면 백엔드가 ScriptCache 를 우회해 카카오에서 실시간 조회한다(화면 '새로고침'용).
   // 직원이 방금 카카오T 앱에서 인증을 마친 경우처럼 우리가 무효화하지 못하는 외부 변경을 즉시 반영한다.
-  async getKakaoTaxiMembers(adminPinHash: string, forceRefresh?: boolean): Promise<{ count: number; members: KakaoTaxiMember[] }> {
+  async getKakaoTaxiMembers(adminPinHash: string, forceRefresh?: boolean): Promise<{ count: number; members: KakaoTaxiMember[]; accountErrors: KakaoTaxiAccountError[] }> {
     return callApi("getKakaoTaxiMembers", { adminPinHash, forceRefresh });
   },
 
@@ -814,29 +814,30 @@ export const gasClient = {
     return callApi("submitBranchKakaoRegister", { branchName, pinHash, name, phone, memo });
   },
 
-  async registerKakaoTaxiMember(member: KakaoTaxiMemberInput, adminPinHash: string): Promise<KakaoTaxiMember> {
-    return callApi("registerKakaoTaxiMember", { member, adminPinHash });
+  // [주의] 쓰기는 계정을 반드시 지정한다. 기본값을 두면 엉뚱한 계정에 삭제·수정이 나갈 수 있다.
+  async registerKakaoTaxiMember(member: KakaoTaxiMemberInput, adminPinHash: string, accountKey: string): Promise<KakaoTaxiMember> {
+    return callApi("registerKakaoTaxiMember", { member, adminPinHash, accountKey });
   },
 
   // 주의: 카카오 수정 API 는 name/department 를 안 보내면 공백으로 지워버린다 — 호출부는 기존 값을 항상 채워 보낼 것.
-  async updateKakaoTaxiMember(memberId: string, member: KakaoTaxiMemberUpdateInput, adminPinHash: string): Promise<KakaoTaxiMember> {
-    return callApi("updateKakaoTaxiMember", { memberId, member, adminPinHash });
+  async updateKakaoTaxiMember(memberId: string, member: KakaoTaxiMemberUpdateInput, adminPinHash: string, accountKey: string): Promise<KakaoTaxiMember> {
+    return callApi("updateKakaoTaxiMember", { memberId, member, adminPinHash, accountKey });
   },
 
-  async blockKakaoTaxiMember(memberIds: string[], adminPinHash: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
-    return callApi("blockKakaoTaxiMember", { memberIds, adminPinHash });
+  async blockKakaoTaxiMember(memberIds: string[], adminPinHash: string, accountKey: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
+    return callApi("blockKakaoTaxiMember", { memberIds, adminPinHash, accountKey });
   },
 
-  async unblockKakaoTaxiMember(memberIds: string[], adminPinHash: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
-    return callApi("unblockKakaoTaxiMember", { memberIds, adminPinHash });
+  async unblockKakaoTaxiMember(memberIds: string[], adminPinHash: string, accountKey: string): Promise<Array<{ id: string; status_code: number; status_msg: string }>> {
+    return callApi("unblockKakaoTaxiMember", { memberIds, adminPinHash, accountKey });
   },
 
-  async deleteKakaoTaxiMember(memberId: string, adminPinHash: string): Promise<{ success: boolean }> {
-    return callApi("deleteKakaoTaxiMember", { memberId, adminPinHash });
+  async deleteKakaoTaxiMember(memberId: string, adminPinHash: string, accountKey: string): Promise<{ success: boolean }> {
+    return callApi("deleteKakaoTaxiMember", { memberId, adminPinHash, accountKey });
   },
 
-  async sendKakaoTaxiMemberTms(memberId: string, adminPinHash: string): Promise<{ success: boolean }> {
-    return callApi("sendKakaoTaxiMemberTms", { memberId, adminPinHash });
+  async sendKakaoTaxiMemberTms(memberId: string, adminPinHash: string, accountKey: string): Promise<{ success: boolean }> {
+    return callApi("sendKakaoTaxiMemberTms", { memberId, adminPinHash, accountKey });
   }
 };
 
@@ -883,10 +884,18 @@ export interface KakaoTaxiOrder {
   account_key: string;
 }
 
+/** 계정 하나가 실패했을 때 — 성공한 계정 데이터는 그대로 오고, 화면이 이 목록으로 경고 배너를 띄운다 */
+export interface KakaoTaxiAccountError {
+  key: string;
+  label: string;
+  message: string;
+}
+
 export interface KakaoTaxiOrdersResult {
   month: string;
-  count: number; // 카카오가 보고한 총 건수 — 수집본(orders.length)과 다르면 화면이 경고한다
+  count: number; // 수집본 건수
   orders: KakaoTaxiOrder[];
+  accountErrors: KakaoTaxiAccountError[];
 }
 
 export interface KakaoTaxiGroup {
