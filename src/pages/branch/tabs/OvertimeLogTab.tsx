@@ -107,8 +107,10 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
     return records.filter((record) => String(record.staffName || "").toLowerCase().includes(normalizedNameFilter));
   }, [normalizedNameFilter, records]);
   const filteredSummaryList = useMemo(() => {
-    if (!normalizedNameFilter) return summaryList;
-    return summaryList.filter((item) => String(item.name || "").toLowerCase().includes(normalizedNameFilter));
+    // 총합계가 0인 인원(초과·조기퇴근이 서로 상쇄된 경우 포함)은 집계에서 볼 필요가 없어 검색어와 무관하게 항상 제외합니다.
+    const nonZero = summaryList.filter((item) => Number(item.totalOvertime || 0) !== 0);
+    if (!normalizedNameFilter) return nonZero;
+    return nonZero.filter((item) => String(item.name || "").toLowerCase().includes(normalizedNameFilter));
   }, [normalizedNameFilter, summaryList]);
 
   const saveManualOvertime = async () => {
