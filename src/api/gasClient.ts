@@ -824,6 +824,23 @@ export const gasClient = {
     return callApi("submitBranchKakaoRegister", { branchName, pinHash, name, phone, memo });
   },
 
+  // 지점용 사전 확인 — 이용신청 전에 "이 번호가 이미 카카오T에 있는가"를 묻는다.
+  // 백엔드가 지점 PIN 을 검증하고 전 계정을 실시간(캐시 우회) 조회한다. 타 지점 인원이면
+  // 전화번호는 마스킹돼 오고(이름·소속은 전입 판단에 필요해 그대로), 계정 조회 실패 시 던진다(fail-closed).
+  async checkKakaoTaxiPhone(branchName: string, pinHash: string, phone: string): Promise<KakaoTaxiPhoneCheck> {
+    return callApi("checkKakaoTaxiPhone", { branchName, pinHash, phone });
+  },
+
+  // 지점 전입 — 직원을 지우지 않고 소속(부서)만 이 지점으로 옮긴다. 그룹은 추가만 하고 알림톡은 보내지 않는다.
+  // [필수] 호출 **전에** 지점 변경 이력(kakao_taxi_branch_history)을 먼저 남길 것 —
+  // 이력이 없으면 과거 이용내역까지 새 지점으로 소급 집계된다.
+  // expectedFromBranch = 이력에 남긴 '이전 지점'(카카오 부서 원문). 백엔드가 실제 소속과 대조해
+  // 다르면 옮기지 않는다 — 확인창 사이에 다른 지점이 먼저 데려간 경우 이력의 이전 지점이 틀린 값으로
+  // 굳어 전입일 이전 이용내역이 엉뚱한 지점으로 집계되는 것을 막는다.
+  async transferKakaoTaxiMember(branchName: string, pinHash: string, memberId: string, expectedFromBranch: string): Promise<KakaoTaxiTransferResult> {
+    return callApi("transferKakaoTaxiMember", { branchName, pinHash, memberId, expectedFromBranch });
+  },
+
   // [주의] 쓰기는 계정을 반드시 지정한다. 기본값을 두면 엉뚱한 계정에 삭제·수정이 나갈 수 있다.
   async registerKakaoTaxiMember(member: KakaoTaxiMemberInput, adminPinHash: string, accountKey: string): Promise<KakaoTaxiMember> {
     return callApi("registerKakaoTaxiMember", { member, adminPinHash, accountKey });
@@ -923,6 +940,42 @@ export interface KakaoTaxiMemberInput {
   group_ids: string[];
   name?: string;
   department?: string;
+}
+
+/**
+ * 지점 이용신청 사전 확인 결과(checkKakaoTaxiPhone).
+ * found=false 면 그냥 등록하면 되고, true 면 sameBranch/sameAccount 로 분기한다.
+ * - sameBranch: 이미 우리 지점 소속(부서 원문 기준, 별칭 포함) → 안내만
+ * - sameAccount=false: 다른 카카오T 계정 소속 → 지점에서 옮길 수 없다(관리자 문의)
+ * - 나머지: 전입 가능(transferKakaoTaxiMember)
+ */
+export type KakaoTaxiPhoneCheck =
+  | { found: false }
+  | {
+      found: true;
+      memberId: string;
+      name: string;
+      /** 가운데 4자리를 가린 표시용 번호(예: 010-****-1234) — 타 지점 인원의 실번호는 내려오지 않는다 */
+      phone: string;
+      /** 현재 소속 표기(카카오 부서 원문, 없으면 그룹명으로 보완). 둘 다 없으면 빈 문자열.
+       *  화면 문구와 지점 변경 이력의 fromBranch 에 쓴다(옛 집계가 그룹명으로 잡히던 것과 이어진다). */
+      department: string;
+      /** 카카오 '부서' 원문 그대로(빈 문자열 가능). **전입 시 소속 대조(CAS) 전용** —
+       *  보완된 department 로 대조하면 부서가 빈 인원은 항상 불일치가 되어 정상 전입까지 막힌다. */
+      departmentRaw: string;
+      accountKey: string;
+      accountLabel: string;
+      sameBranch: boolean;
+      sameAccount: boolean;
+    };
+
+export interface KakaoTaxiTransferResult {
+  success: boolean;
+  /** 옮기기 전 소속(카카오 부서 원문). 부서가 없던 직원이면 빈 문자열 */
+  fromBranch: string;
+  toBranch: string;
+  memberId: string;
+  name: string;
 }
 
 // 직원 수정용 — 등록과 달리 identifier 는 변경 불가라 없다. 전화번호가 바뀌면 카카오가 인증 알림톡을 자동 발송한다.

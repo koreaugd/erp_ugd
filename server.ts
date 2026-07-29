@@ -618,6 +618,151 @@ async function kakaoTaxiGroupIdForBranch(branchName: string): Promise<KakaoGroup
   return { accountKey, groupId: null };
 }
 
+// 인원의 '소속' 표기 — 부서(department) 우선, 비어 있으면 첫 그룹명으로 보완한다.
+// 중복 안내(kakaoTaxiSubmitBranchRegister)와 사전 확인(kakaoTaxiCheckPhone)이 같은 규칙을 쓴다.
+// [주의] 그룹 id 대조에는 account_key 를 함께 본다 — 계정이 다르면 같은 그룹 id 가 존재할 수 있다.
+// gas/Code.gs kakaoTaxiMemberWhere 와 동일 로직으로 유지할 것.
+function kakaoTaxiMemberWhere(member: any, allGroups: any[]): string {
+  const m = member || {};
+  let where = String(m.department || "").trim();
+  if (!where && Array.isArray(m.group_ids) && m.group_ids.length) {
+    const g = (allGroups || []).find((x: any) => x.id === m.group_ids[0] && x.account_key === m.account_key);
+    if (g) where = String(g.name || "").trim();
+  }
+  return where;
+}
+
+// 카카오T 계정 표시명(1계정/2계정). 못 찾으면 빈 문자열. gas/Code.gs kakaoTaxiAccountLabel 과 동일.
+function kakaoTaxiAccountLabel(accountKey: string): string {
+  return KAKAO_TAXI_ACCOUNTS.find((a) => a.key === accountKey)?.label || "";
+}
+
+// 이 부서(카카오 원문)가 이 지점인가 — 별칭표까지 본다. kakaoTaxiBranchMembers 필터와 같은 기준.
+function kakaoTaxiDeptIsBranch(dept: unknown, branchName: string): boolean {
+  const d = String(dept || "").trim();
+  if (!d) return false;
+  return d === branchName || KAKAO_TAXI_BRANCH_ALIASES[d] === branchName;
+}
+
+// 전화번호 가운데 4자리 마스킹 — 타 지점 인원의 번호를 지점 화면에 그대로 내려보내지 않는다.
+function kakaoTaxiMaskPhone(digits: string): string {
+  const d = String(digits || "").replace(/[^0-9]/g, "");
+  if (d.length < 8) return d ? d.slice(0, 1) + "****" : "";
+  return `${d.slice(0, 3)}-****-${d.slice(-4)}`;
+}
+
+/**
+ * 지점 화면 '이용신청' 사전 확인 — 이 번호가 이미 카카오T에 있는지, 있으면 어디 소속인지 알려준다.
+ * 로컬은 캐시가 없어 항상 실시간 조회다(GAS 는 forceRefresh=true 로 같은 효과).
+ * 계정 일부 조회 실패 시 판단 불가 → 던진다(fail-closed).
+ * gas/Code.gs checkKakaoTaxiPhone 과 동일 로직으로 유지할 것.
+ */
+async function kakaoTaxiCheckPhone(db: LocalDB, pinHash: unknown, branchName: string, phone: string) {
+  const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
+  if (!pinHash || !branchName) throw denied;
+  if (!verifyLocalBranchPinOrAdmin(db, pinHash, branchName)) throw denied;
+
+  const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
+  if (!/^01[0-9]{8,9}$/.test(cleanPhone)) throw new Error("휴대전화번호를 확인해주세요. (예: 01012345678)");
+
+  const membersResult = await kakaoTaxiMembers();
+  if (membersResult.accountErrors && membersResult.accountErrors.length) {
+    throw new Error("카카오T 일부 계정 조회에 실패해 중복 확인을 할 수 없습니다. 잠시 후 다시 시도해주세요.");
+  }
+  const found = (membersResult.members || []).find(
+    (m: any) => String(m.mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone
+  );
+  if (!found) return { found: false };
+
+  const allGroups = (await kakaoTaxiGroups()).groups || [];
+  return {
+    found: true,
+    memberId: String((found as any).id || ""),
+    name: String((found as any).name || ""),
+    phone: kakaoTaxiMaskPhone(cleanPhone),
+    // department = 표시·이력 귀속용(부서가 비면 그룹명 보완) / departmentRaw = 부서 원문(전입 대조 전용).
+    // 규약·이유는 gas/Code.gs checkKakaoTaxiPhone 주석 참고.
+    department: kakaoTaxiMemberWhere(found, allGroups),
+    departmentRaw: String((found as any).department || "").trim(),
+    accountKey: String((found as any).account_key || ""),
+    accountLabel: kakaoTaxiAccountLabel(String((found as any).account_key || "")),
+    // 소속 판정은 '부서 원문'만 본다 — 그룹으로 보완한 표기로 판정하면, 부서가 비어 목록에 뜨지도 않는
+    // 인원을 "이미 우리 지점"으로 오판해 전입(부서 채우기)을 막는다.
+    sameBranch: kakaoTaxiDeptIsBranch((found as any).department, branchName),
+    sameAccount: kakaoTaxiAccountForBranch(branchName) === String((found as any).account_key || ""),
+  };
+}
+
+/**
+ * 지점 전입 — 직원을 지우지 않고 소속(부서)만 이 지점으로 옮긴다.
+ * 그룹은 추가만(카카오가 그룹 제거를 500 으로 거부), 계정이 다르면 거부(집계 어긋남 방지),
+ * 4필드 동시 전송(빠뜨리면 카카오가 name/department 를 지운다).
+ * 지점 변경 이력은 화면이 이 호출 **전에** 남긴다(kakao_taxi_branch_history).
+ * gas/Code.gs transferKakaoTaxiMember 와 동일 로직으로 유지할 것.
+ * [차이] 감사 로그(카카오_등록로그 시트)는 GAS 에만 있다 — 로컬은 스프레드시트가 없다.
+ */
+async function kakaoTaxiTransferMember(db: LocalDB, pinHash: unknown, branchName: string, memberId: string, expectedFromBranch?: string | null) {
+  const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
+  if (!pinHash || !branchName) throw denied;
+  if (!verifyLocalBranchPinOrAdmin(db, pinHash, branchName)) throw denied;
+
+  const targetId = String(memberId || "").trim();
+  if (!targetId) throw new Error("대상 인원이 지정되지 않았습니다.");
+
+  const membersResult = await kakaoTaxiMembers();
+  if (membersResult.accountErrors && membersResult.accountErrors.length) {
+    throw new Error("카카오T 일부 계정 조회에 실패해 전입을 진행하지 않았습니다. 잠시 후 다시 시도해주세요.");
+  }
+  const members = membersResult.members || [];
+  const destAccount = kakaoTaxiAccountForBranch(branchName);
+  // [계정 동일성] 계정마다 member id 를 따로 채번해 다른 계정에 같은 id 가 있을 수 있다 —
+  // 반드시 '이 지점의 계정' 안에서 먼저 찾는다.
+  const member: any = members.find((m: any) => String(m.id) === targetId && String(m.account_key || "") === destAccount);
+  if (!member) {
+    const other: any = members.find((m: any) => String(m.id) === targetId);
+    if (other) {
+      throw new Error(
+        `이 직원은 다른 카카오T 계정(${kakaoTaxiAccountLabel(String(other.account_key || "")) || "타 계정"})에 등록돼 있어 ` +
+        `지점에서 옮길 수 없습니다. 관리자에게 문의해주세요.`
+      );
+    }
+    throw new Error("대상 인원을 찾지 못했습니다. 새로고침 후 다시 시도해주세요.");
+  }
+
+  const fromBranch = String(member.department || "").trim();
+  if (kakaoTaxiDeptIsBranch(fromBranch, branchName)) throw new Error("이미 우리 지점 소속입니다.");
+
+  // [소속 대조 — compare-and-set] 이유·문구 규약은 gas/Code.gs transferKakaoTaxiMember 주석 참고.
+  // 화면이 이력에 먼저 남긴 '이전 지점'과 실제 소속이 다르면 옮기지 않는다(이력 오염 방지).
+  if (expectedFromBranch !== undefined && expectedFromBranch !== null) {
+    if (String(expectedFromBranch).trim() !== fromBranch) {
+      throw new Error(
+        `확인 화면을 띄운 사이 이 직원의 소속이 '${fromBranch || "미지정"}'(으)로 바뀌어 ` +
+        `전입을 진행하지 않았습니다. 새로고침 후 다시 시도해주세요.`
+      );
+    }
+  }
+
+  const resolved = await kakaoTaxiGroupIdForBranch(branchName);
+  if (!resolved.groupId) throw new Error("이 지점에 해당하는 카카오T 그룹을 찾지 못했습니다. 관리자에게 문의해주세요.");
+
+  // 그룹은 추가만 — 기존 그룹을 빼면 카카오가 500 으로 거부한다(실측). 중복은 제거한다.
+  const groupIds: string[] = [];
+  for (const raw of Array.isArray(member.group_ids) ? member.group_ids : []) {
+    const gid = String(raw || "").trim();
+    if (gid && !groupIds.includes(gid)) groupIds.push(gid);
+  }
+  if (!groupIds.includes(String(resolved.groupId))) groupIds.push(String(resolved.groupId));
+
+  await kakaoTaxiUpdateMember(String(member.account_key || destAccount), targetId, {
+    mobile_phone: String(member.mobile_phone || "").replace(/[^0-9]/g, ""),
+    group_ids: groupIds,
+    name: String(member.name || ""),
+    department: branchName,
+  });
+  return { success: true, fromBranch, toBranch: branchName, memberId: targetId, name: String(member.name || "") };
+}
+
 // 지점 자동 등록 — 지점 PIN 게이트로 관리자 승인 없이 카카오 등록 + 인증 알림톡 발송.
 // 안전장치: 지점 PIN(자기 지점만)·이름/전화 형식·지점↔그룹 자동매핑(못 찾으면 거부)·중복 전화 차단.
 // gas/Code.gs submitBranchKakaoRegister 와 동일 로직으로 유지할 것.
@@ -649,15 +794,9 @@ async function kakaoTaxiSubmitBranchRegister(db: LocalDB, pinHash: unknown, bran
   const allGroups = (await kakaoTaxiGroups()).groups || [];
   for (const m of existing) {
     if (String(m.mobile_phone || "").replace(/[^0-9]/g, "") === cleanPhone) {
-      let where = String(m.department || "").trim();
-      if (!where && Array.isArray(m.group_ids) && m.group_ids.length) {
-        // 그룹 id 대조에 account_key 를 함께 본다 — 계정이 다르면 같은 그룹 id 가 존재할 수 있다.
-        const g = allGroups.find((x: any) => x.id === m.group_ids[0] && x.account_key === m.account_key);
-        if (g) where = String(g.name || "");
-      }
-      if (!where) where = "다른 지점";
+      const where = kakaoTaxiMemberWhere(m, allGroups) || "다른 지점";
       // [B3] 어느 계정에 등록돼 있는지도 함께 안내 — 계정이 둘이라 지점명만으로는 헷갈릴 수 있다.
-      const acctLabel = KAKAO_TAXI_ACCOUNTS.find((a) => a.key === m.account_key)?.label || "";
+      const acctLabel = kakaoTaxiAccountLabel(String(m.account_key || ""));
       throw new Error(`${m.name || cleanName} 님(${cleanPhone})은 이미 '${where}'${acctLabel ? `(${acctLabel})` : ""}에 등록돼 있습니다. 같은 번호는 중복 등록할 수 없습니다. 전입한 직원이라면 관리자에게 소속(그룹) 변경을 요청해주세요.`);
     }
   }
@@ -792,6 +931,33 @@ app.post("/api/gas", async (req: Request, res: Response) => {
         return res.json({
           success: true,
           data: await kakaoTaxiSubmitBranchRegister(db, req.body.pinHash, String(req.body.branchName || ""), String(req.body.name || ""), String(req.body.phone || "")),
+        });
+      } catch (error: any) {
+        return res.json({ success: false, error: error?.message || String(error) });
+      }
+    }
+
+    // 지점용 사전 확인 — 이 번호가 이미 등록돼 있는지/어디 소속인지(전화는 마스킹해서 내려준다).
+    if (action === "checkKakaoTaxiPhone") {
+      try {
+        return res.json({
+          success: true,
+          data: await kakaoTaxiCheckPhone(db, req.body.pinHash, String(req.body.branchName || ""), String(req.body.phone || "")),
+        });
+      } catch (error: any) {
+        return res.json({ success: false, error: error?.message || String(error) });
+      }
+    }
+
+    // 지점 전입 — 직원 삭제 없이 소속(부서)만 요청 지점으로 옮긴다(지점 PIN 게이트).
+    if (action === "transferKakaoTaxiMember") {
+      try {
+        return res.json({
+          success: true,
+          data: await kakaoTaxiTransferMember(
+            db, req.body.pinHash, String(req.body.branchName || ""), String(req.body.memberId || ""),
+            req.body.expectedFromBranch
+          ),
         });
       } catch (error: any) {
         return res.json({ success: false, error: error?.message || String(error) });
