@@ -32,6 +32,19 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
+/** 대시보드 '새로 확인할 항목' 카운트. 항목마다 따로 도착하므로 부분 갱신(Partial)으로도 쓴다. */
+type DashboardAlerts = {
+  editLogs: number;
+  manualOvertimes: number;
+  newSignups: number;
+  /** null = 조회 실패(0건과 구분해 경고를 띄운다) */
+  taxiRequests: number | null;
+  laborContractsPending: number | null;
+  taxiAnomalies: number | null;
+  latestEditLogAt: string;
+  latestManualOvertimeAt: string;
+};
+
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
   const navigate = useNavigate();
@@ -135,7 +148,8 @@ export default function AdminPage() {
   const [myAccountOpen, setMyAccountOpen] = useState(false);
   // taxiRequests/laborContractsPending/taxiAnomalies 의 null = "조회 실패"다. 0(없음)과 구분해 화면에 경고를 띄운다
   // — 실패를 0건으로 삼키면 '확인할 항목 없음'으로 오도된다(Codex P1 2026-07-27).
-  const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
+  // 항목마다 따로 도착해 따로 반영되므로(loadDashboardAlerts) 부분 갱신이 가능한 형태여야 한다.
+  const [dashboardAlerts, setDashboardAlerts] = useState<DashboardAlerts>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
@@ -295,47 +309,86 @@ export default function AdminPage() {
     // 새로고침 연타 시 늦게 끝난 이전 요청이 최신 결과를 덮지 않도록 최신 요청 표식을 쓴다
     // (dailyList/anomaly 로더와 같은 패턴 — Codex P1 2026-07-27).
     const gen = ++dashboardAlertsRequestRef.current;
+    // [항목별 반영] 예전에는 9개 조회를 **전부** 기다린 뒤 한 번에 그렸다. 그중 법인택시 점검 대상은
+    // 카카오 왕복이라 5~12초가 걸려, 1초면 끝나는 나머지 항목까지 그만큼 기다렸다(사용자 지적 2026-07-30).
+    // 이제 각 항목이 끝나는 대로 화면에 반영한다 — 빠른 항목이 먼저 뜨고 느린 항목만 나중에 채워진다.
+    // 늦게 끝난 이전 요청이 최신 결과를 덮지 않도록 반영 직전에 요청 표식을 확인한다.
+    const apply = (patch: Partial<DashboardAlerts>) => {
+      if (gen !== dashboardAlertsRequestRef.current) return;
+      setDashboardAlerts((cur) => ({ ...cur, ...patch }));
+    };
+    const yesterday = getYesterdayDateString();
+    const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
+      const value = fields.map((field) => item?.[field]).find(Boolean) || "";
+      return String(value) > max ? String(value) : max;
+    }, "");
     try {
       setDashboardAlertsLoading(true);
-      // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
-      // (강조가 최근 3일 기준으로 저절로 꺼지게 바뀜) 이제 아무도 이 목록에 쓰지 않는다. 다만 예전에 확인해 둔
-      // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
-      // 신규 가입 알림은 개인 관리자 세션에서만 조회한다 — PIN 관리자는 users 컬렉션 읽기 권한이 없어
-      // (firestore.rules: isPersonalAdmin()만 read 허용) 그대로 부르면 permission-denied로 거부된다.
-      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount, taxiAnomalyCount, taxiAnomalyAck] = await Promise.all([
-        gasClient.getEditLogs().catch(() => []),
-        gasClient.getAllManualOvertimes().catch(() => []),
-        gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
-        gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => []),
+      await Promise.allSettled([
+        // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
+        // (강조가 최근 3일 기준으로 저절로 꺼지게 바뀜) 이제 아무도 이 목록에 쓰지 않는다. 다만 예전에 확인해 둔
+        // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
+        (async () => {
+          const [editLogs, reviewedEditLogs] = await Promise.all([
+            gasClient.getEditLogs().catch(() => []),
+            gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
+          ]);
+          const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
+          const getEditReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
+          const dismissed = localStorage.getItem("admin_dashboard_dismissed_edit_logs_date") === yesterday;
+          const editNew = dismissed ? [] : (editLogs || []).filter((log: any) => log.settleDate === yesterday && !reviewedEditSet.has(getEditReviewId(log)));
+          apply({ editLogs: editNew.length, latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]) });
+        })(),
+        (async () => {
+          const [manualOvertimes, reviewedManualOvertimes] = await Promise.all([
+            gasClient.getAllManualOvertimes().catch(() => []),
+            gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => []),
+          ]);
+          const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
+          const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
+          const dismissed = localStorage.getItem("admin_dashboard_dismissed_manual_overtimes_date") === yesterday;
+          const manualNew = dismissed ? [] : (manualOvertimes || []).filter((record: any) => record.settleDate === yesterday && !reviewedManualSet.has(getManualReviewId(record)));
+          apply({ manualOvertimes: manualNew.length, latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"]) });
+        })(),
         // accounts 탭 권한이 없는 관리자는 화면 접근이 막혀 있으므로 신규가입 카운트를 아예 불러오지 않는다
         // (권한 있는 배지가 뜨는데 눌러도 안내만 나오면 혼란 — 사용자 지시 2026-07-25).
-        user?.loginType === "personal" && isAdminTabAllowed(user.allowedAdminTabs, "accounts")
-          ? listUserProfiles().catch(() => [])
-          : Promise.resolve([]),
+        (async () => {
+          const userProfiles = user?.loginType === "personal" && isAdminTabAllowed(user.allowedAdminTabs, "accounts")
+            ? await listUserProfiles().catch(() => [])
+            : [];
+          apply({ newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length });
+        })(),
         // 법인택시 대기 신청 수 — 신청 관리 탭과 같은 지점별 공유데이터를 센다(대기만; 처리중은 이미 다른 관리자가 선점).
         // 실패는 0이 아니라 null 로 돌려 화면에 '조회 실패'를 알린다 — 지점 한 곳이라도 못 읽으면 전체를 실패로 본다
         // (일부만 세면 실제보다 적은 수가 '정상'처럼 보인다).
-        isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
-          ? (async () => {
-              const branches = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
-              const lists = await Promise.all(branches.map((b: any) =>
-                gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(kakaoTaxiRequestsKey(b.branchName))
-              ));
-              return lists.flat().filter((r: any) => r?.status === "pending").length;
-            })().catch(() => null)
-          : Promise.resolve(0),
+        (async () => {
+          const count = isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
+            ? await (async () => {
+                const branches = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+                const lists = await Promise.all(branches.map((b: any) =>
+                  gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(kakaoTaxiRequestsKey(b.branchName))
+                ));
+                return lists.flat().filter((r: any) => r?.status === "pending").length;
+              })().catch(() => null)
+            : 0;
+          apply({ taxiRequests: count });
+        })(),
         // 근로계약서 발송 대기 수 — 지점이 등록한 발송대상 중 아직 '발송 대기' 상태인 건. 실패는 null(조회 실패).
-        isAdminTabAllowed(allowedAdminTabs, "laborContracts")
-          ? gasClient.getAllLaborContracts()
-              .then((rows) => (rows || []).filter((row: any) => (row?.status || "발송 대기") === "발송 대기").length)
-              .catch(() => null)
-          : Promise.resolve(0),
+        (async () => {
+          const count = isAdminTabAllowed(allowedAdminTabs, "laborContracts")
+            ? await gasClient.getAllLaborContracts()
+                .then((rows) => (rows || []).filter((row: any) => (row?.status || "발송 대기") === "발송 대기").length)
+                .catch(() => null)
+            : 0;
+          apply({ laborContractsPending: count });
+        })(),
         // 법인택시 이상 점검 대상 수 — '법인택시 > 이상 점검' 탭과 완전히 같은 계산(정규화 → 규칙 판정)을
         // 이번 달 데이터로 여기서 재현한다. 두 곳(여기·KakaoTaxiSection)이 규칙을 따로 들고 있으면 언젠가
         // 어긋나므로, 항상 helpers/kakaoTaxi·kakaoTaxiAnomaly 의 같은 순수 함수를 그대로 불러 쓴다.
-        // 당월 주문 조회와 지점 목록 조회를 병렬로 쏜다 — 지점 목록은 정규화(카카오 표기→ERP 지점명) 에만
-        // 쓰이고 서로 의존하지 않으므로 직렬로 기다릴 이유가 없다(다른 알림 항목들과 같은 절약 패턴).
-        isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
+        // 이 항목이 가장 느리다(카카오 왕복) — 다른 항목을 붙잡지 않도록 따로 떼어 두었다.
+        (async () => {
+          const [taxiAnomalyCount, taxiAnomalyAck] = await Promise.all([
+            isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
           ? (async () => {
               // toISOString()은 UTC 라 KST 월초 오전에 전월로 열리는 함정이 있다 — 로컬 기준으로 만든다
               // (KakaoTaxiSection 의 month 초기값과 같은 방식).
@@ -369,47 +422,27 @@ export default function AdminPage() {
               );
               return flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS).length;
             })().catch(() => null)
-          : Promise.resolve(0),
-        // 점검대상 '확인' 기록 — 크로스디바이스 규약(P0): 어느 노트북에서 확인했든 같아야 하므로
-        // localStorage 가 아니라 공유데이터로 읽는다. 조회 실패는 '미확인'으로 취급(알림은 보이는 쪽이 안전).
-        gasClient.getSharedDataFromServer<{ month?: string; count?: number }>("admin_taxi_anomaly_ack").catch(() => null)
+              : Promise.resolve(0),
+            // 점검대상 '확인' 기록 — 크로스디바이스 규약(P0): 어느 노트북에서 확인했든 같아야 하므로
+            // localStorage 가 아니라 공유데이터로 읽는다. 조회 실패는 '미확인'으로 취급(알림은 보이는 쪽이 안전).
+            gasClient.getSharedDataFromServer<{ month?: string; count?: number }>("admin_taxi_anomaly_ack").catch(() => null),
+          ]);
+          // 점검 대상 '확인' 처리(2026-07-29 사용자 요청): 배지를 눌러 확인한 시점의 (달, 건수)를 공유데이터에
+          // 기억해, 같은 달에 건수가 늘지 않는 한 다시 띄우지 않는다. 새 점검 대상이 생기면(건수 증가) 다시 뜬다.
+          // 조회 실패(null)는 그대로 둔다 — 실패를 '확인됨'으로 가리면 안 된다.
+          const nowForDismiss = new Date();
+          const anomalyMonthKey = `${nowForDismiss.getFullYear()}-${String(nowForDismiss.getMonth() + 1).padStart(2, "0")}`;
+          const ackMonth = String(taxiAnomalyAck?.month || "");
+          const ackCount = Number(taxiAnomalyAck?.count);
+          apply({
+            taxiAnomalies: taxiAnomalyCount === null
+              ? null
+              : (ackMonth === anomalyMonthKey && Number.isFinite(ackCount) && taxiAnomalyCount <= ackCount)
+                ? 0
+                : taxiAnomalyCount,
+          });
+        })(),
       ]);
-      const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
-      const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
-      const getEditReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
-      const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
-      const yesterday = getYesterdayDateString();
-      const editDismissed = localStorage.getItem("admin_dashboard_dismissed_edit_logs_date") === yesterday;
-      const manualDismissed = localStorage.getItem("admin_dashboard_dismissed_manual_overtimes_date") === yesterday;
-      const editNew = editDismissed ? [] : (editLogs || []).filter((log: any) => log.settleDate === yesterday && !reviewedEditSet.has(getEditReviewId(log)));
-      const manualNew = manualDismissed ? [] : (manualOvertimes || []).filter((record: any) => record.settleDate === yesterday && !reviewedManualSet.has(getManualReviewId(record)));
-      const latest = (items: any[], fields: string[]) => items.reduce((max, item) => {
-        const value = fields.map((field) => item?.[field]).find(Boolean) || "";
-        return String(value) > max ? String(value) : max;
-      }, "");
-      if (gen !== dashboardAlertsRequestRef.current) return;   // 더 새 요청이 이미 시작됨 — 결과 폐기
-      // 점검 대상 '확인' 처리(2026-07-29 사용자 요청): 배지를 눌러 확인한 시점의 (달, 건수)를 공유데이터에
-      // 기억해, 같은 달에 건수가 늘지 않는 한 다시 띄우지 않는다. 새 점검 대상이 생기면(건수 증가) 다시 뜬다.
-      // 조회 실패(null)는 그대로 둔다 — 실패를 '확인됨'으로 가리면 안 된다.
-      const nowForDismiss = new Date();
-      const anomalyMonthKey = `${nowForDismiss.getFullYear()}-${String(nowForDismiss.getMonth() + 1).padStart(2, "0")}`;
-      const ackMonth = String(taxiAnomalyAck?.month || "");
-      const ackCount = Number(taxiAnomalyAck?.count);
-      const taxiAnomaliesShown = taxiAnomalyCount === null
-        ? null
-        : (ackMonth === anomalyMonthKey && Number.isFinite(ackCount) && taxiAnomalyCount <= ackCount)
-          ? 0
-          : taxiAnomalyCount;
-      setDashboardAlerts({
-        editLogs: editNew.length,
-        manualOvertimes: manualNew.length,
-        newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length,
-        taxiRequests: taxiRequestCount,
-        laborContractsPending: laborContractsPendingCount,
-        taxiAnomalies: taxiAnomaliesShown,
-        latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
-        latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
-      });
     } finally {
       if (gen === dashboardAlertsRequestRef.current) setDashboardAlertsLoading(false);
     }
@@ -1539,6 +1572,8 @@ function AdminDashboardAlertHub({
     ...(alerts.taxiAnomalies === null ? ["법인택시 점검 대상"] : []),
   ];
   const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0) + (alerts.taxiAnomalies ?? 0);
+  // 조회 중에는 알림 버튼을 잠근다 — 이유는 아래 목록 주석 참고(옛 숫자로 '확인함'이 기록되는 것 방지).
+  const busyClass = loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-95";
 
   return (
     <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
@@ -1552,43 +1587,50 @@ function AdminDashboardAlertHub({
         </button>
       </div>
 
-      {/* 초록 '이상 없음'은 모든 카운트가 정상 조회됐을 때만 — 조회 실패가 있으면 성공처럼 보이면 안 된다.
-          [로딩 중 금지] 조회가 끝나기 전에는 초록을 띄우지 않는다. 카운트 초기값이 전부 0 이라
-          아직 아무것도 못 받은 상태가 '이상 없음'으로 보인다. 법인택시 점검 대상이 붙으면서
-          카카오 왕복만큼 대기가 길어져 이 창이 눈에 띄게 커졌다(Codex P2 2026-07-29). */}
-      {loading ? (
+      {/* 초록 '이상 없음'은 모든 카운트가 정상 조회됐을 때만 — 조회 실패가 있으면 성공처럼 보이면 안 되고,
+          조회가 끝나기 전에도 띄우지 않는다(초기값이 전부 0 이라 '이상 없음'처럼 보인다, Codex P2 2026-07-29).
+          [부분 표시] 다만 이미 도착한 항목은 조회가 다 끝나기 전에도 버튼으로 보여준다 — 가장 느린
+          법인택시 점검 대상(카카오 왕복 5~12초)을 기다리느라 나머지가 묶여 있던 문제를 없앤다(2026-07-30). */}
+      {loading && totalAlerts === 0 ? (
         <div className="rounded-xl bg-gray-50 border border-gray-100 p-4 text-[11px] font-black text-[#212121]/60">
           확인할 항목을 불러오는 중입니다…
         </div>
-      ) : totalAlerts === 0 && failedCounts.length === 0 ? (
+      ) : !loading && totalAlerts === 0 && failedCounts.length === 0 ? (
         <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-[11px] font-black text-emerald-700">
           새로 확인할 항목이 없습니다.
         </div>
       ) : totalAlerts === 0 ? null : (
         /* 버튼 폰트는 관리자 디자인 기준(§6-0-1: 버튼 11px/900)을 따른다 — 기존 text-sm 레거시도 함께 정리(2026-07-27). */
         <div className="admin-dashboard-alert-actions flex flex-col gap-2">
+          {/* 아직 도착 안 한 항목이 있으면 밝혀 두고, 그동안 **버튼은 잠근다**.
+              새로고침 중에는 지난 조회의 옛 숫자가 남아 있는데, 그 상태로 누르면 '확인함' 기록이
+              옛 숫자로 남아 아직 도착하지 않은 새 항목까지 덮어 버린다(Codex stop-time 2026-07-30).
+              조회가 끝나면(수 초) 바로 눌러 볼 수 있다. */}
+          {loading && (
+            <p className="text-[11px] font-bold text-[#212121]/50">나머지 항목을 확인하는 중입니다… (확인이 끝나면 누를 수 있습니다)</p>
+          )}
           {pendingDailyCount > 0 && (
-            <button onClick={() => onOpen("dailyPending")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black hover:bg-amber-100 cursor-pointer">
+            <button onClick={() => onOpen("dailyPending")} disabled={loading} className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClass}`}>
               일일정산 미제출: {pendingDailyCount}건
             </button>
           )}
           {alerts.editLogs > 0 && (
-            <button onClick={() => onOpen("editLogs")} className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-black hover:bg-blue-100 cursor-pointer">
+            <button onClick={() => onOpen("editLogs")} disabled={loading} className={`px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-black ${busyClass}`}>
               정산 변경: {alerts.editLogs}건
             </button>
           )}
           {alerts.manualOvertimes > 0 && (
-            <button onClick={() => onOpen("manualOvertimes")} className="px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-black hover:bg-violet-100 cursor-pointer">
+            <button onClick={() => onOpen("manualOvertimes")} disabled={loading} className={`px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-black ${busyClass}`}>
               초과근무 수기작성: {alerts.manualOvertimes}건
             </button>
           )}
           {alerts.newSignups > 0 && (
-            <button onClick={() => onOpen("accounts")} className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-black hover:bg-emerald-100 cursor-pointer">
+            <button onClick={() => onOpen("accounts")} disabled={loading} className={`px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-black ${busyClass}`}>
               계정 가입 승인 대기: {alerts.newSignups}건
             </button>
           )}
           {(alerts.taxiRequests ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiRequests")} className="px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black hover:bg-sky-100 cursor-pointer">
+            <button onClick={() => onOpen("taxiRequests")} disabled={loading} className={`px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black ${busyClass}`}>
               법인택시 신청 대기: {alerts.taxiRequests}건
             </button>
           )}
@@ -1597,12 +1639,12 @@ function AdminDashboardAlertHub({
               빨강으로 남고, 아래 '조회 실패' 오류 배너(#FDE2E2/#B91C1C)와 헷갈린다. 빨강은 이 허브에서
               오류 전용이다. 버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
           {(alerts.taxiAnomalies ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiAnomalies")} className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black hover:bg-amber-100 cursor-pointer">
+            <button onClick={() => onOpen("taxiAnomalies")} disabled={loading} className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClass}`}>
               법인택시 점검 대상: {alerts.taxiAnomalies}건
             </button>
           )}
           {(alerts.laborContractsPending ?? 0) > 0 && (
-            <button onClick={() => onOpen("laborContracts")} className="px-4 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-100 text-[11px] font-black hover:bg-orange-100 cursor-pointer">
+            <button onClick={() => onOpen("laborContracts")} disabled={loading} className={`px-4 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-100 text-[11px] font-black ${busyClass}`}>
               근로계약서 발송 요청: {alerts.laborContractsPending}건
             </button>
           )}
