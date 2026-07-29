@@ -195,7 +195,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       return;
     }
     if (!periodType) {
-      window.alert("계약유형(1주 단위 / 2주 단위 / 정규)을 선택해 주세요.");
+      window.alert("계약유형(1주 / 2주 / 정규)을 선택해 주세요.");
       return;
     }
     if (!effectiveDate) {

@@ -109,8 +109,8 @@ export interface LaborContract {
 
 // 계약유형 표시 라벨 — 지점 등록 폼·지점 표·관리자 표가 같은 문구를 쓴다.
 export const LABOR_CONTRACT_PERIOD_LABEL: Record<NonNullable<LaborContract["periodType"]>, string> = {
-  "1주": "1주 단위",
-  "2주": "2주 단위",
+  "1주": "1주",
+  "2주": "2주",
   "정규": "정규(수습 후 계속)",
 };
 
