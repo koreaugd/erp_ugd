@@ -251,12 +251,16 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           <>
             <div className="overflow-x-auto rounded-2xl border border-gray-100">
               <table className="w-full text-xs whitespace-nowrap">
+                {/* 입력 칸은 '요청' 오른쪽에 컬럼으로 세운다(사용자 지시 2026-07-29) —
+                    종류를 고른 뒤 오른쪽으로 이어서 적는 순서가 되고, 행끼리 칸이 세로로 맞는다. */}
                 <thead><tr className="text-left">
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이름</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">사유</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">요청</th>
+                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">옮겨간 지점</th>
+                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이동일</th>
+                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">사유</th>
                 </tr></thead>
                 <tbody>
                   {members.map((m) => {
@@ -267,48 +271,25 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                       <td className="px-3 py-2 font-bold text-[#212121]">{m.name || "(이름 없음)"}</td>
                       <td className="px-3 py-2">{m.mobile_phone || "-"}</td>
                       <td className="px-3 py-2">{MEMBER_STATUS_LABEL[m.status] || m.status}</td>
-                      <td className="px-3 py-2">
-                        {active ? (
-                          <div className="flex flex-col gap-1.5 min-w-[15rem]">
-                            {/* 변경신청은 옮겨간 지점(모르면 비워둠)과 이동일을 함께 받는다 —
-                                이동일부터의 이용만 새 지점으로 집계된다(직원 삭제 없음). */}
-                            {requestTarget!.type === "branchChange" && (
-                              <>
-                                <select value={requestTargetBranch} onChange={(e) => setRequestTargetBranch(e.target.value)} disabled={saving}
-                                  aria-label="옮겨간 지점"
-                                  className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50">
-                                  <option value="">옮겨간 지점 모름 (관리자가 지정)</option>
-                                  {erpBranches.map((b) => <option key={b} value={b}>{b}</option>)}
-                                </select>
-                                <label className="flex items-center gap-2 text-[11px] font-bold text-[#212121]">
-                                  <span className="whitespace-nowrap">이동일</span>
-                                  <input type="date" value={requestEffectiveDate} onChange={(e) => setRequestEffectiveDate(e.target.value)} disabled={saving}
-                                    title="이 날짜부터의 이용이 새 지점으로 집계됩니다"
-                                    className="flex-1 min-w-0 h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
-                                </label>
-                              </>
-                            )}
-                            <input value={requestReason} onChange={(e) => setRequestReason(e.target.value)} disabled={saving} autoFocus
-                              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) void submitMemberRequest(); }}
-                              placeholder={requestTarget!.type === "branchChange" ? "변경 사유 (필수 — 예: 타지점 이동)" : "수정 사유 (필수 — 예: 번호 변경, 이름 정정)"}
-                              className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
-                          </div>
-                        ) : (
-                          <span className="text-[#212121]/40">-</span>
-                        )}
-                      </td>
+                      {/* 요청 — 고르면 오른쪽 칸들이 열린다. 작성 중에는 종류와 등록·취소 버튼을 보여준다. */}
                       <td className="px-3 py-2 align-top">
                         {active ? (
-                          <span className="inline-flex gap-1.5">
-                            <button onClick={() => void submitMemberRequest()} disabled={saving}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-black text-white bg-slate-800 disabled:opacity-50">
-                              {requestTarget!.type === "branchChange" ? "변경신청 등록" : "수정요청 등록"}
-                            </button>
-                            <button onClick={closeRequestForm} disabled={saving}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">취소</button>
-                          </span>
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-black text-[#212121]">
+                              {requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"}
+                            </span>
+                            {/* 버튼 글자는 '등록/취소'로 짧지만, 읽어주는 도구에는 누구의 무슨 요청인지 밝힌다 */}
+                            <span className="inline-flex gap-1.5">
+                              <button onClick={() => void submitMemberRequest()} disabled={saving}
+                                aria-label={`${m.name || "이 인원"} ${requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"} 등록`}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-black text-white bg-slate-800 disabled:opacity-50">등록</button>
+                              <button onClick={closeRequestForm} disabled={saving}
+                                aria-label={`${m.name || "이 인원"} ${requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"} 취소`}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">취소</button>
+                            </span>
+                          </div>
                         ) : (
-                          // 요청 종류는 드롭다운 — 기본값 '선택', 고르면 이 행에서 입력 폼이 열린다(2026-07-29).
+                          // 요청 종류는 드롭다운 — 기본값 '선택', 고르면 이 행의 오른쪽 칸이 열린다(2026-07-29).
                           <select value="" disabled={saving} aria-label="요청 종류"
                             onChange={(e) => {
                               const type = e.target.value as MemberRequestType | "";
@@ -325,11 +306,46 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                           </select>
                         )}
                       </td>
+                      {/* 옮겨간 지점 — 변경신청에서만. 모르면 비워 두면 관리자가 지정한다. */}
+                      <td className="px-3 py-2 align-top">
+                        {active && requestTarget!.type === "branchChange" ? (
+                          <select value={requestTargetBranch} onChange={(e) => setRequestTargetBranch(e.target.value)} disabled={saving} autoFocus
+                            aria-label="옮겨간 지점"
+                            className="h-8 w-40 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50">
+                            <option value="">모름 (관리자가 지정)</option>
+                            {erpBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-[#212121]/40">-</span>
+                        )}
+                      </td>
+                      {/* 이동일 — 이 날짜부터의 이용만 새 지점으로 집계된다(직원 삭제 없음). */}
+                      <td className="px-3 py-2 align-top">
+                        {active && requestTarget!.type === "branchChange" ? (
+                          <input type="date" value={requestEffectiveDate} onChange={(e) => setRequestEffectiveDate(e.target.value)} disabled={saving}
+                            title="이 날짜부터의 이용이 새 지점으로 집계됩니다" aria-label="이동일"
+                            className="h-8 w-36 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                        ) : (
+                          <span className="text-[#212121]/40">-</span>
+                        )}
+                      </td>
+                      {/* 사유 — 수정요청·변경신청 모두 필수. */}
+                      <td className="px-3 py-2 align-top">
+                        {active ? (
+                          <input value={requestReason} onChange={(e) => setRequestReason(e.target.value)} disabled={saving}
+                            autoFocus={requestTarget!.type !== "branchChange"} aria-label="사유"
+                            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) void submitMemberRequest(); }}
+                            placeholder={requestTarget!.type === "branchChange" ? "변경 사유 (필수 — 예: 타지점 이동)" : "수정 사유 (필수 — 예: 번호 변경, 이름 정정)"}
+                            className="h-8 w-64 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                        ) : (
+                          <span className="text-[#212121]/40">-</span>
+                        )}
+                      </td>
                     </tr>
                     );
                   })}
                   {!members.length && (
-                    <tr><td colSpan={5} className="px-3 py-8 text-center text-xs font-bold text-[#212121]/50">
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-xs font-bold text-[#212121]/50">
                       이 지점으로 등록된 인원이 없습니다. (부서가 지점명으로 등록된 인원만 표시됩니다)
                     </td></tr>
                   )}
