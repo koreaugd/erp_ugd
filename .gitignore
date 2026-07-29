@@ -19,3 +19,6 @@ __pycache__/
 # firestore-backups/ : backup-firestore.mjs 가 뜨는 전체 컬렉션 스냅샷(개인정보·계좌 포함).
 # git 에는 안 올리지만 OneDrive 가 클라우드 동기화하므로 오프사이트 백업이 된다.
 firestore-backups/
+
+# clasp 로컬 설정 — 스크립트 ID는 GAS URL 과 같은 성격이라 저장소에 두지 않는다
+.clasp.json
