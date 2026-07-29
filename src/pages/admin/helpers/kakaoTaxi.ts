@@ -190,13 +190,33 @@ export function verifyBranchTotals(rows: NormalizedTaxiOrder[], branchTotals: Br
   return rowSum === branchSum && rows.length === branchTotals.reduce((acc, b) => acc + b.count, 0);
 }
 
-const VERTICAL_LABEL: Record<string, string> = { taxi: "택시", quick: "퀵", venti: "벤티", black: "블랙" };
+// 카카오 vertical_code → 화면 표기. 없는 코드는 원문을 그대로 노출한다(새 상품이 조용히 '택시'로
+// 둔갑하지 않게 — 원문이 보이면 여기에 한 줄 추가하면 된다).
+// [2026-07-29] logistics(퀵·택배)·driver(대리)를 추가했다 — 실제로 오는 코드인데 표에 영문 그대로
+// 노출되고 있었다(5월 계정1 logistics 20건 실측). logistics 는 이상 점검에서 제외되고
+// 이용내역 탭의 '퀵·택배 내역' 섹션에서 따로 본다(kakaoTaxiAnomaly.ts 참고).
+const VERTICAL_LABEL: Record<string, string> = {
+  taxi: "택시", quick: "퀵", venti: "벤티", black: "블랙",
+  logistics: "퀵·택배", driver: "대리",
+};
 export function verticalLabel(code: string): string {
   return VERTICAL_LABEL[code] || code || "택시";
 }
 
+/**
+ * 표에 찍을 이용일시 축약 — "YYYY-MM-DD HH:mm:ss" → "MM-DD HH:mm"(2026-07-29, 표 폭 절약).
+ * 고정 형식일 때만 자르고 아니면 원문을 그대로 돌려준다(형식이 바뀌면 엉뚱하게 잘리는 것 방지).
+ * [표시 전용] 정렬·최근 3일 판정·엑셀은 반드시 원본 timeText 를 쓴다 — 축약본으로 비교하면
+ * 연도가 빠져 정렬이 깨진다. 화면은 `title={timeText}` 로 전체 시각을 툴팁으로 남긴다.
+ */
+export function shortTimeText(timeText: string): string {
+  const t = String(timeText || "");
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t) ? t.slice(5, 16) : t;
+}
+
 export function buildOrdersExcelRows(rows: NormalizedTaxiOrder[]) {
   return rows.map(({ order, accountKey, branchName, unmapped, amount, timeText }) => ({
+    // 엑셀은 축약하지 않는다 — 원본 전체 시각(연도 포함)이 있어야 정렬·필터가 제대로 된다.
     "이용일시": timeText,
     "계정": accountLabel(accountKey),
     "직원": order.member_name,
@@ -205,6 +225,9 @@ export function buildOrdersExcelRows(rows: NormalizedTaxiOrder[]) {
     "카카오 그룹": order.group_name,
     "출발지": order.departure_point,
     "도착지": order.arrival_point,
+    // 이용사유 — 카카오T 앱에서 직원이 자유 입력한 텍스트. 옛 캐시·미배포 GAS 에는 필드 자체가
+    // 없어 undefined 가 오므로 반드시 `|| ""`(엑셀에 undefined 가 찍히면 안 된다).
+    "이용사유": order.use_code || "",
     "요금": Number(order.service_fare) || 0,
     "톨비": Number(order.toll) || 0,
     "합계": amount,

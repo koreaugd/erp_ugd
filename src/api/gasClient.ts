@@ -873,11 +873,12 @@ export const gasClient = {
 // 임의로 camelCase 로 바꾸면 GAS·server.ts 두 백엔드와 화면이 서로 어긋난다.
 // ----------------------------------------------------
 // [성능][동기화] gas/Code.gs, server.ts 와 세 곳을 같게 유지할 것.
-// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·
+// 카카오 원본 응답은 이 19개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·
 // waypoints·platform_fee·group_id·car_model·total_distance 등을 더 보내지만, 백엔드가
-// kakaoTaxiFetchAllPages 직후 슬림화해서 이 18개만 내려준다 — 330건 기준 307KB 로
+// kakaoTaxiFetchAllPages 직후 슬림화해서 이 19개만 내려준다 — 330건 기준 307KB 로
 // ScriptCache 100KB(계정당) 상한을 넘겨 cache.put 이 조용히 실패했었다(캐시가 죽어
 // 화면 로드마다 카카오 재조회, 5~12초). 이 타입은 실제로 오는 응답 형태와 일치해야 한다.
+// [2026-07-29] use_code(이용사유) 추가 — 18개 → 19개.
 export interface KakaoTaxiOrder {
   id: string;
   service_fare: number;
@@ -894,8 +895,15 @@ export interface KakaoTaxiOrder {
   car_number: string;
   taxi_company_name: string;
   taxi_kind: string;
-  vertical_code: string; // "taxi" | "quick" 등
+  vertical_code: string; // "taxi" | "logistics"(퀵·택배) | "driver"(대리) 등
   vertical_product_name: string;
+  /**
+   * 이용사유 — 카카오T 앱에서 직원이 자유 입력하는 텍스트(선택 항목, 코드가 아니다).
+   * 2026-07-27쯤부터 실제로 입력되기 시작했고 대부분의 과거 건은 빈 문자열이다.
+   * [결측 주의] 운영 GAS(v40 이하)와 그 시점의 ScriptCache 슬림본에는 이 필드가 아예 없다 —
+   * 그래서 타입도 옵셔널이다(코덱스 리뷰 P2). 화면·엑셀은 `order.use_code || ""` 로 읽을 것.
+   */
+  use_code?: string;
   /** 어느 카카오T 계정에서 온 건인지 — 백엔드가 주입한다. 계정 2개를 합쳐 보여주므로 필수. */
   account_key: string;
 }

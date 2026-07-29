@@ -1,7 +1,9 @@
 // src/pages/admin/helpers/kakaoTaxiAnomaly.ts
 // 관리자 > 법인택시 > 이상 점검 — 규칙 기반 자동 표식. 차단이 아니라 "사람이 봐야 할 건"을 골라줄 뿐이다.
 // 규칙 설계 근거: 외식업 특성상 마감 후 심야 퇴근 택시가 '정상' 패턴이므로, 흔한 심야 감시 대신
-// 낮 시간대 이용을 점검 대상으로 잡는다.
+// **영업시간대 이용**을 점검 대상으로 잡는다. 시간창은 08:00~22:59(2026-07-29 사용자 지시로 06~17시에서 확대) —
+// 06~17시 창은 새벽 00~05시대·저녁 18~22시대 이용이 통째로 빠져 정작 봐야 할 건이 안 잡혔다(정윤기 3건 실측).
+// 남은 '정상' 구간은 23시~익일 07시대뿐이며, 이는 마감 후 퇴근 택시라 의도적으로 점검하지 않는다.
 import type { NormalizedTaxiOrder } from "./kakaoTaxi";
 
 export interface TaxiAnomalyThresholds {
@@ -21,9 +23,34 @@ export const DEFAULT_TAXI_THRESHOLDS: TaxiAnomalyThresholds = {
   highFare: 30000,
   surgeRatio: 2,
   surgeMinIncrease: 50000,
-  dayStartHour: 6,
-  dayEndHour: 17,
+  // 08:00~22:59 출발 건을 '낮 시간대'로 본다(2026-07-29 사용자 지시). 판정식은 그대로
+  // `hour >= dayStartHour && hour < dayEndHour` 라 dayEndHour 는 '미만' 경계다 — 23시 건은 제외.
+  dayStartHour: 8,
+  dayEndHour: 23,
 };
+
+/**
+ * 퀵·택배(logistics)는 점검 규칙 전부에서 제외한다(2026-07-29).
+ * 시간창을 08~23시로 넓히면 업무시간에 부르는 퀵이 전부 '낮 시간대'로 표식돼 소음만 늘고,
+ * 급증 계산에서도 퀵 비용이 직원 개인 이용에 합산돼 오탐을 만든다. 미매핑 규칙에서도 뺀다 —
+ * 퀵은 부서 매핑과 무관한 본사성 호출이 대부분이다. 대신 이용내역 탭의 '퀵·택배 내역' 섹션에서
+ * 사람이 직접 본다(집계·합계에는 그대로 포함된다 — 표식만 제외).
+ * `driver`(대리운전)는 사람 이동이라 모든 규칙을 그대로 적용한다.
+ */
+function isLogisticsOrder(row: NormalizedTaxiOrder): boolean {
+  return String(row.order.vertical_code || "") === "logistics";
+}
+
+/**
+ * 급증(R2) 비교의 **전월 쪽** 입력에서도 퀵·택배를 빼기 위한 공용 필터.
+ * detectMemberSurges 는 전월 값을 이미 합산된 Map 으로 받으므로 스스로 걸러낼 수 없다 —
+ * 당월만 빼면 전월에 퀵이 섞인 직원은 비교 기준이 부풀어 진짜 급증을 놓친다(미탐).
+ * 규칙의 소유를 이 파일에 두려고 여기서 내보내고, 호출부(KakaoTaxiSection)가 memberAmountMap 앞에 쓴다.
+ * 화면의 지점별·직원별 합계와 상단 카드는 이 필터를 쓰지 않는다(집계는 퀵 포함 현행 유지).
+ */
+export function excludeLogisticsOrders(rows: NormalizedTaxiOrder[]): NormalizedTaxiOrder[] {
+  return rows.filter((row) => !isLogisticsOrder(row));
+}
 
 // 이상 점검 제외 대상 — 본사 운영진은 업무 특성상 고액/낮 시간대 이용이 정상 패턴이라
 // 표식이 소음만 만든다(사용자 지시 2026-07-27). 이용내역 표에는 그대로 나온다 — 점검 표식만 제외.
@@ -73,6 +100,7 @@ export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnom
   const flagged: FlaggedTaxiOrder[] = [];
   for (const row of rows) {
     if (isAnomalyExempt(row.accountKey, row.order.member_id)) continue; // 본사 운영진 제외
+    if (isLogisticsOrder(row)) continue; // 퀵·택배 제외 — 이용내역 탭 전용 섹션에서 본다
     const reasons: TaxiAnomalyReason[] = [];
     if (row.amount >= thresholds.highFare) reasons.push("highFare");
     // hour 파싱 실패 건은 시간대 규칙에서 제외 — 억지로 플래그하면 오탐이 늘어 표식 신뢰가 떨어진다
@@ -117,6 +145,10 @@ export function detectMemberSurges(
   const currTotals = new Map<string, { name: string; branchName: string; amount: number }>();
   for (const row of current) {
     if (isAnomalyExempt(row.accountKey, row.order.member_id)) continue; // 본사 운영진 제외
+    // 퀵·택배는 급증 합산에서도 뺀다 — 퀵 한 번이 개인 택시비 급증으로 둔갑하면 안 된다.
+    // 전월 쪽(prevAmountByMember)도 같은 기준이어야 비교가 성립한다 — 호출부가 excludeLogisticsOrders 로
+    // 걸러 넘긴다(한쪽만 걸러내면 비교 기준이 어긋나 오탐/미탐이 생긴다).
+    if (isLogisticsOrder(row)) continue;
     const entry = currTotals.get(row.memberKey) || {
       name: (row.order.member_name || "").trim() || "(이름 없음)",
       branchName: row.branchName,
