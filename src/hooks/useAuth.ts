@@ -230,11 +230,13 @@ export function useAuth() {
             if (parsedSession.salaryBranches === undefined) {
               parsedSession.salaryBranches = parsedSession.loginType === "pin" ? "all" : [];
             }
-            hasV2Session = true;
             if (parsedSession.loginType === "personal") {
+              hasV2Session = true;
               await recoverPersonalSession(parsedSession);
             } else {
-              setUser(parsedSession);
+              // PIN 단독 로그인 폐지(2026-07-29 사용자 지시) — 폐지 전에 만들어진 PIN 세션이
+              // 새로고침으로 복원되면 로그인 화면을 우회한 채 계속 살아남는다(Codex 지적). 지우고 재로그인 유도.
+              sessionStorage.removeItem(SESSION_KEY);
             }
           } else {
             sessionStorage.removeItem(SESSION_KEY);

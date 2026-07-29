@@ -20,6 +20,11 @@ import {
 import {
   kakaoTaxiRequestsKey, REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "./helpers/kakaoTaxiRequests";
+import {
+  KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, createBranchHistoryEntry,
+  type KakaoTaxiBranchHistoryEntry,
+} from "./helpers/kakaoTaxiBranchHistory";
+import { getKakaoTaxiOrdersShared, invalidateKakaoTaxiOrdersShared } from "./helpers/kakaoTaxiOrdersCache";
 
 export type KakaoTaxiView = "orders" | "anomaly" | "members" | "requests";
 
@@ -30,6 +35,12 @@ const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2]
 const MEMBER_STATUS_LABEL: Record<string, string> = {
   created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "휴직",
 };
+
+// 로컬(KST) 기준 오늘 날짜 — toISOString()은 UTC 라 월초·자정 부근에 전날로 어긋난다(month 초기값과 같은 함정).
+function todayDateText(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 // 그룹 선택 드롭다운(등록·승인) 전용 합성 키 — 계정마다 카카오가 그룹 id 를 따로 채번해
 // 서로 다른 계정의 그룹이 같은 id 를 가질 수 있다("계정|id" 로 묶지 않으면 잘못된 계정의
@@ -56,6 +67,9 @@ interface OrdersData {
    * 이 데이터의 실패 표시가 지워지는 문제가 있었다(코덱스 리뷰 2026-07-28) — 데이터와 함께 저장해
    * "지금 화면에 보이는 이 데이터가 실제로 완전한지"를 항상 정확히 반영하게 한다. */
   accountErrors: KakaoTaxiAccountError[];
+  /** 지점 변경 이력 로드 실패 — 이때 과거 이용분이 '현재 지점' 기준으로 보일 수 있어 배너로 알린다.
+   * accountErrors 와 같은 이유로 데이터에 귀속시킨다(탭을 오가도 이 데이터의 상태가 정확해야 한다). */
+  historyLoadFailed: boolean;
 }
 
 export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
@@ -83,6 +97,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const [membersData, setMembersData] = useState<{ members: KakaoTaxiMember[]; groups: KakaoTaxiGroup[]; accountErrors: KakaoTaxiAccountError[] } | null>(null);
   /** 직원 관리 탭의 지점(부서) 필터 — "all" | "unassigned" | 지점명 */
   const [memberBranchFilter, setMemberBranchFilter] = useState("all");
+  /** 직원 관리 탭의 이름 검색(2026-07-29 사용자 요청) — 부분 일치 */
+  const [memberNameFilter, setMemberNameFilter] = useState("");
   /** ERP 지점 목록 — 직원 수정 시 부서를 드롭다운으로 고르게 한다(오타로 미매핑되는 것 방지) */
   const [erpBranches, setErpBranches] = useState<string[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -110,6 +126,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   /** 반려 폼 */
   const [rejectTarget, setRejectTarget] = useState<KakaoTaxiRequest | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  /** 지점변경 승인 폼 — 변경신청(branchChange)과, 레거시 삭제요청의 '지점변경으로 처리'가 함께 쓴다 */
+  const [branchChangeTarget, setBranchChangeTarget] = useState<KakaoTaxiRequest | null>(null);
+  const [branchChangeBranch, setBranchChangeBranch] = useState("");
+  const [branchChangeDate, setBranchChangeDate] = useState("");
   /** 수정 요청 승인 → 수정 카드 저장 성공 시 완료 처리할 신청 */
   const [linkedUpdateRequest, setLinkedUpdateRequest] = useState<KakaoTaxiRequest | null>(null);
 
@@ -125,23 +145,33 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // 실패해도 당월 화면을 막지 않는다(급증 표만 안내문으로 대체).
     setPrevLoading(true);
     const prevMonth = addMonthsToMonthInputValue(target, -1);
-    const prevPromise = gasClient.getKakaoTaxiOrders(prevMonth, adminPinHash).catch(() => null);
+    // 공유 캐시 경유 — 대시보드(점검 대상 계산)가 먼저 받아 둔 같은 달 결과를 재사용해 즉시 뜬다.
+    const prevPromise = getKakaoTaxiOrdersShared(prevMonth, adminPinHash).catch(() => null);
+    // 지점 변경 이력 — 이용일 기준 지점 판정에 필요(2026-07-29). 문서가 아직 없으면 null(정상)이고,
+    // 조회 실패는 따로 표시해 "과거 이용분이 현재 지점 기준으로 보일 수 있음"을 배너로 알린다.
+    let historyLoadFailed = false;
+    const historyPromise = gasClient
+      .getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY)
+      .catch(() => { historyLoadFailed = true; return null; });
     try {
-      const [branchList, curr] = await Promise.all([
+      const [branchList, curr, historyRaw] = await Promise.all([
         gasClient.getBranchList(),
-        gasClient.getKakaoTaxiOrders(target, adminPinHash, forceRefresh),
+        getKakaoTaxiOrdersShared(target, adminPinHash, forceRefresh),
+        historyPromise,
       ]);
       if (ordersGenRef.current !== gen) return;
       const erpNames = Array.from(new Set([...(branchList || []).map((b) => b.branchName).filter(Boolean), "본사"]));
+      const historyMap = buildBranchHistoryMap(Array.isArray(historyRaw) ? historyRaw : []);
       setOrdersData({
         month: target,
         reportedCount: curr.count,
-        current: normalizeKakaoTaxiOrders(curr.orders, erpNames),
+        current: normalizeKakaoTaxiOrders(curr.orders, erpNames, historyMap),
         prev: null, // 전월은 아래에서 도착하는 대로 채운다
         // 당월 조회의 계정 실패만 배너에 반영한다. 전월(prev)은 급증 비교용 보조 자료일 뿐이라
         // 실패해도 이미 "전월 자료를 불러오지 못해 급증 비교를 건너뛰었습니다" 안내가 별도로 뜬다 —
         // 여기서까지 겹쳐 보여주면 당월 조회 실패처럼 오인될 수 있어 의도적으로 무시한다.
         accountErrors: curr.accountErrors || [],
+        historyLoadFailed,
       });
       setBranchFilter("all");
       setMemberFilter("all");
@@ -149,7 +179,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         if (ordersGenRef.current !== gen) return; // 그 사이 새 조회가 시작됐으면 그쪽이 채운다
         setOrdersData((cur) =>
           cur && cur.month === target
-            ? { ...cur, prev: prev ? normalizeKakaoTaxiOrders(prev.orders, erpNames) : null }
+            ? { ...cur, prev: prev ? normalizeKakaoTaxiOrders(prev.orders, erpNames, historyMap) : null }
             : cur
         );
         setPrevLoading(false);
@@ -311,6 +341,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   );
   const thresholds = useMemo(() => ({ ...DEFAULT_TAXI_THRESHOLDS, highFare }), [highFare]);
   const flagged = useMemo(() => flagTaxiOrders(rows, thresholds), [rows, thresholds]);
+  // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 하이라이트 — 새로 생긴 점검 대상이 눈에 띄게(2026-07-29).
+  // 로컬(KST) 기준 날짜 비교 — timeText 는 "YYYY-MM-DD HH:mm:ss" 형태라 앞 10자리 문자열 비교로 충분.
+  const recentSinceDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 2);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }, [ordersData?.month]);   // 조회를 다시 하면 기준일도 갱신
+  const isRecentOrder = (timeText: string) => String(timeText || "").slice(0, 10) >= recentSinceDate;
   const surges = useMemo(
     () => (ordersData?.prev ? detectMemberSurges(rows, memberAmountMap(ordersData.prev), thresholds) : []),
     [rows, ordersData?.prev, thresholds]
@@ -335,10 +373,15 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   const visibleMembers = useMemo(() => {
     const all = membersData?.members || [];
-    const list =
+    const branchFiltered =
       memberBranchFilter === "all" ? all
       : memberBranchFilter === "unassigned" ? all.filter((m) => !(m.department || "").trim())
       : all.filter((m) => memberBranchOf(m) === memberBranchFilter);
+    // 이름 검색 — 부분 일치(대소문자 무시). 지점 필터와 겹쳐 쓸 수 있다.
+    const query = memberNameFilter.trim().toLowerCase();
+    const list = query
+      ? branchFiltered.filter((m) => String(m.name || "").toLowerCase().includes(query))
+      : branchFiltered;
 
     // 최근 등록순으로 보여준다(사용자 지시 2026-07-28).
     // 카카오 목록 응답은 우리가 타입으로 선언한 필드 말고도 그대로 넘어오므로, 등록 시각으로 쓸 만한
@@ -363,7 +406,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         return b.index - a.index;
       })
       .map((entry) => entry.member);
-  }, [membersData?.members, memberBranchFilter, memberBranchOf]);
+  }, [membersData?.members, memberBranchFilter, memberNameFilter, memberBranchOf]);
 
   const groupNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -373,6 +416,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   const downloadExcel = async () => {
     if (stale || ordersLoading) { window.alert(`선택하신 ${month} 자료를 아직 불러오지 못했습니다. 조회가 끝난 뒤 다시 시도해주세요.`); return; }
+    if (ordersData?.historyLoadFailed) {
+      // 이력 없이 뽑은 파일은 지점 귀속이 틀릴 수 있다 — 배너만 띄우고 내려받게 두면 틀린 보고서가 돌게 된다(Codex 지적 2026-07-29).
+      window.alert("지점 변경 이력을 불러오지 못해 지점 귀속이 정확하지 않을 수 있어 다운로드를 취소했습니다.\n'새로고침'으로 다시 조회한 뒤 시도해주세요.");
+      return;
+    }
     if (countMismatch) {
       // 불완전한 파일은 만들지 않는다 — 카카오 보고 건수와 수집 건수가 다르면 누락 가능성이 있다.
       window.alert(`카카오가 보고한 건수(${formatNumber(ordersData!.reportedCount)}건)와 수집된 건수(${formatNumber(allRows.length)}건)가 달라 다운로드를 취소했습니다.\n'새로고침'을 눌러 다시 조회해주세요.`);
@@ -391,6 +439,109 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   // 이용내역/이상 점검 탭을 열 때 새로 조회하게 한다(안 지우면 묵은 집계가 그대로 보인다).
   const markOrdersStaleAfterMemberWrite = () => {
     ordersRequestedMonthRef.current = null;
+    invalidateKakaoTaxiOrdersShared();   // 공유 캐시도 함께 — 묵은 집계가 캐시로 되살아나지 않게
+  };
+
+  // ---------- 지점 변경 이력 (2026-07-29) ----------
+  // 부서(지점) 변경·삭제 시 이력을 남겨, 이용내역 집계가 "이용일 기준 지점"을 쓸 수 있게 한다.
+  // 일시 오류를 넘기려고 한 번 더 시도한다(recordRequestResult 와 같은 규약). 실패 시 false.
+  const appendBranchHistory = async (entry: KakaoTaxiBranchHistoryEntry): Promise<boolean> => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await gasClient.appendSharedArrayItem(
+          KAKAO_TAXI_BRANCH_HISTORY_KEY,
+          entry as unknown as Record<string, unknown>
+        );
+        return true;
+      } catch (e) {
+        console.error(`지점 변경 이력 기록 실패(${attempt + 1}/2):`, e);
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+      }
+    }
+    return false;
+  };
+
+  /**
+   * 부서 변경 이력 **선기록** + 실패 시 사용자 주도 재시도(2026-07-29, Codex 2R 반영).
+   * 이력은 카카오 반영보다 **먼저** 남긴다 — 카카오만 바뀌고 이력이 없으면 과거 내역이 통째로
+   * 소급되는데, 그 상태는 재시도 경로를 만들기 어렵다(부서가 이미 새 값이라 변경 전 지점을 모른다).
+   * 선기록이 실패하면 호출부는 변경 자체를 진행하지 않는다(fail-closed — 아무것도 안 바뀐 상태라
+   * 그냥 다시 저장하면 된다). 카카오가 확실히 실패하면 보정 이력(appendBranchHistoryReversal)로 되돌린다.
+   */
+  const appendBranchHistoryOrWarn = async (entry: KakaoTaxiBranchHistoryEntry): Promise<boolean> => {
+    let recorded = await appendBranchHistory(entry);
+    while (!recorded) {
+      const retry = window.confirm(
+        "지점 변경 이력 기록에 실패했습니다.\n" +
+        "기록 없이 부서를 바꾸면 과거 이용내역까지 새 지점으로 집계되므로, 기록 전에는 변경을 진행하지 않습니다.\n\n" +
+        "지금 다시 시도할까요?"
+      );
+      if (!retry) {
+        window.alert("이력이 기록되지 않아 지점 변경을 진행하지 않았습니다. 네트워크 확인 후 다시 시도해주세요.");
+        return false;
+      }
+      recorded = await appendBranchHistory(entry);
+    }
+    return true;
+  };
+
+  /**
+   * 선기록 보정 — 이력을 먼저 남겼는데 카카오 반영이 '확실히' 실패했을 때, 반대 방향 이력을 덧붙여
+   * 집계를 원상복구한다(append-only 저장소라 삭제 대신 상쇄). 같은 적용일의 나중 기록이 이기므로
+   * (buildBranchHistoryMap 정렬 규칙) 모든 날짜가 변경 전 지점으로 되돌아간다.
+   */
+  const appendBranchHistoryReversal = async (entry: KakaoTaxiBranchHistoryEntry): Promise<void> => {
+    const reverted = await appendBranchHistory(createBranchHistoryEntry({
+      accountKey: entry.accountKey,
+      memberId: entry.memberId,
+      memberName: entry.memberName,
+      fromBranch: entry.toBranch,
+      toBranch: entry.fromBranch,
+      effectiveDate: entry.effectiveDate,
+      note: "변경 실패 보정",
+    }));
+    if (!reverted) {
+      window.alert(
+        "부서 변경은 실행되지 않았는데, 미리 남긴 지점 변경 이력을 되돌리지 못했습니다.\n" +
+        "이 직원의 집계가 새 지점으로 잘못 보이면, 잠시 후 부서 변경을 다시 시도해 상태를 맞춰주세요."
+      );
+    }
+  };
+
+  /**
+   * 삭제 전 현재 지점 스냅샷 — 카카오에서 회원을 삭제하면 과거 이용내역의 부서가 null 이 되어
+   * 지점 집계에서 빠진다(실측, KAKAO_RETIRED_MEMBER_BRANCH 하드코딩의 원인). 삭제 전에 현재 부서를
+   * 이력으로 남겨 과거 집계를 보존한다. 기록에 실패하면 throw — 스냅샷 없이 지우면 과거 금액이
+   * '미지정'으로 새므로 삭제 자체를 멈춘다(fail-closed).
+   * 이미 이 직원의 이력이 있으면 남기지 않는다 — 1970 스냅샷이 기존 이력의 fromBranch 판정을 가리면
+   * 변경일 이전 이용이 엉뚱한 지점으로 집계된다.
+   */
+  const ensureBranchSnapshotBeforeDelete = async (member: KakaoTaxiMember) => {
+    const dept = (member.department || "").trim();
+    if (!dept) return; // 부서가 원래 없던 직원은 남길 스냅샷이 없다(기존 미지정 집계와 동일)
+    let existing: KakaoTaxiBranchHistoryEntry[] | null;
+    try {
+      existing = await gasClient.getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY);
+    } catch (e) {
+      console.error("지점 변경 이력 조회 실패(삭제 전 확인):", e);
+      throw new Error("삭제 전 지점 기록(과거 이용내역 보존용)을 확인하지 못해 삭제를 멈췄습니다.\n네트워크 확인 후 다시 시도해주세요.");
+    }
+    const hasHistory = (existing || []).some(
+      (e) => e && String(e.memberId) === String(member.id) && String(e.accountKey || "acct1") === String(member.account_key || "acct1")
+    );
+    if (hasHistory) return; // 기존 이력이 과거 지점을 이미 설명한다
+    const ok = await appendBranchHistory(createBranchHistoryEntry({
+      accountKey: member.account_key,
+      memberId: member.id,
+      memberName: member.name || "",
+      fromBranch: dept,
+      toBranch: dept,
+      effectiveDate: "1970-01-01", // 전 기간 = 현재 부서. 이력이 없던 직원에게만 쓴다(위 가드).
+      note: "삭제 전 지점 스냅샷",
+    }));
+    if (!ok) {
+      throw new Error("삭제 전 지점 기록(과거 이용내역 보존용)에 실패해 삭제를 멈췄습니다.\n네트워크 확인 후 다시 시도해주세요.");
+    }
   };
 
   // ---------- 직원 쓰기 작업 (전부 확인 모달 → 성공 시 재조회, 낙관적 갱신 금지) ----------
@@ -500,6 +651,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const [editPhone, setEditPhone] = useState("");
   const [editDept, setEditDept] = useState("");
   const [editGroupIds, setEditGroupIds] = useState<string[]>([]);
+  // 부서(지점)를 바꿀 때의 적용일 — 이 날짜부터의 이용만 새 지점으로 집계된다(지점 변경 이력, 2026-07-29).
+  // 과거 날짜를 넣으면 이미 옮겨버린 직원의 과거 집계도 소급 보정할 수 있다.
+  const [editEffectiveDate, setEditEffectiveDate] = useState("");
   const [editBusy, setEditBusy] = useState(false);
 
   // 일반 수정(직원 관리 탭의 [수정])으로 진입할 때는 지점 요청 연결을 반드시 끊는다 —
@@ -511,6 +665,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     setEditPhone(m.mobile_phone || "");
     setEditDept(m.department || "");
     setEditGroupIds(m.group_ids || []);
+    setEditEffectiveDate(todayDateText());
   };
 
   const toggleEditGroup = (id: string) => {
@@ -552,20 +707,39 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       return;
     }
     const phoneChanged = phone !== (editing.mobile_phone || "").replace(/[^0-9]/g, "");
+    // 부서(지점) 변경이면 적용일이 필요하다 — 이 날짜부터의 이용만 새 지점으로 집계된다(지점 변경 이력).
+    const deptChanged = editDept.trim() !== (editing.department || "").trim();
+    // [계정 간 이동 금지] 부서를 다른 카카오 계정 소속 지점명으로 바꾸면, 그 지점 화면은 다른 계정을
+    // 조회해 이 직원이 보이지 않는데 관리자 집계만 그 지점으로 잡혀 택시비가 엉뚱하게 귀속된다.
+    // 지점변경 승인 폼과 같은 규칙(Codex 지적 2026-07-29). 바꾸지 않은 기존 부서에는 적용하지 않는다
+    // (레거시 표기가 걸려 무관한 수정까지 막히는 것 방지).
+    if (deptChanged && editDept.trim() && kakaoTaxiAccountForBranch(editDept.trim()) !== editing.account_key) {
+      window.alert(
+        `'${editDept.trim()}'은(는) 다른 카카오T 계정(${accountLabel(kakaoTaxiAccountForBranch(editDept.trim()))}) 소속 지점입니다.\n` +
+        `계정 간 이동은 지원되지 않습니다 — 기존 계정에서 삭제 후 새 계정으로 새로 등록해주세요.`
+      );
+      return;
+    }
+    if (deptChanged && !/^\d{4}-\d{2}-\d{2}$/.test(editEffectiveDate)) {
+      window.alert("지점 변경 적용일을 선택해주세요. (이 날짜부터의 이용만 새 지점으로 집계됩니다)");
+      return;
+    }
     const groupNames = editGroupIds.map((id) => groupNameById.get(id) || id).join(", ");
     if (!window.confirm(
       `${editing.name || editing.identifier} 님의 정보를 수정할까요? 카카오T 비즈니스에 바로 반영됩니다.\n\n` +
       `이름: ${editName.trim() || "(공백)"}\n` +
       `휴대전화: ${phone}${phoneChanged ? "  ← 변경됨: 새 번호로 인증 알림톡이 자동 발송됩니다" : ""}\n` +
-      `부서(지점): ${editDept.trim() || "(공백)"}\n그룹: ${groupNames}`
+      `부서(지점): ${editDept.trim() || "(공백)"}${deptChanged ? `  ← 변경됨: ${editEffectiveDate}부터의 이용만 새 지점으로 집계됩니다` : ""}\n그룹: ${groupNames}`
     )) return;
     setEditBusy(true);
     setMemberBusyId(editing.id);
     let claimedForUpdate = false; // 지점 요청 선점을 잡았는지 — 실패 시 되돌리기 위해
+    let historyEntry: KakaoTaxiBranchHistoryEntry | null = null; // 선기록한 이력 — 카카오 확정 실패 시 보정용
     try {
       // [동시 수정 방지] 카드를 열어둔 사이 다른 기기에서 이 직원이 바뀌었을 수 있다.
       // 저장 전에 최신본을 확인해, 스냅샷과 다르면 덮어쓰지 않고 최신 정보로 폼을 다시 연다.
-      const freshList = await loadMembers();
+      // forceRefresh=true — 캐시본으로 검사하면 이 방지 장치가 무력화된다(Codex 4R, 승인 경로와 동일 규약).
+      const freshList = await loadMembers(true);
       if (freshList === null) {
         // 최신 상태를 모르는 채 저장하면 이 방지 장치가 통째로 우회된다 — 확인 실패면 저장도 하지 않는다(fail-closed).
         window.alert("최신 직원 정보를 확인하지 못해 저장을 취소했습니다.\n네트워크 확인 후 다시 시도해주세요. (입력하신 내용은 그대로 남아 있습니다)");
@@ -598,6 +772,31 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           return; // 다른 관리자가 이미 처리했거나 처리 중 — 카카오를 부르지 않는다
         }
         claimedForUpdate = true;
+      }
+      // [이력 선기록] 부서 변경은 이력을 카카오 반영보다 먼저 남긴다(Codex 2R 반영) —
+      // 카카오만 바뀌고 이력이 없으면 과거 내역이 통째로 새 지점으로 소급되는데, 그 상태는
+      // 재시도할 방법이 없다(부서가 이미 새 값이라 변경 전 지점을 모른다). 기록 실패면 저장 자체를
+      // 취소한다 — 아무것도 안 바뀐 상태라 그냥 다시 저장하면 된다(fail-closed).
+      if (deptChanged) {
+        historyEntry = createBranchHistoryEntry({
+          accountKey: editing.account_key,
+          memberId: editing.id,
+          memberName: editName.trim() || editing.name || "",
+          fromBranch: (editing.department || "").trim(),
+          toBranch: editDept.trim(),
+          effectiveDate: editEffectiveDate,
+          note: "직원 수정",
+        });
+        if (!(await appendBranchHistoryOrWarn(historyEntry))) {
+          historyEntry = null;
+          // 카카오는 아직 부르지 않았다 — 선점만 되돌리면 깨끗한 재시도가 된다.
+          if (claimedForUpdate && linkedUpdateRequest) {
+            await releaseRequestClaim(linkedUpdateRequest);
+            claimedForUpdate = false;
+            void loadRequests();
+          }
+          return;
+        }
       }
       await gasClient.updateKakaoTaxiMember(editing.id, {
         mobile_phone: phone,
@@ -638,6 +837,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       }
       setEditing(null);
     } catch (e: any) {
+      // 이력을 선기록했는데 카카오가 '확실히' 실행되지 않았다면 보정 이력으로 집계를 되돌린다.
+      // (타임아웃·통신 끊김은 반영됐을 수 있으므로 선기록을 그대로 둔다 — 의도한 값과 일치)
+      if (historyEntry && isDefinitelyNotExecuted(e)) {
+        await appendBranchHistoryReversal(historyEntry);
+      }
       // 카카오 호출 직전에 잡은 선점만 되돌린다 — 단, '실행되지 않은 것이 확실한' 오류일 때만.
       // 타임아웃·통신 끊김은 이미 반영됐을 수 있어 풀면 중복 수정이 된다.
       if (claimedForUpdate && linkedUpdateRequest && isDefinitelyNotExecuted(e)) {
@@ -918,8 +1122,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       window.alert("삭제 대상 인원을 현재 직원 목록에서 찾지 못해 어느 계정인지 알 수 없습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
       return;
     }
-    if (!window.confirm(`삭제 요청을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n카카오T 비즈니스에서 즉시 삭제됩니다.`)) return;
+    if (!window.confirm(
+      `삭제 요청을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n` +
+      `카카오T 비즈니스에서 직원 계정 자체가 즉시 삭제됩니다.\n` +
+      `지점 이동이 사유라면 삭제 대신 [지점변경으로 처리]를 쓰세요 — 직원을 지우지 않고 소속만 옮깁니다.`
+    )) return;
     setRequestBusyId(request.id);
+    // 삭제 전 지점 스냅샷 — 실패하면 삭제를 시작하지 않는다(과거 이용내역 지점 보존, fail-closed).
+    // 선점(claim) 전에 남긴다: 스냅샷 실패가 '카카오 실행 여부 불명' 경로로 오인되지 않게 한다.
+    try {
+      await ensureBranchSnapshotBeforeDelete(targetMember);
+    } catch (e: any) {
+      window.alert(String(e?.message || e));
+      setRequestBusyId("");
+      return;
+    }
     let claimed = false;
     try {
       if (!(await claimForProcessing(request))) return;
@@ -956,6 +1173,152 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           `삭제 결과를 확인하지 못했습니다(응답 지연·통신 끊김).\n${String(e?.message || e)}\n\n` +
           `카카오T에서 이미 삭제됐을 수 있어 신청을 '처리 중'으로 남겨 둡니다.\n` +
           `직원 관리 탭에서 확인한 뒤 정리해주세요.`
+        );
+      }
+    } finally {
+      setRequestBusyId("");
+    }
+  };
+
+  /**
+   * 지점변경 승인 폼 열기 — 변경신청(branchChange)과 레거시 삭제요청의 [지점변경으로 처리]가 함께 쓴다.
+   * 다른 승인/반려 폼은 닫는다(동시에 여러 폼이 떠서 서로 다른 신청을 헷갈리는 것 방지).
+   */
+  const startBranchChangeApproval = (request: KakaoTaxiRequest) => {
+    if (anyWriteBusy) return;
+    setBranchChangeTarget(request);
+    setBranchChangeBranch(request.targetBranch || "");
+    setBranchChangeDate(/^\d{4}-\d{2}-\d{2}$/.test(request.effectiveDate || "") ? String(request.effectiveDate) : todayDateText());
+    setApproveTarget(null);
+    setRejectTarget(null);
+  };
+
+  /**
+   * 지점변경 승인 실행 — 직원을 지우지 않고 카카오 부서(department)만 새 지점으로 바꾼 뒤,
+   * 지점 변경 이력을 남긴다(적용일부터의 이용만 새 지점으로 집계). 선점·기록 규약은 삭제 승인과 동일.
+   */
+  const executeApproveBranchChange = async () => {
+    if (!branchChangeTarget || anyWriteBusy) return;
+    const request = branchChangeTarget;
+    if (!request.memberId) { window.alert("대상 인원 정보가 없는 신청입니다 — 반려 처리해주세요."); return; }
+    const newBranch = branchChangeBranch.trim();
+    if (!newBranch) { window.alert("옮길 지점을 선택해주세요."); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(branchChangeDate)) { window.alert("적용일을 선택해주세요."); return; }
+    // [F2] 신청 지점이 매핑된 계정까지 함께 확인 — id 만으로 찾으면 다른 계정의 동일 id 직원을 잘못 집는다.
+    const targetMember = (membersData?.members || []).find(
+      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+    );
+    if (!targetMember) {
+      window.alert("대상 인원을 현재 직원 목록에서 찾지 못했습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
+      return;
+    }
+    const fromBranch = (targetMember.department || "").trim();
+    if (fromBranch === newBranch) {
+      window.alert(
+        `이미 '${newBranch}' 소속입니다. 다른 지점을 선택하거나 반려 처리해주세요.\n` +
+        `(이전 처리에서 카카오 반영까지 끝난 신청이라면 반려 사유에 '이미 반영됨'으로 남겨 정리해주세요)`
+      );
+      return;
+    }
+    // [계정 간 이동 불가] 지점↔계정 매핑이 하드코딩이라(acct1↔acct2) 부서만 바꾸면 집계 계정이 어긋난다.
+    if (kakaoTaxiAccountForBranch(newBranch) !== targetMember.account_key) {
+      window.alert(
+        `'${newBranch}'는 다른 카카오T 계정(${accountLabel(kakaoTaxiAccountForBranch(newBranch))}) 소속 지점입니다.\n` +
+        `계정 간 이동은 지원되지 않습니다 — 기존 계정에서 삭제 후 새 계정으로 새로 등록해주세요.`
+      );
+      return;
+    }
+    if (!window.confirm(
+      `지점 변경을 승인할까요?\n\n대상: ${request.name}\n${fromBranch || "(부서 없음)"} → ${newBranch}\n` +
+      `적용일: ${branchChangeDate} — 이 날짜부터의 이용만 새 지점으로 집계되고, 이전 이용은 기존 지점에 남습니다.\n\n` +
+      `직원 계정은 삭제되지 않습니다.`
+    )) return;
+    setRequestBusyId(request.id);
+    let claimed = false;
+    let historyEntry: KakaoTaxiBranchHistoryEntry | null = null; // 선기록한 이력 — 카카오 확정 실패 시 보정용
+    try {
+      if (!(await claimForProcessing(request))) return;
+      claimed = true;
+      // [동시 수정 방지] confirm 을 띄워 둔 사이 다른 관리자가 이 직원을 바꿨을 수 있다(Codex 3R).
+      // 선점 직후 서버에서 재조회해 최신 값으로 가드를 다시 검증하고, PUT·이력도 최신 값으로 만든다 —
+      // 오래된 스냅샷으로 실행하면 남의 부서·전화 수정을 되돌린다. 확인 실패면 실행하지 않는다(fail-closed).
+      // forceRefresh=true 필수 — 캐시를 우회해 카카오 실시간 값을 본다(캐시본이면 이 검사가 무력화됨, Codex 4R).
+      const freshList = await loadMembers(true);
+      if (freshList === null) {
+        await releaseRequestClaim(request); claimed = false; void loadRequests();
+        window.alert("최신 직원 정보를 확인하지 못해 지점 변경을 취소했습니다.\n네트워크 확인 후 다시 승인해주세요.");
+        return;
+      }
+      const fresh = freshList.find((x) => x.id === request.memberId && x.account_key === targetMember.account_key);
+      if (!fresh) {
+        await releaseRequestClaim(request); claimed = false; void loadRequests();
+        window.alert("이 직원이 목록에서 사라졌습니다(다른 기기에서 삭제되었을 수 있음). 지점 변경을 취소했습니다.\n확인 후 필요하면 반려 처리해주세요.");
+        return;
+      }
+      const freshDept = (fresh.department || "").trim();
+      if (freshDept !== fromBranch) {
+        await releaseRequestClaim(request); claimed = false; void loadRequests();
+        window.alert(
+          `승인 창을 띄워 둔 사이 이 직원의 부서가 '${fromBranch || "(없음)"}'에서 '${freshDept || "(없음)"}'(으)로 바뀌었습니다.\n` +
+          `덮어쓰지 않도록 지점 변경을 취소했습니다. 현재 상태를 확인한 뒤 다시 승인해주세요.`
+        );
+        return;
+      }
+      // [이력 선기록] 카카오 반영보다 먼저 남긴다(Codex 2R 반영) — 기록 실패면 아무것도 실행하지 않고
+      // 대기로 되돌린다(아무것도 안 바뀐 상태라 재승인이 곧 깨끗한 재시도다). 카카오가 확실히 실패하면
+      // 아래 catch 가 보정 이력으로 집계를 되돌린다.
+      const entry = createBranchHistoryEntry({
+        accountKey: fresh.account_key,
+        memberId: fresh.id,
+        memberName: fresh.name || request.name || "",
+        fromBranch,
+        toBranch: newBranch,
+        effectiveDate: branchChangeDate,
+        note: "변경신청 승인",
+      });
+      if (!(await appendBranchHistoryOrWarn(entry))) {
+        await releaseRequestClaim(request);   // 카카오는 부르지 않았다 — 안내는 appendBranchHistoryOrWarn 이 했다
+        claimed = false;
+        void loadRequests();
+        return;
+      }
+      historyEntry = entry;
+      // 4개 필드를 항상 함께 보낸다 — 안 보내면 카카오가 name/department 를 공백으로 지운다(GAS 규약).
+      // 값은 방금 재조회한 최신본(fresh) 기준 — 다른 관리자의 전화·그룹 수정을 되돌리지 않는다.
+      await gasClient.updateKakaoTaxiMember(request.memberId, {
+        mobile_phone: (fresh.mobile_phone || "").replace(/[^0-9]/g, ""),
+        group_ids: fresh.group_ids || [],
+        name: fresh.name || "",
+        department: newBranch,
+      }, adminPinHash, fresh.account_key);
+      markOrdersStaleAfterMemberWrite();
+      const note = `지점 변경 완료: ${fromBranch || "(부서 없음)"} → ${newBranch} · 적용일 ${branchChangeDate}`;
+      const rec = await recordRequestResult(request, { status: "approved", resultNote: note });
+      if (rec === "recordFailed") {
+        window.alert(
+          `지점 변경은 카카오에 반영됐지만 신청 상태 기록에 실패했습니다.\n` +
+          `새로고침 후 '처리 중'으로 남아 있으면 [처리 중 해제]로 정리해주세요(변경은 이미 반영됨 — 다시 승인하지 마세요).`
+        );
+      } else if (rec === "already") {
+        window.alert("지점 변경은 반영됐지만, 그 사이 다른 관리자가 이 신청을 처리했습니다.\n직원 관리 탭에서 실제 상태를 확인해주세요.");
+      } else {
+        window.alert(`지점 변경 승인 완료 — ${request.name}: ${fromBranch || "(부서 없음)"} → ${newBranch} (적용일 ${branchChangeDate})`);
+      }
+      claimed = false;
+      setBranchChangeTarget(null);
+      await Promise.all([loadRequests(), loadMembers()]);
+    } catch (e: any) {
+      if (claimed && isDefinitelyNotExecuted(e)) {
+        // 선기록한 이력을 보정으로 상쇄한 뒤 대기로 되돌린다 — 재승인이 처음부터 다시 진행된다.
+        if (historyEntry) await appendBranchHistoryReversal(historyEntry);
+        await releaseRequestClaim(request); claimed = false; void loadRequests();
+        window.alert(`지점 변경 실행에 실패했습니다. 신청은 대기 상태로 되돌렸습니다.\n${String(e?.message || e)}`);
+      } else {
+        // 반영 여부 불명 — 선기록 이력은 의도한 값과 일치하므로 그대로 둔다.
+        void loadRequests();
+        window.alert(
+          `지점 변경 결과를 확인하지 못했습니다(응답 지연·통신 끊김).\n${String(e?.message || e)}\n\n` +
+          `이미 반영됐을 수 있어 신청을 '처리 중'으로 남겨 둡니다. 직원 관리 탭에서 부서를 확인한 뒤 정리해주세요.`
         );
       }
     } finally {
@@ -1063,6 +1426,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           잠시 후 새로고침해주세요. ({dedupedAccountErrors[0].message})
         </div>
       )}
+      {/* 지점 변경 이력을 못 읽었으면 과거 이용분이 '현재 지점' 기준으로 보일 수 있다 — 숨기지 않고 알린다 */}
+      {needsMonth && !ordersLoading && ordersData && ordersData.historyLoadFailed && (
+        <div className={ERROR_BANNER}>
+          지점 변경 이력을 불러오지 못했습니다 — 지점을 옮긴 직원의 과거 이용분이 현재 지점 기준으로 집계되어 보일 수 있습니다. '새로고침'을 눌러주세요.
+        </div>
+      )}
       {needsMonth && !ordersLoading && ordersData && countMismatch && (
         <div className={ERROR_BANNER}>
           카카오가 보고한 건수({formatNumber(ordersData.reportedCount)}건)와 수집된 건수({formatNumber(allRows.length)}건)가 다릅니다.
@@ -1073,7 +1442,15 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         <div className={ERROR_BANNER}>집계 검증에 실패했습니다. 화면 수치를 그대로 믿지 마시고 새로고침 후에도 반복되면 알려주세요.</div>
       )}
 
-      {needsMonth && ordersLoading && <div className="py-20 text-center"><LoadingSpinner size="md" /></div>}
+      {/* 로딩 중임을 글로 명시한다 — 스피너만 있으면 멈춘 것인지 로딩인지 구분이 안 된다(사용자 지적 2026-07-29) */}
+      {needsMonth && ordersLoading && (
+        <div className="py-20 text-center space-y-3">
+          <LoadingSpinner size="md" />
+          <p className="text-xs font-bold text-[#212121]/60">
+            카카오T에서 {month} 이용내역을 불러오는 중입니다… 처음 조회는 10초 정도 걸릴 수 있습니다.
+          </p>
+        </div>
+      )}
 
       {/* ---------- 이용내역 ---------- */}
       {view === "orders" && !ordersLoading && ordersData && (
@@ -1300,7 +1677,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 </tr></thead>
                 <tbody>
                   {flagged.map(({ row, reasons }, i) => (
-                    <tr key={row.order.id || `noid-${i}`} className="border-t border-gray-100">
+                    <tr key={row.order.id || `noid-${i}`}
+                      className={`border-t border-gray-100 ${isRecentOrder(row.timeText) ? "bg-[var(--admin-vanilla)]/45" : ""}`}>
                       <td className="px-4 py-2">
                         <span className="inline-flex flex-wrap gap-1">
                           {reasons.map((r) => (
@@ -1310,7 +1688,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                           ))}
                         </span>
                       </td>
-                      <td className="px-4 py-2">{row.timeText}</td>
+                      <td className="px-4 py-2">
+                        {row.timeText}
+                        {isRecentOrder(row.timeText) && (
+                          <span className="ml-1.5 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[10px] font-black">최근 3일</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2 font-bold text-[#212121]">{row.order.member_name || "(이름 없음)"}</td>
                       <td className="px-4 py-2">{row.branchName}</td>
                       <td className="px-4 py-2 max-w-[22rem] truncate" title={`${row.order.departure_point} → ${row.order.arrival_point}`}>
@@ -1388,6 +1771,37 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 </div>
               )}
 
+              {/* 지점변경 승인 — 직원을 지우지 않고 소속 지점만 옮긴다(변경신청·레거시 삭제요청 공용) */}
+              {branchChangeTarget && (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-4 space-y-3">
+                  <h2 className="admin-pill-title">지점변경 승인 — {branchChangeTarget.branchName} · {branchChangeTarget.name}</h2>
+                  {branchChangeTarget.reason && (
+                    <p className="text-[11px] font-bold text-[#212121]">지점 요청 사유: {branchChangeTarget.reason}</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select value={branchChangeBranch} onChange={(e) => setBranchChangeBranch(e.target.value)} disabled={requestBusy}
+                      className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white disabled:opacity-50" aria-label="옮길 지점">
+                      <option value="">옮길 지점 선택 (필수)</option>
+                      {erpBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <label className="flex items-center gap-2 text-[11px] font-bold text-[#212121]">
+                      적용일
+                      <input type="date" value={branchChangeDate} onChange={(e) => setBranchChangeDate(e.target.value)} disabled={requestBusy}
+                        className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white disabled:opacity-50" aria-label="적용일" />
+                    </label>
+                    <button onClick={() => void executeApproveBranchChange()} disabled={anyWriteBusy}
+                      className="h-8 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white disabled:opacity-50">
+                      {requestBusy ? "처리 중..." : "지점변경 승인"}
+                    </button>
+                    <button onClick={() => setBranchChangeTarget(null)} disabled={requestBusy}
+                      className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer disabled:opacity-50">취소</button>
+                  </div>
+                  <p className="text-[11px] font-bold text-[#212121]/60">
+                    적용일부터의 이용만 새 지점으로 집계되고, 이전 이용은 기존 지점에 남습니다. 직원 계정은 삭제되지 않습니다.
+                  </p>
+                </div>
+              )}
+
               {/* 수정 요청 승인 시 아래 수정 카드가 열린다 — 직원 관리 탭과 같은 컴포넌트 */}
               {editing && view === "requests" && (
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-4 space-y-3">
@@ -1410,6 +1824,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                         <option value={editDept}>{editDept} (현재 값 · ERP 지점명 아님)</option>
                       )}
                     </select>
+                    {/* 부서(지점)를 바꿀 때만 — 이 날짜부터의 이용만 새 지점으로 집계된다(지점 변경 이력, 2026-07-29).
+                        과거 날짜를 넣으면 이미 옮겨버린 직원의 지난달 집계도 소급 보정된다. */}
+                    {editDept.trim() !== (editing.department || "").trim() && (
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-[#212121]">
+                        <span className="whitespace-nowrap">지점 변경 적용일</span>
+                        <input type="date" value={editEffectiveDate} onChange={(e) => setEditEffectiveDate(e.target.value)} disabled={editBusy}
+                          title="이 날짜부터의 이용만 새 지점으로 집계됩니다 (이전 이용은 기존 지점 유지)"
+                          className="h-8 flex-1 min-w-0 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                      </label>
+                    )}
                     <p className="text-[11px] font-bold text-[#212121]/60 self-center">사번(변경 불가): {editing.identifier || "-"}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1456,7 +1880,15 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                           <td className="px-4 py-2 font-bold text-[#212121]">{r.branchName}</td>
                           <td className="px-4 py-2">{REQUEST_TYPE_LABEL[r.type]}</td>
                           <td className="px-4 py-2 font-bold text-[#212121]">{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
-                          <td className="px-4 py-2 max-w-[18rem] truncate" title={r.reason || r.memo || ""}>{r.reason || r.memo || "-"}</td>
+                          {/* 변경신청은 옮겨간 지점·이동일까지 함께 보여준다 — 승인 폼의 기본값이 어디서 왔는지 보이게 */}
+                          <td className="px-4 py-2 max-w-[18rem] truncate"
+                            title={r.type === "branchChange"
+                              ? `${r.targetBranch ? `옮겨간 지점: ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || ""}`
+                              : (r.reason || r.memo || "")}>
+                            {r.type === "branchChange"
+                              ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
+                              : (r.reason || r.memo || "-")}
+                          </td>
                           <td className="px-4 py-2">
                             {REQUEST_STATUS_LABEL[r.status]}
                             {r.status === "rejected" && r.rejectReason ? ` — ${r.rejectReason}` : ""}
@@ -1467,13 +1899,22 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                               <span className="inline-flex gap-1.5">
                                 <button
                                   onClick={() => {
-                                    if (r.type === "register") { setApproveTarget(r); setApproveGroupId(guessGroupId(r.branchName)); setRejectTarget(null); }
+                                    if (r.type === "register") { setApproveTarget(r); setApproveGroupId(guessGroupId(r.branchName)); setRejectTarget(null); setBranchChangeTarget(null); }
                                     else if (r.type === "delete") void executeApproveDelete(r);
+                                    else if (r.type === "branchChange") startBranchChangeApproval(r);
                                     else void startUpdateApproval(r);
                                   }}
                                   disabled={anyWriteBusy}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">승인</button>
-                                <button onClick={() => { setRejectTarget(r); setRejectReason(""); setApproveTarget(null); }} disabled={anyWriteBusy}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">
+                                  {r.type === "delete" ? "삭제 승인" : "승인"}
+                                </button>
+                                {/* 레거시 삭제요청 — 사유가 지점 이동이면 직원을 지우지 않고 소속만 옮긴다(2026-07-29) */}
+                                {r.type === "delete" && (
+                                  <button onClick={() => startBranchChangeApproval(r)} disabled={anyWriteBusy}
+                                    title="직원을 삭제하지 않고 소속 지점만 옮깁니다"
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">지점변경으로 처리</button>
+                                )}
+                                <button onClick={() => { setRejectTarget(r); setRejectReason(""); setApproveTarget(null); setBranchChangeTarget(null); }} disabled={anyWriteBusy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black text-[#B91C1C] bg-white border border-[#C93A3A] disabled:opacity-50">반려</button>
                               </span>
                             ) : r.status === "processing" ? (
@@ -1566,6 +2007,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                         <option value={editDept}>{editDept} (현재 값 · ERP 지점명 아님)</option>
                       )}
                     </select>
+                    {/* 부서(지점)를 바꿀 때만 — 이 날짜부터의 이용만 새 지점으로 집계된다(지점 변경 이력, 2026-07-29).
+                        과거 날짜를 넣으면 이미 옮겨버린 직원의 지난달 집계도 소급 보정된다. */}
+                    {editDept.trim() !== (editing.department || "").trim() && (
+                      <label className="flex items-center gap-2 text-[11px] font-bold text-[#212121]">
+                        <span className="whitespace-nowrap">지점 변경 적용일</span>
+                        <input type="date" value={editEffectiveDate} onChange={(e) => setEditEffectiveDate(e.target.value)} disabled={editBusy}
+                          title="이 날짜부터의 이용만 새 지점으로 집계됩니다 (이전 이용은 기존 지점 유지)"
+                          className="h-8 flex-1 min-w-0 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                      </label>
+                    )}
                     <p className="text-[11px] font-bold text-[#212121]/60 self-center">사번(변경 불가): {editing.identifier || "-"}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1584,7 +2035,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     </button>
                     <button onClick={closeEditCard} disabled={editBusy}
                       className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer disabled:opacity-50">취소</button>
-                    <p className="text-[11px] font-bold text-[#212121]/60">부서/지점명을 ERP 지점명과 똑같이 적으면 이용내역이 그 지점으로 집계됩니다. 전화번호를 바꾸면 새 번호로 인증 알림톡이 자동 발송됩니다.</p>
+                    <p className="text-[11px] font-bold text-[#212121]/60">부서/지점명을 ERP 지점명과 똑같이 적으면 이용내역이 그 지점으로 집계됩니다. 지점을 바꾸면 적용일부터의 이용만 새 지점으로 집계됩니다(이전 이용은 기존 지점 유지). 전화번호를 바꾸면 새 번호로 인증 알림톡이 자동 발송됩니다.</p>
                   </div>
                 </div>
               )}
@@ -1601,6 +2052,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     {memberBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
                     <option value="unassigned">부서 미지정</option>
                   </select>
+                  <input value={memberNameFilter} onChange={(e) => setMemberNameFilter(e.target.value)}
+                    placeholder="이름 검색" aria-label="이름 검색"
+                    className="h-8 w-32 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white" />
                   <span className="text-[11px] font-bold text-[#212121]/50">(등록 후 아직 인증하지 않은 직원은 카카오 정책상 목록에 나오지 않습니다)</span>
                 </div>
                 <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
@@ -1642,7 +2096,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status === "blocked" : null; })} disabled={busy}
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">휴직</button>
                                 )}
-                                <button onClick={() => void runMemberAction(m, "삭제", () => gasClient.deleteKakaoTaxiMember(m.id, adminPinHash, m.account_key),
+                                <button onClick={() => void runMemberAction(m, "삭제", async () => {
+                                    // 삭제 전 지점 스냅샷 — 실패 시 throw 로 삭제 자체를 멈춘다(과거 이용내역 지점 보존)
+                                    await ensureBranchSnapshotBeforeDelete(m);
+                                    await gasClient.deleteKakaoTaxiMember(m.id, adminPinHash, m.account_key);
+                                  },
                                   // 삭제는 목록에서 사라져야 반영된 것 — 남아 있으면 미반영으로 알린다
                                   (list) => !list.some((x) => x.id === m.id))} disabled={busy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black text-[#B91C1C] bg-white border border-[#C93A3A] disabled:opacity-50">삭제</button>

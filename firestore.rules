@@ -74,6 +74,13 @@ service cloud.firestore {
           request.resource.data.reviewedByAdmin == false
           || (request.time.toMillis() < 1785250800000 && request.resource.data.reviewedByAdmin == true)
         );
+      // 본인 자가 수정(2026-07-29): 이름·연락처 두 키만. diff 로 바뀐 키를 제한하므로
+      // 역할·상태·허용지점 등 권한류는 여전히 본인이 못 바꾼다(셀프 정지해제·권한조작 차단 유지).
+      // 클라이언트 짝: userProfile.ts updateOwnProfile — 다른 키를 보내면 여기서 통째로 거부된다.
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name", "phone"])
+        && request.resource.data.name is string && request.resource.data.name != ""
+        && request.resource.data.phone is string && request.resource.data.phone != "";
       // 수정·삭제는 개인 관리자만, 본인 문서는 관리자라도 불가(셀프 정지해제·권한조작 차단).
       // 주의: PIN 관리자(admin@ugd-erp.example)는 여기서 의도적으로 배제 — isAdmin() 쓰지 말 것.
       allow update, delete: if isPersonalAdmin() && request.auth.uid != uid;
@@ -182,7 +189,11 @@ service cloud.firestore {
 
     match /shared_data/{dataKey} {
       // 급여대장(급여·주민번호·계좌)은 지점별 열람 권한까지 통과해야 한다. 그 외 공유 데이터는 현행 유지.
-      allow read, write: if canAccessWork() && (!isSalaryKey(dataKey) || canReadSalary(dataKey));
+      // admin_taxi_anomaly_ack(관리자 점검대상 확인 기록, 2026-07-29)는 관리자만 —
+      // 지점 세션이 이 문서를 쓰면 관리자 대시보드 알림을 마음대로 꺼버릴 수 있다(Codex 지적).
+      allow read, write: if canAccessWork()
+        && (!isSalaryKey(dataKey) || canReadSalary(dataKey))
+        && (dataKey != "admin_taxi_anomaly_ack" || isAdmin() || isPersonalAdmin());
     }
 
     // 백업 문서 ID는 '{인코딩된 dataKey}--{timestamp}' 형식이라 급여대장 백업도 같은 함수로 판별된다

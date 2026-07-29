@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertOctagon, Lock, LogIn } from "lucide-react";
+import { AlertOctagon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuthContext } from "../contexts/AuthContext";
 import { warmPersonalAuth } from "../hooks/useAuth";
@@ -8,22 +8,18 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import GateStep from "./login/GateStep";
 import OnboardingStep from "./login/OnboardingStep";
 import ApprovalPendingStep from "./login/ApprovalPendingStep";
-import type { LoginBranch } from "../api/firebaseAuth";
-import { ensureLatestAppVersion } from "../utils/appVersion";
 
-type LoginMode = "personal" | "pin";
+// PIN 단독 로그인은 2026-07-29 사용자 지시로 폐지 — 개인 계정(구글/이메일)으로만 로그인한다.
+// PIN 은 로그인 후의 게이트(GateStep)에서만 쓰인다. 백엔드의 PIN 검증 로직은 게이트가 계속 쓰므로 유지.
 type EmailFormMode = "signin" | "signup" | "reset";
 
 export default function LoginPage() {
   const {
-    user, login, loading, error, failedAttempts, setError,
+    user, loading, error, failedAttempts, setError,
     loginWithGoogle, loginWithEmail, signUpWithEmail, sendPasswordReset, pendingGate,
     pendingOnboarding, pendingApproval
   } = useAuthContext();
   const navigate = useNavigate();
-
-  // 공통 화면 상태
-  const [mode, setMode] = useState<LoginMode>("personal");
 
   // 개인 로그인(이메일) 상태
   const [emailForm, setEmailForm] = useState<EmailFormMode>("signin");
@@ -33,15 +29,6 @@ export default function LoginPage() {
   const [passwordConfirm, setPasswordConfirm] = useState("");   // 가입 폼 전용 — 오타 가입 방지
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [sendingReset, setSendingReset] = useState(false);
-
-  // 기존 PIN 로그인 상태 — 그대로 유지
-  const [pin, setPin] = useState("");
-  const [branches, setBranches] = useState<LoginBranch[]>([]);
-  const [selectedBranch, setSelectedBranch] = useState<LoginBranch | null>(null);
-  const [loadingBranches, setLoadingBranches] = useState(false);
-  const [adminMode, setAdminMode] = useState(false);
-  const [showBranchSelect, setShowBranchSelect] = useState(false);
-  const [checkingVersion, setCheckingVersion] = useState(false);
 
   const busy = loading || sendingReset;
 
@@ -55,37 +42,6 @@ export default function LoginPage() {
     if (!user) return;
     navigate(user.role === "admin" ? "/admin" : "/branch-confirm");
   }, [user, navigate]);
-
-  useEffect(() => {
-    if (!showBranchSelect || adminMode) return;
-    setLoadingBranches(true);
-    import("../api/firebaseAuth")
-      .then(({ getFirebaseLoginBranches }) => getFirebaseLoginBranches())
-      .then((list) => setBranches(list))
-      .catch(() => setBranches([]))
-      .finally(() => setLoadingBranches(false));
-  }, [showBranchSelect, adminMode]);
-
-  // 개인 ↔ PIN 모드 전환 시 입력값·오류·안내 문구를 모두 초기화한다.
-  const switchToPersonal = () => {
-    setMode("personal");
-    setError(null);
-    setResetMessage(null);
-    setPin("");
-    setAdminMode(false);
-    setShowBranchSelect(false);
-    setSelectedBranch(null);
-  };
-
-  const switchToPin = () => {
-    setMode("pin");
-    setError(null);
-    setResetMessage(null);
-    setEmailForm("signin");
-    setName("");
-    setEmail("");
-    setPassword("");
-  };
 
   const switchEmailForm = (next: EmailFormMode) => {
     setEmailForm(next);
@@ -126,30 +82,6 @@ export default function LoginPage() {
       ? await signUpWithEmail(name, email, password)
       : await loginWithEmail(email, password);
     if (success) { setPassword(""); setPasswordConfirm(""); }
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (loading || !pin) return;
-
-    if (!adminMode && !showBranchSelect) {
-      setError(null);
-      setShowBranchSelect(true);
-      return;
-    }
-
-    setCheckingVersion(true);
-    const latest = await ensureLatestAppVersion();
-    setCheckingVersion(false);
-    if (!latest) return;
-
-    const success = await login(adminMode ? null : selectedBranch, pin);
-    if (success) setPin("");
-  };
-
-  const handlePinChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    if (/^[a-zA-Z0-9]*$/.test(value) && value.length <= 12) setPin(value);
   };
 
   return (
@@ -198,7 +130,7 @@ export default function LoginPage() {
           <ApprovalPendingStep profile={pendingApproval} />
         ) : pendingGate ? (
           <GateStep profile={pendingGate.profile} />
-        ) : mode === "personal" ? (
+        ) : (
           <div className="space-y-4" id="personal-login-section">
             <button
               type="button"
@@ -288,76 +220,7 @@ export default function LoginPage() {
                 비밀번호 찾기
               </button>
             </div>
-            <button
-              type="button"
-              onClick={switchToPin}
-              className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4"
-            >
-              기존 PIN으로 로그인
-            </button>
           </div>
-        ) : (
-          <form className="space-y-4" onSubmit={handleSubmit} id="login-form">
-            <div className="relative">
-              <input
-                id="pin-input"
-                name="pin"
-                type="password"
-                inputMode="text"
-                autoComplete="current-password"
-                required
-                value={pin}
-                onChange={handlePinChange}
-                disabled={loading || checkingVersion}
-                placeholder="PIN"
-                aria-label="PIN"
-                className="w-full rounded-xl border border-black px-4 py-4 pl-11 text-center font-mono text-xl font-bold tracking-widest outline-hidden transition focus:ring-1 focus:ring-black disabled:bg-zinc-100"
-              />
-              <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" />
-            </div>
-
-            {!adminMode && showBranchSelect && (
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-zinc-600">지점 선택</p>
-                {loadingBranches ? (
-                  <div className="flex justify-center py-5"><LoadingSpinner size="sm" /></div>
-                ) : (
-                  <select
-                    value={selectedBranch?.branchName || ""}
-                    onChange={(event) => setSelectedBranch(branches.find((branch) => branch.branchName === event.target.value) || null)}
-                    required
-                    className="w-full rounded-xl border border-black bg-white px-4 py-4 text-center text-sm font-bold outline-hidden"
-                  >
-                    <option value="">지점을 선택하세요</option>
-                    {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-                  </select>
-                )}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || checkingVersion || !pin || (!adminMode && showBranchSelect && !selectedBranch)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              id="btn-login-submit"
-            >
-              {loading || checkingVersion ? <LoadingSpinner size="sm" light /> : <>입력 완료 <LogIn className="h-4 w-4" /></>}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAdminMode((current) => !current); setPin(""); setShowBranchSelect(false); setSelectedBranch(null); setError(null); }}
-              className="w-full text-xs font-bold text-zinc-500 underline underline-offset-4"
-            >
-              {adminMode ? "지점 로그인으로 돌아가기" : "관리자 로그인"}
-            </button>
-            <button
-              type="button"
-              onClick={switchToPersonal}
-              className="w-full text-xs font-bold text-zinc-400 underline underline-offset-4"
-            >
-              개인 계정으로 로그인
-            </button>
-          </form>
         )}
       </motion.div>
     </main>
