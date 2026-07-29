@@ -94,6 +94,9 @@ export interface LaborContract {
   // 신규입사/지점이동 구분과 입사·이동일. 지점이동일 때만 previousBranch(이전 지점명)가 채워진다.
   // 옛 레코드에는 없을 수 있어 전부 선택 필드로 둔다(표시 시 없으면 "-").
   contractType?: "신규입사" | "지점이동";
+  // 계약 기간 유형(2026-07-29): 신입은 1~2주 단위 계약서를 따로 보내야 해서 구분이 필요하다.
+  // 옛 레코드에는 없다(표시 "-"). 값은 짧게 저장하고 라벨은 LABOR_CONTRACT_PERIOD_LABEL 로 그린다.
+  periodType?: "1주" | "2주" | "정규";
   effectiveDate?: string;
   previousBranch?: string;
   status?: string;
@@ -103,6 +106,13 @@ export interface LaborContract {
   deleteRequestedAt?: string;
   statusUpdatedAt?: string;
 }
+
+// 계약유형 표시 라벨 — 지점 등록 폼·지점 표·관리자 표가 같은 문구를 쓴다.
+export const LABOR_CONTRACT_PERIOD_LABEL: Record<NonNullable<LaborContract["periodType"]>, string> = {
+  "1주": "1주 단위",
+  "2주": "2주 단위",
+  "정규": "정규(수습 후 계속)",
+};
 
 // 파트타이머 근로계약서 양식(전 지점 공통 1개)의 파일 정보.
 // 파일 본문(base64)은 별도 문서에 둔다 — 아래 getLaborContractTemplateFile 참고.

@@ -2,11 +2,12 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
-import { gasClient, DailyListRow, DailySettleDetail } from "../api/gasClient";
+import { gasClient, DailyListRow, DailySettleDetail, LABOR_CONTRACT_PERIOD_LABEL } from "../api/gasClient";
 import type { LaborContractTemplateMeta } from "../api/gasClient";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ToastMessage, { ToastType } from "../components/ToastMessage";
 import ConfirmModal from "../components/ConfirmModal";
+import MyAccountModal from "../components/MyAccountModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
@@ -16,6 +17,8 @@ import { listUserProfiles } from "../api/userProfile";
 import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
 import { kakaoTaxiRequestsKey, type KakaoTaxiRequest } from "./admin/helpers/kakaoTaxiRequests";
 import { normalizeKakaoTaxiOrders } from "./admin/helpers/kakaoTaxi";
+import { KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, type KakaoTaxiBranchHistoryEntry } from "./admin/helpers/kakaoTaxiBranchHistory";
+import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
@@ -128,6 +131,8 @@ export default function AdminPage() {
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
   const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
   const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
+  // 내 정보 모달(2026-07-29) — 개인 계정만. 이름·연락처·비밀번호 자가 수정.
+  const [myAccountOpen, setMyAccountOpen] = useState(false);
   // taxiRequests/laborContractsPending/taxiAnomalies 의 null = "조회 실패"다. 0(없음)과 구분해 화면에 경고를 띄운다
   // — 실패를 0건으로 삼키면 '확인할 항목 없음'으로 오도된다(Codex P1 2026-07-27).
   const [dashboardAlerts, setDashboardAlerts] = useState<{ editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null; latestEditLogAt: string; latestManualOvertimeAt: string }>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
@@ -297,7 +302,7 @@ export default function AdminPage() {
       // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
       // 신규 가입 알림은 개인 관리자 세션에서만 조회한다 — PIN 관리자는 users 컬렉션 읽기 권한이 없어
       // (firestore.rules: isPersonalAdmin()만 read 허용) 그대로 부르면 permission-denied로 거부된다.
-      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount, taxiAnomalyCount] = await Promise.all([
+      const [editLogs, manualOvertimes, reviewedEditLogs, reviewedManualOvertimes, userProfiles, taxiRequestCount, laborContractsPendingCount, taxiAnomalyCount, taxiAnomalyAck] = await Promise.all([
         gasClient.getEditLogs().catch(() => []),
         gasClient.getAllManualOvertimes().catch(() => []),
         gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
@@ -336,22 +341,38 @@ export default function AdminPage() {
               // (KakaoTaxiSection 의 month 초기값과 같은 방식).
               const now = new Date();
               const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-              const [ordersRes, branches] = await Promise.all([
-                gasClient.getKakaoTaxiOrders(currentMonth, user?.pinHash || ""),
-                gasClient.getBranchList()
+              const [ordersRes, branches, historyRaw] = await Promise.all([
+                // 공유 캐시 경유(2026-07-29) — 여기서 받은 결과를 법인택시 > 이용내역이 재사용해
+                // 대시보드를 본 직후의 이용내역 클릭이 즉시 뜬다(카카오 재조회 생략).
+                getKakaoTaxiOrdersShared(currentMonth, user?.pinHash || ""),
+                gasClient.getBranchList(),
+                // 지점 변경 이력 — 이상 점검 탭과 같은 이용일 기준 지점 판정을 쓴다(2026-07-29).
+                // 이력 없이 세면 지점을 옮긴 직원의 미매핑/지점 판정이 탭과 어긋난다. 실패는 아래에서 null 처리.
+                gasClient.getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY)
+                  .then((v) => ({ ok: true as const, value: v }))
+                  .catch(() => ({ ok: false as const, value: null }))
               ]);
               // 계정 중 하나라도 조회 실패(accountErrors)면 그 계정 건이 통째로 빠진 채 계산한 것이다.
               // 실제보다 적게 나온 '점검 대상 0건'은 '이상 없음'으로 오인되어 진짜 점검 대상을 놓치는
               // 사고로 이어지므로, 부분 데이터로 낸 숫자보다 명시적 조회 실패(null)가 낫다.
               if ((ordersRes.accountErrors || []).length > 0) return null;
+              // 이력 조회 실패도 같은 원칙 — 이력 없이 낸 숫자는 탭과 다를 수 있어 조회 실패(null)로 알린다.
+              if (!historyRaw.ok) return null;
               const branchNames = Array.from(new Set([
                 ...(branches || []).map((b: any) => b.branchName).filter(Boolean),
                 "본사"
               ]));
-              const rows = normalizeKakaoTaxiOrders(ordersRes.orders, branchNames);
+              const rows = normalizeKakaoTaxiOrders(
+                ordersRes.orders,
+                branchNames,
+                buildBranchHistoryMap(Array.isArray(historyRaw.value) ? historyRaw.value : [])
+              );
               return flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS).length;
             })().catch(() => null)
-          : Promise.resolve(0)
+          : Promise.resolve(0),
+        // 점검대상 '확인' 기록 — 크로스디바이스 규약(P0): 어느 노트북에서 확인했든 같아야 하므로
+        // localStorage 가 아니라 공유데이터로 읽는다. 조회 실패는 '미확인'으로 취급(알림은 보이는 쪽이 안전).
+        gasClient.getSharedDataFromServer<{ month?: string; count?: number }>("admin_taxi_anomaly_ack").catch(() => null)
       ]);
       const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
       const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
@@ -367,13 +388,25 @@ export default function AdminPage() {
         return String(value) > max ? String(value) : max;
       }, "");
       if (gen !== dashboardAlertsRequestRef.current) return;   // 더 새 요청이 이미 시작됨 — 결과 폐기
+      // 점검 대상 '확인' 처리(2026-07-29 사용자 요청): 배지를 눌러 확인한 시점의 (달, 건수)를 공유데이터에
+      // 기억해, 같은 달에 건수가 늘지 않는 한 다시 띄우지 않는다. 새 점검 대상이 생기면(건수 증가) 다시 뜬다.
+      // 조회 실패(null)는 그대로 둔다 — 실패를 '확인됨'으로 가리면 안 된다.
+      const nowForDismiss = new Date();
+      const anomalyMonthKey = `${nowForDismiss.getFullYear()}-${String(nowForDismiss.getMonth() + 1).padStart(2, "0")}`;
+      const ackMonth = String(taxiAnomalyAck?.month || "");
+      const ackCount = Number(taxiAnomalyAck?.count);
+      const taxiAnomaliesShown = taxiAnomalyCount === null
+        ? null
+        : (ackMonth === anomalyMonthKey && Number.isFinite(ackCount) && taxiAnomalyCount <= ackCount)
+          ? 0
+          : taxiAnomalyCount;
       setDashboardAlerts({
         editLogs: editNew.length,
         manualOvertimes: manualNew.length,
         newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length,
         taxiRequests: taxiRequestCount,
         laborContractsPending: laborContractsPendingCount,
-        taxiAnomalies: taxiAnomalyCount,
+        taxiAnomalies: taxiAnomaliesShown,
         latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]),
         latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"])
       });
@@ -405,7 +438,16 @@ export default function AdminPage() {
       return;
     }
     if (target === "taxiAnomalies") {
-      // 점검 처리는 이상 점검 화면에서 직접 확인 — 여기서는 이동만(카운트는 새로고침해야 갱신됨, taxiRequests와 동일 규약).
+      // 확인 처리(2026-07-29): 이 달·이 건수는 다시 알리지 않는다. 새 점검 대상이 생겨 건수가 늘면 다시 뜬다.
+      // 크로스디바이스 규약(P0)에 따라 공유데이터에 기록 — 어느 노트북에서 확인했든 같은 상태여야 한다.
+      const now = new Date();
+      const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const count = dashboardAlerts.taxiAnomalies;
+      if (typeof count === "number" && count > 0) {
+        void gasClient.saveSharedData("admin_taxi_anomaly_ack", { month: monthKey, count, at: new Date().toISOString() })
+          .catch((e) => console.error("점검대상 확인 기록 실패(다음 방문에 알림이 다시 뜰 수 있음):", e));
+      }
+      setDashboardAlerts((current) => ({ ...current, taxiAnomalies: current.taxiAnomalies === null ? null : 0 }));
       setAdminSection("kakaoTaxi");
       setKakaoTaxiTab("anomaly");
       return;
@@ -788,7 +830,14 @@ export default function AdminPage() {
         </nav>
 
         {/* 보안 로그아웃 — 메뉴 바로 아래(지점 하단처럼 어두운 버튼) */}
-        <div className="mt-6">
+        <div className="mt-6 space-y-2">
+          {/* 내 정보 — 개인 계정만(이름·연락처·비밀번호 자가 수정, 2026-07-29) */}
+          {user?.loginType === "personal" && (
+            <button onClick={() => setMyAccountOpen(true)} id="btn-admin-my-account"
+              className="w-full py-2 rounded-xl border border-[rgba(33,33,33,0.16)] text-[#212121] hover:bg-[rgba(33,33,33,0.05)] text-xs font-bold cursor-pointer">
+              내 정보
+            </button>
+          )}
           <button onClick={logout} className="admin-sidebar-logout w-full">
             보안 로그아웃
           </button>
@@ -815,15 +864,24 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-            id="mobile-btn-logout"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            로그아웃
-          </button>
+          <div className="flex items-center gap-2">
+            {user?.loginType === "personal" && (
+              <button onClick={() => setMyAccountOpen(true)} id="mobile-btn-my-account"
+                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer">
+                내정보
+              </button>
+            )}
+            <button
+              onClick={logout}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+              id="mobile-btn-logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              로그아웃
+            </button>
+          </div>
         </header>
+        <MyAccountModal isOpen={myAccountOpen} onClose={() => setMyAccountOpen(false)} />
 
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
           {!sectionAllowed && (
@@ -3696,6 +3754,7 @@ function AdminLaborContractsSection() {
                   <th className="p-4">등록일</th>
                   <th className="py-4 px-3">지점명</th>
                   <th className="py-4 px-3">구분</th>
+                  <th className="py-4 px-3">계약유형</th>
                   <th className="py-4 px-3">이름</th>
                   <th className="py-4 px-3">연락처</th>
                   <th className="py-4 px-3">입사·이동일</th>
@@ -3707,9 +3766,9 @@ function AdminLaborContractsSection() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={10} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+                  <tr><td colSpan={11} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
                 ) : filteredContracts.length === 0 ? (
-                  <tr><td colSpan={10} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr>
+                  <tr><td colSpan={11} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr>
                 ) : filteredContracts.map((contract, idx) => (
                   <tr key={contract.id || idx} className="border-b hover:bg-slate-50/50">
                     <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
@@ -3725,6 +3784,12 @@ function AdminLaborContractsSection() {
                       ) : (
                         <span className="text-gray-300">-</span>
                       )}
+                    </td>
+                    <td className="py-4 px-3 whitespace-nowrap">
+                      {/* 계약유형(2026-07-29) — 1주/2주 단위 계약서인지, 수습 후 정규 계약서인지. 옛 레코드는 "-" */}
+                      {contract.periodType && (LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]
+                        ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-black text-slate-600">{(LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]}</span>
+                        : <span className="text-gray-300">-</span>}
                     </td>
                     <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
                     <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{contract.phone}</td>

@@ -2,6 +2,7 @@
 // 관리자 > 법인택시 — 카카오T 이용내역의 정규화(지점 매핑)·집계 순수 함수 모음.
 // 화면(KakaoTaxiSection.tsx)은 조회·표시만 하고 계산은 전부 여기서 한다.
 import type { KakaoTaxiOrder } from "../../../api/gasClient";
+import { branchForOrderDate, type BranchHistoryMap } from "./kakaoTaxiBranchHistory";
 
 // 카카오 쪽 표기(그룹명·부서명) → ERP 표준 지점명 별칭표.
 // 카카오 그룹은 지점이 아니라 '동네' 단위(예: 한남점 그룹에 남산광어 직원이 속함)라서
@@ -69,8 +70,31 @@ export interface NormalizedTaxiOrder {
 
 function resolveBranchName(
   order: KakaoTaxiOrder,
-  erpBranchNames: Set<string>
+  erpBranchNames: Set<string>,
+  history?: BranchHistoryMap
 ): { branchName: string; unmapped: boolean } {
+  // [이력 우선] 지점 변경 이력이 있는 직원은 **이용일 기준**으로 판정한다(2026-07-29).
+  // 카카오는 조회 시점의 부서를 실어 보내 과거 내역이 현재 지점으로 소급되기 때문 —
+  // 변경일 이전 이용은 이전 지점, 이후 이용은 새 지점으로 남긴다. 이력 지점도 별칭 보정을 거친다.
+  if (history) {
+    const atDate = branchForOrderDate(
+      history,
+      String(order.account_key || "acct1"),
+      String(order.member_id || ""),
+      order.departure_time || order.call_time || ""
+    );
+    if (atDate) {
+      // 그 날짜엔 부서가 없었다 — 현재 부서로 폴백하면 부서 없던 시절 이용까지 지금 지점으로
+      // 잘못 귀속된다(Codex 지적 2026-07-29). 당시 화면과 같은 '미지정'으로 명시한다.
+      if ("unassigned" in atDate) return { branchName: "미지정", unmapped: true };
+      const trimmed = atDate.branch.trim();
+      if (erpBranchNames.has(trimmed)) return { branchName: trimmed, unmapped: false };
+      const alias = KAKAO_BRANCH_ALIASES[trimmed];
+      if (alias && erpBranchNames.has(alias)) return { branchName: alias, unmapped: false };
+      // 이력 지점이 ERP 목록에 없어도(지점 폐업 등) 버리지 않는다 — 숨기면 금액이 사라진 것처럼 보인다.
+      return { branchName: trimmed, unmapped: true };
+    }
+  }
   const candidates = [order.member_department, order.group_name]
     .map((v) => (v || "").trim())
     .filter(Boolean);
@@ -86,7 +110,12 @@ function resolveBranchName(
   return { branchName: candidates[0] || "미지정", unmapped: true };
 }
 
-export function normalizeKakaoTaxiOrders(orders: KakaoTaxiOrder[], erpBranchNames: string[]): NormalizedTaxiOrder[] {
+export function normalizeKakaoTaxiOrders(
+  orders: KakaoTaxiOrder[],
+  erpBranchNames: string[],
+  /** 지점 변경 이력(kakaoTaxiBranchHistory) — 있으면 이용일 기준으로 지점을 판정한다 */
+  history?: BranchHistoryMap
+): NormalizedTaxiOrder[] {
   const nameSet = new Set(erpBranchNames.map((n) => n.trim()).filter(Boolean));
   // 페이지 조회 도중 같은 건이 두 페이지에 걸쳐 중복 응답될 수 있다 — id 기준으로 걸러
   // 이중 집계를 막는다. 걸러서 건수가 줄면 카카오 보고 count 와 어긋나 화면 경고가 뜬다(의도).
@@ -103,7 +132,7 @@ export function normalizeKakaoTaxiOrders(orders: KakaoTaxiOrder[], erpBranchName
     return true;
   });
   return deduped.map((order) => {
-    const { branchName, unmapped } = resolveBranchName(order, nameSet);
+    const { branchName, unmapped } = resolveBranchName(order, nameSet, history);
     const timeText = order.departure_time || order.call_time || "";
     const hourMatch = /\b(\d{2}):\d{2}/.exec(timeText);
     const accountKey = String(order.account_key || "acct1");
