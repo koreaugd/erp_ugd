@@ -21,7 +21,8 @@ import {
   kakaoTaxiRequestsKey, REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "./helpers/kakaoTaxiRequests";
 import {
-  KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, createBranchHistoryEntry,
+  KAKAO_TAXI_BRANCH_HISTORY_KEY, appendBranchHistory, appendBranchHistoryOrWarn, appendBranchHistoryReversal,
+  buildBranchHistoryMap, createBranchHistoryEntry, isKakaoWriteDefinitelyNotExecuted as isDefinitelyNotExecuted,
   type KakaoTaxiBranchHistoryEntry,
 } from "./helpers/kakaoTaxiBranchHistory";
 import { getKakaoTaxiOrdersShared, invalidateKakaoTaxiOrdersShared } from "./helpers/kakaoTaxiOrdersCache";
@@ -444,69 +445,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   // ---------- 지점 변경 이력 (2026-07-29) ----------
   // 부서(지점) 변경·삭제 시 이력을 남겨, 이용내역 집계가 "이용일 기준 지점"을 쓸 수 있게 한다.
-  // 일시 오류를 넘기려고 한 번 더 시도한다(recordRequestResult 와 같은 규약). 실패 시 false.
-  const appendBranchHistory = async (entry: KakaoTaxiBranchHistoryEntry): Promise<boolean> => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        await gasClient.appendSharedArrayItem(
-          KAKAO_TAXI_BRANCH_HISTORY_KEY,
-          entry as unknown as Record<string, unknown>
-        );
-        return true;
-      } catch (e) {
-        console.error(`지점 변경 이력 기록 실패(${attempt + 1}/2):`, e);
-        if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
-      }
-    }
-    return false;
-  };
-
-  /**
-   * 부서 변경 이력 **선기록** + 실패 시 사용자 주도 재시도(2026-07-29, Codex 2R 반영).
-   * 이력은 카카오 반영보다 **먼저** 남긴다 — 카카오만 바뀌고 이력이 없으면 과거 내역이 통째로
-   * 소급되는데, 그 상태는 재시도 경로를 만들기 어렵다(부서가 이미 새 값이라 변경 전 지점을 모른다).
-   * 선기록이 실패하면 호출부는 변경 자체를 진행하지 않는다(fail-closed — 아무것도 안 바뀐 상태라
-   * 그냥 다시 저장하면 된다). 카카오가 확실히 실패하면 보정 이력(appendBranchHistoryReversal)로 되돌린다.
-   */
-  const appendBranchHistoryOrWarn = async (entry: KakaoTaxiBranchHistoryEntry): Promise<boolean> => {
-    let recorded = await appendBranchHistory(entry);
-    while (!recorded) {
-      const retry = window.confirm(
-        "지점 변경 이력 기록에 실패했습니다.\n" +
-        "기록 없이 부서를 바꾸면 과거 이용내역까지 새 지점으로 집계되므로, 기록 전에는 변경을 진행하지 않습니다.\n\n" +
-        "지금 다시 시도할까요?"
-      );
-      if (!retry) {
-        window.alert("이력이 기록되지 않아 지점 변경을 진행하지 않았습니다. 네트워크 확인 후 다시 시도해주세요.");
-        return false;
-      }
-      recorded = await appendBranchHistory(entry);
-    }
-    return true;
-  };
-
-  /**
-   * 선기록 보정 — 이력을 먼저 남겼는데 카카오 반영이 '확실히' 실패했을 때, 반대 방향 이력을 덧붙여
-   * 집계를 원상복구한다(append-only 저장소라 삭제 대신 상쇄). 같은 적용일의 나중 기록이 이기므로
-   * (buildBranchHistoryMap 정렬 규칙) 모든 날짜가 변경 전 지점으로 되돌아간다.
-   */
-  const appendBranchHistoryReversal = async (entry: KakaoTaxiBranchHistoryEntry): Promise<void> => {
-    const reverted = await appendBranchHistory(createBranchHistoryEntry({
-      accountKey: entry.accountKey,
-      memberId: entry.memberId,
-      memberName: entry.memberName,
-      fromBranch: entry.toBranch,
-      toBranch: entry.fromBranch,
-      effectiveDate: entry.effectiveDate,
-      note: "변경 실패 보정",
-    }));
-    if (!reverted) {
-      window.alert(
-        "부서 변경은 실행되지 않았는데, 미리 남긴 지점 변경 이력을 되돌리지 못했습니다.\n" +
-        "이 직원의 집계가 새 지점으로 잘못 보이면, 잠시 후 부서 변경을 다시 시도해 상태를 맞춰주세요."
-      );
-    }
-  };
+  // [공용] appendBranchHistory / appendBranchHistoryOrWarn / appendBranchHistoryReversal 과
+  // isDefinitelyNotExecuted 는 helpers/kakaoTaxiBranchHistory.ts 에 있다 — 지점 화면(BusinessTaxiTab)의
+  // 전입 처리도 **같은 함수**를 쓴다. 한쪽만 규약이 달라지면 그 경로로 바꾼 직원이 소급 집계된다.
 
   /**
    * 삭제 전 현재 지점 스냅샷 — 카카오에서 회원을 삭제하면 과거 이용내역의 부서가 null 이 되어
@@ -873,23 +814,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user?.branchName]
   );
-  /**
-   * 이 오류를 보고 "카카오가 실행되지 않았다"고 단정할 수 있는가?
-   *
-   * 타임아웃·네트워크 단절은 **요청이 서버에 닿아 실행됐을 수도** 있다. 이때 선점을 풀면
-   * 다른 관리자가 재승인해 중복 등록/삭제가 된다. 그런 오류는 'processing' 으로 남겨
-   * 사람이 직원 관리에서 실제 반영을 확인한 뒤 [처리 중 해제]로 정리하게 한다.
-   */
-  const isDefinitelyNotExecuted = (e: any): boolean => {
-    const msg = String(e?.message || e || "");
-    const name = String(e?.name || "");
-    if (name === "AbortError" || /aborted|timeout|시간이 초과|응답이 지연|network|Failed to fetch|NetworkError/i.test(msg)) return false;
-    // 값 검증 실패 등 백엔드가 카카오를 부르기 전에 거부한 경우는 실행되지 않은 것이 확실하다.
-    if (/필요합니다|올바르지 않|지정되지 않았습니다|관리자만|연동 정보가 없습니다/.test(msg)) return true;
-    // 카카오가 명시적 오류코드를 준 경우도 실행 실패로 본다.
-    if (/카카오T API 오류/.test(msg)) return true;
-    return false; // 알 수 없는 오류는 안전한 쪽(실행됐을 수 있음)으로 본다
-  };
+  // "이 오류를 보고 카카오가 실행되지 않았다고 단정할 수 있는가"(선점 해제·이력 보정의 전제)는
+  // helpers/kakaoTaxiBranchHistory.ts 의 isKakaoWriteDefinitelyNotExecuted 로 옮겼다 —
+  // 지점 화면의 전입 처리도 같은 판정을 써야 한쪽만 잘못 되돌리는 일이 없다.
 
   const requestBusy = !!requestBusyId;
   const anyWriteBusy = requestBusy || memberWriteBusy || regBusy || editBusy;
@@ -1864,37 +1791,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 </div>
                 <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
                   <table className="w-full text-xs whitespace-nowrap">
+                    {/* 처리(승인·반려)를 맨 왼쪽에 둔다(사용자 지시 2026-07-29) — 오른쪽 끝에 있으면
+                        가로 스크롤을 해야 눌러야 해서 번거롭다. 처리 끝난 건은 같은 칸에 '완료'로 표시된다. */}
                     <thead><tr className="text-left">
+                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">처리</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">신청일</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">지점</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">종류</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">대상</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">사유·메모</th>
                       <th className="px-4 py-2 text-[11px] font-black text-[#212121]">상태</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">처리</th>
                     </tr></thead>
                     <tbody>
                       {requestsData.items.map((r) => (
                         <tr key={r.id} className="border-t border-gray-100">
-                          <td className="px-4 py-2">{(r.requestedAt || "").slice(0, 16).replace("T", " ")}</td>
-                          <td className="px-4 py-2 font-bold text-[#212121]">{r.branchName}</td>
-                          <td className="px-4 py-2">{REQUEST_TYPE_LABEL[r.type]}</td>
-                          <td className="px-4 py-2 font-bold text-[#212121]">{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
-                          {/* 변경신청은 옮겨간 지점·이동일까지 함께 보여준다 — 승인 폼의 기본값이 어디서 왔는지 보이게 */}
-                          <td className="px-4 py-2 max-w-[18rem] truncate"
-                            title={r.type === "branchChange"
-                              ? `${r.targetBranch ? `옮겨간 지점: ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || ""}`
-                              : (r.reason || r.memo || "")}>
-                            {r.type === "branchChange"
-                              ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
-                              : (r.reason || r.memo || "-")}
-                          </td>
-                          <td className="px-4 py-2">
-                            {REQUEST_STATUS_LABEL[r.status]}
-                            {r.status === "rejected" && r.rejectReason ? ` — ${r.rejectReason}` : ""}
-                            {r.status === "approved" && r.resultNote ? ` — ${r.resultNote}` : ""}
-                          </td>
-                          <td className="px-4 py-2">
+                          <td className="px-4 py-2 align-top">
                             {r.status === "pending" ? (
                               <span className="inline-flex gap-1.5">
                                 <button
@@ -1933,8 +1844,33 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 )}
                               </span>
                             ) : (
-                              <span className="text-[11px] font-bold text-[#212121]/50">{(r.processedAt || "").slice(0, 16).replace("T", " ") || "처리됨"}</span>
+                              // 처리 끝난 건 — 같은 칸에 '완료' 알약으로 표시한다. 승인·반려 구분은 옆 '상태' 칸이 맡으므로
+                              // 여기서는 색으로 좋고 나쁨을 말하지 않는 중립 알약을 쓴다(반려가 긍정색으로 읽히지 않게).
+                              <span className="inline-flex flex-col gap-0.5">
+                                <span className="w-fit rounded-full border border-gray-200 bg-[var(--admin-ghost)] px-2 py-0.5 text-[11px] font-black text-[#212121]/70">완료</span>
+                                {r.processedAt && (
+                                  <span className="text-[10px] font-bold text-[#212121]/40">{r.processedAt.slice(0, 16).replace("T", " ")}</span>
+                                )}
+                              </span>
                             )}
+                          </td>
+                          <td className="px-4 py-2">{(r.requestedAt || "").slice(0, 16).replace("T", " ")}</td>
+                          <td className="px-4 py-2 font-bold text-[#212121]">{r.branchName}</td>
+                          <td className="px-4 py-2">{REQUEST_TYPE_LABEL[r.type]}</td>
+                          <td className="px-4 py-2 font-bold text-[#212121]">{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
+                          {/* 변경신청은 옮겨간 지점·이동일까지 함께 보여준다 — 승인 폼의 기본값이 어디서 왔는지 보이게 */}
+                          <td className="px-4 py-2 max-w-[18rem] truncate"
+                            title={r.type === "branchChange"
+                              ? `${r.targetBranch ? `옮겨간 지점: ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || ""}`
+                              : (r.reason || r.memo || "")}>
+                            {r.type === "branchChange"
+                              ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
+                              : (r.reason || r.memo || "-")}
+                          </td>
+                          <td className="px-4 py-2">
+                            {REQUEST_STATUS_LABEL[r.status]}
+                            {r.status === "rejected" && r.rejectReason ? ` — ${r.rejectReason}` : ""}
+                            {r.status === "approved" && r.resultNote ? ` — ${r.resultNote}` : ""}
                           </td>
                         </tr>
                       ))}

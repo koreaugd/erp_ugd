@@ -685,11 +685,17 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
       )}
 
       {/* 카드=검정 1px 테두리, 헤더 라벨=엘리스 배경+100% 검정 11px 볼드(DESIGN.md §4·§9-1 — text-gray-*는 흐려져 금지) */}
+      {/* 계정이 많아 표가 화면을 넘긴다 — 높이를 끊고 표 안에서 스크롤한다(사용자 지시 2026-07-29).
+          머리글은 sticky 로 붙여 두어 스크롤해도 어느 칸인지 보이게 한다. */}
       {loading ? <LoadingSpinner /> : profiles === null ? null : (
-        <div className="bg-white rounded-2xl border border-[#212121] overflow-x-auto">
+        <div id="account-management-table" className="bg-white rounded-2xl border border-[#212121] overflow-x-auto max-h-[34rem] overflow-y-auto">
           <table className="w-full min-w-[1080px] text-xs">
+            {/* sticky·배경은 index.css 에서 th 에 직접 준다 — thead/tr 배경은 본문이 지나갈 때 헤더를 덮지 못한다
+                (마감 이력 점검 표에서 검증된 패턴). */}
             <thead className="bg-[var(--admin-alice)]">
               <tr className="text-[11px] font-black text-[#212121]">
+                {/* 승인은 맨 왼쪽 — 신청관리 탭과 같은 자리(사용자 지시 2026-07-29) */}
+                <th className="px-3 py-2 text-left">승인</th>
                 <th className="px-3 py-2 text-left">이름</th>
                 <th className="px-3 py-2 text-left">이메일</th>
                 <th className="px-3 py-2 text-left">역할</th>
@@ -704,7 +710,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
             </thead>
             <tbody className="divide-y divide-gray-100">
               {visibleProfiles.length === 0 ? (
-                <tr><td colSpan={9} className="px-5 py-16 text-center text-gray-400">
+                <tr><td colSpan={10} className="px-5 py-16 text-center text-gray-400">
                   {profiles.length === 0 ? "등록된 개인 계정이 없습니다." : "이 지점에 해당하는 계정이 없습니다."}
                 </td></tr>
               ) : visibleProfiles.map((p) => {
@@ -721,20 +727,24 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
                       onClick={() => startEdit(p)}
                       className={`hover:bg-gray-50/60 cursor-pointer ${isEditingRow ? "bg-[var(--admin-alice)]/40" : ""} ${rowBusy ? "opacity-50" : ""}`}
                     >
+                      {/* 승인 — 맨 왼쪽 칸. 미확인 계정만 버튼이 뜨고, 확인된 계정은 '완료'로 표시한다.
+                          행 클릭(상세 열기)과 겹치지 않게 stopPropagation. */}
+                      <td className="px-3 py-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {!p.reviewedByAdmin ? (
+                          <button type="button" disabled={rowBusy || confirmingUid === p.uid}
+                            onClick={() => void markReviewed(p.uid)}
+                            title="이 계정을 확인 처리합니다. 권한을 조정하려면 행을 눌러 상세를 여세요."
+                            className="rounded-full border border-[#212121] bg-[var(--admin-honey)] px-2.5 py-0.5 text-[11px] font-black cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            {confirmingUid === p.uid ? "처리 중..." : "승인"}
+                          </button>
+                        ) : (
+                          <span className="rounded-full border border-gray-200 bg-[var(--admin-ghost)] px-2.5 py-0.5 text-[11px] font-black text-[#212121]/70">완료</span>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 font-bold whitespace-nowrap">
                         {String(p.name || "")}
                         {!p.reviewedByAdmin && (
-                          <>
-                            <span className="ml-1.5 inline-block rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[9px] font-black">신규</span>
-                            {/* 행에서 바로 승인 — 상세 패널까지 내려가지 않아도 된다(사용자 요청 2026-07-29).
-                                행 클릭(상세 열기)과 겹치지 않게 stopPropagation. */}
-                            <button type="button" disabled={rowBusy || confirmingUid === p.uid}
-                              onClick={(e) => { e.stopPropagation(); void markReviewed(p.uid); }}
-                              title="이 계정을 확인 처리합니다. 권한을 조정하려면 행을 눌러 상세를 여세요."
-                              className="ml-1.5 rounded-full border border-[#212121] bg-[var(--admin-honey)] px-2 py-0.5 text-[10px] font-black cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-                              {confirmingUid === p.uid ? "처리 중..." : "승인"}
-                            </button>
-                          </>
+                          <span className="ml-1.5 inline-block rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[9px] font-black">신규</span>
                         )}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{String(p.email || "")}</td>
@@ -809,7 +819,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
                     </tr>
                     {rowError?.uid === p.uid && (
                       <tr>
-                        <td colSpan={9} className="px-4 pb-3 text-[10px] font-black text-[#B91C1C]">{rowError.message}</td>
+                        <td colSpan={10} className="px-4 pb-3 text-[10px] font-black text-[#B91C1C]">{rowError.message}</td>
                       </tr>
                     )}
                   </Fragment>

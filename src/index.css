@@ -4094,6 +4094,16 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   background: var(--admin-alice) !important;
 }
 
+/* 관리자 · 인사 › 계정 관리 — 계정이 많아 표를 카드 안에서 스크롤한다(2026-07-29).
+   헤더 고정 방식은 위 마감 이력 점검과 같다: 배경은 thead tr이 아니라 th에 직접 줘야
+   스크롤한 본문이 헤더 위로 비쳐 보이지 않는다. */
+#account-management-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--admin-alice) !important;
+}
+
 /* ② 최근 3일 안에 올라온 행 = 바닐라 강조.
       tbody nth-child 줄무늬가 !important라 인라인 클래스로는 못 이긴다 →
       ID를 낀 선택자로 특이성을 높여 이긴다(DESIGN.md §8). */

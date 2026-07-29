@@ -5,13 +5,20 @@
 // 승인해야 실제 카카오 등록/삭제가 실행된다(설계서 blueprint-지점-비즈니스택시-신청.md).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { gasClient } from "../../../api/gasClient";
-import type { KakaoTaxiMember } from "../../../api/gasClient";
+import type { KakaoTaxiMember, KakaoTaxiPhoneCheck } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import {
-  createBranchChangeRequest, createMemberRequest, createRegisterRequest, kakaoTaxiRequestsKey,
+  createBranchChangeRequest, createMemberRequest, createRegisterRequest, kakaoTaxiRequestsKey, makeRequestId,
   REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "../../admin/helpers/kakaoTaxiRequests";
+// 전입(다른 지점 직원을 우리 지점으로 데려오기)은 관리자 화면과 **같은 공용 헬퍼**를 쓴다 —
+// 이력 선기록·실패 보정 규약이 한쪽만 달라지면 그 경로로 옮긴 직원의 과거 내역이 소급 집계된다.
+import {
+  KAKAO_TAXI_BRANCH_HISTORY_KEY, appendBranchHistoryOrWarn, appendBranchHistoryReversal,
+  createBranchHistoryEntry, isKakaoWriteDefinitelyNotExecuted,
+} from "../../admin/helpers/kakaoTaxiBranchHistory";
+import { KAKAO_BRANCH_ALIASES } from "../../admin/helpers/kakaoTaxi";
 
 // 오류/반려 표시는 DESIGN.md §11 오류색 hex 를 직접 쓴다(rose 계열은 스코프 치환으로 뒤집힐 수 있음).
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
@@ -42,6 +49,9 @@ const todayDateText = () => {
 // 인원 행에서 올릴 수 있는 요청 종류(2026-07-29): 삭제요청 폐지 — 삭제 승인이 직원 계정 자체를 지워
 // 과거 이용내역 지점까지 잃는 사고가 있었다. 지점 이동은 '변경신청'으로 소속만 옮긴다.
 type MemberRequestType = "update" | "branchChange";
+
+// 사전 확인에서 "이미 등록된 사람을 찾았다"로 좁힌 결과 — 전입 처리에 필요한 필드가 모두 있다.
+type FoundPhoneCheck = Extract<KakaoTaxiPhoneCheck, { found: true }>;
 
 export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   const { user } = useAuthContext();
@@ -138,17 +148,166 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     }
   };
 
+  /**
+   * 전입 — 같은 번호가 다른 지점에 이미 등록돼 있을 때, 직원을 지우지 않고 **소속만** 우리 지점으로 옮긴다.
+   *
+   * 순서가 곧 안전장치다: ①이력 선기록 → ②카카오 반영 → ③신청 현황 기록.
+   * 이력을 먼저 남기지 않으면 과거 이용내역까지 우리 지점으로 소급 집계된다(이 기능의 핵심 위험).
+   * 이력 기록에 실패하면 카카오를 아예 부르지 않고 멈춘다(아무것도 안 바뀐 상태라 재시도가 깨끗하다).
+   */
+  const transferFoundMember = async (check: FoundPhoneCheck) => {
+    const today = todayDateText();
+    // fromBranch = 카카오 **부서 원문**(departmentRaw). 이력·대조 모두 이 값을 쓴다 —
+    // 관리자 승인 경로(member.department)와 같은 의미여야 두 경로가 같은 뜻의 이력을 남긴다.
+    // 부서가 비어 있으면 빈 문자열 그대로 남겨 '그때는 소속이 없었다'로 읽히게 한다(Codex 지적 2026-07-30):
+    // 그룹명으로 보완한 값을 넣으면 그 직원의 과거 이용이 실제와 다른 지점으로 굳는다.
+    // 화면 문구에는 보완된 표기(check.department)를 써서 "어디 소속인지"를 사람이 알아볼 수 있게 한다.
+    const fromBranch = check.departmentRaw || "";
+    const fromLabel = (fromBranch && (KAKAO_BRANCH_ALIASES[fromBranch] || fromBranch))
+      || check.department
+      || "소속 미지정";
+    if (!window.confirm(
+      `${check.name || "이 직원"} 님(${check.phone})은 현재 '${fromLabel}' 소속입니다.\n\n` +
+      `우리 지점(${branchName})으로 데려올까요?\n\n` +
+      `· 오늘(${today})부터의 이용이 우리 지점으로 집계됩니다.\n` +
+      `· 이전 이용은 '${fromLabel}'에 그대로 남습니다.\n` +
+      `· 직원 계정은 삭제되지 않고 소속만 바뀌며, 인증 알림톡은 다시 보내지 않습니다.`
+    )) return;
+
+    // ① 이력 선기록 — fromBranch 는 카카오 부서 '원문'을 그대로 남긴다(관리자 승인 경로와 같은 규약).
+    let entry;
+    try {
+      entry = createBranchHistoryEntry({
+        accountKey: check.accountKey,
+        memberId: check.memberId,
+        memberName: check.name || "",
+        fromBranch,
+        toBranch: branchName,
+        effectiveDate: today,
+        note: "지점 전입",
+      });
+    } catch (e: any) {
+      window.alert(String(e?.message || e));
+      return;
+    }
+    if (!(await appendBranchHistoryOrWarn(entry))) return; // 안내는 헬퍼가 이미 했다
+
+    // ② 카카오 반영 — 지점은 카카오를 직접 부르지 않는다(백엔드 액션이 지점 PIN 게이트를 통과한 뒤 대신 호출).
+    let result;
+    try {
+      // 이력에 남긴 이전 지점(=부서 원문)을 함께 보낸다 — 백엔드가 실제 소속과 대조해 다르면 옮기지 않는다.
+      // 확인창 사이에 다른 지점이 먼저 데려간 경우, 그대로 진행하면 이력의 이전 지점이 틀린 값으로 굳어
+      // 전입일 이전 이용내역이 엉뚱한 지점으로 집계된다(Codex 지적 2026-07-30).
+      result = await gasClient.transferKakaoTaxiMember(branchName, pinHash, check.memberId, fromBranch);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (isKakaoWriteDefinitelyNotExecuted(e)) {
+        // 실행되지 않은 것이 확실 → 선기록한 이력을 반대 방향으로 상쇄해 집계를 원상복구한다.
+        await appendBranchHistoryReversal(entry);
+        window.alert(`전입 실패 — ${msg}\n\n바뀐 것은 없습니다. 사유를 확인한 뒤 다시 시도해주세요.`);
+      } else {
+        // 반영 여부 불명(응답 지연·통신 끊김) → 이력은 의도한 값과 같으므로 그대로 둔다.
+        window.alert(
+          `전입 반영 여부를 확인하지 못했습니다 — ${msg}\n\n` +
+          `이미 처리됐을 수 있습니다. '새로고침'으로 아래 '등록된 인원'에 ${check.name || "이 직원"} 님이 보이는지 확인하고, ` +
+          `안 보이면 다시 시도해주세요.`
+        );
+      }
+      return;
+    }
+
+    // 백엔드가 같은 값으로 대조한 뒤에만 옮기므로 여기서 어긋날 일은 없다 — 그래도 값이 다르면
+    // 대조가 무력화된 것이니(옛 GAS 등) 흔적을 남긴다. 전입은 이미 성공이라 되돌리지 않는다.
+    if ((result.fromBranch || "") !== fromBranch) {
+      console.warn("전입 대조 불일치(옛 백엔드일 수 있음):", { 기록: fromBranch, 실제: result.fromBranch });
+    }
+
+    // ③ 신청 현황 기록 — 받는 지점과 보내는 지점 **양쪽**에 남겨 두 지점이 각자 추적할 수 있게 한다.
+    const now = new Date().toISOString();
+    const resultNote = `전입 완료: ${fromLabel} → ${branchName}`;
+    const makeRecord = (owner: string): KakaoTaxiRequest => ({
+      id: makeRequestId(),
+      type: "branchChange",
+      branchName: owner,
+      status: "approved",
+      requestedAt: now,
+      processedAt: now,
+      name: result.name || check.name || "(이름 없음)",
+      memberId: check.memberId,
+      targetBranch: branchName,
+      effectiveDate: today,
+      reason: "지점 전입(이용신청 중 발견)",
+      resultNote,
+    });
+    try {
+      const { list } = await gasClient.appendSharedArrayItem(
+        requestsKey, makeRecord(branchName) as unknown as Record<string, unknown>
+      );
+      setRequests(sortRequests((list || []) as KakaoTaxiRequest[]));
+    } catch (e) {
+      console.error("전입 이력 기록 실패(전입 자체는 완료됨):", e);
+      window.alert("전입은 완료됐지만 '신청 현황' 기록에는 실패했습니다.\n등록된 인원 목록에는 정상 반영되니, 기록이 필요하면 관리자에게 알려주세요.");
+    }
+    // 보내는 지점 기록 실패는 사용자에게 알리지 않는다 — 우리 지점 작업은 이미 끝났고, 남의 지점
+    // 목록에 한 줄 남기는 부가 작업이라 여기서 경고를 띄우면 성공을 실패처럼 보이게 한다.
+    const fromKey = fromBranch ? (KAKAO_BRANCH_ALIASES[fromBranch] || fromBranch) : "";
+    if (fromKey && fromKey !== branchName) {
+      try {
+        await gasClient.appendSharedArrayItem(
+          kakaoTaxiRequestsKey(fromKey), makeRecord(fromKey) as unknown as Record<string, unknown>
+        );
+      } catch (e) {
+        console.warn("보내는 지점 신청 현황 기록 실패(전입 자체는 완료됨):", e);
+      }
+    }
+
+    setRegName(""); setRegPhone(""); setRegMemo("");
+    await load(true);
+    window.alert(
+      `${result.name || check.name || "직원"} 님을 우리 지점으로 데려왔습니다.\n오늘(${today})부터의 이용이 ${branchName}으로 집계됩니다.`
+    );
+  };
+
   const submitRegister = async () => {
     if (saving) return;
     const name = regName.trim();
     const phone = regPhone.replace(/[^0-9]/g, "");
     if (!name) { window.alert("이름을 입력해주세요."); return; }
     if (!/^01[0-9]{8,9}$/.test(phone)) { window.alert("휴대전화번호를 확인해주세요. (예: 01012345678)"); return; }
-    // 자동 등록 — 관리자 승인 없이 지점 PIN 으로 바로 카카오 등록 + 인증 알림톡.
-    // 백엔드가 지점명→그룹 자동 매핑·전화 중복 차단을 처리한다(지점은 그룹을 고르지 않는다).
-    if (!window.confirm(`${name} 님을 카카오T 비즈니스에 바로 등록할까요?\n\n휴대전화: ${phone}\n\n등록되면 직원 휴대폰으로 인증 알림톡이 즉시 발송됩니다.\n(관리자 승인 없이 바로 처리됩니다)`)) return;
     setSaving(true);
     try {
+      // [사전 확인] 등록 확인창을 띄우기 전에 "이 번호가 이미 카카오T에 있는가"를 먼저 묻는다.
+      // 다른 지점에 있으면 거부하지 않고 '전입(소속만 이동)'을 제안한다.
+      //
+      // [배포 순서 안전장치] 이 확인은 '개선'이지 '유일한 방어선'이 아니다 — 등록 경로
+      // (submitBranchKakaoRegister)가 백엔드에서 같은 번호 중복을 이미 막는다. 그래서 확인이 실패하면
+      // 등록 자체를 막지 않고 **기존 방식으로 진행**한다. 이렇게 두지 않으면 백엔드(GAS)가 아직
+      // 새 액션을 모르는 동안 전 지점의 이용신청이 통째로 멈춘다(앱만 먼저 배포되는 상황).
+      // 최악의 경우도 이 기능을 만들기 전과 같은 동작이다.
+      let check: KakaoTaxiPhoneCheck | null = null;
+      try {
+        check = await gasClient.checkKakaoTaxiPhone(branchName, pinHash, phone);
+      } catch (e: any) {
+        console.warn("등록 전 확인 실패 — 기존 등록 방식으로 진행합니다(중복은 백엔드가 막습니다):", e);
+      }
+      if (check?.found) {
+        if (check.sameBranch) {
+          window.alert(`${check.name || "이 직원"} 님은 이미 우리 지점에 등록돼 있습니다.\n(아래 '등록된 인원'에 안 보이면 목록이 묵은 것이니 '새로고침'을 눌러주세요)`);
+          return;
+        }
+        if (!check.sameAccount) {
+          window.alert(
+            `${check.name || "이 직원"} 님(${check.phone})은 다른 카카오T 계정${check.accountLabel ? `(${check.accountLabel})` : ""}의 ` +
+            `'${check.department || "다른 지점"}'에 등록돼 있습니다.\n\n계정이 달라 지점에서는 옮길 수 없습니다. 관리자에게 문의해주세요.`
+          );
+          return;
+        }
+        await transferFoundMember(check);
+        return;
+      }
+      // 자동 등록 — 관리자 승인 없이 지점 PIN 으로 바로 카카오 등록 + 인증 알림톡.
+      // 백엔드가 지점명→그룹 자동 매핑·전화 중복 차단을 처리한다(지점은 그룹을 고르지 않는다).
+      if (!window.confirm(`${name} 님을 카카오T 비즈니스에 바로 등록할까요?\n\n휴대전화: ${phone}\n\n등록되면 직원 휴대폰으로 인증 알림톡이 즉시 발송됩니다.\n(관리자 승인 없이 바로 처리됩니다)`)) return;
       const res = await gasClient.submitBranchKakaoRegister(branchName, pinHash, name, phone, regMemo.trim());
       setRegName(""); setRegPhone(""); setRegMemo("");
       // 등록 결과를 '신청 현황'에 이력으로 남긴다 — 알림톡 실패도 지점이 나중에 계속 확인·추적할 수 있게 한다.
@@ -171,7 +330,8 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
       }
       await load(true);
     } catch (e: any) {
-      window.alert(`등록에 실패했습니다. 입력하신 내용은 그대로 남아 있습니다.\n${String(e?.message || e)}`);
+      // 사유를 첫 줄에 둔다 — "등록에 실패했습니다" 뒤에 붙이면 정작 읽어야 할 사유가 묻힌다.
+      window.alert(`등록 실패 — ${String(e?.message || e)}\n\n입력하신 내용은 그대로 남아 있으니, 위 사유를 확인한 뒤 다시 시도해주세요.`);
     } finally {
       setSaving(false);
     }
@@ -223,6 +383,8 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
         <p className="text-[11px] font-bold text-[#212121]/60">
           직원을 등록하면 <b>바로 카카오T 비즈니스에 등록</b>되고 직원 휴대폰으로 <b>인증 알림톡</b>이 발송됩니다(관리자 승인 없이 즉시 처리).
           직원이 카카오T 앱에서 인증을 마치면 아래 '등록된 인원'에 표시됩니다. 그룹(지점)은 지점명으로 자동 지정됩니다.
+          같은 번호가 <b>다른 지점에 이미 등록</b>돼 있으면, 확인 후 <b>우리 지점으로 데려오기(전입)</b>를 물어봅니다 —
+          직원 계정은 삭제되지 않고 소속만 바뀌며, 전입일부터의 이용만 우리 지점으로 집계됩니다.
         </p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <input value={regName} onChange={(e) => setRegName(e.target.value)} placeholder="이름 (필수)" disabled={saving}
