@@ -7,7 +7,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import LoadingSpinner from "../../components/LoadingSpinner";
-import { listUserProfiles, updateUserProfile, type UserProfile } from "../../api/userProfile";
+import { listUserProfiles, updateUserProfile, withEncodedBranchLists, type UserProfile } from "../../api/userProfile";
 import { getFirebaseLoginBranches, type LoginBranch } from "../../api/firebaseAuth";
 import { type PermKey } from "../branch/tabRegistry";
 import { ADMIN_TAB_KEYS, ADMIN_TAB_LABELS, ADMIN_SENSITIVE_TAB_KEYS, type AdminPermKey } from "./adminTabRegistry";
@@ -267,7 +267,10 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
       const patch = buildDirtyPatch(edit, editBaseline);
       if (Object.keys(patch).length === 0) { cancelEdit(); return; }   // 바뀐 것이 없다
       await updateUserProfile(editingUid, patch);
-      setProfiles((prev) => prev && prev.map((p) => (p.uid === editingUid ? { ...p, ...patch } : p)));
+      // 화면 목록에도 **인코딩본까지** 반영한다 — 저장은 updateUserProfile 안에서 인코딩본을 함께 쓰는데,
+      // 여기서 그걸 빼고 병합하면 방금 지점관리자로 올린 계정이 "권한 인덱스 없음"으로 잘못 잡혀
+      // 빨간 복구 배너가 헛되이 뜬다(서버 문서는 멀쩡한데 화면만 오판 — 사용자 지적 2026-07-30).
+      setProfiles((prev) => prev && prev.map((p) => (p.uid === editingUid ? { ...p, ...withEncodedBranchLists(patch) } : p)));
       cancelEdit();
     } catch (e) {
       console.error("계정 수정 실패:", e);
@@ -312,7 +315,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
         ? { ...buildDirtyPatch(edit, editBaseline), reviewedByAdmin: true }
         : { reviewedByAdmin: true };
       await updateUserProfile(uid, patch);
-      setProfiles((prev) => prev && prev.map((p) => (p.uid === uid ? { ...p, ...patch } : p)));
+      setProfiles((prev) => prev && prev.map((p) => (p.uid === uid ? { ...p, ...withEncodedBranchLists(patch) } : p)));
       if (uid === editingUid) cancelEdit();
     } catch (e) {
       console.error("확인 처리 실패:", e);
@@ -437,7 +440,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
     setRowError(null);
     try {
       await updateUserProfile(profile.uid, fullPatch);
-      setProfiles((prev) => prev && prev.map((p) => (p.uid === profile.uid ? { ...p, ...fullPatch } : p)));
+      setProfiles((prev) => prev && prev.map((p) => (p.uid === profile.uid ? { ...p, ...withEncodedBranchLists(fullPatch) } : p)));
     } catch (e) {
       console.error("계정 즉시 수정 실패:", e);
       setRowError({ uid: profile.uid, message: "저장하지 못했습니다. 본인 계정이거나 권한·네트워크 문제일 수 있습니다." });
