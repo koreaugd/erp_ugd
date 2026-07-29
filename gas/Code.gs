@@ -1474,16 +1474,20 @@ function kakaoTaxiMonthRange(month) {
 }
 
 // [성능][동기화] server.ts, src/api/gasClient.ts(KakaoTaxiOrder 타입)와 세 곳을 같게 유지할 것.
-// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
+// 카카오 원본 응답은 이 19개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
 // platform_fee·group_id·car_model·total_distance 등을 더 보낸다. 원본 그대로면 330건에 307KB —
 // ScriptCache 는 항목당 100KB 상한이라 cache.put 이 조용히 실패해(예외를 삼킴) 캐시가 죽고
 // 화면 로드마다 카카오를 재조회했다(5~12초, 2026-07-28 실측). 화면이 실제로 쓰는 필드만 남긴다.
 // account_key 는 목록에 있지만 여기서 채우지 않는다 — kakaoTaxiCollect 가 나중에 주입한다.
+// [2026-07-29] use_code(이용사유, 자유 입력) 추가 — 18개 → 19개. 대부분 빈 문자열이라 캐시 증가는 미미하다.
+// [배포 주의] 이 파일은 clasp 재배포까지 해야 반영된다. 재배포 전에는 화면의 '이용사유' 칸이 전부 비어 보인다
+// (옛 캐시에도 이 필드가 없다 — 화면은 `use_code || ""` 로 읽어 undefined 를 노출하지 않는다).
 var KAKAO_TAXI_ORDER_KEEP_FIELDS = [
   "id", "service_fare", "toll", "call_time", "departure_time",
   "departure_point", "arrival_point", "member_id", "member_name",
   "member_identifier", "member_department", "group_name", "car_number",
   "taxi_company_name", "taxi_kind", "vertical_code", "vertical_product_name",
+  "use_code",
   "account_key"
 ];
 
@@ -1517,7 +1521,9 @@ function kakaoTaxiOrdersCacheKey(accountKey, month) {
   // v4: 캐시 값을 gzip 압축 후 base64 문자열로 저장한다. 항목을 18개 필드로 슬림화해도
   // 원본 기준 acct1 225KB·acct2 106KB 로 여전히 100KB 상한을 넘는 계정이 있어 압축을 더했다.
   // 옛 v3 는 압축 안 된 평문 JSON 이라 그대로 두면 ungzip 이 던진다 — 버전을 올려 아예 안 읽게 한다.
-  return "kakao_taxi_orders_v4_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
+  // v5: 슬림 필드에 use_code(이용사유)를 추가했다(2026-07-29). 과거월 캐시는 TTL 이 최대 6시간이라
+  // 버전을 안 올리면 배포 뒤에도 use_code 없는 v4 캐시본이 그대로 내려간다 — 새 코드는 새 키만 읽는다.
+  return "kakao_taxi_orders_v5_" + kakaoTaxiOrdersCacheVersion() + "_" + accountKey + "_" + month;
 }
 
 // 캐시 저장 인코딩 — gzip 압축 후 base64 문자열. put 실패(100KB 초과)는 호출부가 삼킨다.

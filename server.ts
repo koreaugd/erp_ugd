@@ -455,17 +455,19 @@ async function kakaoTaxiFetchAllPages(accountKey: string, apiPath: string, baseQ
 }
 
 // [성능][동기화] gas/Code.gs, src/api/gasClient.ts(KakaoTaxiOrder 타입)와 세 곳을 같게 유지할 것.
-// 카카오 원본 응답은 이 18개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
+// 카카오 원본 응답은 이 19개 외에도 payment_items(전체 페이로드의 약 19%)·arrival_time·waypoints·
 // platform_fee·group_id·car_model·total_distance 등을 더 보낸다. 원본 그대로면 330건에 307KB —
 // GAS ScriptCache 는 항목당 100KB 상한이라 cache.put 이 조용히 실패해 캐시가 죽고 화면 로드마다
 // 카카오를 재조회했다(5~12초, 2026-07-28 실측). 로컬(server.ts)은 캐시가 없지만 GAS 와 같은
 // 응답 형태를 유지하려 여기서도 똑같이 슬림화한다. account_key 는 목록에 있지만 여기서 채우지
 // 않는다 — kakaoTaxiCollect 가 나중에 주입한다.
+// [2026-07-29] use_code(이용사유, 자유 입력) 추가 — 18개 → 19개. 대부분 빈 문자열이라 캐시 증가는 미미하다.
 const KAKAO_TAXI_ORDER_KEEP_FIELDS = [
   "id", "service_fare", "toll", "call_time", "departure_time",
   "departure_point", "arrival_point", "member_id", "member_name",
   "member_identifier", "member_department", "group_name", "car_number",
   "taxi_company_name", "taxi_kind", "vertical_code", "vertical_product_name",
+  "use_code",
   "account_key",
 ] as const;
 

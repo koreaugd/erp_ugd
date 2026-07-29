@@ -11,11 +11,12 @@ import { formatNumber } from "../../utils/formatNumber";
 import { addMonthsToMonthInputValue } from "../branch/helpers/formatters";
 import {
   accountLabel, aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES,
-  kakaoTaxiAccountForBranch, memberAmountMap, normalizeKakaoTaxiOrders, verifyBranchTotals, verticalLabel,
+  kakaoTaxiAccountForBranch, memberAmountMap, normalizeKakaoTaxiOrders, shortTimeText, verifyBranchTotals, verticalLabel,
   type NormalizedTaxiOrder,
 } from "./helpers/kakaoTaxi";
 import {
-  DEFAULT_TAXI_THRESHOLDS, TAXI_ANOMALY_LABEL, detectMemberSurges, flagTaxiOrders,
+  DEFAULT_TAXI_THRESHOLDS, detectMemberSurges, excludeLogisticsOrders, flagTaxiOrders,
+  type FlaggedTaxiOrder, type TaxiAnomalyReason,
 } from "./helpers/kakaoTaxiAnomaly";
 import {
   kakaoTaxiRequestsKey, REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
@@ -110,6 +111,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const [branchFilter, setBranchFilter] = useState("all");
   const [memberFilter, setMemberFilter] = useState("all"); // 상세내역 직원 필터 (memberKey — 동명이인 구분)
   const [accountFilter, setAccountFilter] = useState("all"); // 계정 필터 — "all" | "acct1" | "acct2"
+  // 상세내역 구분 필터 — "all" | "logistics". 퀵·택배 표를 클릭하면 상세 내역을 그 건만 좁혀 본다(2026-07-29).
+  const [verticalFilter, setVerticalFilter] = useState("all");
   const [highFare, setHighFare] = useState(DEFAULT_TAXI_THRESHOLDS.highFare);
 
   // ---------- 지점 신청 관리 ----------
@@ -176,6 +179,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       });
       setBranchFilter("all");
       setMemberFilter("all");
+      setVerticalFilter("all"); // 새 자료를 받으면 구분 필터도 함께 풀어 '0건' 화면으로 열리지 않게 한다
       void prevPromise.then((prev) => {
         if (ordersGenRef.current !== gen) return; // 그 사이 새 조회가 시작됐으면 그쪽이 채운다
         setOrdersData((cur) =>
@@ -327,7 +331,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     () => {
       const filtered = rows.filter((r) =>
         (branchFilter === "all" || r.branchName === branchFilter) &&
-        (memberFilter === "all" || r.memberKey === memberFilter)
+        (memberFilter === "all" || r.memberKey === memberFilter) &&
+        // 구분(vertical_code) 필터 — 퀵·택배 표에서 넘어온 경우에만 걸린다. 옛 캐시엔 필드가 없어 `|| ""` 필수.
+        (verticalFilter === "all" || String(r.order.vertical_code || "") === verticalFilter)
       );
       // 최신 이용이 위로 오도록 이용일시(timeText = 출발시각||호출시각) 내림차순 정렬.
       // rows 원본을 변형하지 않게 복사 후 정렬하고, 날짜 파싱 불가 시 문자열 역순으로 폴백한다.
@@ -338,10 +344,23 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         return String(b.timeText).localeCompare(String(a.timeText));
       });
     },
-    [rows, branchFilter, memberFilter]
+    [rows, branchFilter, memberFilter, verticalFilter]
   );
   const thresholds = useMemo(() => ({ ...DEFAULT_TAXI_THRESHOLDS, highFare }), [highFare]);
   const flagged = useMemo(() => flagTaxiOrders(rows, thresholds), [rows, thresholds]);
+  // [사유별 분리] 단일 '점검 대상 건' 표를 대표 사유 3개(고액·낮 시간대·지점 미매핑) 카드로 나눈다
+  // (사용자 지시 2026-07-29) — 고액·낮 시간대는 '지출 행태 점검'이고 지점 미매핑은 '데이터 정비'라
+  // 봐야 할 목적이 다르다. 한 표에 섞여 있으면 매번 눈으로 걸러내야 했다.
+  // flagged 는 이미 대표 사유(reasons[0])로 묶이고 묶음 안에서 최신순이라 여기서는 나누기만 한다
+  // — 정렬·대표 사유 판정은 kakaoTaxiAnomaly.ts 한 곳에만 둔다.
+  const flaggedByReason = useMemo(() => {
+    const groups: Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> = { highFare: [], daytime: [], unmapped: [] };
+    for (const f of flagged) {
+      const primary = f.reasons[0];
+      if (primary && groups[primary]) groups[primary].push(f);
+    }
+    return groups;
+  }, [flagged]);
   // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 하이라이트 — 새로 생긴 점검 대상이 눈에 띄게(2026-07-29).
   // 로컬(KST) 기준 날짜 비교 — timeText 는 "YYYY-MM-DD HH:mm:ss" 형태라 앞 10자리 문자열 비교로 충분.
   const recentSinceDate = useMemo(() => {
@@ -350,10 +369,84 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }, [ordersData?.month]);   // 조회를 다시 하면 기준일도 갱신
   const isRecentOrder = (timeText: string) => String(timeText || "").slice(0, 10) >= recentSinceDate;
+  // 사유별 카드 3개가 컬럼·스타일을 어긋남 없이 공유하도록 표 한 벌만 두고 사유마다 호출한다.
+  // '겹친 사유' 칸은 삭제했다(사용자 지시 2026-07-29) — 카드 제목이 이미 대표 사유라 뱃지 칸이
+  // 자리만 차지했다. 겹친 사유가 궁금하면 해당 사유의 카드에서 같은 건이 다시 보인다.
+  const renderAnomalyCard = (
+    title: string,
+    list: FlaggedTaxiOrder[],
+    emptyText: string,
+    note?: string,
+  ) => (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h2 className="admin-pill-title">{title} — {formatNumber(list.length)}건</h2>
+        {note && <p className="mt-1 text-[11px] font-bold text-[#212121]/60">{note}</p>}
+      </div>
+      <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
+        <table className="w-full text-xs whitespace-nowrap">
+          {/* 일시·직원·지점은 px-2 로 좁혀 이용사유 자리를 냈다 */}
+          <thead><tr className="text-left">
+            <th className="px-2 py-2 text-[11px] font-black text-[#212121]">이용일시</th>
+            <th className="px-2 py-2 text-[11px] font-black text-[#212121]">직원</th>
+            <th className="px-2 py-2 text-[11px] font-black text-[#212121]">지점</th>
+            <th className="px-4 py-2 text-[11px] font-black text-[#212121]">출발지 → 도착지</th>
+            <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이용사유</th>
+            <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
+          </tr></thead>
+          <tbody>
+            {list.map(({ row }, i) => (
+              <tr key={row.order.id || `noid-${i}`}
+                className={`border-t border-gray-100 ${isRecentOrder(row.timeText) ? "bg-[var(--admin-vanilla)]/45" : ""}`}>
+                {/* 표시만 축약(MM-DD HH:mm) — '최근 3일' 판정(isRecentOrder)과 정렬은 원본 timeText 그대로다 */}
+                <td className="px-2 py-2" title={row.timeText}>
+                  {shortTimeText(row.timeText)}
+                  {isRecentOrder(row.timeText) && (
+                    <span className="ml-1.5 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[10px] font-black">최근 3일</span>
+                  )}
+                </td>
+                <td className="px-2 py-2 font-bold text-[#212121]">{row.order.member_name || "(이름 없음)"}</td>
+                <td className="px-2 py-2">{row.branchName}</td>
+                <td className="px-4 py-2 max-w-[22rem] truncate" title={`${row.order.departure_point} → ${row.order.arrival_point}`}>
+                  {row.order.departure_point} → {row.order.arrival_point}
+                </td>
+                {/* 직원이 카카오T 앱에 적은 자유 입력 — 옛 캐시·미배포 GAS 에는 필드가 없어 `|| ""` 필수 */}
+                <td className="px-4 py-2 max-w-[10rem] truncate" title={row.order.use_code || ""}>{row.order.use_code || ""}</td>
+                <td className="px-4 py-2 text-right font-bold">{formatNumber(row.amount)}원</td>
+              </tr>
+            ))}
+            {!list.length && (
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">{emptyText}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+  // 전월 비교값도 당월과 같은 기준(퀵·택배 제외)으로 만든다 — 한쪽만 걸러내면 전월에 퀵이 섞인
+  // 직원의 비교 기준이 부풀어 진짜 급증을 놓친다(excludeLogisticsOrders 주석 참고, 2026-07-29).
   const surges = useMemo(
-    () => (ordersData?.prev ? detectMemberSurges(rows, memberAmountMap(ordersData.prev), thresholds) : []),
+    () => (ordersData?.prev ? detectMemberSurges(rows, memberAmountMap(excludeLogisticsOrders(ordersData.prev)), thresholds) : []),
     [rows, ordersData?.prev, thresholds]
   );
+  // 퀵·택배(vertical_code="logistics") 전용 조회 뷰 — 이상 점검에서 뺀 대신 여기서 사람이 직접 본다(2026-07-29).
+  // [집계 불변] 지점별/직원별 합계·상단 카드·verifyBranchTotals 는 그대로 rows(퀵 포함) 를 쓴다.
+  // 이 목록은 순수 뷰이며 지점/직원 필터는 적용하지 않는다(합계 표들과 같이 계정 필터만 따른다).
+  const logisticsRows = useMemo(
+    () => rows
+      .filter((r) => String(r.order.vertical_code || "") === "logistics")
+      // 상세 내역(visibleRows)과 '같은' 비교기로 최신순 정렬 — Date.parse 우선, 파싱 불가 시 문자열 역순 폴백.
+      // 형식이 흔들리는 건이 섞였을 때 두 표의 순서가 어긋나지 않게 한다(코덱스 리뷰 P1, 2026-07-29).
+      .slice()
+      .sort((a, b) => {
+        const ta = Date.parse(a.timeText);
+        const tb = Date.parse(b.timeText);
+        if (!isNaN(ta) && !isNaN(tb)) return tb - ta;
+        return String(b.timeText).localeCompare(String(a.timeText));
+      }),
+    [rows]
+  );
+  const logisticsAmount = useMemo(() => logisticsRows.reduce((acc, r) => acc + r.amount, 0), [logisticsRows]);
   // 직원 관리 탭의 지점 필터 — 부서 표기를 ERP 지점명(별칭 포함)으로 해석해 묶는다.
   const memberBranchOf = useCallback((m: KakaoTaxiMember): string => {
     const dept = (m.department || "").trim();
@@ -431,7 +524,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     const XLSX = await import("xlsx");
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildOrdersExcelRows(visibleRows)), "이용내역");
-    const suffix = branchFilter === "all" ? "" : `_${branchFilter}`;
+    // 파일명에 걸린 필터를 그대로 적는다 — 내려받은 파일은 화면(visibleRows)과 같은 범위라
+    // 구분 필터가 빠지면 퀵·택배만 담긴 파일이 전체 내역처럼 보관·전달된다(코덱스 리뷰 2026-07-29).
+    const suffix = (branchFilter === "all" ? "" : `_${branchFilter}`) + (verticalFilter === "logistics" ? "_퀵택배" : "");
     XLSX.writeFile(wb, `카카오T택시_이용내역_${shownMonth}${suffix}.xlsx`);
   };
 
@@ -1401,7 +1496,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-5">
+          {/* 합계 3분할 — [지점별 합계] [직원별 합계] [퀵·택배 내역](2026-07-29 신설). 앞의 두 표는
+              내부 마크업을 바꾸지 않고 폭만 줄어든다. */}
+          <div className="grid lg:grid-cols-3 gap-5">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100"><h2 className="admin-pill-title">지점별 합계</h2></div>
               <div className="overflow-x-auto max-h-80 overflow-y-auto">
@@ -1412,9 +1509,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
                   </tr></thead>
                   <tbody>
+                    {/* 클릭 = "이 지점의 상세를 보여줘" — 구분 필터도 함께 풀어야 그 뜻이 유지된다 */}
                     {branchTotals.map((b) => (
                       <tr key={b.branchName}
-                        onClick={() => { setBranchFilter(b.branchName); setMemberFilter("all"); }}
+                        onClick={() => { setBranchFilter(b.branchName); setMemberFilter("all"); setVerticalFilter("all"); }}
                         className={`border-t border-gray-100 cursor-pointer hover:bg-gray-50 ${branchFilter === b.branchName ? "bg-gray-100" : ""}`}
                         title="클릭하면 상세 내역이 이 지점만 표시됩니다">
                         <td className="px-4 py-2 font-bold text-[#212121]">
@@ -1440,9 +1538,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
                   </tr></thead>
                   <tbody>
+                    {/* 지점별 합계와 같은 규칙 — 이 직원의 상세를 보는 것이므로 구분 필터는 푼다 */}
                     {memberTotals.map((m) => (
                       <tr key={m.memberKey}
-                        onClick={() => { setMemberFilter(m.memberKey); setBranchFilter("all"); }}
+                        onClick={() => { setMemberFilter(m.memberKey); setBranchFilter("all"); setVerticalFilter("all"); }}
                         className={`border-t border-gray-100 cursor-pointer hover:bg-gray-50 ${memberFilter === m.memberKey ? "bg-gray-100" : ""}`}
                         title="클릭하면 상세 내역이 이 직원만 표시됩니다">
                         <td className="px-4 py-2 font-bold text-[#212121]">{m.name}</td>
@@ -1453,6 +1552,48 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+            {/* 퀵·택배 내역 — 이상 점검에서 뺀 logistics 건을 사람이 직접 보는 자리(2026-07-29).
+                순수 조회용 뷰라 위 두 합계·상단 카드의 집계 입력은 건드리지 않는다(퀵 포함 현행 유지). */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+                <h2 className="admin-pill-title">퀵·택배 내역</h2>
+                <span className="text-[11px] font-bold text-[#212121]/60">
+                  {formatNumber(logisticsRows.length)}건 · {formatNumber(logisticsAmount)}원
+                </span>
+              </div>
+              <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                {logisticsRows.length ? (
+                  <table className="w-full text-xs whitespace-nowrap">
+                    <thead><tr className="text-left">
+                      <th className="px-2 py-2 text-[11px] font-black text-[#212121]">일시</th>
+                      <th className="px-2 py-2 text-[11px] font-black text-[#212121]">직원</th>
+                      <th className="px-2 py-2 text-[11px] font-black text-[#212121]">상품</th>
+                      <th className="px-2 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
+                    </tr></thead>
+                    <tbody>
+                      {/* 경로는 폭이 없어 컬럼으로 두지 않고 행 툴팁으로만 보여준다(기존 툴팁 유지, 클릭 안내만 덧붙였다).
+                          행 클릭은 지점별/직원별 합계와 같은 UX — 상세 내역을 퀵·택배 건만으로 좁힌다(2026-07-29).
+                          이 표에는 행별 필터 대상이 따로 없어 어느 행을 눌러도 결과가 같다(표 전체 = logistics). */}
+                      {logisticsRows.map((r, i) => (
+                        <tr key={r.order.id ? `${r.accountKey}|${r.order.id}` : `noid-${i}`}
+                          onClick={() => { setVerticalFilter("logistics"); setBranchFilter("all"); setMemberFilter("all"); }}
+                          className={`border-t border-gray-100 cursor-pointer hover:bg-gray-50 ${verticalFilter === "logistics" ? "bg-gray-100" : ""}`}
+                          title={`${r.timeText}\n${r.order.departure_point} → ${r.order.arrival_point}\n클릭하면 상세 내역이 퀵·택배 건만 표시됩니다`}>
+                          <td className="px-2 py-2">{shortTimeText(r.timeText)}</td>
+                          <td className="px-2 py-2 font-bold text-[#212121]">{r.order.member_name || "(이름 없음)"}</td>
+                          <td className="px-2 py-2 max-w-[8rem] truncate" title={r.order.vertical_product_name || ""}>
+                            {r.order.vertical_product_name || verticalLabel(r.order.vertical_code)}
+                          </td>
+                          <td className="px-2 py-2 text-right font-bold">{formatNumber(r.amount)}원</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="px-4 py-6 text-xs font-bold text-[#212121]/50">이번 달 퀵·택배 이용이 없습니다.</p>
+                )}
               </div>
             </div>
           </div>
@@ -1488,9 +1629,19 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 <option value="all">전체 직원</option>
                 {memberTotals.map((m) => <option key={m.memberKey} value={m.memberKey}>{m.name} ({m.branchName})</option>)}
               </select>
-              {(accountFilter !== "all" || branchFilter !== "all" || memberFilter !== "all") && (
+              {/* 구분 필터는 드롭다운이 없어 화면에 흔적이 남지 않는다 — 걸려 있으면 칩으로 드러낸다.
+                  안 그러면 좁혀진 결과가 0건일 때 "이용내역이 없습니다"가 전체 0건으로 오인된다
+                  (코덱스 리뷰 2026-07-29). 해제는 아래 '필터 해제' 버튼이 맡으므로 클릭 동작은 없다. */}
+              {verticalFilter === "logistics" && (
+                <span
+                  className="h-8 inline-flex items-center border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-gray-100"
+                  title="구분 필터가 걸려 있습니다 — 퀵·택배 이용만 보고 있습니다"
+                >구분: 퀵·택배</span>
+              )}
+              {/* 구분 필터는 드롭다운이 없고 퀵·택배 표 클릭으로만 걸리므로, 해제 버튼이 유일한 출구다 */}
+              {(accountFilter !== "all" || branchFilter !== "all" || memberFilter !== "all" || verticalFilter !== "all") && (
                 <button
-                  onClick={() => { setAccountFilter("all"); setBranchFilter("all"); setMemberFilter("all"); }}
+                  onClick={() => { setAccountFilter("all"); setBranchFilter("all"); setMemberFilter("all"); setVerticalFilter("all"); }}
                   className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[11px] font-black text-[#212121]"
                 >필터 해제</button>
               )}
@@ -1498,29 +1649,32 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             </div>
             <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
               <table className="w-full text-xs whitespace-nowrap">
+                {/* 계정 컬럼은 제거하고(상단 계정 필터 드롭다운으로 대체) 그 폭을 '이용사유'에 넘겼다(2026-07-29) */}
                 <thead><tr className="text-left">
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이용일시</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">계정</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">직원</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">지점</th>
+                  <th className="px-2 py-2 text-[11px] font-black text-[#212121]">이용일시</th>
+                  <th className="px-2 py-2 text-[11px] font-black text-[#212121]">직원</th>
+                  <th className="px-2 py-2 text-[11px] font-black text-[#212121]">지점</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">출발지 → 도착지</th>
+                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이용사유</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
                   <th className="px-4 py-2 text-[11px] font-black text-[#212121]">구분</th>
                 </tr></thead>
                 <tbody>
                   {/* id 없는 주문이 섞여도 key 가 중복되지 않게 순번으로 폴백 — 필터/정렬 결과라 순번 key 로 충분 */}
-                  {visibleRows.map(({ order, accountKey, branchName, unmapped, amount, timeText }, i) => (
+                  {visibleRows.map(({ order, branchName, unmapped, amount, timeText }, i) => (
                     <tr key={order.id || `noid-${i}`} className="border-t border-gray-100">
-                      <td className="px-4 py-2">{timeText}</td>
-                      <td className="px-4 py-2">{accountLabel(accountKey)}</td>
-                      <td className="px-4 py-2 font-bold text-[#212121]">{order.member_name || "(이름 없음)"}</td>
-                      <td className="px-4 py-2">
+                      {/* 표시만 축약(MM-DD HH:mm) — 정렬·비교는 위에서 원본 timeText 로 한다. 전체 시각은 툴팁 */}
+                      <td className="px-2 py-2" title={timeText}>{shortTimeText(timeText)}</td>
+                      <td className="px-2 py-2 font-bold text-[#212121]">{order.member_name || "(이름 없음)"}</td>
+                      <td className="px-2 py-2">
                         {branchName}
                         {unmapped && <span className="ml-1.5 text-[11px] font-bold text-[#B91C1C]">(미매핑)</span>}
                       </td>
                       <td className="px-4 py-2 max-w-[26rem] truncate" title={`${order.departure_point} → ${order.arrival_point}`}>
                         {order.departure_point} → {order.arrival_point}
                       </td>
+                      {/* 자유 입력이라 길 수 있어 잘라 보이고 전체는 툴팁. 옛 캐시·미배포 GAS 에는 필드가 없어 `|| ""` 필수 */}
+                      <td className="px-4 py-2 max-w-[10rem] truncate" title={order.use_code || ""}>{order.use_code || ""}</td>
                       <td className="px-4 py-2 text-right font-bold">{formatNumber(amount)}원</td>
                       <td className="px-4 py-2">{verticalLabel(order.vertical_code)}</td>
                     </tr>
@@ -1590,52 +1744,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             )}
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100"><h2 className="admin-pill-title">점검 대상 건 — {formatNumber(flagged.length)}건</h2></div>
-            <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
-              <table className="w-full text-xs whitespace-nowrap">
-                <thead><tr className="text-left">
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">사유</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">이용일시</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">직원</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">지점</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121]">출발지 → 도착지</th>
-                  <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
-                </tr></thead>
-                <tbody>
-                  {flagged.map(({ row, reasons }, i) => (
-                    <tr key={row.order.id || `noid-${i}`}
-                      className={`border-t border-gray-100 ${isRecentOrder(row.timeText) ? "bg-[var(--admin-vanilla)]/45" : ""}`}>
-                      <td className="px-4 py-2">
-                        <span className="inline-flex flex-wrap gap-1">
-                          {reasons.map((r) => (
-                            <span key={r} className="px-2 py-0.5 rounded-full text-xs font-bold bg-[var(--admin-vanilla)] text-[#212121]">
-                              {TAXI_ANOMALY_LABEL[r]}
-                            </span>
-                          ))}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2">
-                        {row.timeText}
-                        {isRecentOrder(row.timeText) && (
-                          <span className="ml-1.5 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[10px] font-black">최근 3일</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 font-bold text-[#212121]">{row.order.member_name || "(이름 없음)"}</td>
-                      <td className="px-4 py-2">{row.branchName}</td>
-                      <td className="px-4 py-2 max-w-[22rem] truncate" title={`${row.order.departure_point} → ${row.order.arrival_point}`}>
-                        {row.order.departure_point} → {row.order.arrival_point}
-                      </td>
-                      <td className="px-4 py-2 text-right font-bold">{formatNumber(row.amount)}원</td>
-                    </tr>
-                  ))}
-                  {!flagged.length && (
-                    <tr><td colSpan={6} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">점검 대상 건이 없습니다.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* 점검 대상 건을 대표 사유별 3개 카드로 나눠 세로로 쌓는다(사용자 지시 2026-07-29) */}
+          {renderAnomalyCard("고액", flaggedByReason.highFare, "고액 건이 없습니다.")}
+          {renderAnomalyCard("낮 시간대 이용", flaggedByReason.daytime, "낮 시간대 이용 건이 없습니다.")}
+          {renderAnomalyCard(
+            "지점 미매핑", flaggedByReason.unmapped, "지점 미매핑 건이 없습니다.",
+            "부서(지점) 미기입·미인식 건 — 직원 관리에서 부서를 채우면 목록에서 사라집니다",
+          )}
         </>
       )}
 
