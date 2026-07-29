@@ -41,13 +41,21 @@ const TAB_GROUPS: Array<{ label: string; keys: PermKey[] }> = [
 ];
 
 // 화면에 보이는 이름만 바꾼 것이다 — 내부 값 "admin"은 규칙·세션·기존 문서가 모두 쓰고 있어 절대 바꾸지 않는다(설계서 §15.1).
-const ROLE_LABEL: Record<UserProfile["role"], string> = { admin: "총괄", branchAdmin: "지점관리자", branch: "지점" };
 // 역할 드롭다운 순서 — 권한이 낮은 것부터.
 const ROLE_OPTIONS: Array<{ value: UserProfile["role"]; label: string; hint: string }> = [
   { value: "branch", label: "지점", hint: "지점 업무만. 급여대장은 볼 수 없습니다." },
   { value: "branchAdmin", label: "지점관리자", hint: "허용된 지점의 급여대장을 보고 작성할 수 있습니다." },
-  { value: "admin", label: "총괄", hint: "관리자 화면 + 전 지점 급여대장." },
+  { value: "admin", label: "총괄관리자", hint: "관리자 화면 + 전 지점 급여대장." },
 ];
+
+// 권한 있는 역할은 색으로 구분한다(사용자 지시 2026-07-30) — 목록을 훑을 때 누가 관리자인지 바로 보이게.
+// 색은 DESIGN_ADMIN.md 토큰만 쓴다: 바닐라=주의(최고 권한), 허니듀=긍정·보조(지점관리자), 지점=기본 흰색.
+// 표 헤더가 엘리스블루라 그 색은 쓰지 않는다(헤더와 섞여 구분이 안 된다).
+const ROLE_SELECT_STYLE: Record<UserProfile["role"], string> = {
+  admin: "border-[#212121] bg-[var(--admin-vanilla)] font-black",
+  branchAdmin: "border-[#212121] bg-[var(--admin-honey)] font-black",
+  branch: "border-gray-200 bg-white font-bold",
+};
 const STATUS_LABEL: Record<UserProfile["status"], string> = { active: "사용중", suspended: "정지" };
 
 type EditState = {
@@ -752,7 +760,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
                       <td className="px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
                         <select value={p.role} disabled={rowLocked}
                           onChange={(e) => void applyRowPatch(p, { role: e.target.value as UserProfile["role"] })}
-                          className="h-7 px-2 border border-gray-200 rounded-lg text-[11px] font-bold bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                          className={`h-7 px-2 border rounded-lg text-[11px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${ROLE_SELECT_STYLE[p.role]}`}>
                           {ROLE_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
@@ -848,12 +856,12 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">이름</span>
                 <input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })}
-                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold" />
+                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-[11px] font-bold" />
               </label>
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">연락처</span>
                 <input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })}
-                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold" />
+                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-[11px] font-bold" />
               </label>
               <div className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">근무지점 (가입 시 선택)</span>
@@ -896,7 +904,7 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">역할</span>
                 <select value={edit.role} onChange={(e) => changeRole(e.target.value as UserProfile["role"])}
-                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold">
+                  className={`w-full p-2 px-3 border rounded-xl text-[11px] ${ROLE_SELECT_STYLE[edit.role]}`}>
                   {ROLE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
@@ -907,8 +915,9 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               </label>
               <label className="space-y-1.5">
                 <span className="block text-[11px] font-black text-gray-700">상태</span>
+                {/* 입력칸·셀렉트는 11px — DESIGN.md §6-0-1 폰트 기준표(역할 셀렉트와 같은 크기로 맞춘다) */}
                 <select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value as UserProfile["status"] })}
-                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold">
+                  className="w-full p-2 px-3 border border-gray-200 rounded-xl text-[11px] font-bold">
                   <option value="active">사용중</option>
                   <option value="suspended">정지</option>
                 </select>
@@ -1012,14 +1021,14 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
                   </p>
                 )}
                 {edit.role === "admin" && (
-                  <p className="text-[10px] font-bold text-zinc-500">총괄은 이 목록과 무관하게 전 지점을 열람·작성합니다.</p>
+                  <p className="text-[10px] font-bold text-zinc-500">총괄관리자는 이 목록과 무관하게 전 지점을 열람·작성합니다.</p>
                 )}
               </div>
-              {/* '전체 지점'은 총괄만 쓸 수 있다 — 지점관리자에게 전체를 주는 것은 요구사항에 어긋난다. */}
+              {/* '전체 지점'은 총괄관리자만 쓸 수 있다 — 지점관리자에게 전체를 주는 것은 요구사항에 어긋난다. */}
               <label className={`flex items-center gap-2 text-[11px] font-black ${edit.role === "admin" ? "text-gray-700 cursor-pointer" : "text-zinc-300"}`}>
                 <input type="checkbox" disabled={edit.role !== "admin"}
                   checked={edit.salaryBranches === "all"} onChange={(e) => toggleAllSalaryBranches(e.target.checked)} />
-                전체 지점 (총괄 전용)
+                전체 지점 (총괄관리자 전용)
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {branches.map((b) => (
