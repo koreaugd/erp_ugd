@@ -134,6 +134,15 @@ export function withEncodedBranchLists<
 }
 
 /**
+ * 본인 프로필 자가 수정(2026-07-29) — 이름·연락처만. firestore.rules 의 self-update 규칙과 짝이다:
+ * 이 두 키 외의 필드를 보내면 규칙이 통째로 거부한다(셀프 권한 상향 차단은 그대로 유지).
+ */
+export async function updateOwnProfile(uid: string, patch: { name: string; phone: string }): Promise<void> {
+  const { updateDoc } = await import("firebase/firestore");
+  await updateDoc(doc(db, "users", uid), { name: patch.name, phone: patch.phone });
+}
+
+/**
  * users/{uid} 삭제(기록 초기화). firestore.rules: 개인 관리자만, 본인 문서는 불가.
  * 주의: Firebase Auth 계정 자체는 남는다(Spark — Admin SDK 없음). 삭제된 사용자가 다시 로그인하면
  * 신규 기본값으로 재가입된다 — 접근 차단이 목적이면 삭제가 아니라 status "suspended"를 쓸 것.

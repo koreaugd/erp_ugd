@@ -9,7 +9,7 @@ import type { KakaoTaxiMember } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import {
-  createMemberRequest, createRegisterRequest, kakaoTaxiRequestsKey,
+  createBranchChangeRequest, createMemberRequest, createRegisterRequest, kakaoTaxiRequestsKey,
   REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "../../admin/helpers/kakaoTaxiRequests";
 
@@ -33,6 +33,16 @@ const formatDateTime = (iso: string) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+// 로컬(KST) 기준 오늘 — toISOString()은 UTC 라 자정 부근에 전날로 어긋난다.
+const todayDateText = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
+
+// 인원 행에서 올릴 수 있는 요청 종류(2026-07-29): 삭제요청 폐지 — 삭제 승인이 직원 계정 자체를 지워
+// 과거 이용내역 지점까지 잃는 사고가 있었다. 지점 이동은 '변경신청'으로 소속만 옮긴다.
+type MemberRequestType = "update" | "branchChange";
+
 export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   const { user } = useAuthContext();
   const pinHash = user?.pinHash || "";
@@ -50,9 +60,27 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   const [regPhone, setRegPhone] = useState("");
   const [regMemo, setRegMemo] = useState("");
 
-  // 수정/삭제 요청 폼 — 인원 행의 버튼을 누르면 열린다. 사유 필수.
-  const [requestTarget, setRequestTarget] = useState<{ member: KakaoTaxiMember; type: "update" | "delete" } | null>(null);
+  // 수정요청/변경신청 폼 — 인원 행의 드롭다운에서 종류를 고르면 열린다. 사유 필수.
+  const [requestTarget, setRequestTarget] = useState<{ member: KakaoTaxiMember; type: MemberRequestType } | null>(null);
   const [requestReason, setRequestReason] = useState("");
+  // 변경신청 전용 — 옮겨간 지점(모르면 빈값)과 이동일(이 날짜부터 새 지점으로 집계)
+  const [requestTargetBranch, setRequestTargetBranch] = useState("");
+  const [requestEffectiveDate, setRequestEffectiveDate] = useState("");
+  // 변경신청의 지점 선택지 — 실패해도 신청 자체는 막지 않는다(지점을 '모름'으로 두면 관리자가 지정)
+  const [erpBranches, setErpBranches] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    gasClient.getBranchList()
+      .then((list) => {
+        if (!alive) return;
+        setErpBranches(Array.from(new Set([
+          ...(list || []).filter((b) => b.role === "branch").map((b) => b.branchName).filter(Boolean),
+          "본사",
+        ])).filter((b) => b !== branchName).sort((a, b) => a.localeCompare(b, "ko")));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [branchName]);
 
   // forceRefresh=true 는 '새로고침' 버튼 전용 — 백엔드 캐시를 우회해 카카오에서 실시간으로
   // 인원을 다시 읽는다. 직원이 방금 카카오T 인증을 마쳐 목록에 아직 안 뜰 때 즉시 반영하기 위함.
@@ -149,22 +177,34 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     }
   };
 
+  const closeRequestForm = () => {
+    setRequestTarget(null);
+    setRequestReason("");
+    setRequestTargetBranch("");
+    setRequestEffectiveDate("");
+  };
+
   const submitMemberRequest = async () => {
     if (saving || !requestTarget) return;
+    const member = { id: requestTarget.member.id, name: requestTarget.member.name };
     let request: KakaoTaxiRequest;
     try {
-      request = createMemberRequest(requestTarget.type, branchName, { id: requestTarget.member.id, name: requestTarget.member.name }, requestReason);
+      request = requestTarget.type === "branchChange"
+        ? createBranchChangeRequest(branchName, member, requestReason, requestTargetBranch, requestEffectiveDate)
+        : createMemberRequest("update", branchName, member, requestReason);
     } catch (e: any) {
       window.alert(String(e?.message || e));
       return;
     }
     const typeLabel = REQUEST_TYPE_LABEL[requestTarget.type];
-    if (!window.confirm(`${request.name} 님에 대한 ${typeLabel}을 등록할까요?\n\n사유: ${request.reason}`)) return;
+    const confirmBody = requestTarget.type === "branchChange"
+      ? `옮겨간 지점: ${request.targetBranch || "모름 (관리자가 지정)"}\n이동일: ${request.effectiveDate}\n사유: ${request.reason}\n\n승인되면 이동일부터의 이용만 새 지점으로 집계되고, 직원은 삭제되지 않습니다.`
+      : `사유: ${request.reason}`;
+    if (!window.confirm(`${request.name} 님에 대한 ${typeLabel}을 등록할까요?\n\n${confirmBody}`)) return;
     setSaving(true);
     try {
       await appendRequest(request);
-      setRequestTarget(null);
-      setRequestReason("");
+      closeRequestForm();
       window.alert(`${typeLabel}이 등록되었습니다. 관리자 확인 후 처리됩니다.`);
     } catch (e: any) {
       window.alert(`요청 저장에 실패했습니다. 다시 시도해주세요.\n${String(e?.message || e)}`);
@@ -229,31 +269,60 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                       <td className="px-3 py-2">{MEMBER_STATUS_LABEL[m.status] || m.status}</td>
                       <td className="px-3 py-2">
                         {active ? (
-                          <input value={requestReason} onChange={(e) => setRequestReason(e.target.value)} disabled={saving} autoFocus
-                            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) void submitMemberRequest(); }}
-                            placeholder={requestTarget!.type === "delete" ? "삭제 사유 (필수 — 예: 퇴사, 타지점 이동)" : "수정 사유 (필수 — 예: 번호 변경, 소속 지점 정정)"}
-                            className="w-full min-w-[13rem] h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                          <div className="flex flex-col gap-1.5 min-w-[15rem]">
+                            {/* 변경신청은 옮겨간 지점(모르면 비워둠)과 이동일을 함께 받는다 —
+                                이동일부터의 이용만 새 지점으로 집계된다(직원 삭제 없음). */}
+                            {requestTarget!.type === "branchChange" && (
+                              <>
+                                <select value={requestTargetBranch} onChange={(e) => setRequestTargetBranch(e.target.value)} disabled={saving}
+                                  aria-label="옮겨간 지점"
+                                  className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50">
+                                  <option value="">옮겨간 지점 모름 (관리자가 지정)</option>
+                                  {erpBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                                </select>
+                                <label className="flex items-center gap-2 text-[11px] font-bold text-[#212121]">
+                                  <span className="whitespace-nowrap">이동일</span>
+                                  <input type="date" value={requestEffectiveDate} onChange={(e) => setRequestEffectiveDate(e.target.value)} disabled={saving}
+                                    title="이 날짜부터의 이용이 새 지점으로 집계됩니다"
+                                    className="flex-1 min-w-0 h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                                </label>
+                              </>
+                            )}
+                            <input value={requestReason} onChange={(e) => setRequestReason(e.target.value)} disabled={saving} autoFocus
+                              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) void submitMemberRequest(); }}
+                              placeholder={requestTarget!.type === "branchChange" ? "변경 사유 (필수 — 예: 타지점 이동)" : "수정 사유 (필수 — 예: 번호 변경, 이름 정정)"}
+                              className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white disabled:opacity-50" />
+                          </div>
                         ) : (
                           <span className="text-[#212121]/40">-</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 align-top">
                         {active ? (
                           <span className="inline-flex gap-1.5">
                             <button onClick={() => void submitMemberRequest()} disabled={saving}
                               className="px-2.5 py-1 rounded-lg text-[11px] font-black text-white bg-slate-800 disabled:opacity-50">
-                              {requestTarget!.type === "delete" ? "삭제요청 등록" : "수정요청 등록"}
+                              {requestTarget!.type === "branchChange" ? "변경신청 등록" : "수정요청 등록"}
                             </button>
-                            <button onClick={() => { setRequestTarget(null); setRequestReason(""); }} disabled={saving}
+                            <button onClick={closeRequestForm} disabled={saving}
                               className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">취소</button>
                           </span>
                         ) : (
-                          <span className="inline-flex gap-1.5">
-                            <button onClick={() => { setRequestTarget({ member: m, type: "update" }); setRequestReason(""); }} disabled={saving}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">수정 요청</button>
-                            <button onClick={() => { setRequestTarget({ member: m, type: "delete" }); setRequestReason(""); }} disabled={saving}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-black text-[#B91C1C] bg-white border border-[#C93A3A] disabled:opacity-50">삭제 요청</button>
-                          </span>
+                          // 요청 종류는 드롭다운 — 기본값 '선택', 고르면 이 행에서 입력 폼이 열린다(2026-07-29).
+                          <select value="" disabled={saving} aria-label="요청 종류"
+                            onChange={(e) => {
+                              const type = e.target.value as MemberRequestType | "";
+                              if (!type) return;
+                              setRequestTarget({ member: m, type });
+                              setRequestReason("");
+                              setRequestTargetBranch("");
+                              setRequestEffectiveDate(type === "branchChange" ? todayDateText() : "");
+                            }}
+                            className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white cursor-pointer disabled:opacity-50">
+                            <option value="">선택</option>
+                            <option value="update">수정요청</option>
+                            <option value="branchChange">변경신청</option>
+                          </select>
                         )}
                       </td>
                     </tr>
@@ -300,6 +369,7 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                       {r.status === "rejected" && r.rejectReason ? `반려 사유: ${r.rejectReason}`
                         : r.status === "approved" && r.type === "register" ? "승인됨 — 직원 휴대폰 인증 알림톡 발송, 카카오T 앱에서 인증 필요"
                         : r.status === "approved" ? (r.resultNote || "처리 완료")
+                        : r.type === "branchChange" ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
                         : (r.reason || r.memo || "-")}
                     </td>
                   </tr>

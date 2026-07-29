@@ -6,6 +6,7 @@ import { gasClient } from "../api/gasClient";
 import { ArrowRight, RefreshCw, LogOut, CircleDollarSign, Plus, Trash2, Clock, User, FileText, ShoppingCart, Lock, Users, ClipboardList, Coins, Settings, X, Database } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import LoadingSpinner from "../components/LoadingSpinner";
+import MyAccountModal from "../components/MyAccountModal";
 import { hashPin } from "../utils/hashPin";
 import { ensureLatestAppVersion } from "../utils/appVersion";
 import { cleanNumeric } from "./branch/helpers/formatters";
@@ -358,6 +359,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     return () => { cancelled = true; };
   }, []);
 
+  // 내 정보 모달(2026-07-29) — 개인 계정만. 이름·연락처·비밀번호 자가 수정.
+  const [myAccountOpen, setMyAccountOpen] = useState(false);
+
   // 2. Admin Settings Editor Modal states
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isPasscodeVerified, setIsPasscodeVerified] = useState(false);
@@ -639,6 +643,16 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           >
             지점 변경하기
           </button>
+          {/* 내 정보 — 개인 계정만(이름·연락처·비밀번호 자가 수정, 2026-07-29). PIN 세션은 개인 문서가 없다. */}
+          {loginType === "personal" && (
+            <button
+              id="btn-branch-my-account"
+              onClick={() => setMyAccountOpen(true)}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-[rgba(33,33,33,0.16)] text-[#212121] hover:bg-[rgba(33,33,33,0.05)] transition-all text-xs font-bold cursor-pointer"
+            >
+              내 정보
+            </button>
+          )}
           <button
             id="btn-branch-logout-desktop"
             onClick={logout}
@@ -662,6 +676,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           >
             지점변경
           </button>
+          {loginType === "personal" && (
+            <button
+              id="btn-branch-my-account-mobile"
+              onClick={() => setMyAccountOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-[rgba(33,33,33,0.16)] text-[#212121]"
+            >
+              내정보
+            </button>
+          )}
           <button
             id="btn-branch-logout-mobile"
             onClick={logout}
@@ -670,6 +693,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             로그아웃
           </button>
         </div>
+        <MyAccountModal isOpen={myAccountOpen} onClose={() => setMyAccountOpen(false)} />
       </aside>
 
       {/* Main Page Area Right */}

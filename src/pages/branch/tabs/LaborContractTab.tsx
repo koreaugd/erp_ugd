@@ -3,7 +3,7 @@
 // 급여는 등록할 때만 입력받는다 — 등록 후에는 지점 화면에 표시하지도, 수정하지도 않는다.
 import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { Download } from "lucide-react";
-import { gasClient } from "../../../api/gasClient";
+import { gasClient, LABOR_CONTRACT_PERIOD_LABEL } from "../../../api/gasClient";
 import type { LaborContract, LaborContractTemplateMeta } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 
@@ -73,6 +73,8 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
   const isLoaded = loadedBranch === branchName;
 
   const [contractType, setContractType] = useState<"" | "신규입사" | "지점이동">("");
+  // 계약유형(필수, 2026-07-29): 신입은 1~2주 단위 계약서를 따로 보내야 해서 여기서 구분을 받는다.
+  const [periodType, setPeriodType] = useState<"" | "1주" | "2주" | "정규">("");
   const [effectiveDate, setEffectiveDate] = useState("");
   const [previousBranch, setPreviousBranch] = useState("");
   const [name, setName] = useState("");
@@ -192,6 +194,10 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       window.alert("신규입사인지 지점이동인지 먼저 선택해 주세요.");
       return;
     }
+    if (!periodType) {
+      window.alert("계약유형(1주 단위 / 2주 단위 / 정규)을 선택해 주세요.");
+      return;
+    }
     if (!effectiveDate) {
       window.alert(`${contractType === "지점이동" ? "지점이동일" : "입사일"}을 선택해 주세요.`);
       return;
@@ -211,22 +217,38 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
     }
     setSaving(true);
     try {
-      const latest = await readContracts();
-      await writeContracts([
-        {
-          id: `contract-${Date.now()}`,
-          name: name.trim(),
-          phone: formatPhone(digits),
-          salary: numericSalary,
-          contractType,
-          effectiveDate,
-          ...(contractType === "지점이동" ? { previousBranch } : {}),
-          status: "발송 대기",
-          createdAt: new Date().toISOString()
-        },
-        ...latest
-      ]);
+      // [동시 등록 유실 방지] 배열을 읽어 통째로 저장하면 두 기기가 거의 동시에 등록할 때 나중 저장이
+      // 먼저 등록을 덮어쓴다(Codex 지적 2026-07-29) — 원자적 append(Firestore 트랜잭션)로 이어붙인다.
+      // 기준(:) 문서가 아직 없고 옛(_) 키에만 내역이 있으면 append 가 옛 내역을 모른 채 새 문서를
+      // 만들므로, 먼저 옛 내역으로 기준 문서를 만들어 둔다(create-only 라 다른 기기 값을 덮지 않는다).
+      const canonicalKey = `labor_contracts:${branchName}`;
+      const canonical = await gasClient.getSharedData<LaborContract[]>(canonicalKey);
+      if (!canonical) {
+        const legacy = await gasClient.getSharedData<LaborContract[]>(`labor_contracts_${branchName}`);
+        if (legacy && legacy.length) await gasClient.createSharedDataIfMissing(canonicalKey, legacy);
+      }
+      const record: LaborContract = {
+        id: `contract-${Date.now()}`,
+        name: name.trim(),
+        phone: formatPhone(digits),
+        salary: numericSalary,
+        contractType,
+        periodType,
+        effectiveDate,
+        ...(contractType === "지점이동" ? { previousBranch } : {}),
+        status: "발송 대기",
+        createdAt: new Date().toISOString()
+      };
+      const { list } = await gasClient.appendSharedArrayItem(canonicalKey, record as unknown as Record<string, unknown>);
+      // "_" 사본은 최선노력 — 실패해도 기준(:)은 이미 갱신됐다(writeContracts 와 같은 규약).
+      try {
+        await gasClient.saveSharedData(`labor_contracts_${branchName}`, list);
+      } catch (copyErr) {
+        console.warn("근로계약서 사본(_) 저장 실패 — 기준(:) 저장은 성공했습니다.", copyErr);
+      }
+      setContracts(list as LaborContract[]);
       setContractType("");
+      setPeriodType("");
       setEffectiveDate("");
       setPreviousBranch("");
       setName("");
@@ -366,6 +388,19 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
               <option value="신규입사">신규입사</option>
               <option value="지점이동">지점이동</option>
             </select>
+            {/* 계약유형(필수) — 1주/2주 단위 계약서인지, 수습 후 계속 근무 정규 계약서인지 구분 */}
+            <select
+              value={periodType}
+              onChange={(e) => setPeriodType(e.target.value as "" | "1주" | "2주" | "정규")}
+              aria-label="계약유형"
+              title="1주·2주 단위 계약서인지, 수습 후 계속 근무할 정규 계약서인지 선택"
+              className="h-8 w-[150px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
+            >
+              <option value="">계약유형 선택</option>
+              <option value="1주">{LABOR_CONTRACT_PERIOD_LABEL["1주"]}</option>
+              <option value="2주">{LABOR_CONTRACT_PERIOD_LABEL["2주"]}</option>
+              <option value="정규">{LABOR_CONTRACT_PERIOD_LABEL["정규"]}</option>
+            </select>
             <input
               type="date"
               value={effectiveDate}
@@ -410,6 +445,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
               <tr className="bg-gray-50/70 text-left border-b border-gray-100 text-slate-400 font-black whitespace-nowrap">
                 <th className="px-3 py-2.5 w-24">등록일</th>
                 <th className="px-3 py-2.5 w-40 whitespace-nowrap">구분</th>
+                <th className="px-3 py-2.5 w-28 whitespace-nowrap">계약유형</th>
                 <th className="px-3 py-2.5 w-24">이름</th>
                 <th className="px-3 py-2.5 w-32">연락처</th>
                 <th className="px-3 py-2.5 w-24">입사·이동일</th>
@@ -420,9 +456,9 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="p-6 text-center"><LoadingSpinner size="sm" /></td></tr>
+                <tr><td colSpan={9} className="p-6 text-center"><LoadingSpinner size="sm" /></td></tr>
               ) : contracts.length === 0 ? (
-                <tr><td colSpan={8} className="p-6 text-center text-slate-300 font-bold">등록된 인적사항이 없습니다.</td></tr>
+                <tr><td colSpan={9} className="p-6 text-center text-slate-300 font-bold">등록된 인적사항이 없습니다.</td></tr>
               ) : contracts.map((c) => (
                 <tr key={c.id} className="border-b border-gray-50 hover:bg-slate-50/50">
                   <td className="px-3 py-2.5 font-mono text-slate-400 whitespace-nowrap">{c.createdAt ? c.createdAt.slice(0, 10) : "-"}</td>
@@ -443,6 +479,12 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
                     ) : (
                       <span className="text-slate-300">-</span>
                     )}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {/* 계약유형은 등록 시 확정 — 잘못 골랐으면 삭제요청 후 재등록(급여와 같은 규칙). 옛 레코드는 "-" */}
+                    {c.periodType && LABOR_CONTRACT_PERIOD_LABEL[c.periodType]
+                      ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-black text-slate-600">{LABOR_CONTRACT_PERIOD_LABEL[c.periodType]}</span>
+                      : <span className="text-slate-300">-</span>}
                   </td>
                   <td className="px-3 py-2.5 font-black text-slate-800 whitespace-nowrap">
                     {editingId === c.id
