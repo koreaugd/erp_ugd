@@ -9,6 +9,13 @@
 //       실제 워크북 조립(assembleMonthlyCloseWorkbook)만 동적 import한 xlsx-js-style 모듈을 받는다.
 
 import { isSampleEmployee } from "./staffHelpers";
+// 파트타이머 급여 판정(저장값 vs 일일마감 집계)은 지점 화면과 반드시 같은 규칙이어야 한다.
+import {
+  computePartTimeSalary,
+  resolvePartTimeAccumulatedHours,
+  resolvePartTimeAttendanceDates,
+  syncPartTimeActualPaid
+} from "./partTimeSalaryRules";
 
 export interface MonthlyCloseData {
   branchName: string;
@@ -117,6 +124,31 @@ export function unnamedPartTimeSalaryRows({
   );
 }
 
+/** 파트타이머 급여 시트의 칸 위치. buildMonthlyCloseSheetSpecs의 partTimeHeaders 순서와 같아야 한다. */
+const PART_TIME_COL = { name: 0, hourlyRate: 6, hours: 7, salary: 9 } as const;
+
+/**
+ * 마감 엑셀에 **일은 했는데 급여가 0원으로** 나갈 파트타이머 행.
+ *
+ * 시급 기본값(15,000)을 없앤 뒤로(2026-07-31) 시급 칸은 비어 있을 수 있다. 비면 급여가 0원으로 계산되는데,
+ * 그대로 내보내면 **일한 사람의 급여가 0원인 채로 '정상 파일'처럼 나가** 그 사람 몫이 통째로 빠진다.
+ * 이름 없는 행(unnamedPartTimeSalaryRows)과 같은 이유로, 내려받기 전에 여기서 먼저 막는다.
+ *
+ * **판정은 빌더가 실제로 만든 행을 그대로 본다.** 저장된 급여 행만 따로 뜯어보면 안 된다 —
+ * 누적시간은 저장값이 아니라 일일마감 집계를 따라 다시 정해지므로(resolvePartTimeAccumulatedHours),
+ * 저장본에 0시간으로 남아 있어도 엑셀에는 12시간으로 나갈 수 있다. 그 차이만큼 게이트가 뚫린다.
+ */
+export function zeroPaidPartTimeRows(data: MonthlyCloseData): { name: string; hours: number }[] {
+  const sheet = buildMonthlyCloseSheetSpecs(data).find((spec) => spec.name === "파트타이머급여");
+  if (!sheet) return [];
+  return sheet.rows
+    .filter((row) => Number(row[PART_TIME_COL.hours]) > 0 && !(Number(row[PART_TIME_COL.salary]) > 0))
+    .map((row) => ({
+      name: String(row[PART_TIME_COL.name] || "").trim(),
+      hours: Number(row[PART_TIME_COL.hours]) || 0
+    }));
+}
+
 export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[] {
   const { branchName, month } = data;
   const purchases = Array.isArray(data.purchases) ? data.purchases : [];
@@ -219,16 +251,19 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
        */
       const payoutName = saved.nameOverride || pt.name;
 
-      const hourlyRate = saved.hourlyRate || profile.hourlyRate || "15000";
-      const accumulatedHours = saved.accumulatedHours !== undefined ? saved.accumulatedHours : String(tel.hours);
+      // 시급은 기본값을 넣지 않는다 — 지점 화면과 같은 규칙(2026-07-31).
+      // 기본값 15000을 박으면 실제 시급을 안 적은 사람에게 그 금액이 급여로 계산돼 나간다.
+      // 비어 있으면 급여가 0으로 나가고, 화면 상단에 '시급 미입력' 경고가 떠 채우도록 한다.
+      const hourlyRate = saved.hourlyRate || profile.hourlyRate || "";
       const tipsEtcAmount = saved.tipsEtcAmount || "0";
-      const calcSalary = saved.calculatedSalary !== undefined && saved.calculatedSalary !== ""
-        ? saved.calculatedSalary
-        : String((Number(hourlyRate) * Number(accumulatedHours)) + (Number(tipsEtcAmount) || 0));
-      const calcActualPaid = saved.actualPaidAmount || "";
-      const attendanceDates = saved.attendanceDates !== undefined
-        ? saved.attendanceDates
-        : tel.dates.slice().sort((a, b) => Number(a) - Number(b)).slice(0, 7).join(",");
+      // 판정 규칙은 지점 화면(MonthlyPartTimeSalarySubTab)과 같은 함수를 쓴다.
+      // 예전에는 여기서만 "저장된 값이 있으면 무조건 그것"을 썼는데, 그러면 말일 낮에 대장을 열어 저장한 뒤
+      // 그날 저녁에 일한 사람이 저장된 0시간 그대로 나가 급여가 통째로 빠졌다.
+      // 화면에는 5시간이 보이는데 엑셀에는 0시간이 찍히는 상태였다 — 돈이 나가는 표라 그 어긋남을 없앤다.
+      const accumulatedHours = resolvePartTimeAccumulatedHours(saved, String(tel.hours));
+      const calcSalary = computePartTimeSalary(hourlyRate, accumulatedHours, tipsEtcAmount);
+      const calcActualPaid = syncPartTimeActualPaid(saved.actualPaidAmount, calcSalary);
+      const attendanceDates = resolvePartTimeAttendanceDates(saved, tel.dates);
 
       return [
         payoutName,
