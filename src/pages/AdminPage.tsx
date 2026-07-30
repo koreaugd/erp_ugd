@@ -10,7 +10,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import MyAccountModal from "../components/MyAccountModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AccountManagementSection } from "./admin/AccountManagementSection";
 import { listUserProfiles } from "../api/userProfile";
@@ -3112,6 +3112,21 @@ function AdminMonthlyClosingStatusSection() {
         profiles: profiles && typeof profiles === "object" ? profiles : {},
         history: Array.isArray(history) ? history : [],
       };
+
+      // 일한 시간은 있는데 급여가 0원으로 나갈 행을 막는다(시급 기본값을 없앤 2026-07-31 이후).
+      // 판정은 워크북 빌더가 실제로 만든 행을 그대로 본다 — 저장된 급여 행만 보면 누적시간이 낡아
+      // "0시간이니 넘어감"으로 새어 나간다(엑셀에는 일일마감 집계로 다시 계산한 시간이 찍힌다).
+      const zeroPaidRows = zeroPaidPartTimeRows(data);
+      if (zeroPaidRows.length > 0) {
+        const who = zeroPaidRows.slice(0, 5).map((row) => `${row.name || "(이름 없음)"} ${row.hours}시간`).join(", ");
+        window.alert(
+          `${branchName} · ${selectedMonth} 파트타이머 급여대장에 근무시간은 있는데 급여가 0원인 행이 ${zeroPaidRows.length}건 있습니다.\n` +
+          `(${who}${zeroPaidRows.length > 5 ? " 외" : ""})\n\n` +
+          `대부분 시급이 비어 있어서입니다. 그대로 받으면 그 사람 급여가 0원인 채 파일이 만들어집니다. 다운로드를 중단했습니다.\n` +
+          `해당 지점에서 [월말마감 → 파트타이머 급여대장] 탭을 열어 시급을 채운 뒤 다시 받아주세요.`
+        );
+        return;
+      }
 
       const XLSX = await import("xlsx-js-style");
       const wb = assembleMonthlyCloseWorkbook(XLSX, data);

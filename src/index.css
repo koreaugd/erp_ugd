@@ -1776,6 +1776,17 @@ input[type=number] {
   box-shadow: none !important;
 }
 
+/* 파트타이머 급여대장 — 사람이 직접 적은 누적시간.
+   자동 집계값과 눈으로 구분돼야 "이 칸은 더 이상 일일마감을 따라가지 않는다"를 알 수 있다.
+   글자색으로는 구분할 수 없다 — 지점 스코프가 text-amber-*·text-blue-* 를 전부 검정으로 치환해(§12)
+   자동값과 수기값이 똑같은 검정이 된다. 그래서 배경을 바닐라로 칠한다(§3 토큰의 '주의·미확인' 용도 그대로,
+   주류 재고 시트가 칸 배경으로 의미를 나누는 방식과 같다 §9-2). 새 색을 만들지 않는다.
+   위 `.sheet-cell-input`이 배경을 투명으로 못 박으므로 element 선택자를 더해 특이성으로 이긴다(§13-7). */
+.branch-redesign #parttime-salaries-subtab input.parttime-hours-manual {
+  background: var(--branch-vanilla) !important;
+  color: var(--branch-black) !important;
+}
+
 /* 쓸 수 없는 칸은 회색으로 잠근다(선입금 미체크 행의 충전금액 칸 등). */
 .branch-redesign #purchase-sales-subtab .sheet-cell-input:disabled,
 .branch-redesign #parttime-salaries-subtab .sheet-cell-input:disabled,
@@ -3826,6 +3837,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   border: 1px solid var(--branch-black) !important;
   color: var(--branch-black) !important;
 }
+/* 발주 매트릭스 헤더 — 분류마다 색을 달리한다(DESIGN.md §12).
+   2026-07-31에 전부 엘리스로 통일해 봤다가, 분류 구분이 어려워 곧바로 원래대로 되돌렸다(사용자 확인). */
 .branch-redesign .order-cat-food {
   background: var(--branch-vanilla) !important;
 }
