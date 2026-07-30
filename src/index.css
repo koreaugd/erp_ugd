@@ -531,6 +531,28 @@ input[type=number] {
   color: #1A1A1A !important;
 }
 
+/* 근로계약서 진행 상태 select — 상태 칩은 원래 채도를 유지한다(DESIGN_ADMIN §2-1).
+   Tailwind 표준색은 관리자 스코프가 치환하므로 전용 클래스로 못 박는다(DESIGN.md §12). */
+.admin-redesign .admin-labor-status-waiting {
+  background: #EFF0A3 !important; /* 바닐라 = 발송 대기(주의·미확인) */
+  color: #1A1A1A !important;
+}
+
+.admin-redesign .admin-labor-status-sent {
+  background: #D8DFE9 !important; /* 앨리스 = 발송 완료(진행 중) */
+  color: #1A1A1A !important;
+}
+
+.admin-redesign .admin-labor-status-signed {
+  background: #CFDECA !important; /* 허니 = 서명 완료(완료·긍정) */
+  color: #1A1A1A !important;
+}
+
+.admin-redesign .admin-labor-status-hold {
+  background: #18181B !important; /* 검정 = 보류(멈춤) */
+  color: #FFFFFF !important;
+}
+
 .admin-redesign section button[class*="bg-amber-50"],
 .admin-redesign section span[class*="bg-amber-50"],
 .admin-redesign section div[class*="bg-amber-50"] {
