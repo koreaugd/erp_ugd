@@ -584,7 +584,7 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
               <p className="text-xs text-gray-400 mt-1">{month} · 이익금 순. 막대 = 그 달 최댓값 대비. 붉은 값 = 경보 기준. MOM = 이익률 전월 대비(%p).</p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1080px] text-sm">
+              <table className="w-full min-w-[1080px] text-xs">
                 <thead className="text-left">
                   <tr>
                     {["#", "지점", "매출", "이익금", "이익률", "식재료율", "인건비율", "PRIME", "생산성", "회전율", "객단가", "MOM"].map((h, i) => (

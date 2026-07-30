@@ -227,7 +227,7 @@ export function SalaryChangeHistoryTab() {
 
           <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
             <table className="w-full min-w-[1100px] text-xs">
-              <thead className="bg-gray-50 text-gray-500">
+              <thead className="text-[11px] text-[#212121] font-black">
                 <tr>
                   <th className="px-4 py-3 text-left">지점</th>
                   <th className="px-4 py-3 text-left">성명</th>

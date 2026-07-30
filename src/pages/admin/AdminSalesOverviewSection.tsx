@@ -285,7 +285,7 @@ export function AdminSalesOverviewSection() {
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[720px] text-xs">
             <thead className="text-left">
               <tr>
                 <th className="py-2 px-2 text-[11px] font-black text-[#212121] w-12">순위</th>

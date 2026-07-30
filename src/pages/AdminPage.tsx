@@ -27,7 +27,7 @@ import {
   Users, CheckCircle2, AlertTriangle,
   Calendar, Filter,
   Download, FileSpreadsheet, Eye,
-  X, Edit3, Save, LogOut, Briefcase, Trash2,
+  X, Edit3, Save, LogOut, Trash2,
   ChevronRight, Menu
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -962,7 +962,7 @@ export default function AdminPage() {
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
                 {[{ id: "summary", label: "손익 종합" }, { id: "charts", label: "손익 차트" }, { id: "branch", label: "지점 손익계산서" }].map((sub) => (
                   <button key={sub.id} onClick={() => setAnalysisTab(sub.id as "summary" | "charts" | "branch")}
-                    className={`px-4 py-3 text-sm font-bold border-b-2 ${analysisTab === sub.id ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>
+                    className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${analysisTab === sub.id ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>
                     {sub.label}
                   </button>
                 ))}
@@ -999,8 +999,8 @@ export default function AdminPage() {
           {sectionAllowed && adminSection === "dailySettlement" && (
             <section className="admin-daily-settlement-section space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
-                <button onClick={() => setDailySettlementTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
-                <button onClick={() => { setDailySettlementTab("logs"); setDailyLogsFocus(null); }} className={`px-4 py-3 text-sm font-bold border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>마감 이력 점검</button>
+                <button onClick={() => setDailySettlementTab("status")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
+                <button onClick={() => { setDailySettlementTab("logs"); setDailyLogsFocus(null); }} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>마감 이력 점검</button>
               </div>
               {dailySettlementTab === "status" ? (
                 <AdminDailySettlementStatusSection
@@ -1029,9 +1029,9 @@ export default function AdminPage() {
           {sectionAllowed && adminSection === "monthlyClosing" && (
             <section className="space-y-5 animate-fade-in">
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
-                <button onClick={() => setMonthlyClosingTab("status")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>제출현황</button>
-                <button onClick={() => setMonthlyClosingTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
-                <button onClick={() => setMonthlyClosingTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${monthlyClosingTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
+                <button onClick={() => setMonthlyClosingTab("status")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${monthlyClosingTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>제출현황</button>
+                <button onClick={() => setMonthlyClosingTab("cashManagement")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${monthlyClosingTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
+                <button onClick={() => setMonthlyClosingTab("cashExpenses")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${monthlyClosingTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
               </div>
               {monthlyClosingTab === "status" && <AdminMonthlyClosingStatusSection />}
               {monthlyClosingTab === "cashManagement" && <AdminCashManagementSection fixedTab="cashManagement" />}
@@ -1260,7 +1260,7 @@ export default function AdminPage() {
                     {/* [드로어 4] 특이사항 메모 본문 */}
                     <div className="space-y-3">
                       <h4 className="text-sm font-extrabold text-gray-600 border-l-4 border-[#2E6DB4] pl-2">전달된 특이사항 메모</h4>
-                      <div className="p-4 bg-rose-50/30 border border-rose-100/50 rounded-2xl block text-sm text-gray-600 leading-relaxed min-h-[80px]">
+                      <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl block text-xs text-gray-600 leading-relaxed min-h-[80px]">
                         {detailData.master.memo ? detailData.master.memo : <span className="text-gray-400 text-xs italic">추가 기재된 특이 상이 존재하지 않습니다.</span>}
                       </div>
                     </div>
@@ -1353,7 +1353,7 @@ function AdminLatestNoticeHeadline() {
           {notices.slice(0, 3).map((notice) => (
             <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl border border-slate-100 p-3">
               <div>
-                <p className="text-sm font-black text-gray-800">{notice.title}</p>
+                <p className="text-xs font-black text-gray-800">{notice.title}</p>
                 <p className="text-xs text-gray-500 mt-1">{notice.body}</p>
               </div>
               <span className="rounded-full px-2 py-1 text-[10px] font-black">관리자 공지</span>
@@ -1508,13 +1508,13 @@ function AdminNoticeManager() {
       </div>
       <div className="admin-notice-form space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
         <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3">
-          <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400">
+          <select value={targetBranch} onChange={(e) => setTargetBranch(e.target.value)} disabled={noticeTab === "admin"} className="border border-gray-200 rounded-lg px-2 py-2 text-[11px] font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400">
             <option value="전체">전체공지</option>
             {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
           </select>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold bg-white" />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="공지 제목" className="border border-gray-200 rounded-lg px-2 py-2 text-[11px] font-bold bg-white" />
         </div>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold resize-y min-h-[88px] bg-white leading-relaxed" />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="공지 내용" rows={3} className="w-full border border-gray-200 rounded-lg px-2 py-2 text-[11px] font-bold resize-y min-h-[88px] bg-white leading-relaxed" />
         <div className="flex justify-end">
           {editingNoticeId && (
             <button onClick={cancelEditNotice} disabled={saving} className="px-5 py-3 bg-white text-gray-600 border border-gray-200 rounded-xl text-xs font-black disabled:opacity-50">
@@ -1529,7 +1529,7 @@ function AdminNoticeManager() {
           {notices.slice(0, 3).map((notice) => (
             <div key={notice.id} className="admin-notice-item flex items-start justify-between gap-3 rounded-xl bg-slate-50 border border-slate-100 p-3">
               <div>
-                <p className="text-sm font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
+                <p className="text-xs font-black text-gray-800">{notice.title} <span className="ml-2 rounded bg-blue-50 px-2 py-0.5 text-[10px] text-[#2E6DB4]">{notice.targetBranch || "전체"}</span></p>
                 <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{notice.body}</p>
               </div>
               {/* 저장이 도는 동안은 잠근다.
@@ -1538,7 +1538,7 @@ function AdminNoticeManager() {
                   지운 공지가 다른 노트북에 되살아난다. 한 번에 하나씩만 보낸다. */}
               <div className="flex shrink-0 items-center gap-2">
                 <button onClick={() => startEditNotice(notice)} disabled={saving} className="text-xs font-black text-[#2E6DB4] disabled:opacity-40 disabled:cursor-not-allowed">수정</button>
-                <button onClick={() => void deleteNotice(notice.id)} disabled={saving} className="text-xs font-black text-rose-600 disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
+                <button onClick={() => void deleteNotice(notice.id)} disabled={saving} className="text-xs font-black text-[#B3261E] disabled:opacity-40 disabled:cursor-not-allowed">삭제</button>
               </div>
             </div>
           ))}
@@ -1945,7 +1945,7 @@ function AdminDailySettlementStatusSection({
           })}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[640px] text-xs">
             <thead className="text-left">
               <tr>
                 <th className="py-2 px-2 text-[11px] font-black text-[#212121]">지점</th>
@@ -2110,44 +2110,52 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
             <p className="text-xs text-gray-400 mt-1">전 지점 월말마감의 현금관리 집계와 현금지출 일람을 모아 확인합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold min-w-40">
+            {/* 입력칸·셀렉트는 11px·h-8(DESIGN.md §6-0-1) */}
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" />
+            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold min-w-40">
               <option value="전체">전체 지점</option>
               {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
             </select>
-            <button onClick={() => void load()} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">새로고침</button>
+            <button onClick={() => void load()} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black">새로고침</button>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">현금관리 집계</p><p className="text-2xl font-black">{cashRows.length}건</p></div>
-          <div className="rounded-xl bg-orange-50 p-4"><p className="text-xs font-bold text-orange-600">현금지출 합계</p><p className="text-2xl font-black text-orange-700">{formatNumber(summary.cashExpenseTotal)}원</p></div>
-          <div className="rounded-xl bg-rose-50 p-4"><p className="text-xs font-bold text-rose-600">현금 차이 합계</p><p className="text-2xl font-black text-rose-700">{formatNumber(summary.diffTotal)}원</p></div>
+          <div className="rounded-xl bg-slate-50 p-4"><p className="text-[11px] font-bold text-slate-500">현금관리 집계</p><p className="text-2xl font-black">{cashRows.length}건</p></div>
+          <div className="rounded-xl bg-slate-50 p-4"><p className="text-[11px] font-bold text-slate-500">현금지출 합계</p><p className="text-2xl font-black">{formatNumber(summary.cashExpenseTotal)}원</p></div>
+          {/* 차이는 경고 지표 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집으므로(DESIGN_ADMIN §2-1 P0)
+              배경은 중립으로 두고, 값이 0이 아닐 때만 오류 hex 글자색으로 못 박는다. */}
+          <div className="rounded-xl bg-slate-50 p-4">
+            <p className="text-[11px] font-bold text-slate-500">현금 차이 합계</p>
+            <p className={`text-2xl font-black ${summary.diffTotal !== 0 ? "text-[#B3261E]" : ""}`}>{formatNumber(summary.diffTotal)}원</p>
+          </div>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         {!fixedTab && (
           <div className="flex gap-2 border-b border-gray-100 px-5">
-            <button onClick={() => setActiveTab("cashManagement")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
-            <button onClick={() => setActiveTab("cashExpenses")} className={`px-4 py-3 text-sm font-bold border-b-2 ${activeTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
+            <button onClick={() => setActiveTab("cashManagement")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${activeTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
+            <button onClick={() => setActiveTab("cashExpenses")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${activeTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
           </div>
         )}
         <div className="overflow-x-auto">
           {activeTab === "cashManagement" ? (
-            <table className="w-full min-w-[980px] text-sm">
-              <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">마감일자</th><th className="p-3">지점</th><th className="p-3 text-right">전일현금</th><th className="p-3 text-right">현금매출</th><th className="p-3 text-right">현금지출</th><th className="p-3 text-right">현금잔액</th><th className="p-3 text-right">실사현금</th><th className="p-3 text-right">차이</th><th className="p-3">비고</th></tr></thead>
+            /* 표 본문 12px·헤더 11px 검정·셀 py-1.5 px-2(DESIGN.md §6-0-1·§8).
+               '차이' 색은 관리자 치환에 죽지 않게 hex로 못 박는다(§4-2 증감색 값). */
+            <table className="w-full min-w-[980px] text-xs">
+              <thead className="text-left text-[11px] text-[#212121] font-black"><tr><th className="py-2 px-2">마감일자</th><th className="py-2 px-2">지점</th><th className="py-2 px-2 text-right">전일현금</th><th className="py-2 px-2 text-right">현금매출</th><th className="py-2 px-2 text-right">현금지출</th><th className="py-2 px-2 text-right">현금잔액</th><th className="py-2 px-2 text-right">실사현금</th><th className="py-2 px-2 text-right">차이</th><th className="py-2 px-2">비고</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : cashRows.length === 0 ? <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">현금관리 내역이 없습니다.</td></tr> : cashRows.map((row) => (
-                  <tr key={`${row.branchName}-${row.date}`}><td className="p-3 font-mono text-xs">{row.date}</td><td className="p-3 font-black">{row.branchName}</td><td className="p-3 text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="p-3 text-right font-mono">{formatNumber(row.cashSales)}</td><td className="p-3 text-right font-mono text-orange-600">{formatNumber(row.cashExpenseTotal)}</td><td className="p-3 text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="p-3 text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`p-3 text-right font-mono font-black ${row.diff ? "text-rose-600" : "text-emerald-600"}`}>{formatNumber(row.diff)}</td><td className="p-3 text-xs text-gray-500">{row.reason || "-"}</td></tr>
+                  <tr key={`${row.branchName}-${row.date}`}><td className="py-1.5 px-2 font-mono">{row.date}</td><td className="py-1.5 px-2 font-black">{row.branchName}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.cashSales)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.cashExpenseTotal)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`py-1.5 px-2 text-right font-mono font-black ${row.diff ? "text-[#B3261E]" : "text-[#1F7A4D]"}`}>{formatNumber(row.diff)}</td><td className="py-1.5 px-2 text-gray-500">{row.reason || "-"}</td></tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <table className="w-full min-w-[860px] text-sm">
-              <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black"><tr><th className="p-3">일자</th><th className="p-3">지점</th><th className="p-3">분류</th><th className="p-3">사용처</th><th className="p-3">상세</th><th className="p-3 text-right">금액</th><th className="p-3">작성자</th></tr></thead>
+            <table className="w-full min-w-[860px] text-xs">
+              <thead className="text-left text-[11px] text-[#212121] font-black"><tr><th className="py-2 px-2">일자</th><th className="py-2 px-2">지점</th><th className="py-2 px-2">분류</th><th className="py-2 px-2">사용처</th><th className="py-2 px-2">상세</th><th className="py-2 px-2 text-right">금액</th><th className="py-2 px-2">작성자</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? <tr><td colSpan={7} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : expenseRows.length === 0 ? <tr><td colSpan={7} className="p-12 text-center text-gray-400 font-bold">현금지출 내역이 없습니다.</td></tr> : expenseRows.map((row) => (
-                  <tr key={row.id}><td className="p-3 font-mono text-xs">{row.date}</td><td className="p-3 font-black">{row.branchName}</td><td className="p-3">{row.classification}</td><td className="p-3">{row.usage}</td><td className="p-3 text-gray-500">{row.detail || "-"}</td><td className="p-3 text-right font-mono font-black">{formatNumber(row.amount)}</td><td className="p-3 text-xs text-gray-500">{row.writer || "-"}</td></tr>
+                  <tr key={row.id}><td className="py-1.5 px-2 font-mono">{row.date}</td><td className="py-1.5 px-2 font-black">{row.branchName}</td><td className="py-1.5 px-2">{row.classification}</td><td className="py-1.5 px-2">{row.usage}</td><td className="py-1.5 px-2 text-gray-500">{row.detail || "-"}</td><td className="py-1.5 px-2 text-right font-mono font-black">{formatNumber(row.amount)}</td><td className="py-1.5 px-2 text-gray-500">{row.writer || "-"}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -2351,15 +2359,16 @@ function AdminAnnualLeaveSection() {
               <h3 className="text-sm font-black text-gray-900">연차 사용기록 수정</h3>
               <button onClick={() => setEditLeave(null)} className="text-gray-400">×</button>
             </div>
-            <div className="p-5 grid grid-cols-1 gap-3 text-sm">
-              <label className="space-y-1"><span className="text-xs font-black text-gray-500">시작일</span><input type="date" value={editLeave.fields.startDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, startDate: e.target.value, days: String(calcDays(e.target.value, cur.fields.endDate)) } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
-              <label className="space-y-1"><span className="text-xs font-black text-gray-500">종료일</span><input type="date" value={editLeave.fields.endDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, endDate: e.target.value, days: String(calcDays(cur.fields.startDate, e.target.value)) } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
-              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사용일수</span><input type="number" value={editLeave.fields.days} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, days: e.target.value } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
-              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사유</span><input value={editLeave.fields.reason} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, reason: e.target.value } } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+            {/* 입력칸 11px·h-8(DESIGN.md §6-0-1), 숫자칸만 font-mono(§9) */}
+            <div className="p-5 grid grid-cols-1 gap-3 text-xs">
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">시작일</span><input type="date" value={editLeave.fields.startDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, startDate: e.target.value, days: String(calcDays(e.target.value, cur.fields.endDate)) } } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">종료일</span><input type="date" value={editLeave.fields.endDate} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, endDate: e.target.value, days: String(calcDays(cur.fields.startDate, e.target.value)) } } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사용일수</span><input type="number" value={editLeave.fields.days} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, days: e.target.value } } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-mono font-bold" /></label>
+              <label className="space-y-1"><span className="text-xs font-black text-gray-500">사유</span><input value={editLeave.fields.reason} onChange={(e) => setEditLeave((cur) => cur ? { ...cur, fields: { ...cur.fields, reason: e.target.value } } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" /></label>
             </div>
             <div className="px-5 py-4 bg-gray-50 flex justify-end gap-2">
-              <button onClick={() => setEditLeave(null)} className="px-4 py-2 rounded-xl bg-white border text-xs font-bold">취소</button>
-              <button onClick={() => void saveEditedLeave()} className="px-5 py-2 rounded-xl bg-[#2E6DB4] text-white text-xs font-black">저장</button>
+              <button onClick={() => setEditLeave(null)} className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-[11px] font-black">취소</button>
+              <button onClick={() => void saveEditedLeave()} className="px-5 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black">저장</button>
             </div>
           </div>
         </div>
@@ -2371,17 +2380,18 @@ function AdminAnnualLeaveSection() {
               <h3 className="text-sm font-black text-gray-900">연차 기간 일부 삭제</h3>
               <button onClick={() => setPartialDeleteLeave(null)} className="text-gray-400">×</button>
             </div>
-            <div className="p-5 space-y-3 text-sm">
-              <p className="rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">
+            <div className="p-5 space-y-3 text-xs">
+              {/* 삭제 경고 박스 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집으므로 오류 hex 직접 지정(DESIGN_ADMIN §2-1 P0) */}
+              <p className="rounded-xl bg-[#FDE2E2] border border-[#C93A3A] p-3 text-xs font-bold text-[#B91C1C]">
                 기존 기록: {partialDeleteLeave.entry.startDate || partialDeleteLeave.entry.date}~{partialDeleteLeave.entry.endDate || partialDeleteLeave.entry.startDate || partialDeleteLeave.entry.date}
               </p>
-              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 시작일</span><input type="date" value={partialDeleteLeave.startDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, startDate: e.target.value } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
-              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 종료일</span><input type="date" value={partialDeleteLeave.endDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, endDate: e.target.value } : cur)} className="w-full border rounded-xl px-3 py-2" /></label>
+              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 시작일</span><input type="date" value={partialDeleteLeave.startDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, startDate: e.target.value } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" /></label>
+              <label className="block space-y-1"><span className="text-xs font-black text-gray-500">삭제 종료일</span><input type="date" value={partialDeleteLeave.endDate} onChange={(e) => setPartialDeleteLeave((cur) => cur ? { ...cur, endDate: e.target.value } : cur)} className="w-full h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" /></label>
               <p className="text-xs text-gray-400">예: 1~10일 기록에서 1~3일만 삭제하면 4~10일 기록만 남습니다.</p>
             </div>
             <div className="px-5 py-4 bg-gray-50 flex justify-end gap-2">
-              <button onClick={() => setPartialDeleteLeave(null)} className="px-4 py-2 rounded-xl bg-white border text-xs font-bold">취소</button>
-              <button onClick={() => void deleteLeavePartialRange()} className="px-5 py-2 rounded-xl bg-rose-600 text-white text-xs font-black">선택 기간 삭제</button>
+              <button onClick={() => setPartialDeleteLeave(null)} className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-[11px] font-black">취소</button>
+              <button onClick={() => void deleteLeavePartialRange()} className="px-5 py-2 rounded-xl bg-rose-600 text-white text-[11px] font-black">선택 기간 삭제</button>
             </div>
           </div>
         </div>
@@ -2391,40 +2401,43 @@ function AdminAnnualLeaveSection() {
           <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 직원 연차 통합 관리</h2>
           <p className="text-xs text-gray-400 mt-1">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다.</p>
         </div>
-        <button onClick={() => void load()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-xs font-bold">새로고침</button>
+        <button onClick={() => void load()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-[11px] font-black">새로고침</button>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
         <h3 className="font-black text-gray-800">연차 사용 등록</h3>
+        {/* 입력칸·셀렉트 11px·h-8, 버튼 11px/900 (DESIGN.md §6-0-1) */}
         <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-          <select value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setSelectedEmployeeId(""); }} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+          <select value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setSelectedEmployeeId(""); }} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold">
             <option value="">지점 선택</option>
             {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
           </select>
-          <select value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+          <select value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold">
             <option value="">직원 선택</option>
             {availableEmployees.map((employee) => <option key={`${employee.branchName}-${employee.id}`} value={employee.id}>{employee.name}</option>)}
           </select>
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="사용 사유" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold" />
-          <button onClick={() => void saveLeaveUse()} className="bg-emerald-600 text-white rounded-xl text-sm font-black">등록</button>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" />
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" />
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="사용 사유" className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" />
+          <button onClick={() => void saveLeaveUse()} className="h-8 bg-emerald-600 text-white rounded-lg text-[11px] font-black">등록</button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1060px] text-sm">
-            <thead className="bg-slate-50 text-left text-xs text-gray-500">
+          {/* 표 본문 12px·헤더 11px 검정·셀 py-1.5 px-2(DESIGN.md §6-0-1·§8).
+              사용일수·잔여 음수의 빨강은 관리자 치환에 죽지 않게 hex(§4-2 증감색 값)로 못 박는다. */}
+          <table className="w-full min-w-[1060px] text-xs">
+            <thead className="text-left text-[11px] text-[#212121] font-black">
               <tr>
-                <th className="px-4 py-3">지점</th>
-                <th className="px-4 py-3">직원</th>
-                <th className="px-4 py-3">입사일</th>
-                <th className="px-4 py-3">근속년수</th>
-                <th className="px-4 py-3 text-center">부여일수</th>
-                <th className="px-4 py-3 text-center">사용일수</th>
-                <th className="px-4 py-3 text-center">잔여일수</th>
-                <th className="px-4 py-3">사용기록</th>
+                <th className="py-2 px-2">지점</th>
+                <th className="py-2 px-2">직원</th>
+                <th className="py-2 px-2">입사일</th>
+                <th className="py-2 px-2">근속년수</th>
+                <th className="py-2 px-2 text-center">부여일수</th>
+                <th className="py-2 px-2 text-center">사용일수</th>
+                <th className="py-2 px-2 text-center">잔여일수</th>
+                <th className="py-2 px-2">사용기록</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -2434,31 +2447,33 @@ function AdminAnnualLeaveSection() {
                 <tr><td colSpan={8} className="py-16 text-center text-gray-400 font-bold">표시할 정직원 데이터가 없습니다.</td></tr>
               ) : rows.map(({ employee, logs, used, grant, remain }) => (
                 <tr key={`${employee.branchName}-${employee.id}`} className="hover:bg-slate-50/60">
-                  <td className="px-4 py-3 font-bold text-gray-500">{employee.branchName}</td>
-                  <td className="px-4 py-3 font-black text-gray-800">{employee.name}</td>
-                  <td className="px-4 py-3 font-mono text-gray-500">{formatShortDate(employee.entryDate)}</td>
-                  <td className="px-4 py-3 font-bold text-gray-600">{formatTenureText(employee.entryDate)}</td>
-                  <td className="px-4 py-3 text-center">
+                  <td className="py-1.5 px-2 font-bold text-gray-500">{employee.branchName}</td>
+                  <td className="py-1.5 px-2 font-black text-gray-800">{employee.name}</td>
+                  <td className="py-1.5 px-2 font-mono text-gray-500">{formatShortDate(employee.entryDate)}</td>
+                  <td className="py-1.5 px-2 font-bold text-gray-600">{formatTenureText(employee.entryDate)}</td>
+                  <td className="py-1.5 px-2 text-center">
                     <input
                       type="number"
                       value={grant}
                       onChange={(e) => setGrantsByBranch((prev) => ({ ...prev, [employee.branchName]: { ...(prev[employee.branchName] || {}), [employee.id]: Number(e.target.value) || 0 } }))}
                       onBlur={(e) => void saveGrant(employee.branchName, employee.id, e.target.value)}
-                      className="w-20 text-center border border-gray-200 rounded-lg px-2 py-1 font-bold"
+                      className="w-20 text-center border border-gray-200 rounded-lg px-2 py-1 text-[11px] font-mono font-bold"
                     />
                   </td>
-                  <td className="px-4 py-3 text-center font-black text-rose-600">{used}</td>
-                  <td className={`px-4 py-3 text-center font-black ${remain < 0 ? "text-rose-700" : "text-[#2E6DB4]"}`}>{remain}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
+                  <td className="py-1.5 px-2 text-center font-black text-[#B3261E]">{used}</td>
+                  <td className={`py-1.5 px-2 text-center font-black ${remain < 0 ? "text-[#B3261E]" : "text-[#2E6DB4]"}`}>{remain}</td>
+                  <td className="py-1.5 px-2 text-gray-500">
                     {logs.length === 0 ? "-" : (
                       <div className="space-y-1">
                         {logs.map((entry) => (
                           <div key={entry.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1">
                             <span>{entry.startDate || entry.date}{entry.endDate && entry.endDate !== (entry.startDate || entry.date) ? `~${entry.endDate}` : ""} ({entry.days}일, {entry.reason || "-"})</span>
+                            {/* 버튼은 11px/900(§6-0-1). 색만으로 의미를 나누지 않게 글자 라벨이 주,
+                                색은 치환에 안 죽는 hex로 보조(§10·DESIGN_ADMIN §2-1). */}
                             <span className="flex gap-1">
-                              <button onClick={() => setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } })} className="text-[10px] font-black text-[#2E6DB4]">수정</button>
-                              <button onClick={() => setPartialDeleteLeave({ branchName: employee.branchName, entry, startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "" })} className="text-[10px] font-black text-amber-600">일부삭제</button>
-                              <button onClick={() => void deleteLeaveEntry(employee.branchName, entry.id)} className="text-[10px] font-black text-rose-600">삭제</button>
+                              <button onClick={() => setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } })} className="text-[11px] font-black text-[#2E6DB4]">수정</button>
+                              <button onClick={() => setPartialDeleteLeave({ branchName: employee.branchName, entry, startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "" })} className="text-[11px] font-black text-[#B45309]">일부삭제</button>
+                              <button onClick={() => void deleteLeaveEntry(employee.branchName, entry.id)} className="text-[11px] font-black text-[#B3261E]">삭제</button>
                             </span>
                           </div>
                         ))}
@@ -2510,7 +2525,8 @@ const MODLOG_TH = "py-2 px-2 text-left text-[11px] font-black text-[#212121] whi
 const MODLOG_TD = "py-1.5 px-2";
 const MODLOG_EMPTY = "py-8 text-center text-[11px] font-bold text-gray-400";
 // 삭제 버튼 — 행 높이를 키우지 않도록 h-6로 납작하게.
-const MODLOG_DELETE = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-rose-600 hover:bg-rose-50 cursor-pointer";
+// hover:bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집으므로 오류 hex로 못 박는다(DESIGN_ADMIN §2-1)
+const MODLOG_DELETE = "inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 bg-white text-[#B3261E] hover:bg-[#FDE2E2] cursor-pointer";
 
 // ── 최근 건 강조 ───────────────────────────────────────────────────────────
 // 최근 3일(오늘·어제·그저께) 안에 올라온 행을 바닐라로 짚어 준다. 예전엔 관리자가 행마다 '확인'을 눌러
@@ -3640,6 +3656,15 @@ function AdminManualOvertimesSection() {
   );
 }
 
+// 진행 상태별 select 배경 — 원래 채도의 상태색(index.css .admin-labor-status-*).
+// Tailwind 표준색은 관리자 스코프가 치환하므로 전용 클래스로 못 박는다(DESIGN.md §12).
+const LABOR_STATUS_CLASS: Record<string, string> = {
+  "발송 대기": "admin-labor-status-waiting",
+  "발송 완료": "admin-labor-status-sent",
+  "서명 완료": "admin-labor-status-signed",
+  "보류": "admin-labor-status-hold",
+};
+
 function AdminLaborContractsSection() {
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3647,20 +3672,36 @@ function AdminLaborContractsSection() {
   const [searchName, setSearchName] = useState("");
   const [templateMeta, setTemplateMeta] = useState<LaborContractTemplateMeta | null>(null);
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  // 저장이 진행 중인 행(`지점명:id`) — 그 행의 select/삭제만 잠가 중복 쓰기를 막는다.
+  const [pendingRows, setPendingRows] = useState<Set<string>>(() => new Set());
+  // 요청 세대 번호. 조회가 겹치거나(포커스 복귀 연타) 조회 중에 상태를 바꾸면,
+  // 먼저 떠났던 오래된 응답이 나중에 도착해 최신 화면을 덮는다(stale overwrite).
+  // 조회 시작·수정 시작 때마다 번호를 올리고, 응답이 돌아왔을 때 번호가 달라져 있으면 버린다.
+  const requestSeqRef = useRef(0);
 
-  const loadData = useCallback(async () => {
+  // silent=true면 스피너(loading)를 켜지 않고 조용히 데이터만 갱신한다.
+  // 화면 복귀(focus/visibilitychange)마다 표가 스피너로 갈렸다 다시 그려지는 깜빡임을 없애기 위함
+  // (지점 LaborContractTab과 같은 방식). 실패하면 이미 그려 둔 표를 그대로 유지한다.
+  const loadData = useCallback(async (silent = false) => {
+    const seq = ++requestSeqRef.current;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [contractData, meta] = await Promise.all([
-        gasClient.getAllLaborContracts().catch(() => []),
+        gasClient.getAllLaborContracts().catch(() => null),
         gasClient.getLaborContractTemplateMeta().catch(() => null)
       ]);
-      setContracts(contractData || []);
-      setTemplateMeta(meta);
+      // 이 응답보다 새 조회/수정이 이미 시작됐다면 낡은 응답이다 — 화면에 반영하지 않는다.
+      if (seq !== requestSeqRef.current) return;
+      // 조용한 갱신 실패(null)로 화면을 빈 목록으로 갈아치우지 않는다.
+      if (contractData) setContracts(contractData);
+      else if (!silent) setContracts([]);
+      if (meta) setTemplateMeta(meta);
     } catch (err) {
       console.error("Failed to load labor contracts:", err);
     } finally {
-      setLoading(false);
+      // 최신 요청이 끝났을 때만 스피너를 끈다 — 연타 시 낡은 응답이 새 조회의 스피너를 꺼버리지 않게.
+      // (스피너가 떠 있는 동안은 행이 안 보여 수정/삭제로 seq만 오르고 조회가 없는 경우는 없다.)
+      if (seq === requestSeqRef.current) setLoading(false);
     }
   }, []);
 
@@ -3668,7 +3709,7 @@ function AdminLaborContractsSection() {
 
   useEffect(() => {
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void loadData();
+      if (document.visibilityState === "visible") void loadData(true);
     };
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -3721,21 +3762,80 @@ function AdminLaborContractsSection() {
   };
 
   const saveBranchContracts = async (branchName: string, next: any[]) => {
+    // `:` 키가 캐노니컬(관리자/지점 조회 기준). 옛 클라이언트용 `_` 사본은 최선노력 —
+    // 사본 저장만 실패했는데 전체를 실패로 알리고 롤백하면, 이미 서버에 반영된 상태와
+    // 화면이 어긋난다(지점 LaborContractTab과 같은 규약, Codex 2R P1).
     await gasClient.saveSharedData("labor_contracts:" + branchName, next);
-    await gasClient.saveSharedData("labor_contracts_" + branchName, next);
-    await loadData();
+    try {
+      await gasClient.saveSharedData("labor_contracts_" + branchName, next);
+    } catch (err) {
+      console.warn("옛 형식 사본(labor_contracts_) 저장 실패 — 캐노니컬 저장은 성공:", err);
+    }
+    // 저장 후 재조회는 조용히 — 스피너로 표를 갈아치우지 않는다.
+    await loadData(true);
+  };
+
+  const rowKey = (row: any) => `${row.branchName}:${row.id}`;
+
+  // id 없는 옛 레코드는 수정/삭제를 막는다 — undefined === undefined 라서
+  // 같은 지점의 id 없는 행 전부가 한꺼번에 바뀌거나 지워진다(Codex 리뷰 P1).
+  const ensureRowId = (row: any) => {
+    if (row.id) return true;
+    window.alert("이 내역은 옛 형식(고유번호 없음)이라 여기서 바꿀 수 없습니다.\n해당 지점 화면에서 삭제 후 다시 등록해 주세요.");
+    return false;
+  };
+
+  const markPending = (key: string, on: boolean) => {
+    setPendingRows((current) => {
+      const next = new Set(current);
+      if (on) next.add(key); else next.delete(key);
+      return next;
+    });
   };
 
   const updateStatus = async (row: any, status: string) => {
-    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
-    const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item);
-    await saveBranchContracts(row.branchName, next);
+    if (!ensureRowId(row)) return;
+    const key = rowKey(row);
+    if (pendingRows.has(key)) return; // 같은 행의 저장이 아직 진행 중
+    const prevStatus = row.status || "발송 대기";
+    markPending(key, true);
+    // 서버 반영 전에 화면 값부터 바꾼다 — 안 그러면 재조회가 끝날 때까지 select가 옛 값으로 되돌아가 보인다.
+    // 이 낙관값이 낡은 재조회 응답에 덮이지 않도록 세대 번호도 올린다.
+    requestSeqRef.current++;
+    setContracts((current) => current.map((item) => item.id === row.id && item.branchName === row.branchName ? { ...item, status } : item));
+    try {
+      const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
+      const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item);
+      await saveBranchContracts(row.branchName, next);
+    } catch (err) {
+      console.error("진행 상태 저장에 실패했습니다.", err);
+      // 실패하면 그 행만, 아직 내 낙관값 그대로일 때만 되돌린다 — 다른 행/더 새 값은 건드리지 않는다.
+      setContracts((current) => current.map((item) =>
+        item.id === row.id && item.branchName === row.branchName && item.status === status
+          ? { ...item, status: prevStatus }
+          : item
+      ));
+      window.alert("진행 상태 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      markPending(key, false);
+    }
   };
 
   const deleteContract = async (row: any) => {
+    if (!ensureRowId(row)) return;
+    const key = rowKey(row);
+    if (pendingRows.has(key)) return;
     if (!window.confirm(row.branchName + " / " + row.name + " 내역을 삭제할까요?")) return;
-    const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
-    await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id));
+    markPending(key, true);
+    try {
+      const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
+      await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id));
+    } catch (err) {
+      console.error("발송 내역 삭제에 실패했습니다.", err);
+      window.alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      markPending(key, false);
+    }
   };
 
   // 지점명 필터 드롭다운 옵션 — 등록된 발송 내역에 실제로 있는 지점만(가나다순).
@@ -3756,54 +3856,55 @@ function AdminLaborContractsSection() {
 
   return (
     <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
-      <div className="bg-white p-6 rounded-2xl border shadow-sm">
+      {/* 카드 테두리는 gray 계열로 명시(§13-2) — 색 없는 `border`는 검정 치환 catch-all에서 빠질 수 있다.
+          제목은 DESIGN_ADMIN §4-1에 따라 기존 관리자 탭과 같은 평제목(알약 아님)을 유지한다. */}
+      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h3 className="font-black text-gray-800 text-lg flex items-center gap-2">
-              <Briefcase className="w-5 h-5 text-[#2E6DB4]" />
-              전 지점 근로계약서 관리
-            </h3>
-            <p className="text-xs text-gray-400 mt-1">지점이 근로계약서 발송을 요청한 인원 목록입니다.</p>
-            <p className="text-xs font-bold text-gray-500 mt-1">
+            {/* 제목은 텍스트만 — 아이콘 금지(DESIGN.md §6-1) */}
+            <h3 className="font-black text-gray-800 text-lg">전 지점 근로계약서 관리</h3>
+            <p className="text-[11px] text-gray-400 mt-1">지점이 근로계약서 발송을 요청한 인원 목록입니다.</p>
+            <p className="text-[11px] font-bold text-gray-500 mt-1">
               파트타이머 양식: {templateMeta
                 ? `${templateMeta.fileName} (${Math.round(templateMeta.size / 1024)}KB · ${templateMeta.uploadedAt.slice(0, 10)} 등록)`
                 : "등록 전 — 지점에서 내려받을 수 없습니다."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className={`px-4 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-bold ${uploadingTemplate ? "opacity-40" : "cursor-pointer"}`}>
+            <label className={`px-4 py-2 rounded-xl border border-gray-200 bg-gray-50 text-[11px] font-black ${uploadingTemplate ? "opacity-40" : "cursor-pointer"}`}>
               {uploadingTemplate ? "등록 중…" : templateMeta ? "파트타이머 양식 교체" : "파트타이머 양식 등록"}
               <input type="file" className="hidden" disabled={uploadingTemplate} onChange={handleTemplateUpload} />
             </label>
-            <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-xs font-bold cursor-pointer transition-colors">새로고침</button>
+            <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-[11px] font-black cursor-pointer transition-colors">새로고침</button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-          <select value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50">
+          <select value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-gray-50">
             <option value="">지점 선택</option>
             {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
-          <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold bg-gray-50" />
+          <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-gray-50" />
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border overflow-hidden shadow-2xs">
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-2xs">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] text-sm">
+            {/* 표 본문 12px(text-xs)·헤더 11px 검정(§6-0-1) — 셀에서 개별 크기 지정 금지 */}
+            <table className="w-full min-w-[920px] text-xs">
               <thead>
-                <tr className="bg-gray-50 text-left border-b text-gray-500 font-extrabold text-xs">
-                  <th className="p-4">등록일</th>
-                  <th className="py-4 px-3">지점명</th>
-                  <th className="py-4 px-3">구분</th>
-                  <th className="py-4 px-3">계약유형</th>
-                  <th className="py-4 px-3">이름</th>
-                  <th className="py-4 px-3">연락처</th>
-                  <th className="py-4 px-3">입사·이동일</th>
-                  <th className="py-4 px-3 text-right">급여</th>
-                  <th className="py-4 px-3 text-center">요청</th>
-                  <th className="py-4 px-3 text-center">진행 상태</th>
-                  <th className="py-4 px-3 text-center">관리</th>
+                <tr className="text-left border-b text-[#212121] font-black text-[11px]">
+                  <th className="py-2 px-2">등록일</th>
+                  <th className="py-2 px-2">지점명</th>
+                  <th className="py-2 px-2">구분</th>
+                  <th className="py-2 px-2">계약유형</th>
+                  <th className="py-2 px-2">이름</th>
+                  <th className="py-2 px-2">연락처</th>
+                  <th className="py-2 px-2">입사·이동일</th>
+                  <th className="py-2 px-2 text-right">급여</th>
+                  <th className="py-2 px-2 text-center">요청</th>
+                  <th className="py-2 px-2 text-center">진행 상태</th>
+                  <th className="py-2 px-2 text-center">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -3813,40 +3914,61 @@ function AdminLaborContractsSection() {
                   <tr><td colSpan={11} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr>
                 ) : filteredContracts.map((contract, idx) => (
                   <tr key={contract.id || idx} className="border-b hover:bg-slate-50/50">
-                    <td className="p-4 font-mono text-xs text-gray-500 whitespace-nowrap">{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
-                    <td className="py-4 px-3 font-black text-gray-800 whitespace-nowrap">{contract.branchName}</td>
-                    <td className="py-4 px-3 whitespace-nowrap">
+                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
+                    <td className="py-1.5 px-2 font-black text-gray-800 whitespace-nowrap">{contract.branchName}</td>
+                    <td className="py-1.5 px-2 whitespace-nowrap">
                       {contract.contractType === "지점이동" ? (
-                        <span className="inline-flex items-center gap-1 text-xs">
-                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-black text-emerald-800">지점이동</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-800">지점이동</span>
                           {contract.previousBranch && <span className="text-gray-400">← {contract.previousBranch}</span>}
                         </span>
                       ) : contract.contractType === "신규입사" ? (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-black text-amber-800">신규입사</span>
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-800">신규입사</span>
                       ) : (
                         <span className="text-gray-300">-</span>
                       )}
                     </td>
-                    <td className="py-4 px-3 whitespace-nowrap">
+                    <td className="py-1.5 px-2 whitespace-nowrap">
                       {/* 계약유형(2026-07-29) — 1주/2주 단위 계약서인지, 수습 후 정규 계약서인지. 옛 레코드는 "-" */}
                       {contract.periodType && (LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]
-                        ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-black text-slate-600">{(LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]}</span>
+                        ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">{(LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]}</span>
                         : <span className="text-gray-300">-</span>}
                     </td>
-                    <td className="py-4 px-3 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
-                    <td className="py-4 px-3 font-mono text-xs text-blue-700 font-black whitespace-nowrap">{contract.phone}</td>
-                    <td className="py-4 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">{contract.effectiveDate || "-"}</td>
-                    <td className="py-4 px-3 text-right font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
-                    <td className="py-4 px-3 text-center">{contract.deleteRequested ? <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-black">삭제요청</span> : contract.editRequestedAt ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-black">수정됨</span> : "-"}</td>
-                    <td className="py-4 px-3 text-center">
-                      <select value={contract.status || "발송 대기"} onChange={(e) => void updateStatus(contract, e.target.value)} className="border rounded-lg px-2 py-1 text-xs font-black">
+                    <td className="py-1.5 px-2 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
+                    <td className="py-1.5 px-2 font-mono font-black whitespace-nowrap">{contract.phone}</td>
+                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">{contract.effectiveDate || "-"}</td>
+                    <td className="py-1.5 px-2 text-right font-mono font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
+                    <td className="py-1.5 px-2 text-center">
+                      {/* 삭제요청은 오류색 hex 직접 지정 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집는다(DESIGN_ADMIN §2-1 P0) */}
+                      {contract.deleteRequested
+                        ? <span className="px-2 py-1 rounded-full bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A] text-[11px] font-black">삭제요청</span>
+                        : contract.editRequestedAt
+                          ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-black">수정됨</span>
+                          : "-"}
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <select
+                        value={contract.status || "발송 대기"}
+                        onChange={(e) => void updateStatus(contract, e.target.value)}
+                        disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                        aria-busy={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                        title="진행 상태"
+                        className={`border rounded-lg px-2 py-1 text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed ${LABOR_STATUS_CLASS[contract.status || "발송 대기"] || ""}`}
+                      >
                         <option>발송 대기</option>
                         <option>발송 완료</option>
                         <option>서명 완료</option>
                         <option>보류</option>
                       </select>
                     </td>
-                    <td className="py-4 px-3 text-center"><button onClick={() => void deleteContract(contract)} className="px-3 py-1.5 bg-rose-50 text-rose-700 rounded-lg text-xs font-black">삭제</button></td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button
+                        onClick={() => void deleteContract(contract)}
+                        disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                        title={`${contract.name} 삭제`}
+                        className="px-3 py-1.5 border border-gray-200 bg-gray-50 rounded-lg text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed"
+                      >삭제</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
