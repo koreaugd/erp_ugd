@@ -15,6 +15,7 @@ import {
   query,
   where,
   or,
+  documentId,
   getCountFromServer
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -533,9 +534,22 @@ export async function firebaseAppendSharedArrayItem(
   });
 }
 
+// shared_data에서 특정 키 접두(예: "labor_contracts:")의 문서만 ID 범위로 읽는다.
+// 문서 ID는 encodeURIComponent(키)라서 접두도 인코딩해 비교한다.
+// 컬렉션 전체 getDocs는 근로계약서 양식 파일(수백 KB)·일일마감·카카오 캐시 등
+// 무관한 문서까지 통째로 내려받아, 조회 한 번에 수 MB가 나가던 원인이었다(2026-07-30).
+async function getSharedDocsByKeyPrefix(keyPrefix: string) {
+  const encodedPrefix = encodeURIComponent(keyPrefix);
+  return await getDocs(query(
+    collection(getDirectDb(), "shared_data"),
+    where(documentId(), ">=", encodedPrefix),
+    where(documentId(), "<=", encodedPrefix + "\uf8ff")
+  ));
+}
+
 export async function firebaseGetAllManualOvertimes() {
   await waitForFirebaseUser(); // 인증 전 거부를 빈 목록으로 오해하지 않도록 로그인 복원을 기다린다.
-  const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
+  const snapshot = await getSharedDocsByKeyPrefix("manual_overtime:");
   const allOvertimes: any[] = [];
   snapshot.forEach((doc) => {
     const key = decodeURIComponent(doc.id);
@@ -557,7 +571,8 @@ export async function firebaseGetAllManualOvertimes() {
 
 export async function firebaseGetAllLaborContracts() {
   await waitForFirebaseUser(); // 인증 전 거부를 빈 목록으로 오해하지 않도록 로그인 복원을 기다린다.
-  const snapshot = await getDocs(collection(getDirectDb(), "shared_data"));
+  // 근로계약서 문서만 읽는다 — 전체 스캔은 양식 파일 본문까지 매번 딸려 와 무거웠다.
+  const snapshot = await getSharedDocsByKeyPrefix("labor_contracts:");
   const allContracts: any[] = [];
   snapshot.forEach((doc) => {
     const key = decodeURIComponent(doc.id);
