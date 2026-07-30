@@ -32,6 +32,25 @@ export function accountLabel(key: string): string {
 // 카카오에서 회원을 삭제하면 그 사람의 과거 주문에서 member_department 가 null 이 된다(실측).
 // 이름으로 매칭하면 동명이인을 가를 수 없어(정윤기 사례) 반드시 member_id 로 지정한다.
 // 삭제 전에 부서를 채워두면 애초에 필요 없다 — 운영 지침은 "퇴사자 존치"다.
+/**
+ * 카카오에 적힌 부서·그룹이 실제 소속과 달라 바로잡아야 하는 인원. 키는 `${account_key}|${member_id}`.
+ *
+ * 왜 필요한가 — 카카오는 **주문마다 그때의 부서·그룹을 함께 실어 보낸다.** 그래서 뒤늦게 부서를 고쳐도
+ * 이미 지나간 이용내역은 옛 값 그대로다. 과거 건까지 실제 지점으로 읽으려면 이 표가 있어야 한다.
+ *
+ * 왜 부서·그룹보다 **먼저** 보는가 — 그룹명만으로도 매핑이 성립해 버리기 때문이다.
+ * 아래 세 사람은 부서가 '대물섬'(브랜드명)뿐인데 그룹이 한남점으로 잘못 잡혀 있어, 뒤에 두면
+ * 그룹명이 먼저 걸려 한남점 이용으로 계속 집계된다(KAKAO_RETIRED_MEMBER_BRANCH 를 맨 뒤에 둔 것과 다른 이유).
+ * 다만 관리자가 남긴 지점 변경 이력이 있으면 그쪽이 우선이다 — 이력은 "언제부터 어디"를 담고 있어 더 정확하다.
+ */
+export const KAKAO_MEMBER_BRANCH_OVERRIDE: Record<string, string> = {
+  // 종로점 직원인데 부서가 '대물섬'뿐이고 그룹은 한남점으로 등록돼 있던 세 사람(2026-07-31 사용자 확인).
+  // 부서는 그 뒤 '대물섬 종로점'으로 고쳐졌지만, 그 전 이용내역은 옛 값이라 이 표로 바로잡는다.
+  "acct1|TCWAY6ZY": "대물섬 종로점", // 김현준
+  "acct1|A4L2RTKS": "대물섬 종로점", // 정휘찬
+  "acct1|8F3YIU1T": "대물섬 종로점", // 황혁
+};
+
 export const KAKAO_RETIRED_MEMBER_BRANCH: Record<string, string> = {
   "acct2|ZB2L167I": "사카바단단", // 김태호, 2026-05 10건 90,700원
 };
@@ -95,6 +114,12 @@ function resolveBranchName(
       return { branchName: trimmed, unmapped: true };
     }
   }
+  // [소속 교정] 카카오에 적힌 부서·그룹이 실제와 다른 인원은 여기서 바로잡는다.
+  // 부서·그룹을 보기 **전에** 확인해야 한다 — 그룹명만으로도 매핑이 성립해 버려서,
+  // 뒤에 두면 잘못 등록된 그룹이 먼저 걸려 이 표가 아무 일도 하지 못한다.
+  const override = KAKAO_MEMBER_BRANCH_OVERRIDE[`${order.account_key}|${order.member_id}`];
+  if (override && erpBranchNames.has(override)) return { branchName: override, unmapped: false };
+
   const candidates = [order.member_department, order.group_name]
     .map((v) => (v || "").trim())
     .filter(Boolean);

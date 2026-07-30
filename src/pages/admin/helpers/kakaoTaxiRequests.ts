@@ -3,9 +3,12 @@
 // 지점 탭(BusinessTaxiTab)과 관리자 신청 관리(KakaoTaxiSection)가 같이 쓴다.
 // 저장 위치: Firestore 공유데이터 `kakao_taxi_requests:<지점>` (지점별 배열 — 설계서 참조).
 
-// "delete"(삭제 요청)는 지점 화면에서 더 이상 만들지 않는다(2026-07-29 — 삭제 승인이 직원 계정 자체를
-// 지워 과거 이용내역 지점까지 잃는 사고가 있었다). 기존 접수분의 표시·처리용으로만 타입에 남긴다.
-// "branchChange"(변경신청)가 그 자리를 대신한다 — 직원을 지우지 않고 소속 지점만 옮긴다.
+// "delete"(삭제 요청)는 **지우는 요청이 아니라 '이용 중지' 요청**이다(2026-07-31 재도입).
+//   · 2026-07-29에 한 번 폐지했다 — 그때는 승인이 직원 계정 자체를 지워 과거 이용내역의 지점까지 잃었다.
+//   · 지금은 승인해도 계정을 지우지 않고 **인증만 해제(휴직 처리)** 한다. 그러면 지점 화면 목록에서는
+//     사라지고(지점 목록은 인증완료자만 보여준다) 택시도 못 타지만, 계정과 과거 이용내역은 그대로 남는다.
+//   · 퇴사자를 처리할 통로가 없어 지점이 무엇을 골라야 할지 헷갈린다는 지적을 받아 되살렸다.
+// "branchChange"(지점변경)는 그대로 — 직원을 지우지 않고 소속 지점만 옮긴다.
 export type KakaoTaxiRequestType = "register" | "update" | "delete" | "branchChange";
 // processing = 관리자가 처리를 선점한 중간 상태. 카카오 API 호출 **전에** 저장되어
 // 두 관리자가 같은 신청을 동시에 승인하는 이중 실행을 막는다(실패 시 pending 으로 되돌림).
@@ -47,8 +50,8 @@ export const kakaoTaxiRequestsKey = (branchName: string) => `${KAKAO_TAXI_REQUES
 export const REQUEST_TYPE_LABEL: Record<KakaoTaxiRequestType, string> = {
   register: "이용신청(등록)",
   update: "수정요청",
-  delete: "삭제 요청(구)",
-  branchChange: "변경신청(지점변경)",
+  delete: "삭제요청(이용중지)",
+  branchChange: "지점변경",
 };
 
 export const REQUEST_STATUS_LABEL: Record<KakaoTaxiRequestStatus, string> = {

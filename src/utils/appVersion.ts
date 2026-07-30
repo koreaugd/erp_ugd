@@ -65,10 +65,17 @@ export async function ensureLatestAppVersion() {
   if (typeof window === "undefined") return true;
   if ((import.meta as any).env?.DEV) return true;
 
+  // **이 확인은 화면 진입을 막고 기다린다**(로그인·지점선택 직후). 그래서 응답이 늦으면
+  // 그만큼 화면이 안 열린다. 지하 매장처럼 신호가 약한 곳에서는 이 요청 하나가 수십 초를
+  // 잡아먹을 수 있었다 — 타임아웃이 없어 브라우저가 포기할 때까지 기다렸다.
+  // 확인에 실패하면 어차피 "그냥 진행"이므로, 짧게 끊고 들여보내는 편이 낫다.
+  // (버전이 정말 바뀌었다면 AppSessionGuard 가 뒤에서 다시 확인해 갈아끼운다.)
+  const timeout = new AbortController();
+  const timeoutTimer = window.setTimeout(() => timeout.abort(), 2500);
   try {
     const versionUrl = new URL(getVersionFileUrl(), window.location.href);
     versionUrl.searchParams.set("checkedAt", String(Date.now()));
-    const response = await fetch(versionUrl.toString(), { cache: "no-store" });
+    const response = await fetch(versionUrl.toString(), { cache: "no-store", signal: timeout.signal });
     if (!response.ok) return true;
 
     const latest = await response.json();
@@ -87,5 +94,7 @@ export async function ensureLatestAppVersion() {
   } catch (error) {
     console.warn("앱 최신 버전 확인에 실패했습니다.", error);
     return true;
+  } finally {
+    window.clearTimeout(timeoutTimer);
   }
 }

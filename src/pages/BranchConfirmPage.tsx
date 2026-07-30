@@ -1,5 +1,5 @@
 // src/pages/BranchConfirmPage.tsx
-import React, { useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient } from "../api/gasClient";
@@ -12,18 +12,24 @@ import { ensureLatestAppVersion } from "../utils/appVersion";
 import { cleanNumeric } from "./branch/helpers/formatters";
 import type { BranchDailyTab } from "./branch/types";
 import { BRANCH_TAB_REGISTRY, isTabAllowed, firstAllowedKey, permKeyForState, type PermKey } from "./branch/tabRegistry";
-import { AnnualLeaveTab } from "./branch/tabs/AnnualLeaveTab";
-import { LaborContractTab } from "./branch/tabs/LaborContractTab";
-import { BusinessTaxiTab } from "./branch/tabs/BusinessTaxiTab";
-import { BranchDashboardTab } from "./branch/tabs/BranchDashboardTab";
-import { OvertimeLogTab } from "./branch/tabs/OvertimeLogTab";
-import { PartTimeLogTab } from "./branch/tabs/PartTimeLogTab";
-import { OrderManagementTabV2 } from "./branch/tabs/OrderManagementTabV2";
-import { LiquorInventoryTabV2 } from "./branch/tabs/LiquorInventoryTabV2";
-import { MonthlySettleTab } from "./branch/tabs/MonthlySettleTab";
-import { DailySettleTab } from "./branch/tabs/DailySettleTab";
-import { OfficeWorkLogTab } from "./branch/tabs/OfficeWorkLogTab";
-import { RosterTab } from "./branch/tabs/RosterTab";
+// **탭은 열 때 받는다.**
+// 예전에는 12개 탭을 전부 정적으로 들여와, 대시보드 하나를 보려고 모든 탭 코드를
+// 내려받아야 화면이 떴다(지점 화면 묶음 444KB / 압축 115KB). 매장 태블릿·약한 회선에서
+// 이 대기가 그대로 체감된다. 각 탭을 따로 떼어 두면 처음 받는 양이 크게 줄고,
+// 실제로 누른 탭만 그때 받는다. 받는 사이에는 아래 Suspense 안내가 잠깐 보인다.
+// (배포로 옛 묶음이 지워져 못 받는 경우는 ChunkErrorBoundary·installChunkReloadGuard 가 이미 처리한다.)
+const AnnualLeaveTab = lazy(() => import("./branch/tabs/AnnualLeaveTab").then((m) => ({ default: m.AnnualLeaveTab })));
+const LaborContractTab = lazy(() => import("./branch/tabs/LaborContractTab").then((m) => ({ default: m.LaborContractTab })));
+const BusinessTaxiTab = lazy(() => import("./branch/tabs/BusinessTaxiTab").then((m) => ({ default: m.BusinessTaxiTab })));
+const BranchDashboardTab = lazy(() => import("./branch/tabs/BranchDashboardTab").then((m) => ({ default: m.BranchDashboardTab })));
+const OvertimeLogTab = lazy(() => import("./branch/tabs/OvertimeLogTab").then((m) => ({ default: m.OvertimeLogTab })));
+const PartTimeLogTab = lazy(() => import("./branch/tabs/PartTimeLogTab").then((m) => ({ default: m.PartTimeLogTab })));
+const OrderManagementTabV2 = lazy(() => import("./branch/tabs/OrderManagementTabV2").then((m) => ({ default: m.OrderManagementTabV2 })));
+const LiquorInventoryTabV2 = lazy(() => import("./branch/tabs/LiquorInventoryTabV2").then((m) => ({ default: m.LiquorInventoryTabV2 })));
+const MonthlySettleTab = lazy(() => import("./branch/tabs/MonthlySettleTab").then((m) => ({ default: m.MonthlySettleTab })));
+const DailySettleTab = lazy(() => import("./branch/tabs/DailySettleTab").then((m) => ({ default: m.DailySettleTab })));
+const OfficeWorkLogTab = lazy(() => import("./branch/tabs/OfficeWorkLogTab").then((m) => ({ default: m.OfficeWorkLogTab })));
+const RosterTab = lazy(() => import("./branch/tabs/RosterTab").then((m) => ({ default: m.RosterTab })));
 
 
 
@@ -707,6 +713,15 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             </div>
           )}
 
+          {/* 탭 코드를 받는 잠깐 동안 빈 화면 대신 이 안내가 보인다. 탭 하나만 받으면 되므로 짧다. */}
+          <Suspense
+            fallback={
+              <div className="py-24 flex flex-col items-center justify-center gap-3">
+                <LoadingSpinner size="lg" />
+                <p className="text-xs font-bold text-zinc-400">화면을 불러오는 중입니다.</p>
+              </div>
+            }
+          >
           {contentAllowed && mainCategory === "dashboard" && <BranchDashboardTab branchName={activeBranchName} />}
 
           {contentAllowed && mainCategory === "daily" && (
@@ -745,6 +760,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           {contentAllowed && mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
 
           {contentAllowed && mainCategory === "businessTaxi" && <BusinessTaxiTab branchName={activeBranchName} />}
+          </Suspense>
         </main>
       </div>
 
