@@ -9,7 +9,10 @@
 //     사라지고(지점 목록은 인증완료자만 보여준다) 택시도 못 타지만, 계정과 과거 이용내역은 그대로 남는다.
 //   · 퇴사자를 처리할 통로가 없어 지점이 무엇을 골라야 할지 헷갈린다는 지적을 받아 되살렸다.
 // "branchChange"(지점변경)는 그대로 — 직원을 지우지 않고 소속 지점만 옮긴다.
-export type KakaoTaxiRequestType = "register" | "update" | "delete" | "branchChange";
+// "resume"(이용재개)는 이용중지된 사람이 복귀했을 때 지점이 올리는 요청이다(2026-07-31).
+//   · 카카오 이용재개(unblock)는 관리자만 할 수 있어 지점이 스스로 풀 수 없다.
+//   · 이 통로가 없으면 지점은 재등록만 반복하게 된다 — 요청으로 넘겨 관리자가 처리한다.
+export type KakaoTaxiRequestType = "register" | "update" | "delete" | "branchChange" | "resume";
 // processing = 관리자가 처리를 선점한 중간 상태. 카카오 API 호출 **전에** 저장되어
 // 두 관리자가 같은 신청을 동시에 승인하는 이중 실행을 막는다(실패 시 pending 으로 되돌림).
 export type KakaoTaxiRequestStatus = "pending" | "processing" | "approved" | "rejected";
@@ -26,8 +29,17 @@ export interface KakaoTaxiRequest {
   phone?: string;
   /** register 전용 — 지점이 남기는 메모(선택) */
   memo?: string;
-  /** update·delete·branchChange 전용 — 카카오 member id */
+  /** update·delete·branchChange·resume 전용 — 카카오 member id */
   memberId?: string;
+  /**
+   * 대상 인원의 카카오T 계정.
+   *
+   * **member id 는 계정별로 발급돼 다른 계정에 같은 id 가 있을 수 있다.** 승인 시점에 목록에서
+   * id 로만 찾으면 엉뚱한 계정의 직원을 건드린다(계정 조회가 일부 실패하면 더 위험하다).
+   * 그래서 신청을 만들 때 그 사람의 계정을 함께 못 박아 둔다(2026-07-31).
+   * 옛 신청에는 없을 수 있어 선택 필드다 — 없으면 승인 경로가 목록으로 확정한다.
+   */
+  accountKey?: string;
   /** update·delete·branchChange 필수 — 요청 사유 */
   reason?: string;
   /** branchChange 전용 — 옮겨간 지점. 지점이 모르면 없음(관리자가 승인 시 지정) */
@@ -52,6 +64,7 @@ export const REQUEST_TYPE_LABEL: Record<KakaoTaxiRequestType, string> = {
   update: "수정요청",
   delete: "삭제요청(이용중지)",
   branchChange: "지점변경",
+  resume: "이용재개요청",
 };
 
 export const REQUEST_STATUS_LABEL: Record<KakaoTaxiRequestStatus, string> = {
@@ -97,9 +110,9 @@ export function createRegisterRequest(branchName: string, input: { name: string;
 
 /** 수정/삭제 요청 레코드 생성 — 사유 필수 */
 export function createMemberRequest(
-  type: "update" | "delete",
+  type: "update" | "delete" | "resume",
   branchName: string,
-  member: { id: string; name: string },
+  member: { id: string; name: string; account_key?: string },
   reason: string
 ): KakaoTaxiRequest {
   const trimmed = (reason || "").trim();
@@ -113,6 +126,7 @@ export function createMemberRequest(
     requestedAt: new Date().toISOString(),
     name: member.name || "(이름 없음)",
     memberId: member.id,
+    ...(member.account_key ? { accountKey: member.account_key } : {}),
     reason: trimmed,
   };
 }
@@ -123,7 +137,7 @@ export function createMemberRequest(
  */
 export function createBranchChangeRequest(
   branchName: string,
-  member: { id: string; name: string },
+  member: { id: string; name: string; account_key?: string },
   reason: string,
   targetBranch: string,
   effectiveDate: string
@@ -140,6 +154,7 @@ export function createBranchChangeRequest(
     requestedAt: new Date().toISOString(),
     name: member.name || "(이름 없음)",
     memberId: member.id,
+    ...(member.account_key ? { accountKey: member.account_key } : {}),
     reason: trimmed,
     ...(String(targetBranch || "").trim() ? { targetBranch: String(targetBranch).trim() } : {}),
     effectiveDate,

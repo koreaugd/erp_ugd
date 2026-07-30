@@ -19,7 +19,7 @@ import {
   type FlaggedTaxiOrder, type TaxiAnomalyReason,
 } from "./helpers/kakaoTaxiAnomaly";
 import {
-  kakaoTaxiRequestsKey, normalizePhone, REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
+  kakaoTaxiRequestsKey, normalizePhone, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "./helpers/kakaoTaxiRequests";
 import {
   KAKAO_TAXI_BRANCH_HISTORY_KEY, appendBranchHistory, appendBranchHistoryOrWarn, appendBranchHistoryReversal,
@@ -34,8 +34,22 @@ export type KakaoTaxiView = "orders" | "anomaly" | "members" | "requests";
 // 뒤집히므로 오류 hex 를 직접 박는다.
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
 
+// 엑셀 형식 표의 본문 셀(DESIGN.md §9-1) — 헤더만 검정 격자로 또렷하게, 본문은 옅은 격자.
+// 첫 칸은 왼쪽 선까지 그어야 표가 닫힌다(`first:border-l`).
+const SHEET_TD = "border-r border-b border-black/10 first:border-l px-2 py-1.5 align-top";
+
+/**
+ * 신청일 표기 — `26-07-31 14:30`.
+ * 표 안에서는 세기(20)까지 적을 이유가 없어 두 자리로 줄인다. 일자·시각은 남긴다 —
+ * 언제 올라온 신청인지가 처리 순서를 정하는 근거라서 날짜만으로는 부족하다.
+ */
+const formatRequestedAt = (iso?: string): string => {
+  const s = String(iso || "");
+  return s.length >= 16 ? s.slice(2, 16).replace("T", " ") : s;
+};
+
 const MEMBER_STATUS_LABEL: Record<string, string> = {
-  created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "휴직",
+  created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "이용중지",
 };
 
 // 로컬(KST) 기준 오늘 날짜 — toISOString()은 UTC 라 월초·자정 부근에 전날로 어긋난다(month 초기값과 같은 함정).
@@ -112,6 +126,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   // 상세내역 직원 필터 — 이름을 직접 친다(사용자 지시 2026-07-31, 드롭다운은 인원이 많아 찾기 어려웠다).
   // 빈 문자열이면 전체. 공백을 지운 부분일치로 찾는다("홍 길동"과 "홍길동"을 같게 본다).
   const [memberFilter, setMemberFilter] = useState("");
+  // 신청 목록 필터(사용자 지시 2026-07-31) — 지점·이름·종류.
+  // 이름은 드롭다운이 아니라 직접 입력이다(신청자는 계속 바뀌어 목록으로 만들면 금세 낡는다).
+  const [reqBranchFilter, setReqBranchFilter] = useState("");
+  const [reqNameFilter, setReqNameFilter] = useState("");
+  const [reqTypeFilter, setReqTypeFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("all"); // 계정 필터 — "all" | "acct1" | "acct2"
   // 상세내역 구분 필터 — "all" | "logistics". 퀵·택배 표를 클릭하면 상세 내역을 그 건만 좁혀 본다(2026-07-29).
   const [verticalFilter, setVerticalFilter] = useState("all");
@@ -1076,7 +1095,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
    * 직원 목록을 아직 못 불러왔으면(로딩 중·조회 실패) 표시하지 않는다 — 없는 것을 "인증 안 됨"으로
    * 단정하면 멀쩡히 인증한 사람까지 대기 중으로 보인다.
    */
-  const registerAuthState = (request: KakaoTaxiRequest): "pending" | "done" | "unknown" => {
+  const registerAuthState = (request: KakaoTaxiRequest): "pending" | "done" | "refused" | "blocked" | "unknown" => {
     if (request.type !== "register" || request.status !== "approved") return "unknown";
     // 목록을 아직 못 받았으면 아무것도 단정하지 않는다.
     if (!membersData || membersLoading) return "unknown";
@@ -1087,7 +1106,18 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // 전화번호가 없는 옛 레코드는 대조할 열쇠가 없다.
     const phone = normalizePhone(request.phone || "");
     if (!phone) return "unknown";
-    return (membersData.members || []).some((m) => normalizePhone(m.mobile_phone || "") === phone) ? "done" : "pending";
+    // **목록에 있다고 인증이 끝난 게 아니다.** 멤버 상태는 네 가지다
+    // (created=등록만 됨 / connected=인증 완료 / refused=초대 거부 / blocked=이용 중지).
+    // 번호만 있으면 done 으로 보던 종전 판정은, 아직 인증 안 한 사람까지 완료로 적었다(Codex P0 2026-07-31).
+    const found = (membersData.members || []).find((m) => normalizePhone(m.mobile_phone || "") === phone);
+    if (!found) return "pending";
+    if (found.status === "connected") return "done";
+    if (found.status === "created") return "pending";
+    // **거부·이용중지를 '모름'으로 뭉개지 않는다.** 셋 다 "등록됨"으로만 보이면 관리자는
+    // 왜 이 사람이 못 타는지 알 수 없고, 초대를 거부한 사람을 두고 인증을 기다리게 된다.
+    if (found.status === "refused") return "refused";
+    if (found.status === "blocked") return "blocked";
+    return "unknown"; // 모르는 값 — 단정하지 않는다.
   };
 
   /**
@@ -1106,11 +1136,52 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
    *
    * 계정은 신청 지점의 매핑에서 얻는다 — 신청 레코드에는 계정이 없고, 목록에도 없어 조회할 수 없다.
    */
+  /**
+   * 신청의 대상 인원을 **계정까지 확정해서** 찾는다.
+   *
+   * 카카오 member id 는 계정별로 발급돼 **다른 계정에 같은 id 가 있을 수 있다.** id 만으로 찾아
+   * 그 사람의 account_key 로 쓰면 엉뚱한 계정의 직원을 건드린다(삭제 승인이 같은 사고 때문에
+   * id+계정으로 확인한다). 확정하지 못하면 실행하지 않는다 — 잘못 푸는 것보다 안 하는 게 낫다.
+   */
+  const resolveMemberForRequest = (request: KakaoTaxiRequest): KakaoTaxiMember | null => {
+    const all = membersData?.members || [];
+    // **신청에 계정이 적혀 있으면 그것이 유일한 근거다.** 목록 상태(조회 실패·동일 id)에
+    // 흔들리지 않는다 — 지점이 신청할 때 그 사람의 계정을 함께 못 박아 두기 때문이다.
+    if (request.accountKey) {
+      const exact = all.find((m) => m.id === request.memberId && m.account_key === request.accountKey);
+      if (exact) return exact;
+      window.alert("신청에 적힌 카카오T 계정에서 대상 인원을 찾지 못했습니다.\n'새로고침'으로 목록을 다시 불러온 뒤 시도해주세요.");
+      return null;
+    }
+    // 옛 신청(계정 미기재) — 목록으로 확정한다. 확정이 안 되면 실행하지 않는다.
+    // 계정 조회가 하나라도 실패했으면 목록이 불완전해 **어떤 판정도 믿을 수 없다.**
+    // "1건뿐"이라는 것도 다른 계정이 통째로 빠졌기 때문일 수 있다(Codex P0 2026-07-31).
+    if (!membersData || (membersData.accountErrors || []).length > 0) {
+      window.alert("일부 카카오T 계정 조회에 실패해 대상 계정을 확정할 수 없습니다.\n'새로고침'으로 목록을 다시 불러온 뒤 시도해주세요.");
+      return null;
+    }
+    const matches = all.filter((m) => m.id === request.memberId);
+    if (!matches.length) {
+      window.alert("대상 인원을 현재 직원 목록에서 찾지 못해 어느 계정인지 알 수 없습니다.\n'새로고침'으로 목록을 다시 불러온 뒤 시도해주세요.");
+      return null;
+    }
+    // 여러 계정에 같은 id 가 있으면 신청 지점이 매핑된 계정만 받아들인다.
+    if (matches.length === 1) return matches[0];
+    const mapped = matches.find((m) => m.account_key === kakaoTaxiAccountForBranch(request.branchName));
+    if (!mapped) {
+      window.alert("같은 id 의 직원이 여러 카카오T 계정에 있어 어느 계정인지 확정할 수 없습니다.\n직원 관리 탭에서 확인한 뒤 처리해주세요.");
+      return null;
+    }
+    return mapped;
+  };
+
   const resumeBlockedMember = async (request: KakaoTaxiRequest) => {
     if (anyWriteBusy || !request.memberId) return;
-    const accountKey = kakaoTaxiAccountForBranch(request.branchName);
+    const target = resolveMemberForRequest(request);
+    if (!target) return;
+    const accountKey = target.account_key;
     if (!window.confirm(
-      `${request.name} 님의 이용 중지를 풀까요?\n\n지점: ${request.branchName}\n\n` +
+      `${request.name} 님의 이용중지를 풀까요?\n\n지점: ${request.branchName}\n\n` +
       `다시 법인택시를 탈 수 있게 되고, 인증이 살아 있으면 직원 관리 목록에도 다시 나타납니다.`
     )) return;
     setRequestBusyId(request.id);
@@ -1118,9 +1189,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       await gasClient.unblockKakaoTaxiMember([request.memberId], adminPinHash, accountKey);
       markOrdersStaleAfterMemberWrite();
       await Promise.all([loadMembers(true), loadRequests()]);
-      window.alert(`${request.name} 님의 이용 중지를 풀었습니다.`);
+      window.alert(`${request.name} 님의 이용중지를 풀었습니다.`);
     } catch (e: any) {
-      window.alert(`이용 재개에 실패했습니다.\n${String(e?.message || e)}`);
+      window.alert(`이용재개에 실패했습니다.\n${String(e?.message || e)}`);
     } finally {
       setRequestBusyId("");
     }
@@ -1141,6 +1212,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     const pill = "inline-block w-fit rounded-full px-2 py-0.5 text-[10px] font-black";
     if (r.status === "pending") return null; // 왼쪽 [승인]·[반려] 버튼이 곧 '대기' 표시다
     if (r.status === "processing") return { label: "처리 중", className: `${pill} bg-[#D8DFE9] text-[#1A1A1A]` };
+    // **지금 이용중지된 사람이면 그것이 결론이다.** 신청 기록상 반려로 남아 있어도, 그 뒤 다른 경로로
+    // 이용중지가 된 경우가 있다(이선복·김미화). 그때 '반려'라고만 적으면 아직 처리가 안 된 것으로
+    // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
+    if (r.memberId && isMemberBlockedNow(r)) {
+      return { label: "이용중지", className: `${pill} bg-[#18181B] text-white` };
+    }
     if (r.status === "rejected") return { label: "반려", className: `${pill} bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]` };
     if (r.type === "register") {
       const auth = registerAuthState(r);
@@ -1148,17 +1225,109 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       // 단정하면, 정작 인증을 안 한 사람을 끝난 것으로 믿고 넘어가게 된다.
       if (auth === "done") return { label: "인증 완료", className: "" }; // 사용자 지시 — 이것만 알약 없이 그대로 둔다
       if (auth === "pending") return null; // 옆에 '인증 대기 중' 알약이 따로 붙는다
+      // 거부·이용중지는 각각 다른 조치가 필요하다 — 거부는 다시 초대해야 하고, 이용중지는 재개하면 된다.
+      // 둘을 '등록됨' 하나로 묶으면 왜 못 타는지 알 수 없어 손을 못 쓴다(stop-hook 지적 2026-07-31).
+      if (auth === "refused") return { label: "인증 거부", className: `${pill} bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]` };
+      if (auth === "blocked") return { label: "이용중지", className: `${pill} bg-[#18181B] text-white` };
+      // 남은 건 진짜 '모름'뿐 — 목록을 못 받았거나 계정 조회가 실패한 상태다.
       return { label: "등록됨", className: `${pill} border border-gray-200 bg-[var(--admin-ghost)] text-[#212121]/70` };
     }
-    if (r.type === "branchChange") return { label: "지점변경", className: `${pill} bg-[#D8DFE9] text-[#1A1A1A]` };
-    if (r.type === "delete") return { label: "이용 중지", className: `${pill} bg-[#18181B] text-white` };
+    // 지점변경은 처리되면 끝이다 — 상태는 승인(인증완료)/반려 둘 중 하나로만 보인다(사용자 지시 2026-07-31).
+    // (반려는 위에서 이미 걸러졌으므로 여기 오는 건 승인된 건뿐이다.)
+    if (r.type === "branchChange") return { label: "인증완료", className: `${pill} bg-[#CFDECA] text-[#1A1A1A]` };
+    if (r.type === "delete") return { label: "이용중지", className: `${pill} bg-[#18181B] text-white` };
+    if (r.type === "resume") return { label: "이용재개", className: `${pill} bg-[#CFDECA] text-[#1A1A1A]` };
     return { label: "처리 완료", className: `${pill} bg-[#CFDECA] text-[#1A1A1A]` };
   };
 
   /** 마우스를 올렸을 때 보여줄 전체 내용 — 짧게 줄인 상태 칸이 정보를 잃지 않게 한다. */
-  const statusDetail = (r: KakaoTaxiRequest): string =>
-    [r.status === "rejected" ? r.rejectReason : r.resultNote, r.processedAt ? `처리: ${r.processedAt.slice(0, 16).replace("T", " ")}` : ""]
+  /**
+   * 비고 칸에 적을 말.
+   *
+   * 지점이 적어 보낸 사유·메모와 처리 결과를 한 줄로 합친다. 종전에는 '사유·메모' 칸과
+   * 상태 칸에 흩어져 있어, 반려 사유를 보려면 두 칸을 번갈아 봐야 했다.
+   * 변경신청은 옮겨간 지점·이동일이 곧 핵심이라 앞에 세운다.
+   */
+  /** 필터 선택지는 **실제로 올라온 신청에 있는 값**으로만 만든다 — 고를 수 있는 게 곧 존재하는 값이 된다. */
+  const requestBranchOptions = useMemo(
+    () => Array.from(new Set<string>((requestsData?.items || []).map((r) => r.branchName).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "ko")),
+    [requestsData]
+  );
+  const requestTypeOptions = useMemo(
+    () => Array.from(new Set((requestsData?.items || []).map((r) => r.type).filter(Boolean))),
+    [requestsData]
+  );
+  /** 화면에 실제로 보이는 신청 — 건수 표시도 이 값을 기준으로 한다(필터를 걸었는데 건수가 전체면 헷갈린다). */
+  const visibleRequests = useMemo(() => {
+    const name = reqNameFilter.trim();
+    return (requestsData?.items || []).filter((r) => {
+      if (reqBranchFilter && r.branchName !== reqBranchFilter) return false;
+      if (reqTypeFilter && r.type !== reqTypeFilter) return false;
+      if (name && !String(r.name || "").includes(name)) return false;
+      return true;
+    });
+  }, [requestsData, reqBranchFilter, reqTypeFilter, reqNameFilter]);
+
+  /**
+   * 이 신청의 대상이 **지금** 이용중지 상태인가.
+   *
+   * 신청 기록의 status 는 그때 무엇을 했는지일 뿐, 지금 그 사람이 탈 수 있는지가 아니다.
+   * 목록을 못 받았으면 아무것도 단정하지 않는다(false) — 모르는 걸 이용중지로 적으면 안 된다.
+   */
+  const isMemberBlockedNow = (r: KakaoTaxiRequest): boolean => {
+    if (!r.memberId || !membersData || membersLoading) return false;
+    if ((membersData.accountErrors || []).length > 0) return false;
+    // 계정까지 맞춰 본다 — id 는 계정별로 발급돼 다른 계정의 동명 id 가 blocked 면 엉뚱한 줄이
+    // 이용중지로 보인다(쓰기 경로는 이미 계정을 검증하지만, 표시도 같은 기준이어야 헷갈리지 않는다).
+    return (membersData.members || []).some((m) =>
+      m.id === r.memberId && m.status === "blocked" && (!r.accountKey || m.account_key === r.accountKey));
+  };
+
+  const requestRemark = (r: KakaoTaxiRequest): string => {
+    const parts: string[] = [];
+    // 지금 이용중지 상태면 그 사실을 먼저 적는다 — 기록상 반려여도 결론은 이용중지다.
+    if (r.memberId && isMemberBlockedNow(r)) parts.push("이용중지 승인됨 — 다시 쓰려면 [이용재개]");
+    if (r.type === "branchChange") {
+      // 어디서 어디로 가는지 한눈에 보이게 **이전 지점부터** 적는다(사용자 지시 2026-07-31).
+      // 신청을 올린 지점(branchName)이 곧 이전 소속이다.
+      if (r.targetBranch) parts.push(`${r.branchName} → ${r.targetBranch}`);
+      if (r.effectiveDate) parts.push(`이동일 ${r.effectiveDate}`);
+    }
+    if (r.status === "rejected" && r.rejectReason) parts.push(`반려 사유: ${r.rejectReason}`);
+    else if (r.type === "register") {
+      // 등록 건은 **지금 실제 상태**를 우선한다. 저장된 처리 메모는 승인 순간의 기록이라
+      // ("등록 완료 · 알림톡 발송") 나중에 직원이 거부하거나 이용중지되면 사실과 어긋난다.
+      // 상태 칸은 '인증 거부'인데 비고는 '완료'라고 하면 재초대가 필요한지 알 수 없다(Codex 2026-07-31).
+      const auth = registerAuthState(r);
+      // 인증까지 끝난 사람에게는 알림톡 안내를 남기지 않는다 — 할 일이 없는데 뭔가 더 해야
+      // 하는 것처럼 읽힌다(사용자 지시 2026-07-31). 끝났다는 말만 남긴다.
+      if (auth === "done") parts.push("카카오 등록완료");
+      else if (auth === "refused") parts.push("직원이 카카오T 초대를 거부했습니다 — 재초대 필요");
+      else if (auth === "blocked") parts.push("이용중지 — 이용재개 필요");
+      else if (r.resultNote) parts.push(r.resultNote);
+    } else if (r.resultNote) parts.push(r.resultNote);
+    if (r.processedAt) parts.push(`처리 ${formatRequestedAt(r.processedAt)}`);
+    // **지점이 적어 보낸 사유는 맨 뒤에.** 앞에 두면 사람마다 길이가 제각각이라 표가 지저분해지고,
+    // 정작 먼저 봐야 할 처리 결과가 뒤로 밀린다(사용자 지시 2026-07-31).
+    // 메모는 사유와 다를 때만 붙인다 — 같은 말을 두 번 적으면 그게 곧 중복이다.
+    const reasonText = [r.reason, r.memo && r.memo !== r.reason ? r.memo : ""].filter(Boolean).join(" / ");
+    if (reasonText) parts.push(`사유: ${reasonText}`);
+    return parts.join(" · ");
+  };
+
+  const statusDetail = (r: KakaoTaxiRequest): string => {
+    // 툴팁도 비고와 같은 기준으로 적는다 — 한쪽만 옛 처리 메모를 보여주면
+    // 마우스를 올렸을 때 상태 칸과 다른 말이 나온다(Codex 2026-07-31).
+    let head = r.status === "rejected" ? r.rejectReason : r.resultNote;
+    if (r.status !== "rejected" && r.type === "register") {
+      const auth = registerAuthState(r);
+      if (auth === "refused") head = "직원이 카카오T 초대를 거부했습니다 — 재초대 필요";
+      else if (auth === "blocked") head = "이용중지 상태 — 이용재개 필요";
+    }
+    return [head, r.processedAt ? `처리: ${r.processedAt.slice(0, 16).replace("T", " ")}` : ""]
       .filter(Boolean).join("\n");
+  };
 
   /**
    * 등록 신청 승인 폼의 그룹 기본값 — 지점명과 그룹명이 겹치면 추천, 아니면 관리자가 직접 선택.
@@ -1245,6 +1414,61 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     }
   };
 
+  /**
+   * 이용재개 요청 승인 — 이용중지된 사람이 복귀했을 때 지점이 올린 요청(2026-07-31).
+   *
+   * 계정은 **추측하지 않는다.** 이용중지된 사람도 목록에는 남아 있으므로(카카오가 blocked 를 함께 준다)
+   * 실제 목록에서 id 로 찾아 그 계정으로만 푼다 — 지점명으로 추측하면 같은 id 가 있는 다른 계정을
+   * 건드릴 수 있다(삭제 승인이 같은 사고 때문에 목록 확인을 하는 것과 같은 이유).
+   */
+  const executeApproveResume = async (request: KakaoTaxiRequest) => {
+    if (anyWriteBusy) return;
+    if (!request.memberId) { window.alert("대상 인원 정보가 없는 신청입니다 — 반려 처리해주세요."); return; }
+    const target = resolveMemberForRequest(request);
+    if (!target) return;
+    if (!window.confirm(
+      `이용재개 요청을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n` +
+      `다시 법인택시를 탈 수 있게 되고, 인증이 살아 있으면 '등록된 인원'에도 다시 나타납니다.`
+    )) return;
+    setRequestBusyId(request.id);
+    let claimed = false;
+    try {
+      if (!(await claimForProcessing(request))) return;
+      claimed = true;
+      await gasClient.unblockKakaoTaxiMember([request.memberId], adminPinHash, target.account_key);
+      markOrdersStaleAfterMemberWrite();
+      const list = await loadMembers(true);
+      const note = list === null
+        ? "이용재개 실행됨 — 목록 재조회 실패로 반영 미확인"
+        : list.some((x) => x.id === request.memberId && x.status === "connected")
+          ? "이용재개 확인됨"
+          : "이용재개 실행됨 — 직원 인증 상태에 따라 목록 반영이 늦을 수 있음";
+      const rec = await recordRequestResult(request, { status: "approved", resultNote: note });
+      if (rec === "recordFailed") {
+        window.alert(`이용재개는 실행됐지만(${note}) 신청 상태 기록에 실패했습니다.\n새로고침 후 '처리 중'으로 남아 있으면 [처리 중 해제]로 정리해주세요.`);
+      } else if (rec === "already") {
+        window.alert("이용재개는 실행됐지만, 그 사이 다른 관리자가 이 신청을 처리했습니다.\n직원 관리 탭에서 실제 상태를 확인해주세요.");
+      } else {
+        window.alert(`이용재개 승인 완료 — ${note}.`);
+      }
+      claimed = false;
+      await loadRequests();
+    } catch (e: any) {
+      if (claimed && isDefinitelyNotExecuted(e)) {
+        await releaseRequestClaim(request); claimed = false; void loadRequests();
+        window.alert(`이용재개 실행에 실패했습니다. 신청은 대기 상태로 되돌렸습니다.\n${String(e?.message || e)}`);
+      } else {
+        void loadRequests();
+        window.alert(
+          `이용재개 결과를 확인하지 못했습니다(응답 지연·통신 끊김).\n${String(e?.message || e)}\n\n` +
+          `이미 재개됐을 수 있어 신청을 '처리 중'으로 남겨 둡니다. 직원 관리 탭에서 확인한 뒤 정리해주세요.`
+        );
+      }
+    } finally {
+      setRequestBusyId("");
+    }
+  };
+
   const executeApproveDelete = async (request: KakaoTaxiRequest) => {
     if (anyWriteBusy) return;
     if (!request.memberId) { window.alert("대상 인원 정보가 없는 신청입니다 — 반려 처리해주세요."); return; }
@@ -1255,18 +1479,21 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // [F2] id 만으로 찾으면 계정이 다른 동명이인 id 충돌에 걸려 엉뚱한 계정의 직원을 삭제할 수
     // 있다 — 신청 지점이 매핑된 계정까지 함께 확인해야 그 사고를 막는다(코덱스 리뷰 2026-07-28).
     const targetMember = (membersData?.members || []).find(
-      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+      // 신청에 계정이 적혀 있으면 그것을 쓴다(2026-07-31) — 지점 매핑은 옛 신청용 폴백이다.
+      // 매핑은 추정이라, 매핑과 다른 계정에 있는 직원은 못 찾거나 엉뚱한 계정을 잡을 수 있다.
+      (x) => x.id === request.memberId
+        && x.account_key === (request.accountKey || kakaoTaxiAccountForBranch(request.branchName))
     );
     if (!targetMember) {
       window.alert("삭제 대상 인원을 현재 직원 목록에서 찾지 못해 어느 계정인지 알 수 없습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
       return;
     }
     if (!window.confirm(
-      `삭제 요청(이용 중지)을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n` +
-      `이 인원의 인증이 해제되어(휴직 처리) 지점 목록에서 사라지고 택시를 탈 수 없게 됩니다.\n` +
+      `삭제 요청(이용중지)을 승인할까요?\n\n지점: ${request.branchName}\n대상: ${request.name}\n사유: ${request.reason || "-"}\n\n` +
+      `이 인원이 이용중지되어 지점 목록에서 사라지고 택시를 탈 수 없게 됩니다.\n` +
       `**계정과 과거 이용내역은 지우지 않습니다** — 지난 이용분의 지점 집계가 그대로 남습니다.\n` +
-      `다시 쓰게 하려면 이 신청 목록에서 [이용 재개]를 누르면 됩니다.\n` +
-      `(휴직하면 직원 관리 목록에서는 사라집니다 — 카카오가 인증 완료자만 목록으로 주기 때문입니다)`
+      `다시 쓰게 하려면 이 신청 목록에서 [이용재개]를 누르면 됩니다.\n` +
+      `(이용중지하면 직원 관리 목록에서는 사라집니다 — 카카오가 인증 완료자만 목록으로 주기 때문입니다)`
     )) return;
     setRequestBusyId(request.id);
     // 지점 스냅샷 — 이용 중지 뒤에도 과거 이용내역의 지점 판정이 흔들리지 않게 먼저 남긴다(fail-closed).
@@ -1290,33 +1517,33 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       markOrdersStaleAfterMemberWrite();
       const list = await loadMembers();
       const note = list === null
-        ? "이용 중지(인증 해제) 실행됨 — 목록 재조회 실패로 반영 미확인"
+        ? "이용중지(인증 해제) 실행됨 — 목록 재조회 실패로 반영 미확인"
         : list.some((x) => x.id === request.memberId)
-          ? "이용 중지 접수됨 — 목록에서 아직 반영 미확인"
-          : "이용 중지 확인됨(계정·이용내역은 보존)";
+          ? "이용중지 접수됨 — 목록에서 아직 반영 미확인"
+          : "이용중지 확인됨(계정·이용내역은 보존)";
       const rec = await recordRequestResult(request, { status: "approved", resultNote: note });
       if (rec === "recordFailed") {
-        window.alert(`이용 중지는 실행됐지만(${note}) 신청 상태 기록에 실패했습니다.\n새로고침 후 '처리 중'으로 남아 있으면 [처리 중 해제]로 정리해주세요(이용 중지는 이미 실행됨).`);
+        window.alert(`이용중지는 실행됐지만(${note}) 신청 상태 기록에 실패했습니다.\n새로고침 후 '처리 중'으로 남아 있으면 [처리 중 해제]로 정리해주세요(이용중지는 이미 실행됨).`);
       } else if (rec === "already") {
         // CAS 충돌 — 내가 이용 중지를 실행하는 사이 다른 관리자가 이 신청을 가로챘다.
         window.alert(
-          `이용 중지는 실행됐지만, 그 사이 다른 관리자가 이 신청을 처리했습니다.\n` +
+          `이용중지는 실행됐지만, 그 사이 다른 관리자가 이 신청을 처리했습니다.\n` +
           `중복 처리 흔적이 있을 수 있으니 직원 관리 탭에서 실제 상태를 확인해주세요.`
         );
       } else {
-        window.alert(`삭제 요청(이용 중지) 승인 완료 — ${note}.`);
+        window.alert(`삭제 요청(이용중지) 승인 완료 — ${note}.`);
       }
       claimed = false;
       await loadRequests();
     } catch (e: any) {
       if (claimed && isDefinitelyNotExecuted(e)) {
         await releaseRequestClaim(request); claimed = false; void loadRequests();
-        window.alert(`이용 중지 실행에 실패했습니다. 신청은 대기 상태로 되돌렸습니다.\n${String(e?.message || e)}`);
+        window.alert(`이용중지 실행에 실패했습니다. 신청은 대기 상태로 되돌렸습니다.\n${String(e?.message || e)}`);
       } else {
         void loadRequests();
         window.alert(
-          `이용 중지 결과를 확인하지 못했습니다(응답 지연·통신 끊김).\n${String(e?.message || e)}\n\n` +
-          `카카오T에서 이미 이용 중지됐을 수 있어 신청을 '처리 중'으로 남겨 둡니다.\n` +
+          `이용중지 결과를 확인하지 못했습니다(응답 지연·통신 끊김).\n${String(e?.message || e)}\n\n` +
+          `카카오T에서 이미 이용중지됐을 수 있어 신청을 '처리 중'으로 남겨 둡니다.\n` +
           `직원 관리 탭에서 확인한 뒤 정리해주세요.`
         );
       }
@@ -1351,7 +1578,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(branchChangeDate)) { window.alert("적용일을 선택해주세요."); return; }
     // [F2] 신청 지점이 매핑된 계정까지 함께 확인 — id 만으로 찾으면 다른 계정의 동일 id 직원을 잘못 집는다.
     const targetMember = (membersData?.members || []).find(
-      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+      // 신청에 계정이 적혀 있으면 그것을 쓴다(2026-07-31) — 지점 매핑은 옛 신청용 폴백이다.
+      // 매핑은 추정이라, 매핑과 다른 계정에 있는 직원은 못 찾거나 엉뚱한 계정을 잡을 수 있다.
+      (x) => x.id === request.memberId
+        && x.account_key === (request.accountKey || kakaoTaxiAccountForBranch(request.branchName))
     );
     if (!targetMember) {
       window.alert("대상 인원을 현재 직원 목록에서 찾지 못했습니다.\n'새로고침'으로 직원 목록을 다시 불러온 뒤 다시 시도하거나, 이미 삭제된 인원이면 반려 처리해주세요.");
@@ -1483,7 +1713,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // [F2] id 만으로 찾으면 계정이 다른 동일 id 충돌에 걸려 엉뚱한 계정의 직원 카드를 열 수 있다 —
     // 신청 지점이 매핑된 계정까지 함께 확인한다(코덱스 리뷰 2026-07-28).
     const member = (membersData?.members || []).find(
-      (x) => x.id === request.memberId && x.account_key === kakaoTaxiAccountForBranch(request.branchName)
+      // 신청에 계정이 적혀 있으면 그것을 쓴다(2026-07-31) — 지점 매핑은 옛 신청용 폴백이다.
+      // 매핑은 추정이라, 매핑과 다른 계정에 있는 직원은 못 찾거나 엉뚱한 계정을 잡을 수 있다.
+      (x) => x.id === request.memberId
+        && x.account_key === (request.accountKey || kakaoTaxiAccountForBranch(request.branchName))
     );
     if (!member) {
       window.alert("대상 인원을 인증완료 목록에서 찾지 못했습니다.\n이미 삭제됐거나 미인증 상태일 수 있으니 확인 후 반려 처리해주세요.");
@@ -2026,28 +2259,60 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               )}
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100">
+                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
                   <h2 className="admin-pill-title">
-                    신청 목록 — 대기 {formatNumber(requestsData.items.filter((r) => r.status === "pending").length)}건 / 전체 {formatNumber(requestsData.items.length)}건
+                    {/* 필터를 걸면 건수도 필터 기준이 된다 — 그때 전체 대기 건수를 함께 적어
+                        "다른 지점에 대기 건이 있는데 없다고 오해"하는 일을 막는다(Codex P2 2026-07-31). */}
+                    신청 목록 — 대기 {formatNumber(visibleRequests.filter((r) => r.status === "pending").length)}건 / 전체 {formatNumber(visibleRequests.length)}건
+                    {(reqBranchFilter || reqNameFilter || reqTypeFilter) &&
+                      ` · 필터 제외 포함 전체 대기 ${formatNumber(requestsData.items.filter((r) => r.status === "pending").length)}건`}
                   </h2>
+                  {/* 필터는 제목 옆에 둔다(사용자 지시 2026-07-31). 지점·종류는 실제 값으로만 목록을 만들어
+                      고를 수 있는 게 곧 존재하는 값이 되게 하고, 이름은 직접 입력한다. */}
+                  <select value={reqBranchFilter} onChange={(e) => setReqBranchFilter(e.target.value)}
+                    className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="지점 필터">
+                    <option value="">지점 전체</option>
+                    {requestBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  <input value={reqNameFilter} onChange={(e) => setReqNameFilter(e.target.value)} placeholder="이름"
+                    className="h-8 w-24 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="이름 필터" />
+                  <select value={reqTypeFilter} onChange={(e) => setReqTypeFilter(e.target.value)}
+                    className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="종류 필터">
+                    <option value="">종류 전체</option>
+                    {requestTypeOptions.map((t) => <option key={t} value={t}>{REQUEST_TYPE_LABEL[t as KakaoTaxiRequest["type"]] || t}</option>)}
+                  </select>
+                  {(reqBranchFilter || reqNameFilter || reqTypeFilter) && (
+                    <button onClick={() => { setReqBranchFilter(""); setReqNameFilter(""); setReqTypeFilter(""); }}
+                      className="admin-period-chip h-8 px-3 rounded-full text-[11px] font-black cursor-pointer">필터 해제</button>
+                  )}
                 </div>
                 <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
-                  <table className="w-full text-xs whitespace-nowrap">
-                    {/* 처리(승인·반려)를 맨 왼쪽에 둔다(사용자 지시 2026-07-29) — 오른쪽 끝에 있으면
-                        가로 스크롤을 해야 눌러야 해서 번거롭다. 처리 끝난 건은 같은 칸에 '완료'로 표시된다. */}
+                  {/* 엑셀 형식(DESIGN.md §9-1) — 헤더는 바닐라 배경 + 사방 검정 격자,
+                      본문 셀은 옅은 격자, 표는 border-separate·사각 모서리.
+                      [주의] 관리자 화면이므로 **`--admin-vanilla`** 를 쓴다. 지점 hex(#EFF0A3)를
+                      그대로 박으면 다크 모드에서 관리자 바닐라(#F4F2CC)로 안 바뀌어 혼자 튄다. */}
+                  <table className="w-full text-xs whitespace-nowrap border-separate" style={{ borderSpacing: 0 }}>
+                    {/* 컬럼 순서는 사용자 지시(2026-07-31): 신청일·지점·대상·종류·상태·비고.
+                        승인/반려는 별도 '처리' 칸을 두지 않고 **상태 칸 안에** 둔다 — 아직 처리 안 한
+                        건이 곧 그 줄의 상태이고, 눌러야 할 것과 상태를 한 곳에서 보게 된다. */}
                     <thead><tr className="text-left">
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">처리</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">신청일</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">지점</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">종류</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">대상</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">사유·메모</th>
-                      <th className="px-4 py-2 text-[11px] font-black text-[#212121]">상태</th>
+                      {["신청일", "지점", "대상", "종류", "상태", "비고"].map((h, i) => (
+                        <th key={h}
+                          className={`bg-[var(--admin-vanilla)] border-t border-r border-b border-[#212121] px-2 py-1.5 text-[11px] font-black text-[#212121] ${i === 0 ? "border-l" : ""}`}>
+                          {h}
+                        </th>
+                      ))}
                     </tr></thead>
                     <tbody>
-                      {requestsData.items.map((r) => (
-                        <tr key={r.id} className="border-t border-gray-100">
-                          <td className="px-4 py-2 align-top">
+                      {visibleRequests.map((r) => (
+                        <tr key={r.id}>
+                          <td className={SHEET_TD}>{formatRequestedAt(r.requestedAt)}</td>
+                          <td className={`${SHEET_TD} font-bold text-[#212121]`}>{r.branchName}</td>
+                          <td className={`${SHEET_TD} font-bold text-[#212121]`}>{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
+                          <td className={SHEET_TD}>{REQUEST_TYPE_LABEL[r.type]}</td>
+                          {/* 상태 — 아직 처리 안 한 건은 여기에 [승인]·[반려]가 그대로 뜬다(사용자 지시 2026-07-31).
+                              처리 끝난 건은 상태 알약이 뜬다. 자세한 내용은 마우스를 올렸을 때 보여준다. */}
+                          <td className={`${SHEET_TD} align-top`} title={statusDetail(r)}>
                             {r.status === "pending" ? (
                               <span className="inline-flex gap-1.5">
                                 {/* 승인은 이 줄의 주된 행동이라 검정 알약으로 세운다(DESIGN.md §10 — 강조 버튼은 검정+밝은 글자).
@@ -2055,19 +2320,28 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 <button
                                   onClick={() => {
                                     if (r.type === "register") { setApproveTarget(r); setApproveGroupId(guessGroupId(r.branchName)); setRejectTarget(null); setBranchChangeTarget(null); }
+                                    else if (r.type === "resume") void executeApproveResume(r);
                                     else if (r.type === "delete") void executeApproveDelete(r);
                                     else if (r.type === "branchChange") startBranchChangeApproval(r);
                                     else void startUpdateApproval(r);
                                   }}
                                   disabled={anyWriteBusy}
                                   className="px-3 py-1 rounded-lg text-[11px] font-black bg-[#212121] text-[var(--admin-ghost)] border border-[#212121] disabled:opacity-50">
-                                  {r.type === "delete" ? "삭제 승인" : "승인"}
+                                  {r.type === "delete" ? "삭제 승인" : r.type === "resume" ? "이용재개 승인" : "승인"}
                                 </button>
                                 {/* 레거시 삭제요청 — 사유가 지점 이동이면 직원을 지우지 않고 소속만 옮긴다(2026-07-29) */}
                                 {r.type === "delete" && (
                                   <button onClick={() => startBranchChangeApproval(r)} disabled={anyWriteBusy}
                                     title="직원을 삭제하지 않고 소속 지점만 옮깁니다"
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">지점변경으로 처리</button>
+                                )}
+                                {/* 지점이 종류를 잘못 골라 올리는 일이 있다 — 퇴사자인데 '수정요청'으로 온 경우
+                                    (장용혁 건, 2026-07-31). 저장된 종류를 고치는 대신 **처리 방식을 바꿔** 받는다.
+                                    위 [지점변경으로 처리]와 같은 방식이라 규약이 하나로 유지된다. */}
+                                {r.type === "update" && (
+                                  <button onClick={() => void executeApproveDelete(r)} disabled={anyWriteBusy}
+                                    title="퇴사자로 보고 이용중지 처리합니다(계정·과거 이용내역은 남습니다)"
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">퇴사(이용중지)로 처리</button>
                                 )}
                                 <button onClick={() => { setRejectTarget(r); setRejectReason(""); setApproveTarget(null); setBranchChangeTarget(null); }} disabled={anyWriteBusy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black text-[#B91C1C] bg-white border border-[#C93A3A] disabled:opacity-50">반려</button>
@@ -2088,67 +2362,46 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 )}
                               </span>
                             ) : (
-                              // 처리 끝난 건 — 같은 칸에 '완료' 알약으로 표시한다. 승인·반려 구분은 옆 '상태' 칸이 맡으므로
-                              // 여기서는 색으로 좋고 나쁨을 말하지 않는 중립 알약을 쓴다(반려가 긍정색으로 읽히지 않게).
-                              <span className="inline-flex flex-col gap-0.5">
-                                <span className="w-fit rounded-full border border-gray-200 bg-[var(--admin-ghost)] px-2 py-0.5 text-[11px] font-black text-[#212121]/70">완료</span>
-                                {/* 이용 중지된 사람은 직원 관리 목록에서 사라진다(카카오가 인증 완료자만 준다).
-                                    그래서 거기 있는 [휴직 해제] 버튼에 손이 닿지 않는다 — 되돌릴 길이 이 줄뿐이다.
-                                    신청 기록에 남은 대상 id 로 여기서 바로 푼다(퇴사 취소·재입사). */}
+                              // 처리 끝난 건 — 상태 알약으로 결과를 말한다(승인/반려/인증 완료 등).
+                              <span className="inline-flex flex-wrap items-center gap-1.5">
+                                {(() => {
+                                  const chip = statusChip(r);
+                                  if (!chip) return null;
+                                  return <span className={chip.className}>{chip.label}</span>;
+                                })()}
+                                {/* 승인했는데 직원 목록에 없으면 '아직 본인 인증 전'이다.
+                                    카카오는 인증 완료자만 목록으로 돌려주므로(Code.gs /members/connected),
+                                    이 표시가 없으면 "승인했는데 왜 아무 데도 안 보이지?"가 된다(실제 문의 2026-07-31). */}
+                                {registerAuthState(r) === "pending" && (
+                                  <span className="inline-block w-fit rounded-full bg-[#EFF0A3] px-2 py-0.5 text-[10px] font-black text-[#212121]"
+                                    title="카카오T에 등록은 됐지만 직원이 아직 본인 인증(알림톡 수락)을 하지 않았습니다. 인증을 마치면 직원 관리 목록에 나타납니다.">
+                                    인증 대기 중
+                                  </span>
+                                )}
+                                {/* 이용중지된 사람은 직원 관리 목록에서 사라진다(카카오가 인증 완료자만 준다).
+                                    그래서 거기 있는 [휴직 해제] 버튼에 손이 닿지 않는다 — 되돌릴 길이 이 줄뿐이다. */}
                                 {r.status === "approved" && r.type === "delete" && r.memberId && (
                                   <button onClick={() => void resumeBlockedMember(r)} disabled={anyWriteBusy}
                                     className="w-fit px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50"
-                                    title="이용 중지(휴직)를 풀어 다시 택시를 탈 수 있게 합니다">이용 재개</button>
-                                )}
-                                {r.processedAt && (
-                                  <span className="text-[10px] font-bold text-[#212121]/40">{r.processedAt.slice(0, 16).replace("T", " ")}</span>
+                                    title="이용중지를 풀어 다시 택시를 탈 수 있게 합니다">이용재개</button>
                                 )}
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-2">{(r.requestedAt || "").slice(0, 16).replace("T", " ")}</td>
-                          <td className="px-4 py-2 font-bold text-[#212121]">{r.branchName}</td>
-                          <td className="px-4 py-2">{REQUEST_TYPE_LABEL[r.type]}</td>
-                          <td className="px-4 py-2 font-bold text-[#212121]">{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
-                          {/* 변경신청은 옮겨간 지점·이동일까지 함께 보여준다 — 승인 폼의 기본값이 어디서 왔는지 보이게 */}
-                          <td className="px-4 py-2 max-w-[18rem] truncate"
-                            title={r.type === "branchChange"
-                              ? `${r.targetBranch ? `옮겨간 지점: ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || ""}`
-                              : (r.reason || r.memo || "")}>
-                            {r.type === "branchChange"
-                              ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
-                              : (r.reason || r.memo || "-")}
-                          </td>
-                          {/* 상태 — 한마디로 줄이고 자세한 내용은 마우스를 올렸을 때 보여준다.
-                              처리 메모를 그대로 찍으면 한 줄이 화면 절반을 먹어 표를 읽을 수 없다. */}
-                          <td className="px-4 py-2 whitespace-nowrap" title={statusDetail(r)}>
-                            <span className="inline-flex items-center gap-1.5">
-                              {(() => {
-                                const chip = statusChip(r);
-                                if (!chip) return null;
-                                return <span className={chip.className}>{chip.label}</span>;
-                              })()}
-                              {/* 승인했는데 직원 목록에 없으면 '아직 본인 인증 전'이다.
-                                  카카오는 인증 완료자만 목록으로 돌려주므로(Code.gs /members/connected),
-                                  이 표시가 없으면 "승인했는데 왜 아무 데도 안 보이지?"가 된다(실제 문의 2026-07-31). */}
-                              {registerAuthState(r) === "pending" && (
-                                <span className="inline-block w-fit rounded-full bg-[#EFF0A3] px-2 py-0.5 text-[10px] font-black text-[#212121]"
-                                  title="카카오T에 등록은 됐지만 직원이 아직 본인 인증(알림톡 수락)을 하지 않았습니다. 인증을 마치면 직원 관리 목록에 나타납니다.">
-                                  인증 대기 중
-                                </span>
-                              )}
-                              {/* 반려는 왜 반려됐는지가 곧 결론이라 짧게 붙여 준다(길면 잘라 툴팁으로). */}
-                              {r.status === "rejected" && r.rejectReason ? (
-                                <span className="text-[#212121]/60">
-                                  {r.rejectReason.length > 12 ? `${r.rejectReason.slice(0, 12)}…` : r.rejectReason}
-                                </span>
-                              ) : null}
-                            </span>
+                          {/* 비고 — 지점이 적어 보낸 사유·메모와 처리 결과를 한 칸에 모은다.
+                              변경신청은 옮겨간 지점·이동일까지, 반려는 사유를, 처리된 건은 처리 시각을 덧붙인다.
+                              길면 잘라 두고 전체는 마우스를 올렸을 때 보여준다. */}
+                          <td className={`${SHEET_TD} max-w-[22rem] truncate`} title={requestRemark(r)}>
+                            {requestRemark(r) || "-"}
                           </td>
                         </tr>
                       ))}
-                      {!requestsData.items.length && (
-                        <tr><td colSpan={7} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">지점에서 올라온 신청이 없습니다.</td></tr>
+                      {!visibleRequests.length && (
+                        <tr><td colSpan={6} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">
+                          {(reqBranchFilter || reqNameFilter || reqTypeFilter)
+                            ? "필터에 해당하는 신청이 없습니다."
+                            : "지점에서 올라온 신청이 없습니다."}
+                        </td></tr>
                       )}
                     </tbody>
                   </table>
@@ -2296,14 +2549,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 <button onClick={() => void sendTms(m)} disabled={busy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">알림톡</button>
                                 {m.status === "blocked" ? (
-                                  <button onClick={() => void runMemberAction(m, "휴직 해제", () => gasClient.unblockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
+                                  <button onClick={() => void runMemberAction(m, "이용중지 해제", () => gasClient.unblockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     // 재조회 목록에 여전히 있고 blocked 가 풀렸으면 확인, 목록에서 사라졌으면 판정 불가
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status !== "blocked" : null; })} disabled={busy}
-                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">휴직 해제</button>
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">이용중지 해제</button>
                                 ) : (
-                                  <button onClick={() => void runMemberAction(m, "휴직", () => gasClient.blockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
+                                  <button onClick={() => void runMemberAction(m, "이용중지", () => gasClient.blockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status === "blocked" : null; })} disabled={busy}
-                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">휴직</button>
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">이용중지</button>
                                 )}
                                 <button onClick={() => void runMemberAction(m, "삭제", async () => {
                                     // 삭제 전 지점 스냅샷 — 실패 시 throw 로 삭제 자체를 멈춘다(과거 이용내역 지점 보존)

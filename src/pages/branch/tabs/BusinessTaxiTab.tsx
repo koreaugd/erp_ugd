@@ -10,7 +10,7 @@ import { useAuthContext } from "../../../contexts/AuthContext";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import {
   createBranchChangeRequest, createMemberRequest, createRegisterRequest, kakaoTaxiRequestsKey, makeRequestId,
-  REQUEST_STATUS_LABEL, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
+  normalizePhone, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
 } from "../../admin/helpers/kakaoTaxiRequests";
 // 전입(다른 지점 직원을 우리 지점으로 데려오기)은 관리자 화면과 **같은 공용 헬퍼**를 쓴다 —
 // 이력 선기록·실패 보정 규약이 한쪽만 달라지면 그 경로로 옮긴 직원의 과거 내역이 소급 집계된다.
@@ -23,21 +23,31 @@ import { KAKAO_BRANCH_ALIASES } from "../../admin/helpers/kakaoTaxi";
 // 오류/반려 표시는 DESIGN.md §11 오류색 hex 를 직접 쓴다(rose 계열은 스코프 치환으로 뒤집힐 수 있음).
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
 
+// 상태 알약. 지점 화면 색 규칙(DESIGN.md)을 따른다 —
+// 완료·긍정은 honey(#CFDECA), 주의·미확인은 vanilla(#EFF0A3), 처리 중은 alice(#D8DFE9).
+// 반려만 오류색을 쓴다(이 화면의 ERROR_BANNER 와 같은 계열).
+const STATUS_PILL = "inline-block w-fit rounded-full px-2 py-0.5 text-[11px] font-black";
 const STATUS_CHIP: Record<string, string> = {
-  pending: "bg-amber-50 text-[#212121]",
-  approved: "bg-emerald-50 text-[#212121]",
-  rejected: "bg-[#FDE2E2] text-[#B91C1C]",
+  waiting: `${STATUS_PILL} bg-[var(--branch-vanilla)] text-[#212121]`,
+  done: `${STATUS_PILL} bg-[var(--branch-honey)] text-[#212121]`,
+  rejected: `${STATUS_PILL} bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]`,
+  processing: `${STATUS_PILL} bg-[var(--branch-alice)] text-[#212121]`,
+  // 판단할 근거가 없을 때. 좋다·나쁘다를 말하지 않는 중립 회색이라 오해를 만들지 않는다.
+  unknown: `${STATUS_PILL} border border-gray-200 bg-[var(--branch-ghost)] text-[#212121]/70`,
 };
 
 const MEMBER_STATUS_LABEL: Record<string, string> = {
-  created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "휴직",
+  created: "등록됨(미인증)", connected: "인증완료", refused: "거부", blocked: "이용중지",
 };
 
 const formatDateTime = (iso: string) => {
   if (!iso) return "-";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // 표 안에서는 세기(20)까지 적을 이유가 없어 연도를 두 자리로 줄인다 — `26-07-31 14:30`
+  // (사용자 지시 2026-07-31). 일자·시각은 남긴다: 언제 올라온 신청인지가 처리 순서의 근거다.
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${yy}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 // 로컬(KST) 기준 오늘 — toISOString()은 UTC 라 자정 부근에 전날로 어긋난다.
@@ -65,8 +75,21 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
 
   const [requests, setRequests] = useState<KakaoTaxiRequest[] | null>(null);
   const [requestsError, setRequestsError] = useState("");
-  const [members, setMembers] = useState<KakaoTaxiMember[] | null>(null);
+  // **서버가 준 그대로**(이용중지 포함). 화면 목록에서는 이용중지를 빼지만, 신청 현황의 상태를
+  // 판정할 때는 "목록에 없다(=인증 전)"와 "이용중지됐다"를 갈라야 하므로 원본이 필요하다.
+  const [allMembers, setAllMembers] = useState<KakaoTaxiMember[] | null>(null);
   const [membersError, setMembersError] = useState("");
+  // 이용 중지(휴직)된 인원은 지점 화면 목록에 보여주지 않는다(사용자 지시 2026-07-31) —
+  // 퇴사 처리한 사람이 목록에 남아 있으면 아직 쓰는 사람으로 오해한다.
+  const members = useMemo(
+    () => (allMembers === null ? null : allMembers.filter((m) => m.status !== "blocked")),
+    [allMembers]
+  );
+  /** 이용중지된 인원 — 위 목록에서는 빠지지만, 복귀 시 이용재개를 신청할 수 있게 따로 모은다. */
+  const blockedMembers = useMemo(
+    () => (allMembers || []).filter((m) => m.status === "blocked"),
+    [allMembers]
+  );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -103,25 +126,28 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     setLoading(true);
     setRequestsError("");
     setMembersError("");
-    // 신청 현황과 등록 인원은 실패를 각자 드러낸다 — 한쪽 실패가 다른 쪽을 가리지 않게 개별 처리.
-    const [reqResult, memResult] = await Promise.allSettled([
-      gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(requestsKey),
-      gasClient.getKakaoTaxiBranchMembers(branchName, pinHash, forceRefresh),
-    ]);
-    if (reqResult.status === "fulfilled") {
-      setRequests(Array.isArray(reqResult.value) ? sortRequests(reqResult.value) : []);
-    } else {
-      console.error("비즈니스택시 신청 현황 로드 실패:", reqResult.reason);
-      setRequests(null);
-      setRequestsError("신청 현황을 불러오지 못했습니다. 네트워크 확인 후 새로고침해주세요.");
-    }
+    // **두 조회를 같이 기다리지 않는다.**
+    // 등록 인원은 카카오 API 를 타서 느리다(실측 첫 조회 7.7초, 캐시가 살아 있어도 2.7초).
+    // 신청 현황은 1.4초면 온다. 종전에는 Promise.allSettled 로 둘을 함께 기다려,
+    // 빠른 쪽까지 느린 쪽에 묶여 탭이 7초 넘게 비어 있었다(사용자 지적 2026-07-31).
+    // 이제 각자 끝나는 대로 화면에 올린다 — 신청 현황이 먼저 뜨고 인원 목록이 뒤따른다.
+    const requestsTask = gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(requestsKey)
+      .then((value) => {
+        setRequests(Array.isArray(value) ? sortRequests(value) : []);
+      })
+      .catch((error) => {
+        console.error("비즈니스택시 신청 현황 로드 실패:", error);
+        setRequests(null);
+        setRequestsError("신청 현황을 불러오지 못했습니다. 네트워크 확인 후 새로고침해주세요.");
+      });
+    const memResult = await gasClient.getKakaoTaxiBranchMembers(branchName, pinHash, forceRefresh)
+      .then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => ({ status: "rejected" as const, reason }));
     if (memResult.status === "fulfilled") {
-      // 이용 중지(휴직)된 인원은 지점 화면에 보여주지 않는다(사용자 지시 2026-07-31) —
-      // 퇴사 처리한 사람이 목록에 남아 있으면 아직 쓰는 사람으로 오해한다.
-      setMembers((memResult.value || []).filter((m) => m.status !== "blocked"));
+      setAllMembers(memResult.value || []);
     } else {
       console.error("비즈니스택시 등록 인원 로드 실패:", memResult.reason);
-      setMembers(null);
+      setAllMembers(null);
       const raw = String((memResult.reason as any)?.message || "");
       // "지점 인증에 실패" 의 원인은 하나가 아니다 — 열어 둔 화면의 인증값이 옛 것이거나,
       // 지점설정에 그 지점 행이 없거나(개발서버는 db_simulation.json 을 보므로 운영에만 있는
@@ -133,6 +159,10 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           : raw || "등록 인원을 불러오지 못했습니다. 새로고침해주세요."
       );
     }
+    // 신청 현황 쪽은 이미 각자 화면에 올렸지만, **버튼을 풀기 전에 그쪽도 끝나기를 기다린다.**
+    // 등록 인원만 끝났다고 버튼을 살리면, 아직 오가는 중인 신청 현황 요청 위에 새 요청이 겹쳐
+    // 늦게 도착한 옛 응답이 최신 목록을 덮을 수 있다(Codex 2026-07-31).
+    await requestsTask;
     setLoading(false);
   }, [requestsKey, branchName, pinHash]);
 
@@ -278,9 +308,36 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     }
 
     setRegName(""); setRegPhone(""); setRegMemo("");
-    await load(true);
+    const refreshed = await gasClient.getKakaoTaxiBranchMembers(branchName, pinHash, true).catch(() => null);
+    if (refreshed) setAllMembers(refreshed);
+    await load();
+    const who = result.name || check.name || "직원";
+    // **전입은 소속만 옮길 뿐 이용중지를 풀지 않는다.**
+    // 부서가 다른 지점으로 남아 있던 이용중지자는 위 blocked 검사에 안 걸려 여기까지 온다
+    // (그 검사는 우리 지점 부서 목록만 본다). 그대로 "데려왔습니다"라고 하면 탈 수 있는 줄 알고
+    // 기다리게 된다 — 옮겨온 뒤에는 우리 부서라 목록에 보이므로, 여기서 확인해 사실대로 알린다
+    // (Codex 2026-07-31).
+    // 재조회 자체가 실패했으면 **확인한 척하지 않는다.** 그대로 "데려왔습니다"만 말하면
+    // 이용중지 상태여도 탈 수 있는 줄 알고 기다리게 된다(Codex 2026-07-31).
+    if (!refreshed) {
+      window.alert(
+        `${who} 님을 우리 지점으로 데려왔습니다.\n오늘(${today})부터의 이용이 ${branchName}으로 집계됩니다.\n\n` +
+        `다만 목록을 다시 불러오지 못해 지금 택시를 탈 수 있는 상태인지는 확인하지 못했습니다.\n` +
+        `'새로고침'을 눌러 '등록된 인원'에 보이는지 확인해주세요(안 보이면 이용중지일 수 있습니다).`
+      );
+      return;
+    }
+    const movedIn = refreshed.find((m) => normalizePhone(m.mobile_phone || "") === normalizePhone(check.phone || ""));
+    if (movedIn?.status === "blocked") {
+      window.alert(
+        `${who} 님을 우리 지점으로 데려왔습니다.\n오늘(${today})부터의 이용이 ${branchName}으로 집계됩니다.\n\n` +
+        `다만 이 분은 **이용중지 상태**라 아직 택시를 탈 수 없습니다.\n` +
+        `아래 '이용중지 인원'에서 [이용재개 신청]을 눌러주세요.`
+      );
+      return;
+    }
     window.alert(
-      `${result.name || check.name || "직원"} 님을 우리 지점으로 데려왔습니다.\n오늘(${today})부터의 이용이 ${branchName}으로 집계됩니다.`
+      `${who} 님을 우리 지점으로 데려왔습니다.\n오늘(${today})부터의 이용이 ${branchName}으로 집계됩니다.`
     );
   };
 
@@ -290,6 +347,25 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     const phone = regPhone.replace(/[^0-9]/g, "");
     if (!name) { window.alert("이름을 입력해주세요."); return; }
     if (!/^01[0-9]{8,9}$/.test(phone)) { window.alert("휴대전화번호를 확인해주세요. (예: 01012345678)"); return; }
+    // 등록 인원 목록이 아직 없으면 **이용중지 여부를 알 수 없다.** 그대로 진행하면 이용중지된
+    // 사람인데 "이미 등록돼 있습니다"로만 끝나, 왜 안 되는지 모른 채 재등록을 반복하게 된다
+    // (Codex P1 2026-07-31).
+    //
+    // **다만 이걸로 등록을 아주 막으면 안 된다.** 이 조회는 카카오를 타서 느리고(7.7초) 가끔
+    // 실패하는데, 실패했다고 등록을 못 하게 하면 멀쩡한 신규 등록까지 통째로 멈춘다.
+    // 그래서 아직 오는 중일 때만 기다리게 하고, 실패했으면 사정을 알린 뒤 진행 여부를 묻는다
+    // (중복 등록은 백엔드가 따로 막으므로 최악이라도 이 기능을 만들기 전과 같다).
+    if (allMembers === null) {
+      if (!membersError) {
+        window.alert("등록 인원 목록을 불러오는 중입니다. 잠시 후 다시 눌러주세요.");
+        return;
+      }
+      if (!window.confirm(
+        "등록 인원 목록을 불러오지 못해 이 번호가 이용중지 상태인지 확인할 수 없습니다.\n\n" +
+        "이용중지된 사람이면 등록이 아니라 관리자의 이용재개가 필요합니다.\n" +
+        "그래도 등록을 진행할까요?"
+      )) return;
+    }
     setSaving(true);
     try {
       // [사전 확인] 등록 확인창을 띄우기 전에 "이 번호가 이미 카카오T에 있는가"를 먼저 묻는다.
@@ -305,6 +381,23 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
         check = await gasClient.checkKakaoTaxiPhone(branchName, pinHash, phone);
       } catch (e: any) {
         console.warn("등록 전 확인 실패 — 기존 등록 방식으로 진행합니다(중복은 백엔드가 막습니다):", e);
+      }
+      // **이용중지된 사람이 복귀해 다시 등록하려는 경우.**
+      // 지점에서는 이용재개(카카오 unblock)를 할 수 없다 — 관리자만 가능하다. 그런데 아래
+      // "이미 우리 지점에 등록돼 있습니다"로 끝내면 왜 안 되는지 몰라 재등록만 반복하게 된다
+      // (사용자 지시 2026-07-31). 이유를 알려 주고 관리자에게 요청으로 넘긴다.
+      const blockedSame = (allMembers || []).find(
+        (m) => m.status === "blocked" && normalizePhone(m.mobile_phone || "") === normalizePhone(phone)
+      );
+      if (blockedSame) {
+        // 요청을 대신 올려 주지 않고 **안내만 한다**(사용자 지시 2026-07-31).
+        // 무엇이 문제이고 무엇을 하면 되는지만 알려 주면, 재등록을 반복하는 일은 없어진다.
+        window.alert(
+          `${blockedSame.name || name} 님은 현재 이용중지 상태입니다.\n\n` +
+          `지점에서는 풀 수 없습니다. 아래 '이용중지 인원'에서 [이용재개 신청]을 눌러주세요.\n` +
+          `관리자가 처리하면 '등록된 인원'에 다시 나타나고 택시도 바로 탈 수 있습니다.`
+        );
+        return;
       }
       if (check?.found) {
         if (check.sameBranch) {
@@ -363,7 +456,14 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
 
   const submitMemberRequest = async () => {
     if (saving || !requestTarget) return;
-    const member = { id: requestTarget.member.id, name: requestTarget.member.name };
+    // **계정(account_key)까지 넘긴다.** id 는 계정별로 발급돼 다른 계정에 같은 id 가 있을 수 있어,
+    // 관리자가 승인할 때 계정을 추정하면 엉뚱한 사람을 건드린다. 신청에 못 박아 두면 그럴 일이 없다
+    // (2026-07-31). 종전에는 여기서 id·name 만 뽑아 계정을 버렸다.
+    const member = {
+      id: requestTarget.member.id,
+      name: requestTarget.member.name,
+      account_key: requestTarget.member.account_key,
+    };
     let request: KakaoTaxiRequest;
     try {
       request = requestTarget.type === "branchChange"
@@ -394,6 +494,117 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   };
 
   const pendingCount = useMemo(() => (requests || []).filter((r) => r.status === "pending").length, [requests]);
+
+  /**
+   * 신청 한 줄의 상태를 한마디로 정한다(사용자 지시 2026-07-31 — 인증대기중·등록완료·반려).
+   *
+   * 지점이 알고 싶은 건 "이 사람이 택시를 탈 수 있느냐"다. 등록만으로는 못 탄다 —
+   * 직원이 카카오T 앱에서 본인 인증을 마쳐야 한다. 그런데 카카오는 **인증을 마친 사람만**
+   * 목록으로 돌려주므로(등록된 인원 = 인증 완료자), 그 목록에 있으면 인증까지 끝난 것이다.
+   *
+   * **모를 때는 '등록완료'라고 하지 않는다.** 목록을 아직 못 받았거나 대조할 전화번호가 없으면
+   * 인증 여부를 단정할 수 없는데, 여기서 완료라고 적으면 정작 못 타는 사람을 끝난 것으로 믿고
+   * 넘어간다. 그런 경우는 '인증대기중'으로 둬서 한 번 더 확인하게 한다.
+   */
+  /** 이 신청의 대상이 **지금** 이용중지 상태인가. 목록을 못 받았으면 단정하지 않는다. */
+  const isMemberBlockedNow = (r: KakaoTaxiRequest): boolean =>
+    !!r.memberId && allMembers !== null && allMembers.some((m) =>
+      m.id === r.memberId && m.status === "blocked" && (!r.accountKey || m.account_key === r.accountKey));
+
+  /**
+   * 이용재개 신청 — 이용중지된 사람이 복귀했을 때.
+   *
+   * 지점은 카카오 이용재개(unblock)를 할 수 없어 관리자에게 넘겨야 한다. 사유는 따로 묻지 않는다 —
+   * '복귀'라는 사실 자체가 사유이고, 한 번 더 묻는 창은 통로만 불편하게 만든다.
+   */
+  const submitResumeRequest = async (member: KakaoTaxiMember) => {
+    if (saving) return;
+    if (!window.confirm(`${member.name} 님의 이용재개를 관리자에게 신청할까요?\n\n승인되면 다시 택시를 탈 수 있고 '등록된 인원'에도 나타납니다.`)) return;
+    setSaving(true);
+    try {
+      await appendRequest(createMemberRequest("resume", branchName, member, "복귀 — 이용재개 요청"));
+      window.alert("이용재개를 신청했습니다. 관리자 확인 후 처리됩니다.");
+    } catch (e: any) {
+      window.alert(`이용재개 신청에 실패했습니다.\n${String(e?.message || e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const requestStatusChip = (r: KakaoTaxiRequest): { label: string; className: string } => {
+    // **지금 이용중지된 사람이면 그것이 결론이다.** 기록상 반려로 남아 있어도 그 뒤 다른 경로로
+    // 이용중지가 된 경우가 있다(이선복·김미화). '반려'라고만 적으면 아직 처리가 안 된 것으로
+    // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
+    if (isMemberBlockedNow(r)) return { label: "이용중지", className: STATUS_CHIP.unknown };
+    if (r.status === "rejected") return { label: "반려", className: STATUS_CHIP.rejected };
+    // 관리자 처리를 기다리는 요청(삭제요청·지점변경)은 위 셋에 속하지 않는다 — 있는 그대로 적는다.
+    if (r.status === "pending") return { label: "관리자 확인 대기", className: STATUS_CHIP.processing };
+    if (r.status === "processing") return { label: "처리 중", className: STATUS_CHIP.processing };
+    // 승인된 건 중 '등록'만 인증 여부를 따진다. 나머지(삭제요청·지점변경 승인)는 그것으로 끝이다.
+    // 지점변경은 처리되면 끝이다 — 상태는 인증완료/반려 둘 중 하나로만 보인다(사용자 지시 2026-07-31).
+    // (반려는 위에서 이미 걸러졌으므로 여기 오는 건 승인된 건뿐이다.)
+    if (r.type === "branchChange") return { label: "인증완료", className: STATUS_CHIP.done };
+    if (r.type !== "register") return { label: "처리 완료", className: STATUS_CHIP.done };
+    const phone = normalizePhone(r.phone || "");
+    // **모를 때는 '인증대기중'이라고 하지 않는다.** 목록을 못 받았거나 대조할 번호가 없는 것은
+    // "직원이 인증을 안 했다"와 전혀 다른 이야기다. 그렇게 적으면 이미 인증을 마친 사람까지
+    // 미완료로 읽히고, 지점은 직원에게 헛되이 인증을 재촉하게 된다(Codex P1 2026-07-31).
+    if (allMembers === null) {
+      return loading
+        ? { label: "확인 중", className: STATUS_CHIP.processing }
+        : { label: "상태 확인 불가", className: STATUS_CHIP.unknown };
+    }
+    if (!phone) return { label: "상태 확인 불가", className: STATUS_CHIP.unknown };
+    const found = allMembers.find((m) => normalizePhone(m.mobile_phone || "") === phone);
+    if (!found) return { label: "인증대기중", className: STATUS_CHIP.waiting };
+    // **목록에 있다고 탈 수 있는 게 아니다.** 카카오 멤버 상태는 네 가지다
+    // (created=등록만 됨 / connected=인증 완료 / refused=초대 거부 / blocked=이용 중지).
+    // 종전에는 blocked 만 걸러내고 나머지를 전부 '등록완료'로 적었는데, 그러면 아직 인증을
+    // 안 한 사람(created)과 초대를 거부한 사람(refused)까지 다 탈 수 있는 것으로 보인다
+    // (Codex P0 2026-07-31). 확실한 connected 하나만 완료로 본다.
+    if (found.status === "connected") return { label: "등록완료", className: STATUS_CHIP.done };
+    if (found.status === "created") return { label: "인증대기중", className: STATUS_CHIP.waiting };
+    if (found.status === "refused") return { label: "인증거부", className: STATUS_CHIP.rejected };
+    // 이용중지된 사람은 인증을 안 한 것이 아니다 — '인증대기중'으로 적으면
+    // 퇴사 처리한 사람을 두고 인증을 기다리게 된다.
+    if (found.status === "blocked") return { label: "이용중지", className: STATUS_CHIP.unknown };
+    // 모르는 상태값이면 단정하지 않는다(카카오가 값을 추가해도 거짓 완료로 새지 않게).
+    return { label: "상태 확인 불가", className: STATUS_CHIP.unknown };
+  };
+
+  /**
+   * 비고 칸에 적을 말. **본문과 툴팁이 반드시 같은 값을 쓴다.**
+   *
+   * 종전에는 본문만 상태에 맞춰 고치고 title 은 저장된 옛 메모를 그대로 써서,
+   * 마우스를 올리면 상태 칸과 다른 말이 나왔다(Codex 2026-07-31).
+   * 저장된 처리 메모(resultNote)는 **승인 순간의 기록**이라, 그 뒤 직원이 거부하거나
+   * 이용중지되면 사실과 어긋난다 — 그래서 지금 상태를 먼저 본다.
+   */
+  const requestRemark = (r: KakaoTaxiRequest): string => {
+    if (isMemberBlockedNow(r)) return "이용중지 승인됨 — 다시 쓰려면 관리자에게 이용재개를 신청해주세요";
+    if (r.status === "rejected" && r.rejectReason) return `반려 사유: ${r.rejectReason}`;
+    if (r.status === "approved" && r.type === "register") {
+      const label = requestStatusChip(r).label;
+      // 인증까지 끝난 사람에게는 알림톡 안내가 남아 있으면 안 된다 — 할 일이 없는데 뭔가
+      // 더 해야 하는 것처럼 읽힌다(사용자 지시 2026-07-31). 끝났다는 말만 남긴다.
+      if (label === "등록완료") return "카카오 등록완료";
+      if (label === "이용중지") return "이용중지 상태입니다 — 다시 쓰려면 관리자에게 이용재개를 요청해주세요";
+      if (label === "인증거부") return "직원이 카카오T 초대를 거부했습니다 — 관리자에게 재초대를 요청해주세요";
+      if (label !== "인증대기중") return "등록 상태를 확인하지 못했습니다 — 새로고침해주세요";
+      // 아직 인증 전이면 **저장된 처리 결과를 그대로** 보여준다.
+      // 여기에 알림톡 발송 실패 여부가 들어 있다 — 일반 문구로 덮으면 알림톡이 간 줄 알고
+      // 기다리기만 하게 된다(실패한 경우 직원이 카카오T 앱에서 초대를 직접 찾아 확인해야 한다).
+      return r.resultNote || "인증 알림톡 발송됨 — 직원이 카카오T 앱>비즈니스에서 인증을 마쳐야 이용할 수 있습니다";
+    }
+    // 지점변경은 **어디서 어디로 언제** 옮기는지가 전부다(사용자 지시 2026-07-31).
+    // 신청을 올린 지점(branchName)이 곧 이전 소속이다.
+    if (r.type === "branchChange") {
+      const move = r.targetBranch ? `${r.branchName} → ${r.targetBranch}` : "";
+      return [move, r.effectiveDate ? `이동일 ${r.effectiveDate}` : "", r.reason || ""].filter(Boolean).join(" · ") || "-";
+    }
+    if (r.status === "approved") return r.resultNote || "처리 완료";
+    return r.reason || r.memo || "-";
+  };
 
   return (
     <div className="space-y-6">
@@ -539,7 +750,7 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                     );
                   })}
                   {!members.length && (
-                    <tr><td colSpan={7} className="px-3 py-8 text-center text-xs font-bold text-[#212121]/50">
+                    <tr><td colSpan={8} className="px-3 py-8 text-center text-xs font-bold text-[#212121]/50">
                       이 지점으로 등록된 인원이 없습니다. (부서가 지점명으로 등록된 인원만 표시됩니다)
                     </td></tr>
                   )}
@@ -549,6 +760,53 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           </>
         )}
       </section>
+
+      {/* ---------- 이용중지 인원 ----------
+          위 '등록된 인원'에는 일부러 넣지 않는다 — 지금 택시를 탈 수 있는 사람 목록이 흐려지면
+          누가 현역인지 알 수 없다(사용자 지시 2026-07-31). 대신 여기 따로 모아,
+          복귀했을 때 **이용재개를 신청할 통로**를 만든다(지점은 스스로 풀 수 없다). */}
+      {blockedMembers.length > 0 && (
+        <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
+          <h3 className="branch-pill-title">이용중지 인원 — {blockedMembers.length}명</h3>
+          <p className="text-[11px] font-bold text-[#212121]/60">
+            퇴사·휴직 등으로 이용이 중지된 인원입니다. 복귀했다면 다시 등록하지 말고 아래에서 이용재개를 신청해주세요.
+          </p>
+          <div className="overflow-x-auto rounded-2xl border border-gray-100">
+            <table className="w-full text-xs whitespace-nowrap">
+              <thead><tr className="text-left">
+                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이름</th>
+                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
+                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">부서(지점)</th>
+                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">요청</th>
+              </tr></thead>
+              <tbody>
+                {blockedMembers.map((m) => {
+                  const openResume = (requests || []).some(
+                    (r) => r.type === "resume" && r.memberId === m.id && (r.status === "pending" || r.status === "processing")
+                  );
+                  return (
+                    <tr key={m.id} className="border-t border-gray-100">
+                      <td className="px-3 py-2 font-bold text-[#212121]">{m.name}</td>
+                      <td className="px-3 py-2">{m.mobile_phone}</td>
+                      <td className="px-3 py-2">{m.department || "-"}</td>
+                      <td className="px-3 py-2">
+                        {openResume ? (
+                          <span className={STATUS_CHIP.waiting}>이용재개 신청됨 — 관리자 확인 대기</span>
+                        ) : (
+                          <button onClick={() => void submitResumeRequest(m)} disabled={saving}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-[#212121] text-white disabled:opacity-50">
+                            이용재개 신청
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ---------- 신청 현황 ---------- */}
       <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
@@ -571,16 +829,15 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                     <td className="px-3 py-2 font-bold text-[#212121]">{REQUEST_TYPE_LABEL[r.type]}</td>
                     <td className="px-3 py-2">{r.name}{r.phone ? ` (${r.phone})` : ""}</td>
                     <td className="px-3 py-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-black ${STATUS_CHIP[r.status] || ""}`}>
-                        {REQUEST_STATUS_LABEL[r.status]}
-                      </span>
+                      {(() => {
+                        const chip = requestStatusChip(r);
+                        return <span className={chip.className}>{chip.label}</span>;
+                      })()}
                     </td>
-                    <td className="px-3 py-2 max-w-[24rem] truncate" title={r.rejectReason || r.resultNote || r.reason || r.memo || ""}>
-                      {r.status === "rejected" && r.rejectReason ? `반려 사유: ${r.rejectReason}`
-                        : r.status === "approved" && r.type === "register" ? "승인됨 — 직원 휴대폰 인증 알림톡 발송, 카카오T 앱에서 인증 필요"
-                        : r.status === "approved" ? (r.resultNote || "처리 완료")
-                        : r.type === "branchChange" ? `${r.targetBranch ? `→ ${r.targetBranch} · ` : ""}${r.effectiveDate ? `이동일 ${r.effectiveDate} · ` : ""}${r.reason || "-"}`
-                        : (r.reason || r.memo || "-")}
+                    {/* 본문과 툴팁이 **같은 값**을 쓴다. 종전에는 본문만 상태에 맞춰 고치고 title 은
+                        옛 처리 메모를 그대로 써서, 마우스를 올리면 "인증거부"인데 "등록 완료"가 떴다. */}
+                    <td className="px-3 py-2 max-w-[24rem] truncate" title={requestRemark(r)}>
+                      {requestRemark(r)}
                     </td>
                   </tr>
                 ))}
