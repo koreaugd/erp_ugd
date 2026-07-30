@@ -46,9 +46,14 @@ const todayDateText = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 };
 
-// 인원 행에서 올릴 수 있는 요청 종류(2026-07-29): 삭제요청 폐지 — 삭제 승인이 직원 계정 자체를 지워
-// 과거 이용내역 지점까지 잃는 사고가 있었다. 지점 이동은 '변경신청'으로 소속만 옮긴다.
-type MemberRequestType = "update" | "branchChange";
+// 인원 행에서 올릴 수 있는 요청 종류.
+//   · update       수정요청 — 이름·전화번호 정정
+//   · branchChange 지점변경 — 다른 지점으로 옮김(계정 유지, 소속만 이동)
+//   · delete       삭제요청 — **퇴사자 처리**. 승인해도 계정을 지우지 않고 인증만 해제(휴직)한다.
+//     지점 목록에서는 사라지고 택시도 못 타지만, 과거 이용내역은 남는다.
+//     (2026-07-29에 '진짜 삭제'라서 폐지했다가, 퇴사자 처리 통로가 없어 헷갈린다는 지적으로
+//      2026-07-31에 '이용 중지' 뜻으로 되살렸다.)
+type MemberRequestType = "update" | "branchChange" | "delete";
 
 // 사전 확인에서 "이미 등록된 사람을 찾았다"로 좁힌 결과 — 전입 처리에 필요한 필드가 모두 있다.
 type FoundPhoneCheck = Extract<KakaoTaxiPhoneCheck, { found: true }>;
@@ -111,11 +116,22 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
       setRequestsError("신청 현황을 불러오지 못했습니다. 네트워크 확인 후 새로고침해주세요.");
     }
     if (memResult.status === "fulfilled") {
-      setMembers(memResult.value || []);
+      // 이용 중지(휴직)된 인원은 지점 화면에 보여주지 않는다(사용자 지시 2026-07-31) —
+      // 퇴사 처리한 사람이 목록에 남아 있으면 아직 쓰는 사람으로 오해한다.
+      setMembers((memResult.value || []).filter((m) => m.status !== "blocked"));
     } else {
       console.error("비즈니스택시 등록 인원 로드 실패:", memResult.reason);
       setMembers(null);
-      setMembersError(String((memResult.reason as any)?.message || "등록 인원을 불러오지 못했습니다. 새로고침해주세요."));
+      const raw = String((memResult.reason as any)?.message || "");
+      // "지점 인증에 실패" 의 원인은 하나가 아니다 — 열어 둔 화면의 인증값이 옛 것이거나,
+      // 지점설정에 그 지점 행이 없거나(개발서버는 db_simulation.json 을 보므로 운영에만 있는
+      // 지점은 여기서 걸린다), PIN 이 실제로 다르거나. 원인을 단정해 적으면 오히려 헤매게 되므로
+      // (2026-07-31 오진) 가장 흔한 조치만 안내하고 원인은 단정하지 않는다.
+      setMembersError(
+        raw.includes("지점 인증")
+          ? "지점 인증이 확인되지 않아 목록을 불러오지 못했습니다. 왼쪽 아래 [마감 보안 로그아웃]으로 나갔다가 다시 로그인해주세요. 그래도 같으면 관리자에게 이 지점의 PIN 등록 여부를 확인해주세요."
+          : raw || "등록 인원을 불러오지 못했습니다. 새로고침해주세요."
+      );
     }
     setLoading(false);
   }, [requestsKey, branchName, pinHash]);
@@ -316,9 +332,10 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
         const record = createRegisterRequest(branchName, { name, phone, memo: regMemo.trim() });
         record.status = "approved";
         record.processedAt = new Date().toISOString();
+        // 짧게 남긴다 — 신청 목록의 '상태' 칸에 그대로 찍히는 값이라, 길면 표를 읽을 수 없다.
         record.resultNote = res.tmsSent
-          ? "카카오 등록 완료 · 인증 알림톡 발송됨 (직원이 앱에서 인증하면 '등록된 인원'에 표시)"
-          : "카카오 등록 완료 · 인증 알림톡 발송 실패 — 직원이 카카오T 앱>비즈니스에서 초대를 직접 확인해 인증하거나 관리자에게 문의";
+          ? "등록 완료 · 알림톡 발송"
+          : "등록 완료 · 알림톡 실패(직원이 카카오T 앱>비즈니스에서 초대를 직접 확인해 인증)";
         await appendRequest(record);
       } catch (histErr) {
         console.warn("등록 이력 기록 실패(등록 자체는 완료됨):", histErr);
@@ -351,7 +368,7 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     try {
       request = requestTarget.type === "branchChange"
         ? createBranchChangeRequest(branchName, member, requestReason, requestTargetBranch, requestEffectiveDate)
-        : createMemberRequest("update", branchName, member, requestReason);
+        : createMemberRequest(requestTarget.type, branchName, member, requestReason);
     } catch (e: any) {
       window.alert(String(e?.message || e));
       return;
@@ -359,7 +376,10 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     const typeLabel = REQUEST_TYPE_LABEL[requestTarget.type];
     const confirmBody = requestTarget.type === "branchChange"
       ? `옮겨간 지점: ${request.targetBranch || "모름 (관리자가 지정)"}\n이동일: ${request.effectiveDate}\n사유: ${request.reason}\n\n승인되면 이동일부터의 이용만 새 지점으로 집계되고, 직원은 삭제되지 않습니다.`
-      : `사유: ${request.reason}`;
+      : requestTarget.type === "delete"
+        // 무엇이 지워지고 무엇이 남는지 분명히 알린다 — '삭제'라는 말 때문에 기록까지 지워진다고 오해하기 쉽다.
+        ? `사유: ${request.reason}\n\n승인되면 이 인원의 인증이 해제되어 목록에서 사라지고 택시를 탈 수 없게 됩니다.\n과거 이용내역은 그대로 남습니다(계정을 지우지 않습니다).`
+        : `사유: ${request.reason}`;
     if (!window.confirm(`${request.name} 님에 대한 ${typeLabel}을 등록할까요?\n\n${confirmBody}`)) return;
     setSaving(true);
     try {
@@ -417,6 +437,9 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                     종류를 고른 뒤 오른쪽으로 이어서 적는 순서가 되고, 행끼리 칸이 세로로 맞는다. */}
                 <thead><tr className="text-left">
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이름</th>
+                  {/* 부서(지점) — 이용내역이 어느 지점으로 잡히는지가 이 값으로 정해진다.
+                      지점명과 다르게 적혀 있으면 그 사람 이용이 엉뚱한 곳으로 집계되므로 눈으로 확인할 수 있게 둔다. */}
+                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">부서(지점)</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th>
                   <th className="px-3 py-2 text-[11px] font-black text-[#212121]">요청</th>
@@ -431,6 +454,12 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                     return (
                     <tr key={m.id} className="border-t border-gray-100">
                       <td className="px-3 py-2 font-bold text-[#212121]">{m.name || "(이름 없음)"}</td>
+                      {/* 부서가 우리 지점명과 다르면 그 사람 이용이 다른 지점으로 집계된다 — 빨간 글씨로 짚어 준다
+                          (지점 화면은 색이 죽는 자리가 많아 오류 hex 로 못 박는다). */}
+                      <td className={`px-3 py-2 ${String(m.department || "").trim() === branchName ? "" : "text-[#B3261E] font-bold"}`}
+                        title={String(m.department || "").trim() === branchName ? "" : "부서가 우리 지점명과 다릅니다 — 이용내역이 다른 지점으로 집계될 수 있습니다. 관리자에게 수정을 요청해주세요."}>
+                        {m.department || "(없음)"}
+                      </td>
                       <td className="px-3 py-2">{m.mobile_phone || "-"}</td>
                       <td className="px-3 py-2">{MEMBER_STATUS_LABEL[m.status] || m.status}</td>
                       {/* 요청 — 고르면 오른쪽 칸들이 열린다. 작성 중에는 종류와 등록·취소 버튼을 보여준다. */}
@@ -438,15 +467,15 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                         {active ? (
                           <div className="flex flex-col gap-1.5">
                             <span className="text-[11px] font-black text-[#212121]">
-                              {requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"}
+                              {REQUEST_TYPE_LABEL[requestTarget!.type]}
                             </span>
                             {/* 버튼 글자는 '등록/취소'로 짧지만, 읽어주는 도구에는 누구의 무슨 요청인지 밝힌다 */}
                             <span className="inline-flex gap-1.5">
                               <button onClick={() => void submitMemberRequest()} disabled={saving}
-                                aria-label={`${m.name || "이 인원"} ${requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"} 등록`}
+                                aria-label={`${m.name || "이 인원"} ${REQUEST_TYPE_LABEL[requestTarget!.type]} 등록`}
                                 className="px-2.5 py-1 rounded-lg text-[11px] font-black text-white bg-slate-800 disabled:opacity-50">등록</button>
                               <button onClick={closeRequestForm} disabled={saving}
-                                aria-label={`${m.name || "이 인원"} ${requestTarget!.type === "branchChange" ? "변경신청" : "수정요청"} 취소`}
+                                aria-label={`${m.name || "이 인원"} ${REQUEST_TYPE_LABEL[requestTarget!.type]} 취소`}
                                 className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">취소</button>
                             </span>
                           </div>
@@ -463,8 +492,11 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
                             }}
                             className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white cursor-pointer disabled:opacity-50">
                             <option value="">선택</option>
-                            <option value="update">수정요청</option>
-                            <option value="branchChange">변경신청</option>
+                            {/* 퇴사자는 '삭제요청'을 고른다 — 승인되면 인증만 해제돼 목록에서 사라지고,
+                                과거 이용내역은 남는다(계정을 지우지 않는다). */}
+                            <option value="delete">삭제요청 (퇴사)</option>
+                            <option value="branchChange">지점변경 (타지점 이동)</option>
+                            <option value="update">수정요청 (이름·번호 정정)</option>
                           </select>
                         )}
                       </td>

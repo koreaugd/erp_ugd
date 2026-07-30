@@ -142,7 +142,16 @@ export function zeroPaidPartTimeRows(data: MonthlyCloseData): { name: string; ho
   const sheet = buildMonthlyCloseSheetSpecs(data).find((spec) => spec.name === "파트타이머급여");
   if (!sheet) return [];
   return sheet.rows
-    .filter((row) => Number(row[PART_TIME_COL.hours]) > 0 && !(Number(row[PART_TIME_COL.salary]) > 0))
+    .filter((row) => {
+      const hours = Number(row[PART_TIME_COL.hours]) || 0;
+      if (hours <= 0) return false; // 이번 달 일하지 않은 사람은 지급할 것이 없다
+      // 시급이 없으면 그 시간만큼의 기본급이 통째로 빠진다.
+      // **급여 합계만 보면 안 된다** — 팁이 들어 있으면 급여가 0원이 아니라서(예: 5시간·시급 없음·팁 1만원 → 1만원)
+      // "0원 아님"으로 통과해 버리고, 정작 5시간분 기본급은 사라진 파일이 나간다.
+      if (!(Number(row[PART_TIME_COL.hourlyRate]) > 0)) return true;
+      // 시급이 있는데도 급여가 0원이면 다른 계산 문제다. 그것도 내보내지 않는다.
+      return !(Number(row[PART_TIME_COL.salary]) > 0);
+    })
     .map((row) => ({
       name: String(row[PART_TIME_COL.name] || "").trim(),
       hours: Number(row[PART_TIME_COL.hours]) || 0

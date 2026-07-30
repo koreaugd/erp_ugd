@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyPartTimeSalarySubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Check, Plus, RotateCcw, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -311,6 +311,35 @@ export function MonthlyPartTimeSalarySubTab({
   // 그 행이 안 보이면 예상 시간을 적을 길이 없어 수기 행을 만들게 되고 결국 한 사람이 두 줄이 된다.
   const [showZeroHourRows, setShowZeroHourRows] = useState(false);
   const salaryAutoSaveTimerRef = useRef<number | null>(null);
+  /**
+   * 저장을 한 줄로 세우는 고리.
+   *
+   * 저장은 "서버 읽기 → 병합 → 쓰기"라 시간이 걸린다. 여러 저장이 겹치면 느린 앞 저장이 나중에 끝나
+   * 옛 값으로 되돌린다("16000"까지 친 뒤 "1600" 저장이 늦게 도착하는 식). 앞 저장이 끝난 뒤에
+   * 다음 저장을 시작해 그 역전을 없앤다.
+   */
+  const salarySaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  /** 편집 순번. 저장이 끝난 뒤 "그 사이 또 고쳤는지"를 가려 '못 올림' 표시를 성급히 지우지 않게 한다. */
+  const salaryEditSeqRef = useRef(0);
+  /** 못 올린 값을 다시 올리려는 타이머. 연결이 끊겼다 돌아오면 스스로 회복한다. */
+  const salaryRetryTimerRef = useRef<number | null>(null);
+  /**
+   * 저장 상태 배지.
+   *
+   * 예전에는 늘 초록 '자동저장'만 보여줬다. 그런데 서버를 못 읽어 저장을 미룬 동안에도 그대로여서,
+   * **안 올라간 값을 올라간 줄 알고** 화면을 닫는 일이 생긴다. 실제 상태를 그대로 보여준다.
+   *
+   * 처음 값은 '못 올린 표시'가 남아 있는지를 보고 정한다 — 저장을 못 한 채 새로고침했으면
+   * 화면을 다시 열어도 여전히 안 올라간 상태이므로, 초록으로 시작하면 또 속게 된다.
+   */
+  const [salarySaveState, setSalarySaveState] = useState<"saved" | "saving" | "retry">(() => {
+    // 제외 목록만 못 올라간 상태도 똑같이 '못 올림'이다. 급여 배열만 보고 초록으로 시작하면,
+    // 이 기기에서 제외한 사람이 다른 노트북에서는 자동 행으로 되살아나는데도
+    // 저장된 줄 알고 화면을 닫는다(Codex P0 2026-07-31).
+    const salaryKey = pendingLocalSaveStorageKey(`erp_monthly_part_time_salary_${branchName}_${selectedMonth}`);
+    const exclusionKey = pendingLocalSaveStorageKey(`erp_monthly_part_time_exclusions_${branchName}_${selectedMonth}`);
+    return localStorage.getItem(salaryKey) === "1" || localStorage.getItem(exclusionKey) === "1" ? "retry" : "saved";
+  });
 
   const salaryStorageKey = `erp_monthly_part_time_salary_${branchName}_${selectedMonth}`;
   const salaryDataKey = `part_time_salaries:${branchName}:${selectedMonth}`;
@@ -347,7 +376,187 @@ export function MonthlyPartTimeSalarySubTab({
     }, {});
   }, []);
 
-  const persistPartTimeSalaries = useCallback((nextSalaries: PartTimeSalaryRow[], nextExcluded = excludedEmployeeIds, showToast = false) => {
+  /** 재시도 실패 때 다시 예약하려면 아래에 정의된 scheduleSalaryRetry 가 필요해 ref 로 이어 준다. */
+  const scheduleSalaryRetryRef = useRef<(() => void) | null>(null);
+
+  /**
+   * 제외 목록을 **확정했는지** 여부.
+   *
+   * `excludedEmployeeIds` 의 초기값은 빈 배열인데, 이건 "제외한 사람이 없다"와 "아직 못 읽었다"를
+   * 구분하지 못한다. 서버를 못 읽은 채로 그 빈 배열을 저장에 실어 보내면 **서버에 있던 제외 목록이
+   * 통째로 지워져** 제외해 둔 사람이 전부 급여대장에 되살아난다(Codex 5R P0 2026-07-31).
+   * 그래서 로컬 사본이나 서버 값으로 실제로 확정했을 때만 true 로 올리고, 그 전에는 제외 목록을
+   * 아예 건드리지 않는다(급여 저장은 평소대로 진행된다).
+   */
+  const exclusionsResolvedRef = useRef(false);
+
+  /**
+   * 지금 화면이 보고 있는 제외 목록 키. 서버 응답이 늦게 도착했을 때 "아직 같은 달인가"를 가린다.
+   * 이게 없으면 7월 조회가 느린 사이 8월로 옮겼을 때, 뒤늦게 온 7월 제외 목록이 8월 화면에 박히고
+   * 다음 저장이 그 값을 8월 키로 올려 버린다(Codex 6R P0 2026-07-31).
+   */
+  const currentExclusionKeyRef = useRef(exclusionDataKey);
+  currentExclusionKeyRef.current = exclusionDataKey;
+
+  /**
+   * 제외 목록을 이 화면에서 건드린 횟수.
+   *
+   * 키(달·지점)만 봐서는 **같은 달 안에서** 늦게 온 서버 응답을 걸러낼 수 없다. 조회가 오가는 사이에
+   * 사용자가 누군가를 제외하면, 뒤늦게 도착한 옛 서버 목록이 그 제외를 덮고 '못 올림' 표시까지 지운다
+   * (Codex 7R P0 2026-07-31). 조회를 시작할 때 이 값을 적어 두고, 응답이 왔을 때 그대로면 그동안
+   * 아무도 안 건드린 것이므로 반영해도 된다.
+   */
+  const exclusionSeqRef = useRef(0);
+  /**
+   * 진행 중인 서버 조회. 같은 요청을 겹쳐 쏘지 않으려고 공유한다.
+   *
+   * **키뿐 아니라 세대값도 함께 들고 있어야 한다.** 진행 중인 조회는 시작 시점의 세대값으로
+   * 판정하므로, 그 사이 제외가 바뀌었으면 그 조회는 아무것도 반영하지 않고 끝난다. 그런 조회를
+   * 키만 보고 새 호출자에게 돌려주면, 그 호출자는 "확정해 달라"고 불렀는데 아무 일도 안 일어난
+   * 응답을 성공으로 받는다 — 확정이 안 된 채로 화면이 남는다(Codex 10R 2026-07-31).
+   */
+  const restoreExclusionsInFlightRef = useRef<{ key: string; seq: number; promise: Promise<void> } | null>(null);
+
+  /**
+   * 서버에서 제외 목록을 되받아 화면·로컬 사본·'못 올림' 표시를 한 번에 확정한다.
+   * 실패하면 던진다 — 부르는 쪽이 표시를 남긴 채 재시도를 걸도록.
+   */
+  const restoreExclusionsFromServer = useCallback(() => {
+    const inFlight = restoreExclusionsInFlightRef.current;
+    // 세대까지 같을 때만 공유한다 — 다르면 그 조회는 no-op 으로 끝날 운명이라 새로 쏴야 한다.
+    if (inFlight?.key === exclusionDataKey && inFlight.seq === exclusionSeqRef.current) return inFlight.promise;
+    // **캐시 폴백이 없는 서버 전용 조회여야 한다.** getSharedData 로 읽으면 서버에 못 닿아도
+    // 던지지 않고 옛 사본이나 빈 값을 돌려줄 수 있는데, 여기서는 그 값을 "서버에 제외가 없다"로
+    // 확정해 버리므로 위와 똑같은 유실이 다른 문으로 들어온다.
+    const startSeq = exclusionSeqRef.current;
+    let restoreTask: Promise<void>;
+    restoreTask = (async () => {
+      const restored = await gasClient.getSharedDataFromServer<string[]>(exclusionDataKey);
+      // 기다리는 사이 달·지점이 바뀌었으면 이 응답은 옛 화면의 것이다. 반영하면 새 달에 지난달 제외가 박힌다.
+      if (currentExclusionKeyRef.current !== exclusionDataKey) return;
+      // 같은 달이어도, 기다리는 사이 이 화면에서 제외 목록을 건드렸으면 덮으면 안 된다.
+      // 덮으면 방금 제외한 사람이 되살아나고 '못 올림' 표시까지 지워져 다시 올라가지도 않는다.
+      if (exclusionSeqRef.current !== startSeq) return;
+      // 여기서의 빈 배열은 "아직 저장된 제외 목록이 없다"가 확실하다(서버가 실제로 그렇게 답했다).
+      const restoredExclusions = Array.isArray(restored) ? restored : [];
+      setExcludedEmployeeIds(restoredExclusions);
+      localStorage.setItem(exclusionStorageKey, JSON.stringify(restoredExclusions));
+      localStorage.removeItem(exclusionPendingKey);
+      exclusionsResolvedRef.current = true;
+      if (localStorage.getItem(salaryPendingKey) !== "1") setSalarySaveState("saved");
+    })().finally(() => {
+      if (restoreExclusionsInFlightRef.current?.promise === restoreTask) {
+        restoreExclusionsInFlightRef.current = null;
+      }
+    });
+    restoreExclusionsInFlightRef.current = { key: exclusionDataKey, seq: startSeq, promise: restoreTask };
+    return restoreTask;
+  }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey, salaryPendingKey]);
+
+  /**
+   * 제외 목록만 따로 올린다.
+   *
+   * 평소에는 급여와 제외가 한 번에 올라가므로 이 경로를 탈 일이 없다. 다만 브라우저가 저장 공간을
+   * 정리하며 급여 사본만 지워 가면, 제외는 '못 올림'인데 급여 경로로는 다시 올릴 수가 없어
+   * 화면을 열어 둔 채로는 영영 안 올라간다(Codex 2R P0 2026-07-31). 그 막다른 길을 막는다.
+   */
+  const retryExclusionsOnly = useCallback(() => {
+    if (localStorage.getItem(exclusionPendingKey) !== "1") return;
+    const savedExclusions = localStorage.getItem(exclusionStorageKey);
+    // 올릴 사본조차 없으면 올릴 것이 없다. 그렇다고 그냥 물러나면 이 화면에서는 제외 목록이
+    // 영영 확정되지 않고, 그 사이 화면의 빈 목록이 다음 편집에 섞여 서버 제외 목록을 지운다
+    // (Codex 5R P0). 서버에서 되받아 확정한다 — 실패하면 표시를 남긴 채 재시도를 건다.
+    if (!savedExclusions) {
+      restoreExclusionsFromServer().catch((error) => {
+        console.warn("제외 목록을 서버에서 되받지 못했습니다.", error);
+        scheduleSalaryRetryRef.current?.();
+      });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(savedExclusions);
+      if (!Array.isArray(parsed)) return;
+      gasClient.saveSharedData(exclusionDataKey, parsed)
+        .then(() => {
+          // **올리는 동안 사용자가 또 제외했으면 로컬 사본이 바뀐다.**
+          // 그때도 '못 올림' 표시를 지우면, 방금 제외한 사람은 서버에 올라간 적이 없는데도
+          // 올라간 것으로 취급돼 다른 노트북에서 급여대장에 도로 나타난다(Codex 3R P0 2026-07-31).
+          // 이 경로는 저장 체인 밖에서 혼자 도는 저장이라, 여기서 직접 최신 여부를 확인해야 한다.
+          if (localStorage.getItem(exclusionStorageKey) !== savedExclusions) {
+            scheduleSalaryRetryRef.current?.(); // 더 새 값이 밀려 있으니 그걸 다시 올린다.
+            return;
+          }
+          localStorage.removeItem(exclusionPendingKey);
+          if (localStorage.getItem(salaryPendingKey) !== "1") setSalarySaveState("saved");
+        })
+        .catch((error) => {
+          console.warn("제외 목록을 다시 올리지 못했습니다.", error);
+          scheduleSalaryRetryRef.current?.(); // 한 번 실패했다고 놓으면 그대로 멈춘다.
+        });
+    } catch { /* 손상된 사본은 다음 편집 때 새로 쓰인다 */ }
+  }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey, restoreExclusionsFromServer, salaryPendingKey]);
+
+  /**
+   * 못 올린 값을 다시 올린다.
+   *
+   * 저장을 미루거나 실패했을 때 이걸 예약해 두지 않으면, 사용자가 그 화면에 그대로 머무는 한
+   * 적어 둔 값이 **영영 서버에 올라가지 않는다.** 화면에는 아무 일 없어 보이는 것이 특히 위험하다.
+   * localStorage에 남은 최신값을 그대로 다시 올리므로, 재시도 사이에 더 고쳤어도 그 값이 올라간다.
+   */
+  const scheduleSalaryRetry = useCallback(() => {
+    setSalarySaveState("retry");
+    if (salaryRetryTimerRef.current) window.clearTimeout(salaryRetryTimerRef.current);
+    salaryRetryTimerRef.current = window.setTimeout(() => {
+      salaryRetryTimerRef.current = null;
+      // 제외가 아직 확정 안 됐으면 그것부터 다시 확정한다 — 확정 전에는 업로드가 보류되므로,
+      // 이걸 안 하면 재시도가 보류만 반복하며 영영 빠져나오지 못한다(Codex 8R P0 2026-07-31).
+      if (!exclusionsResolvedRef.current) {
+        restoreExclusionsFromServer().catch((error) => {
+          console.warn("제외 목록 확정을 다시 시도했지만 실패했습니다.", error);
+        });
+      }
+      // 그 사이 다른 저장이 성공해 '못 올림' 표시가 지워졌으면 할 일이 없다.
+      // 제외 목록도 함께 본다 — persistPartTimeSalaries 는 급여와 제외를 한 번에 올리므로,
+      // 제외만 밀려 있어도 이 재시도로 같이 올라간다.
+      if (localStorage.getItem(salaryPendingKey) !== "1"
+        && localStorage.getItem(exclusionPendingKey) !== "1") { setSalarySaveState("saved"); return; }
+      const saved = localStorage.getItem(salaryStorageKey);
+      // 급여 사본이 없으면 급여 경로로는 올릴 수 없다. 제외만 밀려 있는 경우를 여기서 따로 구제한다.
+      if (!saved) { retryExclusionsOnly(); return; }
+      try {
+        const rows = JSON.parse(saved);
+        if (Array.isArray(rows)) persistPartTimeSalariesRef.current?.(rows, undefined, false);
+      } catch (error) {
+        console.warn("다시 올릴 급여대장을 읽지 못했습니다.", error);
+      }
+    }, 15000);
+  }, [exclusionPendingKey, restoreExclusionsFromServer, retryExclusionsOnly, salaryPendingKey, salaryStorageKey]);
+
+  scheduleSalaryRetryRef.current = scheduleSalaryRetry;
+
+  /** 재시도가 persistPartTimeSalaries 를 부르는데, 그 함수가 아래에 정의되므로 ref 로 이어 준다. */
+  const persistPartTimeSalariesRef = useRef<((rows: PartTimeSalaryRow[], excluded?: string[], showToast?: boolean) => void) | null>(null);
+
+  const persistPartTimeSalaries = useCallback((nextSalaries: PartTimeSalaryRow[], explicitExcluded?: string[], showToast = false) => {
+    // 제외 목록을 **사용자가 직접 바꾼 호출**인지, 급여만 고친 호출인지 구분한다.
+    // 자동 재시도 경로는 undefined 를 넘기므로 여기서 false 가 되고, 화면의 제외 목록이 그대로 쓰인다.
+    const isExclusionEdit = explicitExcluded !== undefined;
+    const nextExcluded = explicitExcluded ?? excludedEmployeeIds;
+    // **제외를 저장할 수 없으면 아무것도 하지 않고 물러난다.**
+    // 예전에는 안내만 띄우고 급여 저장은 그대로 진행했는데, 그러면 화면에서는 그 사람이 빠지고
+    // 급여 배열도 그대로 저장돼 초록 '자동저장'까지 뜬다. 정작 제외는 서버에 없으니 다음 재조립 때
+    // 되살아난다 — 사용자는 저장됐다고 믿는데 결과가 다르다(Codex 6R P0 2026-07-31).
+    if (isExclusionEdit && !exclusionsResolvedRef.current) {
+      triggerToast("제외 목록을 아직 불러오지 못해 이 변경을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.", "error");
+      restoreExclusionsFromServer().catch((error) => {
+        console.warn("제외 목록 확정을 다시 시도했지만 실패했습니다.", error);
+      });
+      return false;
+    }
+    // 이 편집의 순번. 저장이 끝났을 때 그 사이 새 편집이 있었는지 이걸로 가린다.
+    // (앞 저장 성공이 '못 올림' 표시를 지워 버리면, 그 사이 친 값이 아직 안 올라갔는데도
+    //  올라간 것으로 취급돼 탭을 옮기는 순간 사라진다.)
+    const editSeq = ++salaryEditSeqRef.current;
     setSalaries(nextSalaries);
     nextSalaries.forEach((sal) => {
       localStorage.setItem(`erp_pt_profile_${branchName}_${sal.employeeId}`, JSON.stringify({
@@ -359,58 +568,223 @@ export function MonthlyPartTimeSalarySubTab({
         hourlyRate: sal.hourlyRate
       }));
     });
+    // 제외 목록을 아직 확정하지 못했으면(서버를 못 읽은 채 화면이 열린 상태) **손대지 않는다.**
+    // 이때 화면의 제외 목록은 빈 배열인데, 그걸 저장하면 서버에 있던 제외 목록이 통째로 지워진다.
+    // 급여 저장은 그대로 진행한다.
     localStorage.setItem(salaryStorageKey, JSON.stringify(nextSalaries));
-    localStorage.setItem(exclusionStorageKey, JSON.stringify(nextExcluded));
     localStorage.setItem(salaryPendingKey, "1");
-    localStorage.setItem(exclusionPendingKey, "1");
+    // **급여만 고친 저장은 제외 목록을 건드리지 않는다.** 다시 쓰지도, '못 올림'을 켜지도,
+    // 세대를 올리지도 않는다. 예전에는 매 저장마다 화면의 제외 목록을 다시 썼는데, 그러면
+    // 서버에서 막 받아온 최신 제외가 화면의 옛 목록으로 덮이고, 진행 중이던 서버 조회까지
+    // 세대가 바뀌었다는 이유로 취소된다(stop-hook 지적 2026-07-31).
+    if (isExclusionEdit) {
+      // 사용자가 제외를 바꿨다는 표시. 이미 떠 있는 서버 조회가 이 값을 덮지 못하게 막는다.
+      exclusionSeqRef.current += 1;
+      localStorage.setItem(exclusionStorageKey, JSON.stringify(nextExcluded));
+      localStorage.setItem(exclusionPendingKey, "1");
+    }
     if (salaryAutoSaveTimerRef.current) window.clearTimeout(salaryAutoSaveTimerRef.current);
+    setSalarySaveState("saving");
+    // **제외 목록을 확정하기 전에는 서버로 올리지 않는다.**
+    // 이 시점의 행 구성은 제외 목록을 기준으로 만들어지는데, 아직 그 목록을 모르면
+    // 지금 화면이 이번 달에 맞는 구성이라고 보증할 수 없다. 그대로 올리면 이번 달 급여대장이
+    // 잘못된 기준으로 저장된다(stop-hook 지적 2026-07-31).
+    // 적어 둔 값은 위에서 localStorage 와 '못 올림' 표시로 남겨 뒀으므로 잃지 않는다 —
+    // 제외가 확정된 뒤 재시도가 올바른 구성으로 올린다.
+    if (!exclusionsResolvedRef.current) {
+      // **확정 자체를 다시 시도해야 여기서 빠져나온다.** 재시도만 걸면 그 재시도가 다시 이 자리로
+      // 돌아와 보류만 반복하고, 적어 둔 값은 영영 안 올라간다(Codex 8R P0 2026-07-31).
+      restoreExclusionsFromServer().catch((error) => {
+        console.warn("제외 목록 확정을 다시 시도했지만 실패했습니다.", error);
+      });
+      scheduleSalaryRetry();
+      return true;
+    }
     salaryAutoSaveTimerRef.current = window.setTimeout(() => {
       // toStorableRows: 값이 없는 칸(undefined)을 걷어낸다. 하나라도 섞이면 Firestore가 저장을 통째로 거부한다.
       const storableSalaries = toStorableRows(nextSalaries);
-      Promise.all([
-        gasClient.saveSharedData(salaryDataKey, storableSalaries),
-        gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(storableSalaries)),
-        gasClient.saveSharedData(exclusionDataKey, nextExcluded)
-      ])
-        .then(() => {
-          localStorage.removeItem(salaryPendingKey);
-          localStorage.removeItem(exclusionPendingKey);
-          // 방금 올린 값을 기준값으로 남긴다 — 다음에 못 올린 편집분을 다시 올릴 때
-          // "이 기기에서 정말 바뀐 행"만 골라 상대의 수정을 덮지 않기 위해서다.
-          localStorage.setItem(salarySyncedKey, JSON.stringify(nextSalaries));
+      // **평상시 저장도 통째로 덮지 않는다.**
+      // 이 표는 배열 하나를 통째로 쓰기 때문에, 그냥 저장하면 그 사이 다른 노트북이 고친 행까지
+      // 내 화면의 옛 값으로 되돌아간다. 예전에는 시급이 15,000 고정이라 덮여도 같은 값이었지만,
+      // 이제는 사람마다 다른 시급을 손으로 넣으므로 덮이는 순간 그 사람 급여가 통째로 틀어진다.
+      // 그래서 올리기 직전에 서버를 읽어, 기준값과 견줘 **이 기기에서 실제로 바뀐 행만** 얹는다.
+      // 서버를 못 읽으면 종전대로 올린다 — 적어 둔 값을 잃지 않는 쪽이 먼저다.
+      salarySaveChainRef.current = salarySaveChainRef.current.catch(() => {}).then(async () => {
+        try {
+          let serverRows: PartTimeSalaryRow[] | null = null;
+          try {
+            // **반드시 서버 전용 조회**(getSharedDataFromServer)를 쓴다. 캐시 폴백이 있는 getSharedData로 읽으면
+            // 오프라인·일시 실패 때 옛 사본을 "서버 최신"으로 착각해, 다른 기기가 방금 올린 수정을 못 본 채
+            // 내 값으로 덮어쓴다 — 병합한다고 해 놓고 정작 덮어쓰는 꼴이 된다.
+            // (null = 아직 저장된 적 없는 달. 병합할 것이 없으니 그대로 올린다.)
+            const fetched = await gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey);
+            if (Array.isArray(fetched)) serverRows = fetched;
+          } catch (error) {
+            // 서버 상태를 모르는 채로 표 전체를 올리면 다른 기기의 수정이 소리 없이 사라진다.
+            // 그런데 화면에는 "저장되었습니다"가 뜨니 아무도 알아채지 못한다 — 그래서 저장을 **미룬다.**
+            // 미루기만 하고 끝내면 그 값은 영영 안 올라가므로, 여기서 **다시 시도를 예약**한다.
+            console.warn("저장 전 서버 급여대장을 읽지 못해 저장을 미뤘습니다.", error);
+            scheduleSalaryRetry();
+            triggerToast("연결이 불안정해 저장을 잠시 미뤘습니다. 적으신 내용은 그대로 있고 곧 다시 저장됩니다.", "error");
+            return;
+          }
+          const mergedRows = toStorableRows(mergePendingLocalRows(storableSalaries, serverRows, readSyncedRows()));
+          // 아직 못 올린 제외 목록이 있으면 이 저장에 실어 함께 올린다.
+          // **화면 값이 아니라 저장된 사본을 올린다** — 화면 값은 그 사이 달 전환 등으로 비워졌을 수 있다.
+          // (제외를 바꾼 저장이면 위에서 방금 그 사본을 써 뒀으므로 같은 값이다.)
+          const pendingExclusionsRaw = localStorage.getItem(exclusionPendingKey) === "1"
+            ? localStorage.getItem(exclusionStorageKey)
+            : null;
+          let exclusionsToUpload: string[] | null = null;
+          if (pendingExclusionsRaw) {
+            try {
+              const parsed = JSON.parse(pendingExclusionsRaw);
+              if (Array.isArray(parsed)) exclusionsToUpload = parsed;
+            } catch { /* 손상된 사본은 올리지 않는다 — 표시가 남아 다음에 다시 다룬다 */ }
+          }
+          await Promise.all([
+            gasClient.saveSharedData(salaryDataKey, mergedRows),
+            gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(mergedRows)),
+            ...(exclusionsToUpload ? [gasClient.saveSharedData(exclusionDataKey, exclusionsToUpload)] : [])
+          ]);
+          // 방금 올린 값을 기준값으로 남긴다 — 다음 저장 때 "이 기기에서 정말 바뀐 행"만 골라
+          // 상대의 수정을 덮지 않기 위해서다.
+          localStorage.setItem(salarySyncedKey, JSON.stringify(mergedRows));
+          // **화면도 올린 값으로 맞춘다.** 이걸 빠뜨리면 병합이 무의미해진다 —
+          // 병합에서 다른 기기 수정을 받아들여 놓고 화면은 옛 값 그대로면, 다음 저장 때
+          // "이 기기에서 바뀐 행"으로 잘못 판정해 방금 받아들인 상대 수정을 도로 덮는다.
+          //
+          // 반드시 **올린 목록(mergedRows)을 기준으로** 다시 만든다. 화면 목록만 훑으면
+          // 다른 기기가 새로 추가한 행이 화면에 안 들어오는데 기준값에는 들어 있어서,
+          // 다음 저장 때 "이 기기에서 지운 행"으로 오해받아 서버에서 사라진다(급여 누락).
+          const atSaveTimeById = new Map<string, PartTimeSalaryRow>(storableSalaries.map((row) => [row.employeeId, row]));
+          setSalaries((current) => {
+            const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+            const mergedIds = new Set(mergedRows.map((row) => row.employeeId));
+            const reconciledRows = mergedRows.map((merged) => {
+              const onScreen = currentById.get(merged.employeeId);
+              if (!onScreen) return merged; // 다른 기기가 추가한 행 — 화면에 들인다
+              const atSaveTime = atSaveTimeById.get(merged.employeeId);
+              // 저장을 예약한 뒤 사용자가 또 고친 행은 화면 값을 지킨다(그건 다음 저장이 올린다).
+              if (atSaveTime && rowFingerprint(onScreen) !== rowFingerprint(atSaveTime)) return onScreen;
+              return merged;
+            });
+            // 저장을 예약한 뒤 새로 추가한 행도 지킨다(아직 올라가지 않았을 뿐이다).
+            return [...reconciledRows, ...current.filter((row) => !mergedIds.has(row.employeeId))];
+          });
+          // 그 사이 새 편집이 있었으면 '못 올림' 표시와 로컬 사본을 건드리지 않는다.
+          // 지워 버리면 아직 안 올라간 값이 올라간 것으로 취급돼, 탭을 옮기는 순간 사라진다.
+          if (editSeq === salaryEditSeqRef.current) {
+            localStorage.setItem(salaryStorageKey, JSON.stringify(mergedRows));
+            localStorage.removeItem(salaryPendingKey);
+            // 제외 표시는 **이 저장이 실제로 올린 경우에만** 지운다. 안 올렸는데 지우면
+            // 아직 서버에 없는 제외가 올라간 것으로 취급돼 다시 시도되지 않는다.
+            // 올리는 사이 사용자가 또 제외했으면(사본이 바뀌었으면) 그것도 남겨 둔다.
+            if (exclusionsToUpload && localStorage.getItem(exclusionStorageKey) === pendingExclusionsRaw) {
+              localStorage.removeItem(exclusionPendingKey);
+            }
+            // 제외가 아직 안 올라갔으면 초록으로 돌리지 않는다 — 다 저장된 것처럼 보이면 안 된다.
+            if (localStorage.getItem(exclusionPendingKey) !== "1") setSalarySaveState("saved");
+          }
           if (showToast) triggerToast("파트타이머 급여대장이 저장되었습니다.", "success");
-        })
-        .catch(() => triggerToast("급여지급 대장 자동저장 실패", "error"));
+        } catch {
+          // 올리기 자체가 실패했을 때도 다시 시도한다 — 한 번 실패하고 끝나면 그 값은 서버에 없다.
+          scheduleSalaryRetry();
+          triggerToast("급여지급 대장 자동저장 실패 — 잠시 후 다시 시도합니다.", "error");
+        }
+      });
     }, 500);
-  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, triggerToast]);
+    return true; // 편집을 받아들였다. 부르는 쪽이 성공 안내를 띄워도 되는지 이걸로 가린다.
+  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
+
+  // 재시도 타이머가 부를 수 있게 최신 저장 함수를 ref 에 담아 둔다.
+  persistPartTimeSalariesRef.current = persistPartTimeSalaries;
+
+  // 연결이 돌아오면 곧바로 다시 올린다 — 15초 타이머를 기다리지 않는다.
+  useEffect(() => {
+    const retryNow = () => {
+      // 제외 목록만 밀려 있는 경우도 여기서 같이 올린다 — 급여 배열만 보면 그 상태를 놓친다.
+      if (localStorage.getItem(salaryPendingKey) !== "1"
+        && localStorage.getItem(exclusionPendingKey) !== "1") return;
+      const saved = localStorage.getItem(salaryStorageKey);
+      // 급여 사본이 없으면 급여 경로로는 못 올린다 — 제외만 밀려 있는 경우를 따로 구제한다.
+      if (!saved) { retryExclusionsOnly(); return; }
+      try {
+        const rows = JSON.parse(saved);
+        if (Array.isArray(rows)) persistPartTimeSalariesRef.current?.(rows, undefined, false);
+      } catch { /* 손상된 사본은 다음 편집 때 새로 쓰인다 */ }
+    };
+    window.addEventListener("online", retryNow);
+    return () => {
+      window.removeEventListener("online", retryNow);
+      if (salaryRetryTimerRef.current) {
+        window.clearTimeout(salaryRetryTimerRef.current);
+        salaryRetryTimerRef.current = null;
+      }
+    };
+  }, [exclusionPendingKey, retryExclusionsOnly, salaryPendingKey, salaryStorageKey]);
 
   useEffect(() => {
-    return () => {
+    // **화면을 떠나는 순간에도 밀린 저장을 내보낸다.**
+    // 값을 적으면 localStorage 에는 즉시 들어가지만 클라우드 전송은 500ms 타이머 뒤에 시작한다.
+    // 언마운트 cleanup 만 걸어 두면, 탭 닫기·새로고침·모바일 백그라운드 전환처럼 React 가
+    // 정리 함수를 돌리지 못하는 경로에서 그 500ms 안의 입력이 이 기기에만 남는다. 31일 낮에 적어 둔
+    // 예측 근무시간이 그렇게 사라지면, 본사 마감 엑셀은 자동 집계값으로 급여를 계산한다(Codex P0 2026-07-31).
+    // 주류재고 탭(LiquorInventoryTabV2)에서 쓰는 것과 같은 배선이다.
+    const chainFlush = () => {
       if (salaryAutoSaveTimerRef.current) {
         window.clearTimeout(salaryAutoSaveTimerRef.current);
         salaryAutoSaveTimerRef.current = null;
       }
+      // **이 정리 저장도 자동저장과 같은 줄에 세운다.**
+      // 따로 돌면 진행 중이던 자동저장과 겹쳐, 완료 순서에 따라 옛 값이 나중에 도착해 최신 편집을 덮는다.
+      // 앞 저장이 끝난 뒤에 실행되므로, 그 저장이 이미 다 올려 pending이 지워졌으면 여기서는 아무것도 안 한다.
+      salarySaveChainRef.current = salarySaveChainRef.current.catch(() => {}).then(() => runPendingFlush());
+    };
+    // visibilitychange(hidden)가 탭 닫기·새로고침·모바일 백그라운드 전환에서 가장 안정적으로 발동한다.
+    const handleVisibility = () => { if (document.visibilityState === "hidden") chainFlush(); };
+    window.addEventListener("beforeunload", chainFlush);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", chainFlush);
+    return () => {
+      window.removeEventListener("beforeunload", chainFlush);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", chainFlush);
+      chainFlush();
+    };
+
+    /** 밀린 편집분을 올린다. 체인이 이 저장을 기다리도록 promise를 돌려준다. */
+    function runPendingFlush(): Promise<unknown> {
       const salaryPending = localStorage.getItem(salaryPendingKey) === "1";
       const exclusionPending = localStorage.getItem(exclusionPendingKey) === "1";
-      if (!salaryPending && !exclusionPending) return;
+      if (!salaryPending && !exclusionPending) return Promise.resolve();
+      // 제외 목록을 확정하기 전에는 여기서도 올리지 않는다(자동저장 경로와 같은 규칙).
+      // '못 올림' 표시가 그대로 남아 다음 진입 때 올바른 구성으로 올라간다.
+      if (!exclusionsResolvedRef.current) return Promise.resolve();
 
       const savedSalaries = localStorage.getItem(salaryStorageKey);
       const savedExclusions = localStorage.getItem(exclusionStorageKey);
       try {
-        const pendingSalaries = savedSalaries ? JSON.parse(savedSalaries) : [];
-        const pendingExclusions = savedExclusions ? JSON.parse(savedExclusions) : [];
+        // **사본이 없으면 빈 배열이 아니라 null 이다.**
+        // 빈 배열로 두면 '못 올림' 표시만 남고 사본이 사라진 상태(브라우저가 저장 공간을 정리하면
+        // 그렇게 된다)에서 빈 배열을 그대로 올려 **서버의 급여대장과 제외 목록이 통째로 지워진다.**
+        // null 이면 아래 Array.isArray 검사에서 걸러져 올리지 않고, 표시만 정리된다.
+        const pendingSalaries = savedSalaries ? JSON.parse(savedSalaries) : null;
+        const pendingExclusions = savedExclusions ? JSON.parse(savedExclusions) : null;
         const saveTasks: Promise<unknown>[] = [];
         if (salaryPending && Array.isArray(pendingSalaries)) {
           // 탭을 옮기며 올릴 때도 통째로 덮으면 그 사이 다른 기기가 고쳐 둔 것이 지워진다.
           // 올리기 전에 서버를 읽어 **이 기기에서 실제로 바뀐 행만** 얹는다(자동저장 경로와 같은 규칙).
-          // 서버를 못 읽으면 로컬을 올린다 — 아직 못 올린 편집분을 잃지 않는 쪽이 먼저다.
+          // **서버를 못 읽으면 올리지 않는다** — 서버 상태를 모른 채 덮으면 상대의 수정이 소리 없이 사라진다.
+          // 못 올린 표시(pending)가 남아 다음 진입 때 다시 시도하므로, 적어 둔 값은 잃지 않는다.
           const syncedById = readSyncedRows();
           saveTasks.push(
-            gasClient.getSharedData<PartTimeSalaryRow[]>(salaryDataKey)
-              .then((server) => (Array.isArray(server) ? server : null))
-              .catch(() => null)
+            // 서버 전용 조회 — 캐시 폴백으로 옛 사본을 읽으면 병합이 상대 수정을 덮는 결과가 된다.
+            gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey)
               .then((server) => {
-                const merged = toStorableRows(mergePendingLocalRows(pendingSalaries as PartTimeSalaryRow[], server, syncedById));
+                const merged = toStorableRows(
+                  mergePendingLocalRows(pendingSalaries as PartTimeSalaryRow[], Array.isArray(server) ? server : null, syncedById)
+                );
                 return Promise.all([
                   gasClient.saveSharedData(salaryDataKey, merged),
                   gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(merged))
@@ -425,48 +799,89 @@ export function MonthlyPartTimeSalarySubTab({
         if (exclusionPending && Array.isArray(pendingExclusions)) {
           saveTasks.push(gasClient.saveSharedData(exclusionDataKey, pendingExclusions));
         }
-        void Promise.all(saveTasks)
+        return Promise.all(saveTasks)
           .then(() => {
-            if (salaryPending) localStorage.removeItem(salaryPendingKey);
-            if (exclusionPending) localStorage.removeItem(exclusionPendingKey);
+            // **올리는 동안 사용자가 더 고쳤으면 그 표시를 지우면 안 된다.**
+            // 이 flush 는 화면을 떠날 때 시작되는데, 잠깐 다른 앱을 봤다 돌아와 이어서 고치는 일이 흔하다.
+            // 그때 여기서 '못 올림' 표시를 지우면 새로 고친 값은 올라간 적이 없는데도 올라간 것으로
+            // 취급돼 조용히 사라진다. 시작 시점에 읽어 둔 사본과 같을 때만 지운다 —
+            // 다르면 표시가 남아 다음 진입·재시도 때 그 새 값이 올라간다.
+            // (사본이 아예 없던 경우도 null === null 로 같아 표시가 정리된다.)
+            if (salaryPending && localStorage.getItem(salaryStorageKey) === savedSalaries) {
+              localStorage.removeItem(salaryPendingKey);
+            }
+            if (exclusionPending && localStorage.getItem(exclusionStorageKey) === savedExclusions) {
+              localStorage.removeItem(exclusionPendingKey);
+            }
           })
           .catch((error) => {
             console.warn("Pending part-time salary save failed during tab change.", error);
           });
       } catch (error) {
         console.warn("Pending part-time salary data could not be parsed during tab change.", error);
+        return Promise.resolve();
       }
-    };
-  }, [branchName, buildPartTimeProfiles, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
+    }
+  }, [branchName, buildPartTimeProfiles, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
 
   useEffect(() => {
     let active = true;
+    // 달·지점이 바뀌면 확정 상태도 처음으로 돌린다. 안 그러면 지난달에 확정한 표시가 남아,
+    // 이번 달 제외 목록을 아직 못 읽었는데도 화면의 빈 배열을 저장에 실어 보낸다.
+    exclusionsResolvedRef.current = false;
+    // 화면의 제외 목록도 함께 비운다. **지난달 제외가 그대로 남으면 그게 이번 달 행 구성에 쓰여**,
+    // 이번 달에는 제외 대상이 아닌 사람이 빠진 채로 급여대장이 저장된다(stop-hook 지적 2026-07-31).
+    // 비워 두면 잠깐 전원이 보일 뿐이고, 바로 아래에서 이번 달 값으로 채운다.
+    setExcludedEmployeeIds([]);
     const loadExclusions = async () => {
       try {
         const local = localStorage.getItem(exclusionStorageKey);
         const hasPendingExclusions = localStorage.getItem(exclusionPendingKey) === "1";
         if (local && active) {
           const parsed = JSON.parse(local);
-          if (Array.isArray(parsed)) setExcludedEmployeeIds(parsed);
+          if (Array.isArray(parsed)) {
+            setExcludedEmployeeIds(parsed);
+            exclusionsResolvedRef.current = true; // 사본으로 확정됐다 — 이제 저장에 실어도 된다.
+          }
           if (hasPendingExclusions) {
             await gasClient.saveSharedData(exclusionDataKey, parsed);
-            localStorage.removeItem(exclusionPendingKey);
+            // 올리는 동안 사용자가 또 제외했으면 사본이 바뀐다. 그때 '못 올림' 표시를 지우면
+            // 그 새 제외는 올라간 적이 없는데도 올라간 것으로 취급돼, 다른 노트북에서 되살아난다.
+            // 같을 때만 지운다 — 다르면 표시가 남아 다음 저장이 그 새 값을 올린다.
+            if (localStorage.getItem(exclusionStorageKey) === local) {
+              localStorage.removeItem(exclusionPendingKey);
+            }
             return;
           }
         }
 
-        const remote = await gasClient.getSharedData<string[]>(exclusionDataKey);
-        if (active && Array.isArray(remote)) {
-          setExcludedEmployeeIds(remote);
-          localStorage.setItem(exclusionStorageKey, JSON.stringify(remote));
+        // 올릴 사본은 없는데 '못 올림' 표시만 남은 상태가 있을 수 있다(브라우저가 저장 공간을 정리한 경우).
+        // 그대로 두면 올릴 것이 없어 아무도 다시 시도하지 않는데 배지만 '저장 대기 중'으로 영영 남는다.
+        // **다만 표시를 지우는 것은 서버 값을 되받아 온 뒤여야 한다.**
+        // 순서를 뒤집으면(먼저 지우고 나중에 조회) 조회가 실패했을 때 화면의 제외 목록이 빈 채로 남고,
+        // 그 뒤 아무 칸이나 고치면 그 빈 목록이 서버로 올라가 **제외해 둔 사람이 전부 되살아난다**(Codex 4R P0).
+        // 조회가 실패하면 표시를 남긴 채 물러난다 — 아래 catch 가 재시도를 걸어 준다.
+        if (!local && hasPendingExclusions) {
+          // 서버 전용 조회로 되받아 확정한다(실패하면 던져서 아래 catch 가 표시를 남긴 채 재시도).
+          await restoreExclusionsFromServer();
+          return;
         }
+
+        // 평상시 조회도 **서버 전용**이어야 한다. 캐시 폴백이 있는 getSharedData 로 읽으면
+        // 서버에 못 닿았을 때도 던지지 않고 옛 사본을 돌려주는데, 그걸 '확정'으로 올리면
+        // 그 옛 값이 다음 저장 때 서버의 최신 제외 목록을 덮는다 — 복구 경로만 서버 전용으로
+        // 막아 놓고 이 문을 열어 두면 같은 유실이 그대로 들어온다.
+        await restoreExclusionsFromServer();
       } catch (error) {
         console.warn("파트타이머 급여대장 제외 목록을 불러오지 못했습니다.", error);
+        // 밀린 제외 목록을 **올리다** 실패한 경우도 여기로 온다. 경고만 남기고 끝내면
+        // 표시는 그대로 '저장됨'인데 서버에는 안 올라가, 다른 노트북에서 제외한 사람이 되살아난다.
+        if (localStorage.getItem(exclusionPendingKey) === "1") scheduleSalaryRetry();
       }
     };
     loadExclusions();
     return () => { active = false; };
-  }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey]);
+  }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey, restoreExclusionsFromServer, salaryPendingKey, scheduleSalaryRetry]);
 
   // 1. Fetch current live Roster for PTs and merge with previously saved info + auto computed work logs from history!
   useEffect(() => {
@@ -599,6 +1014,25 @@ export function MonthlyPartTimeSalarySubTab({
         const local = localStorage.getItem(salaryStorageKey);
         if (localStorage.getItem(salaryPendingKey) === "1" && local) {
           const localRows = JSON.parse(local);
+          // **제외 목록을 확정하기 전에는 여기서도 올리지 않는다**(자동저장·flush 경로와 같은 규칙).
+          // 이 경로는 화면에 들어오자마자 도는데, 그 시점의 `excludedEmployeeIds` 는 아직 비어 있을 수
+          // 있다. 그대로 올리면 제외해야 할 사람이 포함된 구성이 이번 달 급여대장으로 저장된다
+          // (stop-hook 지적 2026-07-31). '못 올림' 표시가 남아 있으므로 확정된 뒤 재시도가 올린다.
+          if (!exclusionsResolvedRef.current) {
+            // **올리지 않을 뿐, 화면에서는 살려 둔다.** 적어 둔 값이 화면에서 사라지면 사용자는
+            // 잃어버린 줄 안다 — 특히 수기로 넣은 행은 명부·일일마감에서 다시 만들어지지 않아
+            // 이 복원이 없으면 확정될 때까지 표에서 통째로 사라진다(stop-hook 지적 2026-07-31).
+            if (Array.isArray(localRows)) {
+              const excluded = new Set<string>(excludedEmployeeIds);
+              const restoredRows = localRows.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
+                ...salary,
+                tipsEtcAmount: salary.tipsEtcAmount || "0"
+              }));
+              setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
+            }
+            scheduleSalaryRetry();
+            return;
+          }
           if (Array.isArray(localRows)) {
             const excluded = new Set<string>(excludedEmployeeIds);
             const restoredRows = localRows.filter((salary) => !excluded.has(salary.employeeId)).map((salary) => ({
@@ -609,10 +1043,18 @@ export function MonthlyPartTimeSalarySubTab({
             // 못 읽으면 null로 두고 종전처럼 로컬을 올린다 — 편집분을 잃지 않는 쪽이 먼저다.
             let serverRows: PartTimeSalaryRow[] | null = null;
             try {
-              const fetched = await gasClient.getSharedData<PartTimeSalaryRow[]>(salaryDataKey);
+              // 캐시 폴백이 있는 getSharedData로 읽으면 옛 사본을 최신으로 착각해 상대 수정을 덮는다 — 서버 전용으로 읽는다.
+              const fetched = await gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey);
               if (Array.isArray(fetched)) serverRows = fetched.filter((salary) => !excluded.has(salary.employeeId));
             } catch (error) {
-              console.warn("저장 전 서버 급여대장을 읽지 못했습니다. 이 기기 편집분만 올립니다.", error);
+              // 서버 상태를 모른 채 올리면 다른 기기 수정이 소리 없이 사라진다. 못 올린 표시를 남긴 채 물러난다
+              // (이 기기 편집분은 화면에 살려 두고, 재시도를 예약한다).
+              // **재시도 예약이 핵심이다** — 화면을 새로 연 직후 이 경로로 빠지면, 예약이 없을 때
+              // 사용자가 더 고치지 않는 한 그 값은 영영 안 올라간다(화면은 멀쩡해 보인다).
+              console.warn("밀린 편집분을 올리기 전 서버를 읽지 못해 전송을 미뤘습니다.", error);
+              setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
+              scheduleSalaryRetry();
+              return;
             }
             const uploadRows = toStorableRows(mergePendingLocalRows(restoredRows, serverRows, readSyncedRows()));
             setSalaries((current) => mergeKeepingManualRows(uploadRows, current, excluded));
@@ -623,9 +1065,19 @@ export function MonthlyPartTimeSalarySubTab({
               gasClient.saveSharedData(salaryDataKey, uploadRows),
               gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(uploadRows))
             ]);
-            localStorage.setItem(salaryStorageKey, JSON.stringify(uploadRows));
-            localStorage.setItem(salarySyncedKey, JSON.stringify(uploadRows));
-            localStorage.removeItem(salaryPendingKey);
+            // **올리는 사이에 사용자가 더 고쳤으면 여기서 손대면 안 된다.**
+            // 이 경로는 화면에 들어오자마자 밀린 편집분을 올리는데, 그 몇 초 사이에 셀을 고치는 일이 흔하다.
+            // 그때 옛 값(uploadRows)으로 로컬 사본과 기준값을 덮고 '못 올림' 표시까지 지우면,
+            // 방금 고친 값이 로컬에서도 사라지고 다시 올라가지도 않는다.
+            // 사본이 그대로일 때만 확정하고, 바뀌었으면 그 새 저장에 맡긴다(표시가 남아 있어 다시 올라간다).
+            if (localStorage.getItem(salaryStorageKey) === local) {
+              localStorage.setItem(salaryStorageKey, JSON.stringify(uploadRows));
+              localStorage.setItem(salarySyncedKey, JSON.stringify(uploadRows));
+              localStorage.removeItem(salaryPendingKey);
+              // 제외 목록이 아직 안 올라갔으면 초록으로 돌리지 않는다 — 여기서 '저장됨'으로 바꾸면
+              // 제외만 로컬에 남은 상태를 다 저장된 것으로 보여 준다.
+              if (localStorage.getItem(exclusionPendingKey) !== "1") setSalarySaveState("saved");
+            }
             return;
           }
         }
@@ -647,10 +1099,14 @@ export function MonthlyPartTimeSalarySubTab({
         }
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
+        // 밀린 편집분을 **올리다** 실패한 경우도 여기로 온다(읽기 실패만 위에서 따로 막았다).
+        // 재시도를 걸지 않으면 그 값은 영영 서버에 안 올라가는데 화면은 멀쩡해 보인다.
+        if (localStorage.getItem(salaryPendingKey) === "1"
+          || localStorage.getItem(exclusionPendingKey) === "1") scheduleSalaryRetry();
       }
     };
     loadSharedSalaries();
-  }, [excludedEmployeeIds, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
+  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionPendingKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry]);
 
   useEffect(() => {
     const loadSharedProfiles = async () => {
@@ -858,8 +1314,13 @@ export function MonthlyPartTimeSalarySubTab({
     const nextExcluded = manual || excludedEmployeeIds.includes(employee.employeeId)
       ? excludedEmployeeIds
       : [...excludedEmployeeIds, employee.employeeId];
-    setExcludedEmployeeIds(nextExcluded);
-    persistPartTimeSalaries(nextSalaries, nextExcluded, true);
+    // 수기 행 삭제는 제외 목록을 바꾸지 않는다(같은 배열 그대로). 실제로 바뀐 경우에만 '제외 변경'으로 넘긴다.
+    const isExclusionChange = nextExcluded !== excludedEmployeeIds;
+    // **저장이 거절되면 화면도 바꾸지 않는다.** 화면에서만 사라지고 서버에는 안 남으면,
+    // 저장된 줄 알고 넘어갔다가 다음에 그 사람이 급여대장에 되살아난다.
+    const accepted = persistPartTimeSalaries(nextSalaries, isExclusionChange ? nextExcluded : undefined, true);
+    if (!accepted) return; // 거절 사유는 persistPartTimeSalaries 가 이미 안내했다.
+    if (isExclusionChange) setExcludedEmployeeIds(nextExcluded);
     triggerToast(manual ? `${who}을(를) 삭제했습니다.` : `${who} 님을 이번 달 급여대장에서 제외했습니다.`);
   };
 
@@ -896,7 +1357,8 @@ export function MonthlyPartTimeSalarySubTab({
     // 수기 행은 언제나 보이므로(isAlwaysVisibleRow) 새 행은 표의 마지막 줄이 된다.
     // 그 줄의 성명 칸으로 커서를 보내 바로 이름부터 적게 한다.
     const newRowIndex = visibleSalaries.length;
-    persistPartTimeSalaries(nextSalaries, excludedEmployeeIds, false);
+    // 제외 목록은 건드리지 않는 동작이므로 넘기지 않는다(넘기면 '제외 변경'으로 오인된다).
+    persistPartTimeSalaries(nextSalaries, undefined, false);
     requestFocus(newRowIndex, COL_NAME);
     triggerToast("행을 추가했습니다. 성명부터 적어 주세요.");
   };
@@ -996,11 +1458,23 @@ export function MonthlyPartTimeSalarySubTab({
               {showZeroHourRows ? "근무기록 없는 인원 숨기기" : `근무기록 없는 인원 ${hiddenZeroHourCount}명 보기`}
             </button>
           )}
-          {/* 자동저장 배지 — 한 줄에 선 것들이 서로 다른 크기면 어색하다. 버튼 기준 11px·900로 맞춘다(§6-0-1·§11). */}
-          <div className="flex-1 sm:flex-none px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm">
-            <Check className="w-3.5 h-3.5" />
-            자동저장
-          </div>
+          {/* 저장 상태 배지 — 실제 상태를 보여준다(§11).
+              늘 초록 '자동저장'만 띄우면, 서버에 못 올린 동안에도 올라간 줄 알고 화면을 닫게 된다.
+              못 올린 상태는 오류색 hex 로 못 박는다 — bg-rose-* 는 지점 스코프에서 색이 죽는다(§11·§12). */}
+          {salarySaveState === "retry" ? (
+            <div
+              className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]"
+              title="연결이 불안정해 아직 서버에 올리지 못했습니다. 적으신 내용은 이 기기에 남아 있고, 연결이 돌아오면 자동으로 다시 올립니다."
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              저장 대기 중
+            </div>
+          ) : (
+            <div className="flex-1 sm:flex-none px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm">
+              <Check className="w-3.5 h-3.5" />
+              {salarySaveState === "saving" ? "저장 중…" : "자동저장"}
+            </div>
+          )}
         </div>
       </div>
 
