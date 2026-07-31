@@ -12,6 +12,7 @@ import { isSampleEmployee } from "./staffHelpers";
 // 파트타이머 급여 판정(저장값 vs 일일마감 집계)은 지점 화면과 반드시 같은 규칙이어야 한다.
 import {
   computePartTimeSalary,
+  mergeManualPartTimeWork,
   resolvePartTimeAccumulatedHours,
   resolvePartTimeAttendanceDates,
   syncPartTimeActualPaid
@@ -26,6 +27,10 @@ export interface MonthlyCloseData {
   exclusions: string[];          // part_time_salary_exclusions:{branch}:{month}
   profiles: Record<string, any>; // part_time_profiles:{branch}
   history: any[];                // getBranchHistory(branch, month) — 해당 월 일일마감 기록
+  // manual_parttime:{branch} — 근무일지에 수기로 적은 파트타이머 근무.
+  // **없으면 안 된다.** 이 값 없이 만든 엑셀은 수기 근무만큼 시간이 적게 찍히고, 그 표가 그대로
+  // 은행 이체로 이어진다. 호출부는 서버 전용 리더로 읽어 실패 시 다운로드를 취소한다(fail-closed).
+  manualWork: any[];
 }
 
 export interface SheetSpec {
@@ -166,6 +171,7 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   const exclusions = Array.isArray(data.exclusions) ? data.exclusions : [];
   const profiles = data.profiles && typeof data.profiles === "object" ? data.profiles : {};
   const history = Array.isArray(data.history) ? data.history : [];
+  const manualWork = Array.isArray(data.manualWork) ? data.manualWork : [];
   const inMonth = (settleDate: unknown) => String(settleDate || "").startsWith(month);
 
   // ─────────────────────────────────────────────
@@ -208,6 +214,14 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
         });
       }
     } catch {}
+  });
+
+  // 근무일지에 수기로 적은 근무도 같이 더한다. 지점 화면(급여대장)과 같은 함수를 쓴다 —
+  // 여기서 빠지면 화면에는 보이는 시간이 엑셀에서만 사라져, 그 차이가 그대로 이체 금액 차이가 된다.
+  // 출근일 표기는 바로 위 집계와 같은 형식(앞자리 0 없는 '일')으로 맞춘다.
+  mergeManualPartTimeWork(ptTelemetry, manualWork, month, (settleDate) => {
+    const dateParts = String(settleDate).split("-");
+    return dateParts[2] ? `${Number(dateParts[2])}` : String(settleDate);
   });
 
   const savedSalaryMap: { [empId: string]: any } = {};

@@ -11,6 +11,7 @@ import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import {
   PART_TIME_ATTENDANCE_MAX,
   computePartTimeSalary,
+  mergeManualPartTimeWork,
   resolvePartTimeAccumulatedHours,
   resolvePartTimeAttendanceDates,
   syncPartTimeActualPaid
@@ -37,6 +38,7 @@ const PARTTIME_COL_COUNT = 11;
 // id로 구분한다 — 자동으로 만들어진 행의 id는 직원명부의 사원 id다.
 const MANUAL_ID_PREFIX = "manual-";
 const isManualRow = (row: { employeeId: string }) => row.employeeId.startsWith(MANUAL_ID_PREFIX);
+
 
 /** 두 번 눌러도 같은 순간이면 id가 겹친다. 겹치면 React 키·수정·삭제가 두 행을 한 행으로 본다. */
 const newManualId = () =>
@@ -310,6 +312,47 @@ export function MonthlyPartTimeSalarySubTab({
   // 말일 낮에 급여대장을 쓰면 그날 저녁 근무가 아직 안 올라와 0시간인 사람이 있는데,
   // 그 행이 안 보이면 예상 시간을 적을 길이 없어 수기 행을 만들게 되고 결국 한 사람이 두 줄이 된다.
   const [showZeroHourRows, setShowZeroHourRows] = useState(false);
+  /**
+   * 근무일지에 수기로 적은 파트타이머 근무(manual_parttime:<지점>).
+   *
+   * null = 아직 못 읽음. 빈 배열(= 수기 기록 없음)과 반드시 구분한다 — 못 읽은 것을 '없음'으로
+   * 치면 근무시간이 조용히 실제보다 적게 잡힌다(이 탭이 예전에 겪은 실패 방식 그대로다).
+   *
+   * **어느 지점 것인지 함께 들고 있는다.** 지점을 바꾸면 이 값을 비우는 일이 effect 안에서 일어나는데,
+   * 그 전에 같은 커밋의 다른 effect 들이 이미 옛 지점의 배열을 손에 쥔 채 비동기 조회를 시작한다.
+   * 그것이 늦게 끝나면 **옛 지점의 수기 근무가 새 지점 급여에 섞인다**(Codex P0 2026-07-31).
+   * 그래서 쓰는 쪽에서 지점이 같을 때만 쓴다.
+   */
+  const [manualWork, setManualWork] = useState<{ branch: string; rows: any[] } | null>(null);
+  /** 수기 기록을 못 읽었다는 사실. 화면 위에 경고로 띄워 '정상 집계'로 오해하지 않게 한다. */
+  const [manualWorkFailed, setManualWorkFailed] = useState(false);
+  /** 경고의 '다시 시도'가 다시 읽게 하는 방아쇠. */
+  const [manualWorkReloadKey, setManualWorkReloadKey] = useState(0);
+  /**
+   * **지금 보고 있는 지점의** 수기 근무만 통과시킨다. 지점이 다르면 아직 안 읽은 것과 같게 다룬다(null).
+   * 이 한 줄이 '옛 지점 값 섞임'과 '못 읽음'을 한 자리에서 막는다 — 아래 두 집계와 저장 가드가 모두 이 값을 본다.
+   */
+  const manualWorkRows = manualWork && manualWork.branch === branchName ? manualWork.rows : null;
+  /** 수기 근무를 아직 확정하지 못했다 = 이 화면의 근무시간이 실제보다 적을 수 있다. */
+  const manualWorkUnresolved = manualWorkRows === null;
+  /**
+   * 위 값의 ref 사본. 화면을 떠날 때 도는 flush 는 deps 를 늘리면 리스너를 매번 다시 걸게 되므로
+   * (제외 목록이 같은 이유로 ref 를 쓴다) 최신 상태를 여기서 본다.
+   */
+  const manualWorkUnresolvedRef = useRef(true);
+  manualWorkUnresolvedRef.current = manualWorkUnresolved;
+  /**
+   * 이 안내를 이미 띄웠는지. 재시도가 15초마다 돌면서 같은 토스트를 반복하면 화면을 덮어 버린다.
+   * 못 읽은 상태는 상단 배너가 계속 말해 주므로, 토스트는 한 번이면 된다.
+   */
+  const manualWorkToastShownRef = useRef(false);
+  /**
+   * 지금 수기 근무를 읽는 중인지.
+   *
+   * 못 읽은 상태에서는 칸을 고칠 때마다 저장이 거부되면서 재조회를 부탁하는데, 그대로 두면
+   * **글자 하나 칠 때마다 서버 조회가 새로 뜬다.** 이미 읽는 중이면 그 결과를 기다린다.
+   */
+  const manualWorkFetchingRef = useRef(false);
   const salaryAutoSaveTimerRef = useRef<number | null>(null);
   /**
    * 저장을 한 줄로 세우는 고리.
@@ -553,6 +596,26 @@ export function MonthlyPartTimeSalarySubTab({
       });
       return false;
     }
+    // **수기 근무를 아직 확정하지 못했으면 저장하지 않는다.**
+    // 이 상태의 화면은 근무시간이 실제보다 적게 잡혀 있다. 그대로 저장하면 그 값이 서버에 올라가고
+    // 다른 기기·마감이 그걸 정상값으로 읽는다. 더 나쁜 것은, 사용자가 그 적은 숫자를 보고 시간칸을
+    // 직접 고치면 '사람이 정한 값'으로 굳어져 이후 집계가 고쳐 주지도 못한다는 점이다.
+    // (제외 목록과 같은 fail-closed 규칙 — Codex P0 2026-07-31)
+    if (manualWorkUnresolved) {
+      // 안내는 한 번만. 아래 재시도가 15초마다 이 자리를 다시 지나므로, 매번 띄우면 토스트가 화면을 덮는다.
+      if (!manualWorkToastShownRef.current) {
+        manualWorkToastShownRef.current = true;
+        triggerToast("근무일지의 수기 근무를 아직 불러오지 못해 저장하지 않았습니다. 화면 위 [다시 시도]를 눌러주세요.", "error");
+      }
+      // 이미 읽는 중이면 또 부탁하지 않는다 — 안 그러면 글자 하나마다 조회가 새로 뜬다.
+      if (!manualWorkFetchingRef.current) setManualWorkReloadKey((key) => key + 1);
+      // **재시도를 다시 걸어 둔다.** 이 자리는 '못 올림' 표시가 남은 재시도 경로도 지나간다.
+      // 여기서 그냥 물러나면 그 재시도는 끝나 버리고, 나중에 수기 근무를 읽는 데 성공해도
+      // 아무도 다시 올리지 않는다 — 적어 둔 값이 영영 서버에 안 올라간 채 화면만 멀쩡해진다
+      // (Codex 2R P0 2026-07-31). 표시가 없으면 재시도가 스스로 할 일 없음을 보고 끝낸다.
+      scheduleSalaryRetry();
+      return false;
+    }
     // 이 편집의 순번. 저장이 끝났을 때 그 사이 새 편집이 있었는지 이걸로 가린다.
     // (앞 저장 성공이 '못 올림' 표시를 지워 버리면, 그 사이 친 값이 아직 안 올라갔는데도
     //  올라간 것으로 취급돼 탭을 옮기는 순간 사라진다.)
@@ -695,7 +758,7 @@ export function MonthlyPartTimeSalarySubTab({
       });
     }, 500);
     return true; // 편집을 받아들였다. 부르는 쪽이 성공 안내를 띄워도 되는지 이걸로 가린다.
-  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
+  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, manualWorkUnresolved, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
 
   // 재시도 타이머가 부를 수 있게 최신 저장 함수를 ref 에 담아 둔다.
   persistPartTimeSalariesRef.current = persistPartTimeSalaries;
@@ -761,6 +824,11 @@ export function MonthlyPartTimeSalarySubTab({
       // 제외 목록을 확정하기 전에는 여기서도 올리지 않는다(자동저장 경로와 같은 규칙).
       // '못 올림' 표시가 그대로 남아 다음 진입 때 올바른 구성으로 올라간다.
       if (!exclusionsResolvedRef.current) return Promise.resolve();
+      // 수기 근무를 확정하기 전에도 올리지 않는다(자동저장 경로와 같은 fail-closed 규칙).
+      // 이 경로는 화면을 떠날 때 도는데, 여기만 열려 있으면 저장 화면에서는 막아 둔 값이
+      // 탭을 옮기는 것만으로 서버에 올라간다 — 가드를 우회하는 뒷문이 된다(Codex 2R P0 2026-07-31).
+      // '못 올림' 표시는 그대로 남아, 수기 근무를 읽은 뒤 재시도가 올바른 값으로 올린다.
+      if (manualWorkUnresolvedRef.current) return Promise.resolve();
 
       const savedSalaries = localStorage.getItem(salaryStorageKey);
       const savedExclusions = localStorage.getItem(exclusionStorageKey);
@@ -883,6 +951,43 @@ export function MonthlyPartTimeSalarySubTab({
     return () => { active = false; };
   }, [exclusionDataKey, exclusionPendingKey, exclusionStorageKey, restoreExclusionsFromServer, salaryPendingKey, scheduleSalaryRetry]);
 
+  // 0. 근무일지의 수기 근무를 읽어 둔다. 아래 두 집계가 이 값을 같이 더한다.
+  useEffect(() => {
+    let cancelled = false;
+    setManualWorkFailed(false);
+    manualWorkFetchingRef.current = true;
+    (async () => {
+      try {
+        // 급여 금액에 직접 들어가는 값이라 캐시 폴백을 쓰지 않는다(정직원 초과근무 집계와 같은 규칙) —
+        // 서버 실패가 오래된 캐시로 둔갑하면 stale 시간을 보고 급여를 적게 된다.
+        const rows = await gasClient.getSharedDataFromServer<any[]>(`manual_parttime:${branchName}`);
+        if (cancelled) return;
+        // 문서가 없으면 null 이 온다. 그건 '수기 기록 없음'이라는 확인된 답이므로 빈 배열로 확정한다.
+        // 어느 지점 것인지 함께 담는다 — 쓰는 쪽이 지점을 대조해 옛 지점 값을 걸러 낸다.
+        setManualWork({ branch: branchName, rows: Array.isArray(rows) ? rows : [] });
+        setManualWorkFailed(false);
+        // 다시 막히면 그때는 한 번 더 안내해야 하므로 여기서 푼다.
+        manualWorkToastShownRef.current = false;
+        // 못 읽는 동안 저장이 거부돼 '못 올림' 표시만 남은 값이 있으면 지금 올린다.
+        // 이 깨우기가 없으면 사용자가 다시 손대기 전까지 그 값은 서버에 안 올라간다.
+        if (localStorage.getItem(salaryPendingKey) === "1"
+          || localStorage.getItem(exclusionPendingKey) === "1") scheduleSalaryRetryRef.current?.();
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("수기 파트타이머 근무기록을 불러오지 못했습니다.", error);
+        setManualWork(null);
+        setManualWorkFailed(true);
+      } finally {
+        // **뒤늦게 끝난 옛 조회는 이 표시를 내리지 않는다.** 내려 버리면 아직 도는 새 조회가 있는데도
+        // '읽는 중 아님'으로 보여, 글자를 칠 때마다 조회를 또 걸게 된다(Codex 3R P2 2026-07-31).
+        if (!cancelled) manualWorkFetchingRef.current = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [branchName, exclusionPendingKey, manualWorkReloadKey, salaryPendingKey]);
+
   // 1. Fetch current live Roster for PTs and merge with previously saved info + auto computed work logs from history!
   useEffect(() => {
     // A. Retrieve general roster
@@ -926,6 +1031,13 @@ export function MonthlyPartTimeSalarySubTab({
           } catch {}
         }
       }
+    });
+
+    // B-2. 근무일지에 수기로 적은 근무를 같이 더한다. 여기서 빠지면 일지에는 보이는 시간이 급여에서 사라진다.
+    // 출근일 표기는 바로 위 B 와 같은 형식(앞자리 0 없는 '일')으로 맞춘다 — 다르면 같은 날이 두 번 들어간다.
+    mergeManualPartTimeWork(ptTelemetry, manualWorkRows, selectedMonth, (settleDate) => {
+      const dateParts = String(settleDate).split("-");
+      return dateParts[2] ? `${Number(dateParts[2])}` : String(settleDate);
     });
 
     // C. Combine with stored monthly salary configurations for the selected branch/month
@@ -1006,7 +1118,7 @@ export function MonthlyPartTimeSalarySubTab({
       ...assembledRows,
       ...current.filter((row) => isManualRow(row) && !excluded.has(row.employeeId))
     ]);
-  }, [branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey]);
+  }, [branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey, manualWorkRows]);
 
   useEffect(() => {
     const loadSharedSalaries = async () => {
@@ -1095,7 +1207,21 @@ export function MonthlyPartTimeSalarySubTab({
           // 방금 서버에서 받은 값이 곧 "서버와 맞춰진 상태"다. 기준값으로 남겨 둔다.
           // 안 남기면 기준값 없이 sticky한 edited 표시로 판단하게 되어, 서버에서 받은 옛 행까지
           // "내가 고친 행"으로 잡혀 다음 재시도 때 상대의 수정을 덮는다.
-          localStorage.setItem(salarySyncedKey, JSON.stringify(loadedRows));
+          const loadedText = JSON.stringify(loadedRows);
+          localStorage.setItem(salarySyncedKey, loadedText);
+          // **로컬 작업본에도 같이 쓴다.** 이 값은 화면 state 에만 들어가는데, 표를 다시 조립하는
+          // effect 는 state 가 아니라 이 로컬 작업본에서 행을 만든다. 여기 안 쓰면 조립이 한 번
+          // 더 도는 순간 방금 받은 서버 값이 **옛 로컬 값으로 되돌아간다** — 다른 기기가 적어 둔
+          // 팁·메모·실수령액이 사라지고, 특히 hoursOverridden(사람이 직접 적은 시간)이 풀려
+          // 그 사람 급여 시간이 조용히 바뀐다(stop-hook 지적 2026-07-31).
+          //
+          // 단, **서버를 읽는 사이에 사용자가 고쳤으면 손대지 않는다.** 저장은 로컬 사본과
+          // '못 올림' 표시를 곧바로 남기므로(persistPartTimeSalaries), 여기서 그냥 덮으면 방금 친
+          // 값이 로컬에서 사라진 채 표시만 남아 재시도가 옛 값을 올린다 — 위 밀린-편집 경로가
+          // 같은 이유로 쓰는 가드와 똑같이, 사본이 그대로일 때만 맞춘다(stop-hook 지적 2026-07-31).
+          const untouched = localStorage.getItem(salaryStorageKey) === local
+            && localStorage.getItem(salaryPendingKey) !== "1";
+          if (untouched) localStorage.setItem(salaryStorageKey, loadedText);
         }
       } catch (error) {
         console.warn("파트타이머 급여 공통 데이터를 불러오지 못했습니다.", error);
@@ -1143,9 +1269,16 @@ export function MonthlyPartTimeSalarySubTab({
 
   // 다른 기기에서도 공통 직원현황을 기준으로 파트타이머 행을 생성합니다.
   useEffect(() => {
+    // **지점·달이 바뀌면 이 조회 결과는 버린다.**
+    // 명부 조회를 기다리는 사이에 지점을 옮기면, 늦게 도착한 옛 지점의 명단·수기 근무로 만든 행이
+    // 지금 보고 있는 지점의 급여대장을 덮는다 — 다른 지점 사람이 이 지점 급여에 섞여 그대로
+    // 이체로 이어질 수 있다. 아래 파생값 대조(manualWork.branch)는 이번 렌더만 막을 뿐,
+    // 이미 떠난 조회는 막지 못한다(Codex 2R P0 2026-07-31).
+    let cancelled = false;
     const mergeRemotePartTimers = async () => {
       try {
         const roster = await gasClient.getBranchOwnRoster(branchName);
+        if (cancelled) return;
         const partTimers = roster.filter((employee) => employee.division === "파트타이머");
         if (partTimers.length === 0) return;
 
@@ -1165,6 +1298,12 @@ export function MonthlyPartTimeSalarySubTab({
           } catch {}
         });
 
+        // 수기 근무도 같이 더한다(위 A 집계와 같은 함수). 출근일 표기는 이 집계의 형식(앞자리 0 유지)에 맞춘다.
+        // 이 집계가 아래에서 'legacy-' 행까지 만들어 주므로, 명부에 없고 수기로만 적힌 사람도 여기서 급여대장에 올라온다.
+        mergeManualPartTimeWork(telemetry, manualWorkRows, selectedMonth, (settleDate) =>
+          String(settleDate).split("-")[2] || ""
+        );
+
         // 기존 파트타이머 일지에만 있는 직원도 급여대장에 포함합니다.
         // 직원현황에 등록되지 않은 과거 기록은 이름 기반 임시 ID를 사용합니다.
         const allPartTimers = [...partTimers];
@@ -1179,6 +1318,8 @@ export function MonthlyPartTimeSalarySubTab({
           }
         });
 
+        // 명단을 손질하는 동안에도 지점이 바뀌었을 수 있다. 화면에 넣기 직전에 한 번 더 본다.
+        if (cancelled) return;
         setSalaries((current) => {
           const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
           const excluded = new Set<string>(excludedEmployeeIds);
@@ -1238,7 +1379,10 @@ export function MonthlyPartTimeSalarySubTab({
       }
     };
     mergeRemotePartTimers();
-  }, [branchName, selectedMonth, history, excludedEmployeeIds]);
+    return () => {
+      cancelled = true;
+    };
+  }, [branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     const nextSalaries = salaries.map(item => {
@@ -1292,7 +1436,10 @@ export function MonthlyPartTimeSalarySubTab({
       // edited는 그대로 둔다 — 되돌린 값이 0시간이어도 행이 갑자기 사라지지 않게.
       return { ...item, accumulatedHours: autoHours, hoursOverridden: false, calculatedSalary: total, actualPaidAmount: total };
     });
-    persistPartTimeSalaries(nextSalaries);
+    // 저장이 거부되면 되돌리기도 일어나지 않는다. 거부 사유는 persistPartTimeSalaries 가 이미 안내했다 —
+    // 여기서 "되돌렸습니다"까지 띄우면 그대로인 값을 바뀌었다고 말하는 셈이고, 사용자는 확인하러 오지 않는다
+    // (행 추가·제외 경로와 같은 규칙. stop-hook 지적 2026-07-31).
+    if (!persistPartTimeSalaries(nextSalaries)) return;
     triggerToast(`${who} 님의 누적시간을 ${autoHours}시간으로 되돌렸습니다.`);
   };
 
@@ -1358,7 +1505,10 @@ export function MonthlyPartTimeSalarySubTab({
     // 그 줄의 성명 칸으로 커서를 보내 바로 이름부터 적게 한다.
     const newRowIndex = visibleSalaries.length;
     // 제외 목록은 건드리지 않는 동작이므로 넘기지 않는다(넘기면 '제외 변경'으로 오인된다).
-    persistPartTimeSalaries(nextSalaries, undefined, false);
+    // **저장이 거부되면 행도 안 생긴다.** 거부 사유는 persistPartTimeSalaries 가 이미 안내했으므로,
+    // 여기서 커서를 옮기고 "추가했습니다"까지 띄우면 없는 행을 있다고 말하는 셈이다(삭제 경로와 같은 규칙).
+    const accepted = persistPartTimeSalaries(nextSalaries, undefined, false);
+    if (!accepted) return;
     requestFocus(newRowIndex, COL_NAME);
     triggerToast("행을 추가했습니다. 성명부터 적어 주세요.");
   };
@@ -1428,13 +1578,29 @@ export function MonthlyPartTimeSalarySubTab({
 
   return (
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
+      {/* 수기 근무를 못 읽으면 근무시간이 실제보다 적게 나온다. 그 사실을 말하지 않으면 '정상 집계'로
+          보이는 화면을 그대로 믿고 급여를 적게 지급하게 된다 — 조용히 넘어가면 안 되는 실패다. */}
+      {manualWorkFailed && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+          <span className="text-[11px] font-black text-rose-700">
+            근무일지에 수기로 적은 근무를 불러오지 못했습니다. 아래 누적시간이 실제보다 적을 수 있으니, 다시 시도한 뒤 금액을 확정해 주세요.
+          </span>
+          <button
+            type="button"
+            onClick={() => setManualWorkReloadKey((key) => key + 1)}
+            className="ml-auto rounded-full bg-rose-600 px-3 py-1 text-[11px] font-black text-white focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
       <div className="flex justify-between items-center pb-3 border-b border-gray-50 flex-col sm:flex-row gap-3">
         <div>
           <h3 className="text-sm font-black text-zinc-900 leading-snug w-fit">
             파트타이머 급여대장
           </h3>
           <p className="text-[10px] text-gray-400 font-extrabold mt-1">
-             직원현황의 파트타이머 리스트가 자동으로 연동되고, 이번 달 일일 일지에서 실시간 근무시간과 출근일이 집계되어 프리필링됩니다.
+             직원현황의 파트타이머 리스트가 자동으로 연동되고, 이번 달 일일 일지(근무일지에 수기로 적은 근무 포함)에서 실시간 근무시간과 출근일이 집계되어 프리필링됩니다.
              누적시간은 직접 고쳐 쓸 수 있습니다 — 말일에 그날 저녁 근무를 예상해 적어 두는 경우가 그렇습니다.
           </p>
         </div>
