@@ -692,6 +692,23 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             </div>
           ) : (
             <div className="space-y-6">
+              {/* 현금관리·현금지출·카드지출에도 결산월 선택을 붙인다(사용자 지시 2026-07-31).
+                  종전에는 매입매출·정직원급여 헤더에만 있어서, 이 세 탭은 지난달을 볼 방법이 없었다.
+                  (그 헤더는 '매입집계/정직원 급여대장' 제목과 마감 버튼이 함께 있어 여기서는 못 쓴다 —
+                  선택기만 같은 모양으로 따로 둔다. 값은 같은 selectedMonth 라 탭을 옮겨도 유지된다.) */}
+              {(activeSubTab === "cashExpenses" || activeSubTab === "cashManagement" || activeSubTab === "cardExpenses") && (
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    aria-label="결산월 선택"
+                    style={{ color: adminSettings.monthlyAccentColor }}
+                    className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
+                  />
+                </div>
+              )}
               {activeSubTab === "partTimeSalary" && (
                 // 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28).
                 <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
