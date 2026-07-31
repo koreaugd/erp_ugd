@@ -3062,13 +3062,16 @@ function AdminMonthlyClosingStatusSection() {
       // Promise.all이 reject → 아래 catch에서 다운로드를 취소한다. 실패를 삼켜 빈/오래된 데이터로 채우면
       // 파트타이머급여·현금지출·카드지출·현금관리 시트가 '데이터 없음/구값'인 채 '정상 파일'처럼 다운로드돼
       // (중복이체·누락·stale) 눈에 띄지 않는 오류가 된다. (전지점 매출집계 다운로드와 동일한 fail-closed 원칙)
-      const [purchases, roster, salaries, exclusions, profiles, history] = await Promise.all([
+      const [purchases, roster, salaries, exclusions, profiles, history, manualWork] = await Promise.all([
         gasClient.getSharedDataFromServer<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`),
         gasClient.getBranchOwnRosterFromServer(branchName),
         gasClient.getSharedDataFromServer<any[]>(`part_time_salaries:${branchName}:${selectedMonth}`),
         gasClient.getSharedDataFromServer<string[]>(`part_time_salary_exclusions:${branchName}:${selectedMonth}`),
         gasClient.getSharedDataFromServer<Record<string, any>>(`part_time_profiles:${branchName}`),
         gasClient.getBranchHistoryFromServer(branchName, selectedMonth),
+        // 근무일지에 수기로 적은 파트타이머 근무. 이것 없이 만든 엑셀은 그만큼 시간이 적게 찍히고
+        // 그 표가 그대로 이체로 이어진다 — 그래서 다른 소스와 똑같이 서버 전용(실패 시 다운로드 취소)으로 읽는다.
+        gasClient.getSharedDataFromServer<any[]>(`manual_parttime:${branchName}`),
       ]);
 
       // 매입매출 확정건에는 매입 데이터가 있어야 정상. 서버가 정상 응답했으나 비어 있으면(레거시/미저장) 재확정을 안내하고 중단.
@@ -3111,6 +3114,7 @@ function AdminMonthlyClosingStatusSection() {
         exclusions: Array.isArray(exclusions) ? exclusions : [],
         profiles: profiles && typeof profiles === "object" ? profiles : {},
         history: Array.isArray(history) ? history : [],
+        manualWork: Array.isArray(manualWork) ? manualWork : [],
       };
 
       // 일한 시간은 있는데 급여가 0원으로 나갈 행을 막는다(시급 기본값을 없앤 2026-07-31 이후).
