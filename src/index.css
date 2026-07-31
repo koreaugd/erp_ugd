@@ -4180,3 +4180,14 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 }
 /* 제목 안에는 글자만 — DESIGN.md §6-1 (아이콘이 들어가면 알약 크기가 들쭉날쭉해진다) */
 .branch-redesign .branch-pill-title svg { display: none !important; }
+
+/* 계좌이체 사용처 강조 (일일마감 지출 그리드).
+   결제가 아니라 **본사에 이체를 요청하는 건**이라 한눈에 갈라 보여야 한다(사용자 지시 2026-07-31).
+   [함정] 전역 `.branch-redesign select { background: ... !important }` 가 셀 배경을 덮어써서,
+   부모 div 에만 색을 주면 select 가 그 위를 가려 색이 보이지 않는다(Codex 2026-07-31).
+   그래서 **섹션 ID 특이성**으로 전역 규칙을 이긴다 — DESIGN.md §9-1 의 `.sheet-cell-input` 과 같은 방법. */
+.branch-redesign #expenses-section select.expense-usage-transfer {
+  background: var(--branch-vanilla) !important;
+  color: #212121 !important;
+  font-weight: 900 !important;
+}

@@ -64,7 +64,9 @@ export interface DailySettleValidationTargets {
 
 export interface ExpenseRow {
   classification: "식재료" | "소모품등 기타" | "부식비" | "음료" | "현금입금";
-  usage: "쿠팡" | "네이버" | "인근매장" | "그외기타" | "현금입금";
+  // "현금입금"은 **현금지출에서만** 쓴다(카드 사용처 목록에서는 2026-07-31에 뺐다).
+  // "계좌이체"는 반대로 카드지출 전용 — 결제가 아니라 본사에 이체를 요청하는 건이다.
+  usage: "쿠팡" | "네이버" | "인근매장" | "그외기타" | "계좌이체" | "현금입금";
   detail: string;
   amount: string;
 }
