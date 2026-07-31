@@ -4191,3 +4191,12 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   color: #212121 !important;
   font-weight: 900 !important;
 }
+
+/* 펼친 목록 안의 '계좌이체' 항목도 색을 준다 — 고를 때부터 눈에 띄어야 잘못 고르지 않는다.
+   (닫힌 칸은 위 select 규칙이 칠한다. option 배경은 윈도우 크롬/엣지에서 반영되고,
+   사파리 등 일부 브라우저는 OS 렌더링이라 무시할 수 있다 — 그래서 칸 색이 본체다.) */
+.branch-redesign #expenses-section option.expense-usage-transfer-option {
+  background: var(--branch-vanilla);
+  color: #212121;
+  font-weight: 900;
+}
