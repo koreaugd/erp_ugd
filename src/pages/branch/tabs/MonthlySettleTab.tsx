@@ -578,7 +578,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
               style={{ color: adminSettings.monthlyAccentColor }}
-              className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold rounded-lg shadow-inner focus:outline-none cursor-pointer"
+              className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
             />
             {/* '이력 갱신' 버튼은 없앴다 — 탭을 열 때와 결산월을 바꿀 때 자동으로 다시 불러오고,
                 지출·현금관리 탭에서 수정·삭제하면 그쪽에서 refreshHistory를 부른다. 손으로 누를 일이 없다. */}
@@ -699,13 +699,18 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               {(activeSubTab === "cashExpenses" || activeSubTab === "cashManagement" || activeSubTab === "cardExpenses") && (
                 <div className="flex flex-wrap items-center justify-end gap-3">
                   <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+                  {/* [주의] 모서리 클래스(rounded-*)는 여기서 쓰지 않는다 — 지점 화면 전역 규칙
+                      `.branch-redesign input/select/textarea { border-radius: 18px !important }`
+                      (index.css)가 이겨서 **렌더에 반영되지 않는다**(DESIGN.md §9-1 함정 1).
+                      적어 두면 바뀐 줄 알고 넘어가게 된다. 지점 입력칸은 18px 이 공통 모양이므로
+                      ID 특이성으로 억지로 이기지 않는다 — 그러면 이 칸만 다른 화면이 된다. */}
                   <input
                     type="month"
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(e.target.value)}
                     aria-label="결산월 선택"
                     style={{ color: adminSettings.monthlyAccentColor }}
-                    className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold rounded-lg shadow-inner focus:outline-none cursor-pointer"
+                    className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
                   />
                 </div>
               )}
