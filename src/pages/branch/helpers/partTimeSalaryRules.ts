@@ -7,6 +7,47 @@
 //   이 표는 그대로 은행 이체로 이어지므로 그 어긋남이 곧 급여 누락·과지급이다.
 //   그래서 판정은 이 파일 한 곳에서만 한다. 한쪽만 고치는 일이 다시 생기지 않게.
 
+/** 이름별 이번 달 근무 집계. hours=합계 시간, dates=출근일(표기 형식은 부르는 쪽이 정한다). */
+export type PartTimeWorkTelemetry = { hours: number; dates: string[] };
+
+/**
+ * 파트타이머 근무일지에 **수기로 적은 근무**(shared_data `manual_parttime:<지점>`)를 집계에 더한다.
+ *
+ * 일지 탭은 일일마감 기록과 수기 기록을 합쳐 보여주는데, 급여대장과 마감 엑셀은 오랫동안 일일마감만
+ * 읽었다. 그래서 수기로 적은 근무는 일지에는 보이면서 **급여에서는 빠졌다** — 두 화면의 숫자가
+ * 어긋나고 경고도 없어, 수기 입력에 기댄 달은 급여가 적게 나갈 수 있었다(2026-07-31 수정).
+ * (정직원 초과근무는 원래부터 manual_overtime 을 같이 합산한다. 파트타이머만 빠져 있었다.)
+ *
+ * 이 집계를 만드는 곳이 화면 2곳·엑셀 1곳으로 모두 셋이라, 한 곳만 고치면 또 어긋난다.
+ * 그래서 이 파일의 다른 규칙들과 같은 이유로 여기 한 곳에 둔다.
+ *
+ * 같은 날 같은 사람이 일일마감에도 있고 수기에도 있으면 **둘 다 더한다** — 일지 탭이 그렇게 세고,
+ * 세 곳이 같은 숫자를 보여주는 것이 먼저다. 중복이면 일지에서 지우는 것이 맞는 처리다.
+ *
+ * @param manualRows null 이면 "아직 못 읽었다"는 뜻이라 아무것도 더하지 않는다. 부르는 쪽이 그 상태를
+ *                   반드시 사용자에게 알려야 한다 — 0으로 치고 넘어가면 조용한 누락으로 되돌아간다.
+ * @param formatDay 출근일 표기를 부르는 쪽 형식에 맞춘다. 형식이 다르면 같은 날이 두 번 들어간다.
+ */
+export function mergeManualPartTimeWork(
+  telemetry: Record<string, PartTimeWorkTelemetry>,
+  manualRows: unknown,
+  selectedMonth: string,
+  formatDay: (settleDate: string) => string
+): void {
+  if (!Array.isArray(manualRows)) return;
+  manualRows.forEach((row: any) => {
+    const name = String(row?.staffName || "").trim();
+    const hours = Number(row?.workHours || 0);
+    const settleDate = String(row?.settleDate || "");
+    if (!name || !(hours > 0) || settleDate.slice(0, 7) !== selectedMonth) return;
+    const item = telemetry[name] || { hours: 0, dates: [] };
+    item.hours += hours;
+    const day = formatDay(settleDate);
+    if (day && !item.dates.includes(day)) item.dates.push(day);
+    telemetry[name] = item;
+  });
+}
+
 /** 이 규칙이 들여다보는 부분만. 화면의 행 타입과 엑셀 쪽 느슨한 저장본을 모두 받는다. */
 export interface PartTimeHoursSource {
   accumulatedHours?: unknown;
