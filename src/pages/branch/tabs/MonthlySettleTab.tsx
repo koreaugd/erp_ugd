@@ -578,7 +578,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
               style={{ color: adminSettings.monthlyAccentColor }}
-              className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
+              className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold rounded-lg shadow-inner focus:outline-none cursor-pointer"
             />
             {/* '이력 갱신' 버튼은 없앴다 — 탭을 열 때와 결산월을 바꿀 때 자동으로 다시 불러오고,
                 지출·현금관리 탭에서 수정·삭제하면 그쪽에서 refreshHistory를 부른다. 손으로 누를 일이 없다. */}
@@ -705,7 +705,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
                     onChange={(e) => setSelectedMonth(e.target.value)}
                     aria-label="결산월 선택"
                     style={{ color: adminSettings.monthlyAccentColor }}
-                    className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer"
+                    className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold rounded-lg shadow-inner focus:outline-none cursor-pointer"
                   />
                 </div>
               )}
