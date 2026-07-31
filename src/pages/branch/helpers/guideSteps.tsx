@@ -296,9 +296,11 @@ export const dailySettleGuideSteps: GuideStep[] = [
     body: (
       <>
         <p>
-          <b className="font-black text-rose-700">계좌이체 요청 건을 제외한 모든 결제</b>를 입력하세요.
+          <b className="font-black text-rose-700">계좌이체 요청 건을 포함한 모든 결제</b>를 입력하세요.
           <br />
           인터넷 즉시결제·카드결제 등 모두 포함됩니다.
+          <br />
+          계좌이체로 요청할 건은 사용처에서 <b className="font-black text-rose-700">계좌이체</b>를 선택하세요.
         </p>
         <ExpenseSheetGuide />
       </>

@@ -3689,6 +3689,8 @@ function AdminLaborContractsSection() {
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
   // 저장이 진행 중인 행(`지점명:id`) — 그 행의 select/삭제만 잠가 중복 쓰기를 막는다.
   const [pendingRows, setPendingRows] = useState<Set<string>>(() => new Set());
+  // 같은 값의 ref 사본 — 아래 loadData 가 응답 도착 시점에 "저장이 아직 진행 중인가"를 본다.
+  const pendingRowsRef = useRef<Set<string>>(new Set());
   // 요청 세대 번호. 조회가 겹치거나(포커스 복귀 연타) 조회 중에 상태를 바꾸면,
   // 먼저 떠났던 오래된 응답이 나중에 도착해 최신 화면을 덮는다(stale overwrite).
   // 조회 시작·수정 시작 때마다 번호를 올리고, 응답이 돌아왔을 때 번호가 달라져 있으면 버린다.
@@ -3707,6 +3709,12 @@ function AdminLaborContractsSection() {
       ]);
       // 이 응답보다 새 조회/수정이 이미 시작됐다면 낡은 응답이다 — 화면에 반영하지 않는다.
       if (seq !== requestSeqRef.current) return;
+      // **저장이 아직 진행 중이면 서버 값을 덮어쓰지 않는다.**
+      // 세대 번호만으로는 못 막는 경우가 있다 — 저장이 끝나기 전에 화면 복귀(focus/visibility)나
+      // 새로고침으로 시작된 조회는 **더 큰 세대 번호**를 달고 출발하므로 가드를 통과해 버린다.
+      // 그 조회가 읽은 값은 아직 저장 전 서버 상태라, 방금 바꾼 진행 상태가 옛 값으로 되돌아간다
+      // (Codex 2026-07-31). 저장이 끝나면 그쪽이 스스로 재조회하므로 여기서 건너뛰어도 최신이 된다.
+      if (pendingRowsRef.current.size > 0) return;
       // 조용한 갱신 실패(null)로 화면을 빈 목록으로 갈아치우지 않는다.
       if (contractData) setContracts(contractData);
       else if (!silent) setContracts([]);
@@ -3776,18 +3784,29 @@ function AdminLaborContractsSection() {
     }
   };
 
+  /**
+   * 한 지점의 발송 내역을 저장한다.
+   *
+   * **재조회는 여기서 하지 않는다.** 저장 표시(pendingRows)가 켜져 있는 동안 도착한 조회 응답은
+   * loadData 가 버리기 때문이다(저장 전 서버 값이 낙관값을 덮지 않게 하려는 가드). 여기서 던지면
+   * 바로 그 버려지는 창에 걸려 서버 값이 영영 반영되지 않는다 — 상태 변경은 값이 안 맞고,
+   * 삭제는 지운 행이 화면에 남는다(Codex 2026-07-31).
+   * 그래서 **부르는 쪽이 finally 에서 표시를 푼 뒤** `void loadData(true)` 를 던진다.
+   *
+   * 이렇게 두면 저장 한 번에 기다리는 왕복이 2번(읽기·정본 쓰기)으로 줄어든다.
+   * 종전에는 4번(옛 사본 쓰기·전 지점 재조회까지)을 모두 기다려 그동안 행이 잠겨 있었다
+   * — 상태를 연달아 바꿀 때 그만큼 답답했다(사용자 지적 2026-07-31).
+   */
   const saveBranchContracts = async (branchName: string, next: any[]) => {
     // `:` 키가 캐노니컬(관리자/지점 조회 기준). 옛 클라이언트용 `_` 사본은 최선노력 —
     // 사본 저장만 실패했는데 전체를 실패로 알리고 롤백하면, 이미 서버에 반영된 상태와
     // 화면이 어긋난다(지점 LaborContractTab과 같은 규약, Codex 2R P1).
     await gasClient.saveSharedData("labor_contracts:" + branchName, next);
-    try {
-      await gasClient.saveSharedData("labor_contracts_" + branchName, next);
-    } catch (err) {
+    // 사본은 어차피 실패해도 넘어가는 값이라 **기다리지 않는다** — 기다리면 왕복이 한 번 더 늘 뿐이다.
+    void gasClient.saveSharedData("labor_contracts_" + branchName, next).catch((err) => {
       console.warn("옛 형식 사본(labor_contracts_) 저장 실패 — 캐노니컬 저장은 성공:", err);
-    }
+    });
     // 저장 후 재조회는 조용히 — 스피너로 표를 갈아치우지 않는다.
-    await loadData(true);
   };
 
   const rowKey = (row: any) => `${row.branchName}:${row.id}`;
@@ -3801,6 +3820,9 @@ function AdminLaborContractsSection() {
   };
 
   const markPending = (key: string, on: boolean) => {
+    // ref 에도 같이 담는다 — loadData 는 deps 가 비어 있어 state 를 못 읽는다.
+    // "지금 저장 중인 행이 있는가"를 응답 도착 시점에 판단하려면 ref 여야 한다.
+    if (on) pendingRowsRef.current.add(key); else pendingRowsRef.current.delete(key);
     setPendingRows((current) => {
       const next = new Set(current);
       if (on) next.add(key); else next.delete(key);
@@ -3821,6 +3843,8 @@ function AdminLaborContractsSection() {
     try {
       const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
       const next = list.map((item) => item.id === row.id ? { ...item, status, statusUpdatedAt: new Date().toISOString() } : item);
+      // 화면에는 이미 새 상태가 떠 있다 — 재조회를 기다리지 않고 행을 바로 풀어 준다.
+      // 재조회는 아래 finally 에서 **표시를 푼 뒤** 던진다(그전에 던지면 응답이 버려진다).
       await saveBranchContracts(row.branchName, next);
     } catch (err) {
       console.error("진행 상태 저장에 실패했습니다.", err);
@@ -3833,6 +3857,11 @@ function AdminLaborContractsSection() {
       window.alert("진행 상태 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       markPending(key, false);
+      // **표시를 푼 뒤에** 재조회를 던진다. 그 전에 던지면 pendingRows 가드에 걸려 응답이 버려지고,
+      // 그러면 서버 값이 화면에 영영 안 붙는다(Codex 2026-07-31).
+      // 다른 행이 아직 저장 중이면 이 응답도 버려지지만, 그 행이 끝날 때 자기 몫을 다시 던지므로
+      // **마지막으로 끝난 저장의 재조회는 반드시 반영된다.**
+      void loadData(true);
     }
   };
 
@@ -3844,12 +3873,17 @@ function AdminLaborContractsSection() {
     markPending(key, true);
     try {
       const list = (await gasClient.getSharedData<any[]>("labor_contracts:" + row.branchName)) || [];
+      // 삭제도 재조회를 여기서 기다리지 않는다 — 저장 표시가 켜져 있는 동안 도착한 응답은
+      // loadData 가 버리기 때문이다(낙관값 보호 가드). 그대로 두면 지운 행이 화면에 남는다
+      // (Codex 2026-07-31). 아래 finally 에서 표시를 푼 뒤 던진다.
       await saveBranchContracts(row.branchName, list.filter((item) => item.id !== row.id));
     } catch (err) {
       console.error("발송 내역 삭제에 실패했습니다.", err);
       window.alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       markPending(key, false);
+      // 삭제는 화면에서 행이 사라져야 완료다 — 표시를 푼 뒤 재조회를 던져야 그 결과가 반영된다.
+      void loadData(true);
     }
   };
 
