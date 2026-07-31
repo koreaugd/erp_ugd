@@ -3986,7 +3986,7 @@ function AdminLaborContractsSection() {
                     <td className="py-1.5 px-2 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
                     <td className="py-1.5 px-2 font-mono font-black whitespace-nowrap">{contract.phone}</td>
                     <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">
-                      {laborContractPeriodText(contract.effectiveDate, contract.periodType)}
+                      {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
                     </td>
                     <td className="py-1.5 px-2 text-right font-mono font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
                     <td className="py-1.5 px-2 text-center">
