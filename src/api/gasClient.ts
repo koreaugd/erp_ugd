@@ -108,6 +108,29 @@ export interface LaborContract {
 }
 
 // 계약유형 표시 라벨 — 지점 등록 폼·지점 표·관리자 표가 같은 문구를 쓴다.
+/**
+ * 입사·이동일 칸에 적을 말 — 1주·2주 계약은 **언제부터 언제까지인지** 기간으로 보여준다
+ * (사용자 지시 2026-07-31). 컬럼을 늘리지 않고 한 칸 안에 `yy.mm.dd~yy.mm.dd` 로 적는다.
+ *
+ * 끝나는 날은 저장돼 있지 않아 시작일에서 계산한다. **시작일을 포함해 세는 것**이 기준이라
+ * 1주 = 시작일 +6일, 2주 = 시작일 +13일이다(8월 1일 시작 1주 계약이면 8월 7일까지).
+ * 정규 계약과 옛 기록은 종전대로 날짜 하나만 적는다.
+ */
+export const laborContractPeriodText = (effectiveDate?: string, periodType?: string): string => {
+  const raw = String(effectiveDate || "").trim();
+  if (!raw) return "-";
+  const short = (d: Date) =>
+    `${String(d.getFullYear()).slice(-2)}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
+  // 날짜로 못 읽으면(형식이 다른 옛 기록) 원문을 그대로 보여준다 — 임의로 고쳐 적지 않는다.
+  const start = new Date(`${raw}T00:00:00`);
+  if (isNaN(start.getTime())) return raw;
+  const addDays = periodType === "1주" ? 6 : periodType === "2주" ? 13 : null;
+  if (addDays === null) return short(start);
+  const end = new Date(start.getTime());
+  end.setDate(end.getDate() + addDays);
+  return `${short(start)}~${short(end)}`;
+};
+
 export const LABOR_CONTRACT_PERIOD_LABEL: Record<NonNullable<LaborContract["periodType"]>, string> = {
   "1주": "1주",
   "2주": "2주",

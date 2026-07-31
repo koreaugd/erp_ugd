@@ -249,7 +249,7 @@ export function ExpenseGrid({
                         className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer${row.usage === "계좌이체" ? " expense-usage-transfer" : ""}`}
                       >
                         {usageOptionsFor(row.usage).map((item) => (
-                          <option key={item} value={item}>
+                          <option key={item} value={item} className={item === "계좌이체" ? "expense-usage-transfer-option" : undefined}>
                             {item}
                           </option>
                         ))}
@@ -376,7 +376,7 @@ export function ExpenseGrid({
                       className={`px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white${row.usage === "계좌이체" ? " expense-usage-transfer" : ""}`}
                     >
                       {usageOptionsFor(row.usage).map((item) => (
-                        <option key={item} value={item}>
+                        <option key={item} value={item} className={item === "계좌이체" ? "expense-usage-transfer-option" : undefined}>
                           {item}
                         </option>
                       ))}

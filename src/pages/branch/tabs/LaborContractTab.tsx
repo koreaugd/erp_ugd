@@ -3,7 +3,7 @@
 // 급여는 등록할 때만 입력받는다 — 등록 후에는 지점 화면에 표시하지도, 수정하지도 않는다.
 import { useState, useEffect, useCallback, type ChangeEvent } from "react";
 import { Download } from "lucide-react";
-import { gasClient, LABOR_CONTRACT_PERIOD_LABEL } from "../../../api/gasClient";
+import { gasClient, LABOR_CONTRACT_PERIOD_LABEL, laborContractPeriodText } from "../../../api/gasClient";
 import type { LaborContract, LaborContractTemplateMeta } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 
@@ -499,7 +499,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
                       </div>
                     ) : c.phone}
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">{c.effectiveDate || "-"}</td>
+                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">{laborContractPeriodText(c.effectiveDate, c.periodType)}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <span className={`rounded-full px-2 py-0.5 font-black ${statusChipClass(normalizeStatus(c.status))}`}>
                       {normalizeStatus(c.status)}

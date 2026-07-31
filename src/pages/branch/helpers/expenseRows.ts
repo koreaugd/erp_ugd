@@ -17,12 +17,13 @@ export const EXPENSE_CLASSIFICATIONS: ExpenseRow["classification"][] = [
  *  · 계좌이체는 카드 지출에 적되 결제가 아니라 **본사에 이체를 요청하는 건**이라 사용처로
  *    구분해 두어야 한다. 눈에 띄게 색으로도 표시한다(ExpenseGrid).
  */
+// 계좌이체를 맨 위에 둔다(사용자 지시 2026-07-31) — 다른 사용처와 성격이 달라 먼저 눈에 띄어야 한다.
 export const EXPENSE_USAGES: ExpenseRow["usage"][] = [
+  "계좌이체",
   "쿠팡",
   "네이버",
   "인근매장",
-  "그외기타",
-  "계좌이체"
+  "그외기타"
 ];
 
 /**
