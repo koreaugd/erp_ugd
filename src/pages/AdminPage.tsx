@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
-import { gasClient, DailyListRow, DailySettleDetail, LABOR_CONTRACT_PERIOD_LABEL } from "../api/gasClient";
+import { gasClient, DailyListRow, DailySettleDetail, LABOR_CONTRACT_PERIOD_LABEL, laborContractPeriodText } from "../api/gasClient";
 import type { LaborContractTemplateMeta } from "../api/gasClient";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ToastMessage, { ToastType } from "../components/ToastMessage";
@@ -3985,7 +3985,9 @@ function AdminLaborContractsSection() {
                     </td>
                     <td className="py-1.5 px-2 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
                     <td className="py-1.5 px-2 font-mono font-black whitespace-nowrap">{contract.phone}</td>
-                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">{contract.effectiveDate || "-"}</td>
+                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">
+                      {laborContractPeriodText(contract.effectiveDate, contract.periodType)}
+                    </td>
                     <td className="py-1.5 px-2 text-right font-mono font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
                     <td className="py-1.5 px-2 text-center">
                       {/* 삭제요청은 오류색 hex 직접 지정 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집는다(DESIGN_ADMIN §2-1 P0) */}
