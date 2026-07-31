@@ -118,17 +118,31 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       alert("직원명, 시간, 수기 입력 사유를 모두 채워주세요.");
       return;
     }
-    if (!/^\d+(\.\d+)?$/.test(manualHours)) {
-      alert("시간은 숫자 형식으로만 입력해 주세요. (예: 2시간 30분 ➔ 2.5)");
+    // **음수도 받는다**(사용자 지시 2026-07-31). 잘못 올라간 초과근무를 되돌릴 방법이 이것뿐이다 —
+    // 이미 제출된 일일마감의 초과시간은 여기서 고칠 수 없으므로, 같은 크기의 음수를 적어
+    // 합계를 0으로 만든다(집계는 총합이 0인 인원을 아예 빼고 보여준다).
+    if (!/^-?\d+(\.\d+)?$/.test(manualHours)) {
+      alert("시간은 숫자 형식으로만 입력해 주세요. (예: 2시간 30분 ➔ 2.5 / 되돌리기 ➔ -2.5)");
       return;
     }
     const hours = Number(manualHours);
-    if (hours <= 0) {
-      alert("초과 근무 시간은 0보다 커야 합니다.");
+    if (hours === 0) {
+      alert("0시간은 적을 수 없습니다. 되돌리려면 되돌릴 만큼 음수로 적어주세요. (예: -2.5)");
       return;
     }
-    if (hours >= 5) {
-      const ok = window.confirm(`초과 근무 시간이 5시간 이상(${hours}시간)으로 기재되었습니다. 오타(예: 25 등)가 아닌 것이 확실한가요?\n정말 등록하시겠습니까?`);
+    // 오타 확인은 부호와 무관하게 '크기'로 본다 — -25 도 -2.5 의 오타일 수 있다.
+    if (Math.abs(hours) >= 5) {
+      const ok = window.confirm(
+        `초과 근무 시간이 5시간 이상(${hours}시간)으로 기재되었습니다. 오타(예: 25 등)가 아닌 것이 확실한가요?\n정말 등록하시겠습니까?`
+      );
+      if (!ok) return;
+    }
+    if (hours < 0) {
+      const ok = window.confirm(
+        `${manualName.trim()} 님의 초과근무를 ${hours}시간(차감)으로 적습니다.\n\n` +
+        `잘못 올라간 초과근무를 되돌릴 때 쓰는 방법입니다. 기존 기록은 지워지지 않고, 이 차감이 더해져 합계가 줄어듭니다.\n` +
+        `계속할까요?`
+      );
       if (!ok) return;
     }
     const key = `manual_overtime:${branchName}`;
@@ -289,10 +303,10 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
           <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
           <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
           <div className="relative">
-            <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" />
-            {manualHours.length > 0 && !/^\d+(\.\d+)?$/.test(manualHours) && (
+            <input value={manualHours} onChange={(e) => setManualHours(e.target.value)} placeholder="시간" className="w-16 px-2 py-1 border rounded text-xs" title="되돌리려면 음수로 적습니다 (예: -2.5)" />
+            {manualHours.length > 0 && !/^-?\d+(\.\d+)?$/.test(manualHours) && (
               <div className="absolute z-10 bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-black p-2 rounded-xl shadow-md -bottom-12 left-0 whitespace-nowrap animate-bounce">
-                숫자만 기입해 주세요! (예: 2시간 30분 ➔ 2.5)
+                숫자만 기입해 주세요! (예: 2시간 30분 ➔ 2.5 / 되돌리기 ➔ -2.5)
               </div>
             )}
             {manualHours.length > 0 && /^\d+(\.\d+)?$/.test(manualHours) && Number(manualHours) >= 5 && (
@@ -347,9 +361,13 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                       <td className="py-2 px-2 text-center font-bold text-gray-600">{r.workHours}h</td>
                       <td className="py-2 px-2 text-center text-gray-400">{r.standardHours}h</td>
                       <td className="py-2 px-2 text-center">
+                        {/* 음수라도 **수기로 적은 것은 조기퇴근이 아니라 차감**이다(2026-07-31).
+                            잘못 올라간 초과근무를 되돌리려고 적은 값인데 '조기퇴근'이라고 하면
+                            그날 실제로 일찍 퇴근한 것으로 읽혀 근태를 오해하게 된다.
+                            출퇴근 시각에서 계산된 음수만 조기퇴근이다. */}
                         {r.overtime < 0 ? (
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-amber-50 text-amber-700 font-bold">
-                            {r.overtime}h (조기퇴근)
+                            {r.overtime}h {r.manual ? "(차감)" : "(조기퇴근)"}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-50 text-emerald-800 font-bold">
@@ -407,7 +425,9 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
                   </span>
                   {(item.manualOvertime !== 0 || item.autoOvertime !== 0) && (
                     <span className="block mt-0.5 text-[10px] text-gray-400">
-                      {`수기 ${item.manualOvertime || 0}h · 자동/차감 ${item.autoOvertime || 0}h`}
+                      {/* '자동/차감'이라고 적으면 수기 차감과 자동 조기퇴근이 한 말에 섞인다 —
+                          수기 쪽에도 차감(음수)이 들어오게 됐으므로 출처로만 가른다(Codex 2026-07-31). */}
+                      {`수기 ${item.manualOvertime || 0}h · 자동 ${item.autoOvertime || 0}h`}
                     </span>
                   )}
                 </span>

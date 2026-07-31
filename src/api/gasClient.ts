@@ -94,10 +94,16 @@ export interface LaborContract {
   // 신규입사/지점이동 구분과 입사·이동일. 지점이동일 때만 previousBranch(이전 지점명)가 채워진다.
   // 옛 레코드에는 없을 수 있어 전부 선택 필드로 둔다(표시 시 없으면 "-").
   contractType?: "신규입사" | "지점이동";
-  // 계약 기간 유형(2026-07-29): 신입은 1~2주 단위 계약서를 따로 보내야 해서 구분이 필요하다.
+  // 계약 기간 유형(2026-07-29): 신입은 기간을 정해 계약서를 따로 보내야 해서 구분이 필요하다.
   // 옛 레코드에는 없다(표시 "-"). 값은 짧게 저장하고 라벨은 LABOR_CONTRACT_PERIOD_LABEL 로 그린다.
-  periodType?: "1주" | "2주" | "정규";
+  //
+  // "1주"·"2주"는 **옛 값**이다(2026-07-31에 신청 폼에서 뺐다). 기간이 그 둘로만 고정돼
+  // 실제 계약과 맞지 않는 경우가 있어, 시작·종료일을 직접 고르는 "기간작성"으로 바꿨다.
+  // 타입에 남겨 둬야 이미 등록된 기록을 그대로 읽고 보여줄 수 있다.
+  periodType?: "기간작성" | "정규" | "1주" | "2주";
   effectiveDate?: string;
+  /** periodType === "기간작성" 일 때의 종료일(YYYY-MM-DD). 시작일은 effectiveDate 다. */
+  periodEndDate?: string;
   previousBranch?: string;
   status?: string;
   createdAt?: string;
@@ -109,14 +115,15 @@ export interface LaborContract {
 
 // 계약유형 표시 라벨 — 지점 등록 폼·지점 표·관리자 표가 같은 문구를 쓴다.
 /**
- * 입사·이동일 칸에 적을 말 — 1주·2주 계약은 **언제부터 언제까지인지** 기간으로 보여준다
- * (사용자 지시 2026-07-31). 컬럼을 늘리지 않고 한 칸 안에 `yy.mm.dd~yy.mm.dd` 로 적는다.
+ * 입사·이동일 칸에 적을 말 — 기간이 있는 계약은 **언제부터 언제까지인지** 한 칸에 적는다
+ * (사용자 지시 2026-07-31). 컬럼을 늘리지 않고 `yy.mm.dd~yy.mm.dd` 형태로 보여준다.
  *
- * 끝나는 날은 저장돼 있지 않아 시작일에서 계산한다. **시작일을 포함해 세는 것**이 기준이라
- * 1주 = 시작일 +6일, 2주 = 시작일 +13일이다(8월 1일 시작 1주 계약이면 8월 7일까지).
- * 정규 계약과 옛 기록은 종전대로 날짜 하나만 적는다.
+ *  · "기간작성"  — 지점이 달력에서 고른 종료일(periodEndDate)을 그대로 쓴다.
+ *  · "1주"·"2주" — **옛 기록**이라 종료일이 저장돼 있지 않다. 시작일에서 계산한다
+ *                  (시작일을 포함해 세는 기준이라 1주=+6일, 2주=+13일).
+ *  · 정규·그 밖  — 날짜 하나만 적는다.
  */
-export const laborContractPeriodText = (effectiveDate?: string, periodType?: string): string => {
+export const laborContractPeriodText = (effectiveDate?: string, periodType?: string, periodEndDate?: string): string => {
   const raw = String(effectiveDate || "").trim();
   if (!raw) return "-";
   const short = (d: Date) =>
@@ -124,6 +131,13 @@ export const laborContractPeriodText = (effectiveDate?: string, periodType?: str
   // 날짜로 못 읽으면(형식이 다른 옛 기록) 원문을 그대로 보여준다 — 임의로 고쳐 적지 않는다.
   const start = new Date(`${raw}T00:00:00`);
   if (isNaN(start.getTime())) return raw;
+  if (periodType === "기간작성") {
+    const endRaw = String(periodEndDate || "").trim();
+    const end = endRaw ? new Date(`${endRaw}T00:00:00`) : null;
+    // 종료일이 없거나 못 읽으면 시작일만 적는다 — 없는 날짜를 지어내지 않는다.
+    if (!end || isNaN(end.getTime())) return short(start);
+    return `${short(start)}~${short(end)}`;
+  }
   const addDays = periodType === "1주" ? 6 : periodType === "2주" ? 13 : null;
   if (addDays === null) return short(start);
   const end = new Date(start.getTime());
@@ -132,9 +146,11 @@ export const laborContractPeriodText = (effectiveDate?: string, periodType?: str
 };
 
 export const LABOR_CONTRACT_PERIOD_LABEL: Record<NonNullable<LaborContract["periodType"]>, string> = {
+  "기간작성": "기간작성(수습)",
+  "정규": "정규(수습 후 계속)",
+  // 아래 둘은 옛 기록 표시용 — 신청 폼 선택지에는 더 이상 없다.
   "1주": "1주",
   "2주": "2주",
-  "정규": "정규(수습 후 계속)",
 };
 
 // 파트타이머 근로계약서 양식(전 지점 공통 1개)의 파일 정보.

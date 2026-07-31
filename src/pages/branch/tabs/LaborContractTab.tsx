@@ -74,8 +74,11 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
 
   const [contractType, setContractType] = useState<"" | "신규입사" | "지점이동">("");
   // 계약유형(필수, 2026-07-29): 신입은 1~2주 단위 계약서를 따로 보내야 해서 여기서 구분을 받는다.
-  const [periodType, setPeriodType] = useState<"" | "1주" | "2주" | "정규">("");
+  // 계약유형 — 1주·2주 고정 선택지를 없애고 기간을 직접 고르는 "기간작성"으로 바꿨다(2026-07-31).
+  const [periodType, setPeriodType] = useState<"" | "기간작성" | "정규">("");
   const [effectiveDate, setEffectiveDate] = useState("");
+  /** 기간작성일 때의 종료일. 시작일은 effectiveDate(입사·이동일)를 그대로 쓴다. */
+  const [periodEndDate, setPeriodEndDate] = useState("");
   const [previousBranch, setPreviousBranch] = useState("");
   const [name, setName] = useState("");
   const [phoneDigits, setPhoneDigits] = useState("");
@@ -195,12 +198,23 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       return;
     }
     if (!periodType) {
-      window.alert("계약유형(1주 / 2주 / 정규)을 선택해 주세요.");
+      window.alert("계약유형(기간작성(수습) / 정규)을 선택해 주세요.");
       return;
     }
     if (!effectiveDate) {
       window.alert(`${contractType === "지점이동" ? "지점이동일" : "입사일"}을 선택해 주세요.`);
       return;
+    }
+    // 기간작성은 종료일이 있어야 계약서를 만들 수 있다 — 없이 넘기면 관리자가 기간을 알 수 없다.
+    if (periodType === "기간작성") {
+      if (!periodEndDate) {
+        window.alert("계약 종료일을 선택해 주세요.");
+        return;
+      }
+      if (periodEndDate < effectiveDate) {
+        window.alert("계약 종료일이 시작일보다 앞설 수 없습니다.");
+        return;
+      }
     }
     if (!name.trim() || digits.length !== 8 || !salary.trim()) {
       window.alert("이름, 연락처 8자리, 급여를 모두 입력해 주세요.");
@@ -235,6 +249,9 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
         contractType,
         periodType,
         effectiveDate,
+        // 기간작성일 때만 종료일을 싣는다. 값이 없으면 아예 넣지 않는다 —
+        // 빈 문자열을 저장하면 "종료일이 있는데 비어 있다"로 읽힌다.
+        ...(periodType === "기간작성" && periodEndDate ? { periodEndDate } : {}),
         ...(contractType === "지점이동" ? { previousBranch } : {}),
         status: "발송 대기",
         createdAt: new Date().toISOString()
@@ -250,6 +267,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       setContractType("");
       setPeriodType("");
       setEffectiveDate("");
+      setPeriodEndDate("");
       setPreviousBranch("");
       setName("");
       setPhoneDigits("");
@@ -391,14 +409,18 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
             {/* 계약유형(필수) — 1주/2주 단위 계약서인지, 수습 후 계속 근무 정규 계약서인지 구분 */}
             <select
               value={periodType}
-              onChange={(e) => setPeriodType(e.target.value as "" | "1주" | "2주" | "정규")}
+              onChange={(e) => {
+                const next = e.target.value as "" | "기간작성" | "정규";
+                setPeriodType(next);
+                // 기간작성이 아니면 종료일은 뜻이 없다 — 남겨 두면 저장까지 딸려 간다.
+                if (next !== "기간작성") setPeriodEndDate("");
+              }}
               aria-label="계약유형"
-              title="1주·2주 단위 계약서인지, 수습 후 계속 근무할 정규 계약서인지 선택"
+              title="기간을 정해 쓰는 계약서인지, 수습 후 계속 근무할 정규 계약서인지 선택"
               className="h-8 w-[150px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
             >
               <option value="">계약유형 선택</option>
-              <option value="1주">{LABOR_CONTRACT_PERIOD_LABEL["1주"]}</option>
-              <option value="2주">{LABOR_CONTRACT_PERIOD_LABEL["2주"]}</option>
+              <option value="기간작성">{LABOR_CONTRACT_PERIOD_LABEL["기간작성"]}</option>
               <option value="정규">{LABOR_CONTRACT_PERIOD_LABEL["정규"]}</option>
             </select>
             <input
@@ -409,6 +431,22 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
               title={contractType === "지점이동" ? "지점이동일" : "입사일"}
               className="h-8 w-[146px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
             />
+            {/* 계약 종료일 — 기간작성일 때만 나온다. 시작일은 왼쪽 입사·이동일을 그대로 쓴다.
+                min 을 시작일로 묶어 끝이 시작보다 앞서는 날짜를 애초에 못 고르게 한다. */}
+            {periodType === "기간작성" && (
+              <span className="flex items-center gap-1">
+                <span className="text-[11px] font-black text-slate-400">~</span>
+                <input
+                  type="date"
+                  value={periodEndDate}
+                  min={effectiveDate || undefined}
+                  onChange={(e) => setPeriodEndDate(e.target.value)}
+                  aria-label="계약 종료일"
+                  title="계약 종료일 (시작일은 왼쪽 입사·이동일)"
+                  className="h-8 w-[146px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
+                />
+              </span>
+            )}
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="이름" className="h-8 w-[80px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold" />
             <div className="flex h-8 w-[160px] items-center overflow-hidden rounded-lg border border-gray-200 bg-white">
               <span className="flex h-full items-center bg-gray-50 px-2 text-[11px] font-extrabold text-gray-400 border-r border-gray-200">010</span>
@@ -499,7 +537,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
                       </div>
                     ) : c.phone}
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">{laborContractPeriodText(c.effectiveDate, c.periodType)}</td>
+                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">{laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <span className={`rounded-full px-2 py-0.5 font-black ${statusChipClass(normalizeStatus(c.status))}`}>
                       {normalizeStatus(c.status)}
