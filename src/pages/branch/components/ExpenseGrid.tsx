@@ -226,7 +226,9 @@ export function ExpenseGrid({
                     <ChevronDown className="w-3 h-3 text-gray-300 absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
 
-                  {/* 사용처 — 현금입금이면 쓰지 않는 칸이라 잠근다 */}
+                  {/* 사용처 — 현금입금이면 쓰지 않는 칸이라 잠근다.
+                      '계좌이체'는 결제가 아니라 **본사에 이체를 요청하는 건**이라 한눈에 갈라 보이게
+                      칸을 바닐라로 칠한다(사용자 지시 2026-07-31, DESIGN.md 주의색 vanilla #EFF0A3). */}
                   {usageDisabled ? (
                     <div
                       className="border-r border-b border-gray-200 bg-gray-100 flex items-center justify-center"
@@ -244,7 +246,7 @@ export function ExpenseGrid({
                         aria-label={cellLabel(rowIndex, COL_USAGE)}
                         value={row.usage}
                         onChange={(e) => updateCell(rowIndex, "usage", e.target.value)}
-                        className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer`}
+                        className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer${row.usage === "계좌이체" ? " expense-usage-transfer" : ""}`}
                       >
                         {usageOptionsFor(row.usage).map((item) => (
                           <option key={item} value={item}>
@@ -367,10 +369,11 @@ export function ExpenseGrid({
                 {!(variant === "cash" && row.classification === "현금입금") && (
                   <div className="flex flex-col space-y-1">
                     <span className="text-[10px] font-bold text-gray-400">사용처</span>
+                    {/* 모바일도 PC와 같은 기준으로 강조한다 — 한쪽만 칠하면 기기에 따라 다르게 보인다. */}
                     <select
                       value={row.usage}
                       onChange={(e) => updateCell(rowIndex, "usage", e.target.value)}
-                      className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
+                      className={`px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white${row.usage === "계좌이체" ? " expense-usage-transfer" : ""}`}
                     >
                       {usageOptionsFor(row.usage).map((item) => (
                         <option key={item} value={item}>
