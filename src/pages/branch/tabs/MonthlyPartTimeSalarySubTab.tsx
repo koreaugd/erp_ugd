@@ -1580,15 +1580,21 @@ export function MonthlyPartTimeSalarySubTab({
     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
       {/* 수기 근무를 못 읽으면 근무시간이 실제보다 적게 나온다. 그 사실을 말하지 않으면 '정상 집계'로
           보이는 화면을 그대로 믿고 급여를 적게 지급하게 된다 — 조용히 넘어가면 안 되는 실패다. */}
+      {/* 색은 지점 실패색 3종을 hex 그대로 쓴다(DESIGN.md §11 · §2 매핑표).
+          `bg-rose-50` 같은 Tailwind 색을 쓰면 지점 CSS가 **바닐라(연노랑)로 치환해** 급여 위험 경고가
+          평범한 '주의'로 보인다 — 저장 실패를 눈에 띄게 하라는 규칙(AGENTS.md P0-2)과 어긋난다.
+          같은 파일의 '저장 대기 중' 배지와 같은 조합이라 두 경고가 한 화면에서 같은 색으로 읽힌다.
+          글자는 경고 배너 규격 12px·700(§6). 버튼은 색으로 의미를 나누지 않고 검정+고스트(§10). */}
       {manualWorkFailed && (
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
-          <span className="text-[11px] font-black text-rose-700">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 bg-[#FDE2E2] border border-[#C93A3A]">
+          <AlertTriangle className="w-3.5 h-3.5 text-[#B91C1C] shrink-0" />
+          <span className="text-xs font-bold text-[#B91C1C]">
             근무일지에 수기로 적은 근무를 불러오지 못했습니다. 아래 누적시간이 실제보다 적을 수 있으니, 다시 시도한 뒤 금액을 확정해 주세요.
           </span>
           <button
             type="button"
             onClick={() => setManualWorkReloadKey((key) => key + 1)}
-            className="ml-auto rounded-full bg-rose-600 px-3 py-1 text-[11px] font-black text-white focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
+            className="ml-auto rounded-full px-4 py-1.5 text-[11px] font-black bg-[#212121] text-[#F6F5FA] focus:outline-none focus:ring-2 focus:ring-[#C93A3A] focus:ring-offset-2"
           >
             다시 시도
           </button>
