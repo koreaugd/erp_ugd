@@ -3117,19 +3117,21 @@ function AdminMonthlyClosingStatusSection() {
         manualWork: Array.isArray(manualWork) ? manualWork : [],
       };
 
-      // 일한 시간은 있는데 급여가 0원으로 나갈 행을 막는다(시급 기본값을 없앤 2026-07-31 이후).
+      // 일한 시간은 있는데 급여가 0원으로 나갈 행은 경고만 하고 다운로드는 계속한다(2026-08-01 사용자 지시 —
+      // 시급 미입력 지점 하나 때문에 관리자 다운로드가 통째로 막히는 게 더 큰 불편). 취소를 고르면 받지 않는다.
       // 판정은 워크북 빌더가 실제로 만든 행을 그대로 본다 — 저장된 급여 행만 보면 누적시간이 낡아
       // "0시간이니 넘어감"으로 새어 나간다(엑셀에는 일일마감 집계로 다시 계산한 시간이 찍힌다).
       const zeroPaidRows = zeroPaidPartTimeRows(data);
       if (zeroPaidRows.length > 0) {
         const who = zeroPaidRows.slice(0, 5).map((row) => `${row.name || "(이름 없음)"} ${row.hours}시간`).join(", ");
-        window.alert(
+        const proceed = window.confirm(
           `${branchName} · ${selectedMonth} 파트타이머 급여대장에 근무시간은 있는데 급여가 0원인 행이 ${zeroPaidRows.length}건 있습니다.\n` +
           `(${who}${zeroPaidRows.length > 5 ? " 외" : ""})\n\n` +
-          `대부분 시급이 비어 있어서입니다. 그대로 받으면 그 사람 급여가 0원인 채 파일이 만들어집니다. 다운로드를 중단했습니다.\n` +
-          `해당 지점에서 [월말마감 → 파트타이머 급여대장] 탭을 열어 시급을 채운 뒤 다시 받아주세요.`
+          `대부분 시급이 비어 있어서입니다. 그대로 받으면 그 사람 급여가 0원인 채 파일이 만들어집니다.\n` +
+          `[확인]을 누르면 지금 상태 그대로 다운로드하고, [취소]를 누르면 받지 않습니다.\n` +
+          `(시급은 해당 지점 [월말마감 → 파트타이머 급여대장] 탭에서 채울 수 있습니다.)`
         );
-        return;
+        if (!proceed) return;
       }
 
       const XLSX = await import("xlsx-js-style");
