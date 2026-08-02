@@ -2900,6 +2900,15 @@ function AdminCashDiffHistorySection() {
 // 이상치 이력 캐시 유효시간 — 이 안에서는 날짜를 바꿔도 다시 읽지 않는다(수동 새로고침은 즉시 무효화).
 const ANOMALY_CACHE_TTL_MS = 5 * 60 * 1000;
 
+// 결제구성(카드결제·단순현금결제·현금영수증)과 영수건수는 2026-08-02에 지점 매출집계 화면에서 삭제됐다.
+// 엑셀 컬럼은 과거 달을 위해 남겨 두지만, 저장된 적 없는 달까지 0으로 찍으면 '카드매출 0원 / 영수건수 0건'처럼
+// 실제 실적으로 읽힌다 — 값이 없으면 0이 아니라 빈칸으로 내보내 '집계 안 함'과 '0원'을 구분한다.
+const legacyCell = (v: unknown): number | "" => {
+  const raw = String(v ?? "").trim();
+  if (raw === "") return "";
+  return Number(raw.replace(/[^0-9.-]/g, "")) || 0;
+};
+
 // 지점 월말마감의 섹션 키(MonthlySettleTab CloseSection)와 같은 문자열을 쓴다 — 다르면 상태가 영영 '미제출'로 보인다.
 type MonthlyCloseSectionKey = "salesSummary" | "purchase" | "salary" | "partTimeSalary";
 const MONTHLY_CLOSE_SECTIONS: Array<{ key: MonthlyCloseSectionKey; label: string }> = [
@@ -3022,13 +3031,18 @@ function AdminMonthlyClosingStatusSection() {
           { 항목: "총매출", 값: num(s.totalSales) },
           { 항목: "총할인", 값: num(s.totalDiscount) },
           { 항목: "실매출", 값: num(s.netSales) },
-          { 항목: "영수건수", 값: num(s.receiptCount) },
-          { 항목: "카드결제", 값: num(s.cardPay) },
-          { 항목: "단순현금결제", 값: num(s.cashPlain) },
-          { 항목: "현금영수증", 값: num(s.cashReceipt) },
+          // 아래 4개는 지점 화면에서 삭제된 레거시 칸 — 값이 없으면 빈칸(legacyCell 주석 참고).
+          { 항목: "영수건수", 값: legacyCell(s.receiptCount) },
+          { 항목: "카드결제", 값: legacyCell(s.cardPay) },
+          { 항목: "단순현금결제", 값: legacyCell(s.cashPlain) },
+          { 항목: "현금영수증", 값: legacyCell(s.cashReceipt) },
+          // 매출구성 = 메뉴+주류+커버차지(전 지점 필수, POS 실매출에 포함).
+          // 예약정산금(캐치테이블)은 POS에 안 잡히는 별도 정산금이라 매출구성과 나눠 적는다.
+          // 옛 '자리값' 한 칸에 두 개념이 섞여 있었다 — 커버차지를 빠뜨리면 필수 입력값이 엑셀에서 사라진다.
           { 항목: "메뉴매출", 값: num(s.menuSales) },
           { 항목: "주류매출", 값: num(s.liquorSales) },
-          { 항목: "자리값", 값: num(s.seatCharge) },
+          { 항목: "커버차지(자릿값)", 값: num(s.coverCharge) },
+          { 항목: "예약정산금", 값: num(s.seatCharge) },
           { 항목: "빈칸 사유", 값: s.blankReason || "" },
         ];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "매출집계");
@@ -3162,7 +3176,12 @@ function AdminMonthlyClosingStatusSection() {
       const wb = assembleMonthlyCloseWorkbook(XLSX, data);
       const monthNumber = Number(selectedMonth.split("-")[1]) || 0;
       XLSX.writeFile(wb, `월말정산_${branchName}${monthNumber}월_결산자료.xlsx`);
-      markDownloaded(branchName, "purchase"); // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각' 기록
+      // 파일이 실제로 저장된 뒤에만 '내 다운로드 시각' 기록.
+      // 이 한 파일에 매입매출과 파트타이머급여 시트가 함께 들어 있다 — 파트타이머급여 열에는 따로 엑셀
+      // 버튼이 없으므로, 여기서 같이 기록하지 않으면 그 열의 수정기록 말풍선은 받은 뒤에도 영영
+      // '다운로드 기록 없음'으로 남는다(Codex 정지리뷰 2026-08-02).
+      markDownloaded(branchName, "purchase");
+      markDownloaded(branchName, "partTimeSalary");
     } catch (error) {
       console.error("월말마감 엑셀 다운로드 실패:", error);
       window.alert("월말마감 데이터를 서버에서 불러오지 못해 엑셀 다운로드를 취소했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.");
@@ -3235,6 +3254,9 @@ function AdminMonthlyClosingStatusSection() {
         const d: any = s || {};
         const net = num(d.netSales);
         const cnt = num(d.receiptCount);
+        // 레거시 칸(영수건수·결제구성)은 저장된 적이 있을 때만 숫자로 내보낸다(legacyCell 주석 참고).
+        const hasCount = String(d.receiptCount ?? "").trim() !== "";
+        const hasPay = ["cardPay", "cashPlain", "cashReceipt"].some((k) => String(d[k] ?? "").trim() !== "");
         return {
           "수집일시": "",
           "연월": selectedMonth,
@@ -3244,18 +3266,20 @@ function AdminMonthlyClosingStatusSection() {
           "총매출": num(d.totalSales),
           "총할인": num(d.totalDiscount),
           "실매출": net,
-          "영수건수": cnt,
-          "영수단가": cnt > 0 ? Math.round(net / cnt) : 0,
-          "결제합계": num(d.cardPay) + num(d.cashPlain) + num(d.cashReceipt),
-          "단순현금": num(d.cashPlain),
-          "현금영수증": num(d.cashReceipt),
-          "신용카드": num(d.cardPay),
+          "영수건수": hasCount ? cnt : "",
+          "영수단가": hasCount && cnt > 0 ? Math.round(net / cnt) : "",
+          "결제합계": hasPay ? num(d.cardPay) + num(d.cashPlain) + num(d.cashReceipt) : "",
+          "단순현금": legacyCell(d.cashPlain),
+          "현금영수증": legacyCell(d.cashReceipt),
+          "신용카드": legacyCell(d.cardPay),
           "수집상태": s ? "입력완료" : "미입력",
           "비고": "",
           "메뉴매출": num(d.menuSales),
           "주류매출": num(d.liquorSales),
-          "자리값": num(d.seatCharge),
-          "자리값내역": "",
+          // 커버차지(POS 실매출 구성)와 예약정산금(캐치테이블, POS 미포함)을 나눠 적는다 — 위 지점별 시트와 같은 규칙.
+          "커버차지(자릿값)": num(d.coverCharge),
+          "예약정산금": num(d.seatCharge),
+          "예약정산금내역": "",
         };
       });
       const wb = XLSX.utils.book_new();
