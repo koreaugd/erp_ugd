@@ -58,15 +58,22 @@ export function purchaseTransferExportValue(r: any): number {
 
 /**
  * 매입매출 대장 '이달사용금액' 칸의 값. 공란("")이면 export에 빈 칸으로 나간다.
- * - 선입금 업체: 발주액 합계(monthlyUsageAmount).
- * - 이체 필요 후불업체: 이체필요금액=사용액이라 중복 방지로 공란.
- * - 결제완료 후불업체: 이미 결제한 업체의 실제 사용액.
+ * - 이체 필요 업체: 이체필요금액=사용액이라 중복 방지로 공란.
+ * - 결제완료 업체: 이미 결제한 업체의 실제 사용액.
  *   사용액이 비어 있으면 이체금액으로 폴백한다 — UI가 두 필드를 미러링하므로 통상 같은 값이고,
  *   비어 있는 건 구버전/외부 유입 데이터뿐이라 금액이 0으로 증발하지 않게 보존한다.
  *   (사용자가 명시적으로 "0"을 넣은 경우는 공란이 아니므로 그대로 0.)
+ *
+ * 선입금(충전) 업체 분기는 2026-08-02 개념 폐지와 함께 없앴다 — 이제 모든 업체가 같은 규칙을 쓴다.
+ * 과거 선입금으로 표시됐던 업체도 '이체 필요/결제완료'만으로 판정된다.
  */
 export function purchaseUsageExportValue(r: any): number | "" {
-  if (r?.isPrepaid) return num(r?.monthlyUsageAmount);
+  // 선입금 폐지 전 데이터(레거시)는 **옛 규칙을 그대로** 지킨다: 이체금액 유무와 무관하게 사용액을 내보낸다.
+  // 조건을 좁히면(예: 이체금액이 빈 행만) 이체금액과 사용액이 둘 다 적힌 옛 선입금 행에서 사용액이 조용히
+  // 빠지는데, transferExport가 0보다 커서 확정 게이트는 통과한다 — 즉 아무도 모르게 대장이 축소된다(Codex 4R·5R).
+  // 화면 마이그레이션(normalizePurchaseRows)은 지점이 탭을 열어야 반영되지만 관리자 다운로드는 서버 원본을
+  // 직접 읽으므로, 두 경로가 어긋나지 않도록 판정을 여기(공유 헬퍼)에 둔다.
+  if (r?.isPrepaid === true) return num(r?.monthlyUsageAmount);
   if (r?.transferNeeded !== false) return "";
   return isBlank(r?.monthlyUsageAmount) ? num(r?.transferAmount) : num(r?.monthlyUsageAmount);
 }
@@ -75,7 +82,6 @@ export function purchaseUsageExportValue(r: any): number | "" {
  * 매입매출 행이 실제 export(매입매출 대장)에 0 초과 금액으로 나가는지 판정.
  * 확정 게이트(hasMeaningful)와 관리자 다운로드 게이트가 동일 기준을 쓰도록 공유하며,
  * export 값 자체를 재사용해 '확정인데 워크북은 0/0' 불일치가 구조적으로 생기지 않게 한다.
- * (선입금 충전액은 export 컬럼이 없으므로 판정에서 제외.)
  */
 export function purchaseRowHasExportableAmount(r: any): boolean {
   if (String(r?.vendorName || "").trim() === "") return false;

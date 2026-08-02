@@ -293,7 +293,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         triggerToast("매출집계를 서버에 반영/확인하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.", "error");
         return;
       }
-      if ((window as any).__ugdSalesSummaryInvalid === true || isSalesSummaryDataInvalid(summaryCheck.data, branchName)) {
+      if ((window as any).__ugdSalesSummaryInvalid === true || isSalesSummaryDataInvalid(summaryCheck.data)) {
         window.dispatchEvent(new Event("ugd_show_monthly_errors"));
         triggerToast("매출집계에 확인이 필요합니다(금액 불일치 또는 빈칸).", "error");
         return;

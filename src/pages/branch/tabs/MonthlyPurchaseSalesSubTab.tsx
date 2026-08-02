@@ -10,17 +10,16 @@ import { purchaseRowHasExportableAmount } from "../helpers/monthlyCloseWorkbook"
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
 // 표에 보이는 순서 그대로의 셀 좌표. 키보드 이동이 이 순서를 따른다.
+// 선입금(충전) 컬럼 2개는 2026-08-02에 삭제했다(사용자 지시) — 열 번호가 앞으로 당겨졌다.
 const COL_CATEGORY = 0;
 const COL_VENDOR = 1;
-const COL_IS_PREPAID = 2;
-const COL_TRANSFER_NEEDED = 3;
-const COL_PREPAID_CHARGE = 4;
-const COL_TRANSFER_AMOUNT = 5;
-const COL_MONTHLY_USAGE = 6;
-const COL_BANK = 7;
-const COL_ACCOUNT = 8;
-const COL_MEMO = 9;
-const PURCHASE_COL_COUNT = 10;
+const COL_TRANSFER_NEEDED = 2;
+const COL_TRANSFER_AMOUNT = 3;
+const COL_MONTHLY_USAGE = 4;
+const COL_BANK = 5;
+const COL_ACCOUNT = 6;
+const COL_MEMO = 7;
+const PURCHASE_COL_COUNT = 8;
 
 interface PurchaseSalesRow {
   id: string;
@@ -29,7 +28,9 @@ interface PurchaseSalesRow {
   transferAmount: string;
   bank: string;
   accountNumber: string;
-  isPrepaid: boolean;
+  // 선입금(충전) 개념은 2026-08-02에 폐지했다 — 모든 업체가 '이체필요 금액 / 실제 이달사용액'만 쓴다.
+  // 아래 두 필드는 과거 데이터가 로드→저장 왕복에서 날아가지 않도록 남겨 둔 레거시로, 화면·엑셀 어디서도 읽지 않는다.
+  isPrepaid?: boolean;
   prepaidChargeAmount?: string;
   monthlyUsageAmount: string;
   // 이체 필요 여부: 체크=이체 필요(기본), 해제=이미 결제 완료. 옛 데이터엔 없으므로 로드 시 true로 보정.
@@ -118,12 +119,25 @@ export function MonthlyPurchaseSalesSubTab({
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
 
   const normalizePurchaseRows = useCallback((sourceRows: PurchaseSalesRow[]) => {
-    return sourceRows.map((row) => ({
-      ...row,
-      prepaidChargeAmount: row.prepaidChargeAmount || "",
+    return sourceRows.map((row) => {
       // 옛 데이터엔 transferNeeded가 없으므로 기본 '이체 필요(true)'로 보정.
-      transferNeeded: row.transferNeeded ?? true,
-    }));
+      const transferNeeded = row.transferNeeded ?? true;
+      // 선입금 폐지 마이그레이션(2026-08-02).
+      // 옛 선입금 행은 '이체필요금액'과 '이달사용액'을 둘 다 내보냈다. 새 규칙에서는 이체 필요(true)면
+      // 이달사용액이 공란으로 나가므로, 이체금액이 비어 있고 사용액만 있는 옛 선입금 행은 export가 0/공란이 되어
+      // 대장에서 통째로 사라지고 확정 게이트(purchaseRowHasExportableAmount)까지 '내역 없음'으로 본다(Codex 4R).
+      // 그런 행만 '결제완료(transferNeeded=false)'로 옮겨 사용액이 그대로 나가게 한다.
+      // (이체금액이 있는 옛 선입금 행은 건드리지 않는다 — 실제 송금액이 0으로 지워지면 안 되기 때문.)
+      const usageOnlyLegacyPrepaid =
+        row.isPrepaid === true
+        && transferNeeded !== false
+        && String(row.transferAmount || "").trim() === ""
+        && (Number(cleanNumeric(String(row.monthlyUsageAmount || ""))) || 0) > 0;
+      return {
+        ...row,
+        transferNeeded: usageOnlyLegacyPrepaid ? false : transferNeeded,
+      };
+    });
   }, []);
 
   const emptyAmounts = useCallback((sourceRows: PurchaseSalesRow[]) => {
@@ -131,6 +145,7 @@ export function MonthlyPurchaseSalesSubTab({
       ...row,
       id: `p_${selectedMonth}_${row.id || Date.now()}`,
       transferAmount: "",
+      // 폐지된 선입금 충전액도 함께 비운다 — 읽는 곳은 없지만, 안 비우면 죽은 값이 새 달로 계속 딸려간다.
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       // 이월 시 '결제완료' 상태는 초기화한다 — 다음 달 결제 여부는 아직 미정이므로 '이체 필요'로 시작.
@@ -236,27 +251,20 @@ export function MonthlyPurchaseSalesSubTab({
 
   const handleUpdateRow = (id: string, field: keyof PurchaseSalesRow, val: any) => {
     if (isLocked) return;
-    const nextValue = ["transferAmount", "prepaidChargeAmount", "monthlyUsageAmount"].includes(String(field))
+    const nextValue = ["transferAmount", "monthlyUsageAmount"].includes(String(field))
       ? cleanNumeric(String(val || ""))
       : val;
     setRows(prev => {
       const nextRows = prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: nextValue };
-        // If it's regular vendor and transferAmount changes, sync usageAmount
-        if (field === "transferAmount" && !updated.isPrepaid) {
+        // 이체 필요금액이 바뀌면 이달사용액이 따라간다(두 값은 통상 같다).
+        if (field === "transferAmount") {
           updated.monthlyUsageAmount = nextValue;
         }
-        if (field === "isPrepaid" && val === true && !updated.prepaidChargeAmount) {
-          updated.prepaidChargeAmount = updated.transferAmount || "";
-        }
-        if (field === "isPrepaid" && val === false) {
-          updated.prepaidChargeAmount = "";
-          updated.monthlyUsageAmount = updated.transferAmount || "";
-        }
-        // 이체 필요?를 다시 체크(true)하면 비선입금 업체의 이달사용액은 이체 필요금액을 다시 미러링한다.
+        // 이체 필요?를 다시 체크(true)하면 이달사용액은 이체 필요금액을 다시 미러링한다.
         // (결제완료 상태에서 따로 적은 값은 '이체 필요' 복귀 시 이체금액 기준으로 되돌린다.)
-        if (field === "transferNeeded" && val === true && !updated.isPrepaid) {
+        if (field === "transferNeeded" && val === true) {
           updated.monthlyUsageAmount = updated.transferAmount || "";
         }
         return updated;
@@ -283,8 +291,6 @@ export function MonthlyPurchaseSalesSubTab({
       transferAmount: "",
       bank: "",
       accountNumber: "",
-      isPrepaid: false,
-      prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       transferNeeded: true,
       memo: ""
@@ -315,7 +321,7 @@ export function MonthlyPurchaseSalesSubTab({
       const resetRows = currentRows.map((row) => ({
         ...row,
         transferAmount: "",
-        prepaidChargeAmount: "",
+        prepaidChargeAmount: "", // 폐지된 레거시 — 금액 초기화 때 같이 비운다(위 emptyAmounts와 동일).
         monthlyUsageAmount: "",
         // 금액 초기화 시 '결제완료' 상태도 초기화 — 재입력한 이체가 결제완료로 오인돼 배너·엑셀에서 누락되는 것을 방지.
         transferNeeded: true
@@ -337,7 +343,6 @@ export function MonthlyPurchaseSalesSubTab({
   // Calculations
   // 결제완료(이체 필요 해제) 업체는 이체 불필요이므로 이체 합계에서 제외 — 관리자 엑셀(이체금액 0 처리)과 일치시킨다.
   const totalTransfer = rows.reduce((acc, r) => acc + (r.transferNeeded === false ? 0 : (Number(r.transferAmount) || 0)), 0);
-  const totalPrepaidCharge = rows.reduce((acc, r) => acc + (Number(r.prepaidChargeAmount) || 0), 0);
   const totalUsage = rows.reduce((acc, r) => acc + (Number(r.monthlyUsageAmount) || 0), 0);
 
   // 화면 표시용 정렬: 분류항목 순서대로(식재료비→주류비→식음료외 기타). Array.sort는 안정 정렬이라 같은 분류 내 입력 순서는 유지된다.
@@ -411,9 +416,7 @@ export function MonthlyPurchaseSalesSubTab({
             <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">
               <th className="py-3 px-3">분류항목</th>
               <th className="py-3 px-3">업체명</th>
-              <th className="py-3 px-3 w-20">선입금 충전?</th>
               <th className="py-3 px-3 w-20 text-center">이체 필요?</th>
-              <th className="py-3 px-3 w-24">충전금액 (원)</th>
               <th className="py-3 px-3 w-24">이체필요 금액 (원)</th>
               <th className="py-3 px-3 w-24">실제 이달사용액 (원)</th>
               <th className="py-3 px-3 w-20">은행</th>
@@ -425,7 +428,7 @@ export function MonthlyPurchaseSalesSubTab({
           <tbody className="divide-y divide-gray-100 text-[11px]">
             {displayRows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-16 text-center text-gray-400">
+                <td colSpan={9} className="py-16 text-center text-gray-400">
                   매입매출에 등록된 거래처가 없습니다. 상단의 '매입 업체 추가'를 클릭해 작성해주세요.
                 </td>
               </tr>
@@ -458,22 +461,6 @@ export function MonthlyPurchaseSalesSubTab({
                       className={`${cellInput} font-bold placeholder-gray-300`}
                     />
                   </td>
-                  <td className={cellTd(rowIndex, COL_IS_PREPAID, "text-center")}>
-                    <label className="flex h-9 items-center justify-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        {...cellProps(rowIndex, COL_IS_PREPAID)}
-                        aria-label={`${rowIndex + 1}번 행 선입금 충전`}
-                        type="checkbox"
-                        checked={row.isPrepaid}
-                        disabled={isLocked}
-                        onChange={(e) => handleUpdateRow(row.id, "isPrepaid", e.target.checked)}
-                        className="w-4 h-4 text-[#2E6DB4] border-gray-300 rounded focus:ring-2 focus:ring-[#2E6DB4] disabled:cursor-not-allowed"
-                      />
-                      <span className={`text-[9px] ${row.isPrepaid ? "font-black text-rose-600" : "font-normal text-gray-400"}`}>
-                        선입금
-                      </span>
-                    </label>
-                  </td>
                   <td className={cellTd(rowIndex, COL_TRANSFER_NEEDED, "text-center")}>
                     <label className="flex h-9 items-center justify-center gap-1.5 cursor-pointer select-none">
                       <input
@@ -489,19 +476,6 @@ export function MonthlyPurchaseSalesSubTab({
                         이체필요
                       </span>
                     </label>
-                  </td>
-                  <td className={cellTd(rowIndex, COL_PREPAID_CHARGE)}>
-                    <input
-                      {...cellProps(rowIndex, COL_PREPAID_CHARGE)}
-                      aria-label={`${rowIndex + 1}번 행 충전금액`}
-                      type="text"
-                      inputMode="numeric"
-                      value={formatWithCommas(row.prepaidChargeAmount || "")}
-                      disabled={isLocked || !row.isPrepaid}
-                      onChange={(e) => handleUpdateRow(row.id, "prepaidChargeAmount", e.target.value)}
-                      placeholder={row.isPrepaid ? "충전 금액" : "-"}
-                      className={`${cellInput} font-mono font-black text-right text-blue-700`}
-                    />
                   </td>
                   <td className={cellTd(rowIndex, COL_TRANSFER_AMOUNT)}>
                     <input
@@ -523,9 +497,9 @@ export function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
-                      disabled={isLocked || !(row.isPrepaid || row.transferNeeded === false)}
+                      disabled={isLocked || row.transferNeeded !== false}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder={row.isPrepaid ? "발주액 합계" : (row.transferNeeded === false ? "이달 사용액" : "-")}
+                      placeholder={row.transferNeeded === false ? "이달 사용액" : "-"}
                       className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>
@@ -585,8 +559,7 @@ export function MonthlyPurchaseSalesSubTab({
           {rows.length > 0 && (
             <tfoot className="sticky bottom-0 z-10">
               <tr className="bg-zinc-100 text-[11px] font-black text-zinc-800 shadow-[0_-1px_0_0_rgb(203_213_225)]">
-                <td className="bg-zinc-100 py-2 px-3" colSpan={4}>합계</td>
-                <td className="bg-zinc-100 py-2 px-3 text-right font-mono">{formatNumber(totalPrepaidCharge)}</td>
+                <td className="bg-zinc-100 py-2 px-3" colSpan={3}>합계</td>
                 <td className="bg-zinc-100 py-2 px-3 text-right font-mono">{formatNumber(totalTransfer)}</td>
                 <td className="bg-zinc-100 py-2 px-3 text-right font-mono text-[#2E6DB4]">{formatNumber(totalUsage)}</td>
                 <td className="bg-zinc-100 py-2 px-3" colSpan={4}></td>

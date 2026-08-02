@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/SalesSummarySection.tsx
 // 월말마감 매입매출 탭 상단 - 매출집계 섹션 (자동계산 + 검증 + 경고 + 빈칸사유)
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
-import { AlertTriangle, TrendingUp, CreditCard, Utensils, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
+import { AlertTriangle, TrendingUp, Utensils, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -13,77 +13,89 @@ export interface SalesSummary {
   totalSales: string;
   totalDiscount: string;
   netSales: string;
-  receiptCount: string;
-  cardPay: string;
-  cashPlain: string;
-  cashReceipt: string;
   menuSales: string;
   liquorSales: string;
-  seatCharge: string;
-  coverCharge?: string; // 금샤빠 전용(커버차지)
+  coverCharge: string; // 커버차지(자릿값) — 전 지점 입력, 안 받는 매장은 0
+  seatCharge: string;  // 캐치테이블 예약정산금 — POS 실매출에 안 잡히는 별도 정산금
+  // ── 아래는 입력칸이 없어진 레거시 필드다(결제구성 섹션·영수건수 삭제, 2026-08-02).
+  // 지운 게 아니라 남겨 둔다: 과거 달에 저장된 값이 로드→저장 왕복에서 날아가지 않게 하고,
+  // 관리자 매출집계 엑셀이 아직 이 값들을 읽는다. 새 달에는 빈 값으로 남는다.
+  receiptCount?: string;
+  cardPay?: string;
+  cashPlain?: string;
+  cashReceipt?: string;
 }
 
 const EMPTY: SalesSummary = {
-  totalSales: "", totalDiscount: "", netSales: "", receiptCount: "",
-  cardPay: "", cashPlain: "", cashReceipt: "",
-  menuSales: "", liquorSales: "", seatCharge: "",
-  coverCharge: "",
+  totalSales: "", totalDiscount: "", netSales: "",
+  menuSales: "", liquorSales: "", coverCharge: "", seatCharge: "",
+  receiptCount: "", cardPay: "", cashPlain: "", cashReceipt: "",
 };
 
-// 빈칸 사유 대상 필드 (파생값 영수단가/종매출 제외)
+// 빈칸 사유 대상 필드 = 화면에 입력칸이 있는 칸만. 입력칸이 없는 레거시 필드를 여기 두면
+// 새 달은 채울 방법이 없어 영영 마감할 수 없다.
 const REQUIRED_FIELDS: Array<{ key: keyof SalesSummary; label: string }> = [
   { key: "totalSales", label: "총매출" },
   { key: "totalDiscount", label: "총할인" },
   { key: "netSales", label: "실매출" },
-  { key: "receiptCount", label: "영수건수" },
-  { key: "cardPay", label: "카드결제" },
-  { key: "cashPlain", label: "단순현금결제" },
-  { key: "cashReceipt", label: "현금영수증" },
+  { key: "seatCharge", label: "캐치테이블 예약정산금" },
   { key: "menuSales", label: "메뉴매출" },
   { key: "liquorSales", label: "주류매출" },
-  { key: "seatCharge", label: "자릿값(예약정산금)" },
+  { key: "coverCharge", label: "커버차지(자릿값)" },
 ];
 
-const num = (v: string) => Number(cleanNumeric(String(v || ""))) || 0;
-const filled = (v: string) => String(v || "").trim() !== "";
-
-// 커버차지는 금샤빠 지점에서만 매출구성에 포함/필수. branch-aware로 판정해, 다른 지점에 남아있을 수 있는
-// stale coverCharge 값이 그 지점 검증을 오염시키지 않도록 한다.
-export const salesSummaryUsesCover = (branchName?: string) => String(branchName || "").includes("금샤빠");
+const num = (v?: string) => Number(cleanNumeric(String(v || ""))) || 0;
+const filled = (v?: string) => String(v || "").trim() !== "";
 
 // 검증 규칙 — 섹션 화면과 마감제출 가드(MonthlySettleTab)가 공유한다. 규칙을 한 곳에서만 정의해 드리프트를 막는다.
-export function computeSalesSummaryWarnings(input: Partial<SalesSummary> | null, branchName?: string): string[] {
+export function computeSalesSummaryWarnings(input: Partial<SalesSummary> | null): string[] {
   const data = { ...EMPTY, ...(input || {}) };
-  // 매출구성 = 메뉴+주류(+금샤빠 커버차지)로 실매출과 대조. 자릿값(예약정산금)은 별도 정산항목이라 제외.
-  const gross = num(data.menuSales) + num(data.liquorSales) + (salesSummaryUsesCover(branchName) ? num(data.coverCharge || "") : 0);
+  // 매출구성 = 메뉴+주류+커버차지로 실매출과 대조. 커버차지는 POS 실매출에 포함되므로 여기서 더한다.
+  // 캐치테이블 예약정산금은 POS에 잡히지 않는 별도 정산금이라 이 대조에서 제외한다(매출요약에서 따로 더한다).
+  const gross = num(data.menuSales) + num(data.liquorSales) + num(data.coverCharge);
   const list: string[] = [];
   if (filled(data.totalSales) && filled(data.totalDiscount) && filled(data.netSales)
     && num(data.totalSales) - num(data.totalDiscount) !== num(data.netSales)) {
     list.push(`총매출 − 총할인(${formatNumber(num(data.totalSales) - num(data.totalDiscount))}) 이 실매출(${formatNumber(num(data.netSales))})과 일치하지 않습니다.`);
   }
-  if (filled(data.cardPay) && filled(data.cashPlain) && filled(data.cashReceipt) && filled(data.netSales)
-    && num(data.cardPay) + num(data.cashPlain) + num(data.cashReceipt) !== num(data.netSales)) {
-    list.push(`카드+단순현금+현금영수증(${formatNumber(num(data.cardPay) + num(data.cashPlain) + num(data.cashReceipt))}) 합이 실매출(${formatNumber(num(data.netSales))})과 맞지 않습니다.`);
-  }
-  if (filled(data.menuSales) && filled(data.liquorSales) && filled(data.netSales)
+  if (filled(data.menuSales) && filled(data.liquorSales) && filled(data.coverCharge) && filled(data.netSales)
     && gross !== num(data.netSales)) {
     list.push(`매출구성 합계(${formatNumber(gross)})가 실매출(${formatNumber(num(data.netSales))})과 맞지 않습니다.`);
   }
   return list;
 }
 
-export function salesSummaryBlankBlocking(input: Partial<SalesSummary> | null, branchName?: string): boolean {
+/**
+ * 레거시 안내(경고 아님) — 마감을 막지 않는다.
+ *
+ * 결제구성(카드·단순현금·현금영수증) 입력칸은 2026-08-02에 없앴지만 과거 달에는 값이 저장돼 있고,
+ * 관리자 매출집계 엑셀이 그 값을 그대로 내보낸다. 그 달을 다시 열어 실매출만 고치면 결제구성과 어긋난 채
+ * 확정되고, 엑셀은 어긋난 값을 실적처럼 싣는다(Codex 2R 지적).
+ *
+ * 그렇다고 이걸 마감 차단 경고로 되살리면 안 된다 — 고칠 입력칸이 화면에서 사라졌기 때문에
+ * 지점이 영영 마감할 수 없는 막다른 길이 된다. 그래서 **막지 않고 알리기만** 한다.
+ */
+export function computeSalesSummaryLegacyNotices(input: Partial<SalesSummary> | null): string[] {
+  const data = { ...EMPTY, ...(input || {}) };
+  // 세 칸이 모두 저장된 달(=결제구성을 입력하던 과거 달)에만 대조한다. 새 달은 전부 비어 있어 뜨지 않는다.
+  if (!(filled(data.cardPay) && filled(data.cashPlain) && filled(data.cashReceipt) && filled(data.netSales))) return [];
+  const paySum = num(data.cardPay) + num(data.cashPlain) + num(data.cashReceipt);
+  if (paySum === num(data.netSales)) return [];
+  return [
+    `이 달에 저장된 결제구성(카드+단순현금+현금영수증 ${formatNumber(paySum)})이 실매출(${formatNumber(num(data.netSales))})과 맞지 않습니다. `
+    + `결제구성 입력칸은 현재 화면에서 없어졌으므로 지점에서 고칠 수 없습니다 — 마감은 그대로 진행하시고, 본사에 알려주세요.`,
+  ];
+}
+
+export function salesSummaryBlankBlocking(input: Partial<SalesSummary> | null): boolean {
   const data = { ...EMPTY, ...(input || {}) };
   // 모든 필수 칸이 채워져야 한다(값이 0이어도 "0"이면 채워진 것). 빈칸이 하나라도 있으면 차단.
-  const requiredBlank = REQUIRED_FIELDS.some((f) => !filled(String((data as any)[f.key] || "")));
-  // 커버차지는 금샤빠 지점에서만 필수(다른 지점은 요구하지 않음).
-  const coverBlank = salesSummaryUsesCover(branchName) && !filled(String(data.coverCharge || ""));
-  return requiredBlank || coverBlank;
+  return REQUIRED_FIELDS.some((f) => !filled(String((data as any)[f.key] || "")));
 }
 
 // 마감제출 차단 여부: 금액 불일치 경고가 있거나, 사유 없는 빈칸이 있으면 true.
-export function isSalesSummaryDataInvalid(input: Partial<SalesSummary> | null, branchName?: string): boolean {
-  return computeSalesSummaryWarnings(input, branchName).length > 0 || salesSummaryBlankBlocking(input, branchName);
+export function isSalesSummaryDataInvalid(input: Partial<SalesSummary> | null): boolean {
+  return computeSalesSummaryWarnings(input).length > 0 || salesSummaryBlankBlocking(input);
 }
 
 export const salesSummaryLocalKey = (branchName: string, selectedMonth: string) => `erp_monthly_sales_summary_${branchName}_${selectedMonth}`;
@@ -235,24 +247,18 @@ export function SalesSummarySection({
   };
 
   // ---- 파생값 ----
-  const unitPrice = useMemo(() => {
-    const n = num(data.netSales);
-    const c = num(data.receiptCount);
-    return filled(data.netSales) && c > 0 ? Math.round(n / c) : null;
-  }, [data.netSales, data.receiptCount]);
-
-  const isGeumshabba = salesSummaryUsesCover(branchName);
-
-  const paymentSum = num(data.cardPay) + num(data.cashPlain) + num(data.cashReceipt);
-  const paymentDiff = num(data.netSales) - paymentSum;
-  // 매출구성 = 메뉴+주류(+금샤빠 커버차지). 커버차지는 금샤빠에서만 합산(branch-aware)해 다른 지점 오염 방지.
-  const compositionSum = num(data.menuSales) + num(data.liquorSales) + (isGeumshabba ? num(data.coverCharge || "") : 0);
+  // 매출구성 = 메뉴+주류+커버차지. 이 셋이 POS 실매출을 이루므로 실매출과 대조한다.
+  const compositionSum = num(data.menuSales) + num(data.liquorSales) + num(data.coverCharge);
   const compositionDiff = num(data.netSales) - compositionSum;
+  // 매출요약 최종값 = 실매출 + 캐치테이블 예약정산금. 예약정산금은 POS에 안 잡히므로 실매출과 겹치지 않는다.
+  const netWithCatchTable = num(data.netSales) + num(data.seatCharge);
 
-  // ---- 검증 (마감제출 가드와 동일 규칙 공유, branchName 전달로 커버차지 branch-aware) ----
-  const warnings = useMemo(() => computeSalesSummaryWarnings(data, branchName), [data, branchName]);
-  const blankBlocking = salesSummaryBlankBlocking(data, branchName);
+  // ---- 검증 (마감제출 가드와 동일 규칙 공유) ----
+  const warnings = useMemo(() => computeSalesSummaryWarnings(data), [data]);
+  const blankBlocking = salesSummaryBlankBlocking(data);
   const invalid = warnings.length > 0 || blankBlocking;
+  // 과거 달 결제구성 불일치 안내 — invalid에 넣지 않는다(고칠 칸이 없어 막으면 마감 불가가 된다).
+  const legacyNotices = useMemo(() => computeSalesSummaryLegacyNotices(data), [data]);
 
   // 매출집계 자체 '제출': 경고가 있으면 빈칸을 빨갛게 표시하고 제출을 막는다.
   const handleSubmitClick = () => {
@@ -279,10 +285,10 @@ export function SalesSummarySection({
     return () => window.removeEventListener("ugd_show_monthly_errors", onShow);
   }, []);
 
-  // 세 카드를 하나의 격자로 보고 방향키로 오간다.
-  // 열 = 카드(매출구성/결제구성/매출요약), 행 = 카드 안의 칸 순번. 카드마다 칸 수가 달라 빈 자리가 생기는데,
+  // 두 카드를 하나의 격자로 보고 방향키로 오간다.
+  // 열 = 카드(0 매출구성 / 1 매출요약), 행 = 카드 안의 칸 순번. 카드마다 칸 수가 달라 빈 자리가 생기는데,
   // 훅이 없는 칸을 만나면 옆 칸으로 흘려보내므로 들쭉날쭉한 격자도 그대로 동작한다.
-  const { cellProps } = useSheetKeyboardNav({ rowCount: 4, colCount: 3 });
+  const { cellProps } = useSheetKeyboardNav({ rowCount: 4, colCount: 2 });
 
   // ---- 렌더 헬퍼: 라벨(좌) + 입력값(우). 모든 칸 필수(빈칸이면 붉게 표시), 0 입력은 유효 ----
   // guideAnchor: 작성방법 안내 말풍선이 붙을 칸에만 붙인다(GuideCallouts가 data-guide로 찾는다).
@@ -313,10 +319,11 @@ export function SalesSummarySection({
     );
   };
 
-  const autoRow = (label: string, value: string, warn = false) => (
-    <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-zinc-200">
-      <span className="text-[11px] font-black text-zinc-500 shrink-0">{label} <span className="text-[9px] font-bold text-zinc-400">자동</span></span>
-      <span className={`w-28 p-1.5 rounded-lg text-xs font-mono font-black text-right border-2 ${warn ? "bg-rose-50 text-rose-600 border-rose-400" : "bg-zinc-50 text-blue-700 border-zinc-200"}`}>{value}</span>
+  // strong: 카드의 최종값(합계)용. 바로 위 입력칸과 한 덩어리로 읽히도록 구분선을 빼고 라벨·테두리를 진하게 한다.
+  const autoRow = (label: string, value: string, warn = false, strong = false) => (
+    <div className={`flex items-center justify-between gap-2 ${strong ? "pt-1.5" : "pt-2 mt-1 border-t border-zinc-200"}`}>
+      <span className={`text-[11px] font-black shrink-0 ${strong ? "text-zinc-900" : "text-zinc-500"}`}>{label} <span className="text-[9px] font-bold text-zinc-400">자동</span></span>
+      <span className={`w-28 p-1.5 rounded-lg text-xs font-mono font-black text-right border-2 ${warn ? "bg-rose-50 text-rose-600 border-rose-400" : strong ? "bg-zinc-50 text-blue-700 border-zinc-900" : "bg-zinc-50 text-blue-700 border-zinc-200"}`}>{value}</span>
     </div>
   );
 
@@ -385,6 +392,16 @@ export function SalesSummarySection({
           ))}
         </div>
       )}
+      {/* 과거 달 안내 — 붉은 경고(마감 차단)와 구분되도록 호박색으로, 항상 보이게 둔다. */}
+      {legacyNotices.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-1.5">
+          {legacyNotices.map((n, i) => (
+            <div key={i} className="flex items-start gap-2 text-[11px] font-bold text-amber-800">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> <span>{n}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {showErrors && blankBlocking && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-start gap-2 text-[11px] font-bold text-rose-700">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -392,31 +409,31 @@ export function SalesSummarySection({
         </div>
       )}
 
-      {/* 가로 3개 카드 (흰 바탕 + 검정 테두리 + 노란 pill 제목) */}
+      {/* 카드 2개(매출구성·매출요약)를 3열 격자의 왼쪽 두 칸에 두고, 오른쪽 한 칸은 비워 둔다.
+          결제구성 섹션은 삭제했다(사용자 지시 2026-08-02) — 남은 두 카드가 왼쪽으로 당겨지고 빈 자리는 오른쪽에 생긴다.
+          빈 칸에는 아무것도 렌더하지 않는다(빈 카드 껍데기를 두면 입력할 수 있는 칸처럼 보인다). */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={cardCls}>
           <div className={pillTitleCls}><Utensils className="w-3.5 h-3.5" /> 매출구성</div>
           {rowField("menuSales", "메뉴매출", { row: 0, col: 0 })}
           {rowField("liquorSales", "주류매출", { row: 1, col: 0 })}
-          {rowField("seatCharge", "자릿값(예약정산금)", { row: 2, col: 0 }, "sales-summary-seat-charge")}
-          {isGeumshabba && rowField("coverCharge", "커버차지", { row: 3, col: 0 })}
-          <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 자릿값(예약정산금): 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요.</p>
-          {autoRow(isGeumshabba ? "실매출과 차이(메뉴+주류+커버)" : "실매출과 차이(메뉴+주류)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
-        </div>
-        <div className={cardCls}>
-          <div className={pillTitleCls}><CreditCard className="w-3.5 h-3.5" /> 결제구성</div>
-          {rowField("cardPay", "카드결제", { row: 0, col: 1 })}
-          {rowField("cashPlain", "단순현금결제", { row: 1, col: 1 })}
-          {rowField("cashReceipt", "현금영수증", { row: 2, col: 1 })}
-          {autoRow("실매출과 차이", formatNumber(paymentDiff), filled(data.netSales) && paymentDiff !== 0)}
+          {/* 커버차지는 전 지점 입력칸이다. 안 받는 매장은 0을 넣으면 되고, 0도 '채워진 값'으로 본다. */}
+          {rowField("coverCharge", "커버차지(자릿값)", { row: 2, col: 0 })}
+          <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 커버차지(자릿값)를 받지 않는 매장은 <span className="font-black">0</span>을 입력하세요.</p>
+          {autoRow("실매출과 차이(메뉴+주류+커버)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
         </div>
         <div className={cardCls}>
           <div className={pillTitleCls}><TrendingUp className="w-3.5 h-3.5" /> 매출요약</div>
-          {rowField("totalSales", "총매출", { row: 0, col: 2 })}
-          {rowField("totalDiscount", "총할인", { row: 1, col: 2 })}
-          {rowField("netSales", "실매출", { row: 2, col: 2 })}
-          {rowField("receiptCount", "영수건수", { row: 3, col: 2 })}
-          {autoRow("영수단가", unitPrice === null ? "-" : formatNumber(unitPrice))}
+          {rowField("totalSales", "총매출", { row: 0, col: 1 })}
+          {rowField("totalDiscount", "총할인", { row: 1, col: 1 })}
+          {rowField("netSales", "실매출", { row: 2, col: 1 })}
+          {/* 여기부터는 POS가 아니라 캐치테이블에서 받아 적는 값이다. 위 세 칸(POS 실적)과 성격이 달라
+              구분선으로 끊는다. 예약정산금은 POS 실매출에 잡히지 않으므로 실매출과 겹치지 않는다. */}
+          <div className="pt-2.5 mt-1 border-t border-zinc-200 space-y-2.5">
+            {rowField("seatCharge", "캐치테이블 예약정산금", { row: 3, col: 1 }, "sales-summary-seat-charge")}
+            <p className="text-[9px] text-zinc-900 leading-snug">※ 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요. 해당 없으면 <span className="font-black">0</span>을 입력하세요.</p>
+            {autoRow("실매출 + 캐치테이블", formatNumber(netWithCatchTable), false, true)}
+          </div>
         </div>
       </div>
     </div>
