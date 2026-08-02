@@ -10,15 +10,18 @@ import { fullTimeSalaryGuideSteps, purchaseSalesGuideSteps } from "../helpers/gu
 import { addMonthsToMonthInputValue } from "../helpers/formatters";
 import { MonthlyFullTimeSalarySubTab, flushFullTimeSalaryForClose } from "./MonthlyFullTimeSalarySubTab";
 import { MonthlyPurchaseSalesSubTab, flushMonthlyPurchasesForClose } from "./MonthlyPurchaseSalesSubTab";
-import { MonthlyPartTimeSalarySubTab } from "./MonthlyPartTimeSalarySubTab";
+import { MonthlyPartTimeSalarySubTab, flushPartTimeSalaryForClose } from "./MonthlyPartTimeSalarySubTab";
 import { SalaryAccessGate, isSalaryUnlockedNow, useSalaryUnlocked } from "../components/SalaryAccessGate";
 import { MonthlyCashExpensesSubTab } from "./MonthlyCashExpensesSubTab";
 import { MonthlyCashManagementSubTab } from "./MonthlyCashManagementSubTab";
 import { MonthlyCardExpensesSubTab } from "./MonthlyCardExpensesSubTab";
 import { SalesSummarySection, isSalesSummaryDataInvalid, loadSalesSummaryForClose } from "./SalesSummarySection";
 
-// 섹션별 독립 마감: 정직원 급여대장 / 매입매출(거래처) / 매출집계
-type CloseSection = "purchase" | "salary" | "salesSummary";
+// 섹션별 독립 마감: 정직원 급여대장 / 매입매출(거래처) / 매출집계 / 파트타이머 급여대장
+type CloseSection = "purchase" | "salary" | "salesSummary" | "partTimeSalary";
+
+// 급여 데이터(정직원·파트타이머)를 다루는 섹션 — 열람 권한 + 비밀번호 해제 가드를 함께 받는다.
+const isSalaryCloseSection = (section: CloseSection) => section === "salary" || section === "partTimeSalary";
 
 interface MonthlySettleTabProps {
   branchName: string;
@@ -75,12 +78,16 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monthlyCloseRecords, setMonthlyCloseRecords] = useState<any[]>([]);
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
+  // 파트타이머 마감제출이 진행 중인 동안 표를 잠그는 플래그(아래 isLocked에 합산).
+  // flush가 검증을 마친 뒤 확정 저장이 끝나기 전에 들어온 편집은 '검증을 통과한 적 없는 값'인데,
+  // 뒤따르는 자동저장에 실려 확정된 대장 위에 얹힌다 — 제출 중 입력을 막아 그 틈을 없앤다(Codex 2R P0 2026-08-01).
+  const [partTimeSubmitting, setPartTimeSubmitting] = useState(false);
   // 매입매출 탭 "작성방법 보기" 투어. 수동으로만 열린다(자동 노출 없음).
   const [guideOpen, setGuideOpen] = useState(false);
   // '확정 후 수정'한 섹션을 다시 마감제출할 때 받는 수정 사유(섹션별 초안). 사유는 이제 편집 전이 아니라 '제출 시점'에 받는다.
-  const [editReasonDrafts, setEditReasonDrafts] = useState<{ purchase: string; salary: string; salesSummary: string }>({ purchase: "", salary: "", salesSummary: "" });
+  const [editReasonDrafts, setEditReasonDrafts] = useState<Record<CloseSection, string>>({ purchase: "", salary: "", salesSummary: "", partTimeSalary: "" });
   // 사유 미입력으로 제출을 막았을 때 사유칸을 붉게 강조하는 플래그(섹션별).
-  const [reasonErrors, setReasonErrors] = useState<{ purchase: boolean; salary: boolean; salesSummary: boolean }>({ purchase: false, salary: false, salesSummary: false });
+  const [reasonErrors, setReasonErrors] = useState<Record<CloseSection, boolean>>({ purchase: false, salary: false, salesSummary: false, partTimeSalary: false });
   // 자주 쓰는 수정 사유(칩) — 클릭하면 사유칸을 채운다. 그대로 두거나 뒤에 상세를 덧붙일 수 있다.
   const REASON_CHIPS = ["입력 오류 정정", "누락 항목 추가", "금액 정정", "지점 요청", "기타"];
 
@@ -272,9 +279,13 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     await gasClient.saveSharedData(nextKey, carriedRows);
   }, [branchName, selectedMonth]);
 
-  const sectionLabel = (section: CloseSection) => section === "purchase" ? "매입매출" : section === "salary" ? "정직원 급여대장" : "매출집계";
+  const sectionLabel = (section: CloseSection) =>
+    section === "purchase" ? "매입매출"
+    : section === "salary" ? "정직원 급여대장"
+    : section === "partTimeSalary" ? "파트타이머 급여대장"
+    : "매출집계";
 
-  const handleConfirm = useCallback(async (section: CloseSection) => {
+  const runConfirm = useCallback(async (section: CloseSection) => {
     // 매출집계 제출 시에만 매출집계 정합성/영속화를 검증한다(다른 섹션 마감과 무관).
     if (section === "salesSummary") {
       const summaryCheck = await loadSalesSummaryForClose(branchName, selectedMonth);
@@ -288,12 +299,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         return;
       }
     }
-    // 급여대장/매입매출은 마감 확정 전에 이 기기의 입력을 서버에 반영 보장(실패 시 중단).
-    if (section === "salary") {
+    // 급여대장(정직원·파트타이머)/매입매출은 마감 확정 전에 이 기기의 입력을 서버에 반영 보장(실패 시 중단).
+    if (isSalaryCloseSection(section)) {
       // 열람 권한이 없으면 급여 데이터를 읽거나 쓰지 않는다 — flush가 먼저 서버 조회/저장을 시도하므로
       // 그 앞에서 fail-closed로 막는다(권한 없는 계정이 마감 버튼으로 급여 요청을 보내는 우회 차단).
       if (!canReadSalaryBranch(user, branchName)) {
-        triggerToast("정직원 급여대장 열람 권한이 없어 마감할 수 없습니다. 본사 관리자에게 문의해주세요.", "error");
+        triggerToast(`${sectionLabel(section)} 열람 권한이 없어 마감할 수 없습니다. 본사 관리자에게 문의해주세요.`, "error");
         return;
       }
       // 비밀번호 잠금이 풀리지 않았으면 급여 데이터를 건드리지 않는다 — 잠긴 채로 마감을 눌러
@@ -302,9 +313,26 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         triggerToast("급여대장 비밀번호를 먼저 입력해야 마감할 수 있습니다.", "error");
         return;
       }
+    }
+    if (section === "salary") {
       const flush = await flushFullTimeSalaryForClose(branchName, selectedMonth);
       if (flush.blocked) {
         triggerToast("정직원 급여대장에 저장된 데이터가 없거나 서버 반영에 실패했습니다. 급여대장 탭에서 데이터를 확인·입력한 뒤 다시 시도해주세요.", "error");
+        return;
+      }
+    }
+    if (section === "partTimeSalary") {
+      const flush = await flushPartTimeSalaryForClose(branchName, selectedMonth);
+      if (flush.blocked) {
+        // 이유별로 고칠 방법을 짚어 준다 — 뭉뚱그리면 지점이 어디를 고쳐야 할지 모른 채 반복 제출한다.
+        triggerToast(
+          flush.reason === "unnamed" ? "성명이 비어 있는 행이 있어 마감할 수 없습니다. 이름을 적거나 필요 없는 행이면 삭제(X)해주세요."
+          : flush.reason === "zeroPaid" ? "근무시간은 있는데 급여가 0원인 행이 있어 마감할 수 없습니다. 시급을 채운 뒤 다시 제출해주세요."
+          : flush.reason === "empty" ? "파트타이머 급여대장에 저장된 행이 없어 마감할 수 없습니다. 급여대장을 확인한 뒤 다시 시도해주세요."
+          : flush.reason === "manualWork" ? "근무일지의 수기 근무를 아직 불러오지 못해 마감할 수 없습니다. 표 위의 [다시 시도]를 누른 뒤 다시 제출해주세요."
+          : "파트타이머 급여대장을 서버에 반영/확인하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.",
+          "error"
+        );
         return;
       }
     }
@@ -349,13 +377,25 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     }
   }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts, user]);
 
+  // 파트타이머 제출은 진행 중 잠금(partTimeSubmitting)으로 감싼다 — 차단/실패/성공 어느 경로로 끝나도
+  // finally 가 반드시 푼다. 다른 섹션은 종전과 동일하게 그대로 실행한다.
+  const handleConfirm = useCallback(async (section: CloseSection) => {
+    if (section !== "partTimeSalary") { await runConfirm(section); return; }
+    setPartTimeSubmitting(true);
+    try {
+      await runConfirm(section);
+    } finally {
+      setPartTimeSubmitting(false);
+    }
+  }, [runConfirm]);
+
   const handleEdit = useCallback(async (section: CloseSection) => {
-    // 급여 섹션의 마감상태 변경도 열람 권한 + 비밀번호 해제가 있어야 한다 — 낡은 화면/세션으로 재개·취소하는 우회 차단(fail-closed).
-    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
-      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+    // 급여 섹션(정직원·파트타이머)의 마감상태 변경도 열람 권한 + 비밀번호 해제가 있어야 한다 — 낡은 화면/세션으로 재개·취소하는 우회 차단(fail-closed).
+    if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
+      triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
       return;
     }
-    if (section === "salary" && !isSalaryUnlockedNow()) {
+    if (isSalaryCloseSection(section) && !isSalaryUnlockedNow()) {
       triggerToast("급여대장 비밀번호를 먼저 입력해주세요.", "error");
       return;
     }
@@ -397,12 +437,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   }, [branchName, selectedMonth]);
 
   const handleCancel = useCallback(async (section: CloseSection) => {
-    // 급여 섹션 마감취소도 열람 권한 + 비밀번호 해제 필요(handleEdit와 동일한 fail-closed 가드).
-    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
-      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+    // 급여 섹션(정직원·파트타이머) 마감취소도 열람 권한 + 비밀번호 해제 필요(handleEdit와 동일한 fail-closed 가드).
+    if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
+      triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
       return;
     }
-    if (section === "salary" && !isSalaryUnlockedNow()) {
+    if (isSalaryCloseSection(section) && !isSalaryUnlockedNow()) {
       triggerToast("급여대장 비밀번호를 먼저 입력해주세요.", "error");
       return;
     }
@@ -450,12 +490,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast, user, branchName]);
 
   const handleCancelEdit = useCallback(async (section: CloseSection) => {
-    // 급여 섹션 '수정취소'도 열람 권한 + 비밀번호 해제 필요(handleEdit/handleCancel와 동일한 fail-closed 가드).
-    if (section === "salary" && !canReadSalaryBranch(user, branchName)) {
-      triggerToast("정직원 급여대장 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.", "error");
+    // 급여 섹션(정직원·파트타이머) '수정취소'도 열람 권한 + 비밀번호 해제 필요(handleEdit/handleCancel와 동일한 fail-closed 가드).
+    if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
+      triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
       return;
     }
-    if (section === "salary" && !isSalaryUnlockedNow()) {
+    if (isSalaryCloseSection(section) && !isSalaryUnlockedNow()) {
       triggerToast("급여대장 비밀번호를 먼저 입력해주세요.", "error");
       return;
     }
@@ -715,10 +755,43 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
                 </div>
               )}
               {activeSubTab === "partTimeSalary" && (
-                // 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28).
-                <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
-                  <MonthlyPartTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} history={history} triggerToast={triggerToast} />
-                </SalaryAccessGate>
+                <>
+                  {/* 결산월 선택 + 파트타이머 마감 컨트롤(제출/수정/취소) + 제출상태 — 정직원급여 헤더와 같은 구성(사용자 지시 2026-08-01).
+                      종전에는 이 탭에 월 선택이 없어 지난달 급여대장을 볼 방법이 없었다.
+                      마감 버튼은 정직원 헤더와 같은 이중 방어 — 역할·지점 권한 + 비밀번호 해제를 모두 통과해야 보인다
+                      (각 핸들러의 fail-closed 가드와 별개로, 잠긴 채 마감을 눌러 급여를 읽고 쓰는 우회를 막는다).
+                      월 선택기 자체는 가드 밖에 둔다 — 급여 내용을 드러내지 않고, 표는 어차피 SalaryAccessGate 뒤에 있다. */}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex flex-wrap items-center gap-3 justify-end">
+                      <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+                      {/* 모서리 클래스는 쓰지 않는다 — 지점 전역 input 18px 규칙이 이긴다(위 세 탭 선택기와 동일, DESIGN.md §9-1). */}
+                      <input
+                        type="month"
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                        aria-label="결산월 선택"
+                        style={{ color: adminSettings.monthlyAccentColor }}
+                        className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
+                      />
+                      {canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("partTimeSalary")}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
+                      {statusPill("partTimeSalary")}
+                    </div>
+                  </div>
+                  {renderReasonBox("partTimeSalary")}
+                  {/* 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28). */}
+                  <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
+                    <MonthlyPartTimeSalarySubTab
+                      branchName={branchName}
+                      selectedMonth={selectedMonth}
+                      history={history}
+                      triggerToast={triggerToast}
+                      isLocked={getSectionStatus("partTimeSalary") === "confirmed" || partTimeSubmitting}
+                    />
+                  </SalaryAccessGate>
+                </>
               )}
               {activeSubTab === "cashExpenses" && (
                 <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} />

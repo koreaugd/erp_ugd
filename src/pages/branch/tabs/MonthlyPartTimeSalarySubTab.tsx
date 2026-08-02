@@ -129,6 +129,64 @@ const reconcileLoadedRow = (incoming: PartTimeSalaryRow, known: PartTimeSalaryRo
  */
 const toStorableRows = (rows: PartTimeSalaryRow[]): PartTimeSalaryRow[] => JSON.parse(JSON.stringify(rows ?? []));
 
+/**
+ * 지점별 급여 저장 직렬화 체인.
+ *
+ * 화면 자동저장·화면이탈 flush·마감 flush 가 **전부 이 한 줄에 선다.** 따로 돌면 느린 앞 저장이
+ * 나중에 도착해 방금 올린 값을 옛 값으로 되돌리고, 그 옛 값이 synced 기준값과 어긋나
+ * 다음 병합이 "다른 기기의 수정"으로 오인해 영구히 굳힌다(Codex P0 2026-08-01 — 마감 flush 가
+ * 컴포넌트 ref 체인 밖에서 쓰다가 잡힌 시나리오). 컴포넌트 ref 로는 모듈 함수(마감 flush)가
+ * 같은 줄에 설 수 없어 모듈 레벨로 올렸다. 모양은 ref 와 같은 { current } 라 쓰는 쪽 코드는 동일하다.
+ */
+const partTimeSaveChains = new Map<string, { current: Promise<unknown> }>();
+const getPartTimeSaveChain = (branchName: string) => {
+  let chain = partTimeSaveChains.get(branchName);
+  if (!chain) {
+    chain = { current: Promise.resolve() };
+    partTimeSaveChains.set(branchName, chain);
+  }
+  return chain;
+};
+
+/**
+ * 마감 flush 가 '화면에 지금 보이는 그 표'를 확정하도록, 떠 있는 화면이 자기 행 스냅샷 getter 를 등록한다.
+ *
+ * 이게 없으면 flush 는 로컬 사본('못 올림'일 때)이나 서버 값만 보고 확정한다. 그런데 이 표의 행은
+ * 화면에서 매번 다시 조립된다(명부·일일마감·수기근무) — 사용자가 아무것도 안 고친 달은 사본도 pending 도
+ * 없어서, 화면에는 새로 집계된 행이 보이는데 **확정은 옛 서버 값으로** 되는 어긋남이 생긴다
+ * (Codex 스톱훅 지적 2026-08-02: 표시된 급여대장과 다른 데이터가 확정될 수 있음).
+ * 마감 버튼은 이 탭이 떠 있을 때만 보이므로, 화면이 등록한 스냅샷이 곧 사용자가 확정하려는 값이다.
+ *
+ * reconcileUploaded 는 반대 방향 다리 — 마감 flush 가 올린 최종본을 화면·기준값 상태에 되반영한다.
+ * 이게 없으면 flush 가 synced 기준값만 최신(병합본)으로 바꾸고 화면은 옛 값으로 남아, 다음 편집 때
+ * "이 기기에서 바뀐 행" 오판으로 다른 기기의 수정을 옛 화면값으로 덮는다(Codex High 2026-08-02).
+ * baseline(flush 가 읽어 간 스냅샷)과 지문이 달라진 행 = flush 중 사용자가 고친 행이므로 화면 값을 지킨다.
+ */
+type PartTimeScreenBridge = {
+  snapshot: () => { month: string; rows: PartTimeSalaryRow[] };
+  reconcileUploaded: (month: string, baseline: PartTimeSalaryRow[], uploaded: PartTimeSalaryRow[]) => void;
+};
+const partTimeScreenSnapshots = new Map<string, PartTimeScreenBridge>();
+
+/**
+ * 급여 행에서 달과 무관하게 지점에 남길 프로필(주민번호·입사일·은행·계좌·시급)을 추린다.
+ * 급여대장을 올리는 모든 경로가 이걸 함께 올려야 다음 달에 시급·계좌가 따라온다.
+ * (화면 자동저장·밀린분 재전송·마감 flush 가 같은 함수를 쓴다 — 따로 만들면 한쪽만 어긋난다.)
+ */
+const buildPartTimeProfiles = (sourceSalaries: PartTimeSalaryRow[]) => {
+  return sourceSalaries.reduce((result: Record<string, any>, sal) => {
+    result[sal.employeeId] = {
+      residentNumber: sal.residentNumber,
+      entryDate: sal.entryDate,
+      contractStatus: sal.contractStatus,
+      bank: sal.bank,
+      accountNumber: sal.accountNumber,
+      hourlyRate: sal.hourlyRate
+    };
+    return result;
+  }, {});
+};
+
 const rowFingerprint = (row: PartTimeSalaryRow) => JSON.stringify([
   row.name ?? "", row.nameOverride ?? "", row.residentNumber ?? "", row.entryDate ?? "",
   row.contractStatus ?? "", row.bank ?? "", row.accountNumber ?? "", row.hourlyRate ?? "",
@@ -153,6 +211,46 @@ const rowFingerprint = (row: PartTimeSalaryRow) => JSON.stringify([
  *
  * 서버를 못 읽었으면(오프라인 등) 종전처럼 로컬을 올린다 — 편집분을 잃지 않는 쪽이 먼저다.
  */
+/**
+ * 이 기기의 행이 병합에서 이길 때, **다른 기기가 직접 정한 시간·출근일은 필드 단위로 지킨다.**
+ *
+ * 병합은 행 단위다 — 내가 memo·시급만 고쳐도 행 전체가 내 버전으로 올라간다. 그런데 내 화면의
+ * 시간은 자동 집계값이라, 다른 기기가 hoursOverridden=true 로 직접 적어 둔 예상 시간을 그 업로드가
+ * 소리 없이 덮는다(Codex High 2026-08-02 — 같은 행 동시 편집 시나리오). 그래서 행은 내 것을 쓰되
+ * '사람이 정한 시간' 필드만 서버 값을 지키고, 금액은 최종 시간으로 다시 계산한다.
+ *
+ * 단, **이 기기에서 방금 '되돌리기'를 누른 행은 예외다** — 기준값(synced)엔 직접 적은 표시가 있는데
+ * 지금은 풀려 있다면 이 기기의 의도된 동작이므로 서버의 true 를 다시 얹지 않는다
+ * (reconcileLoadedRow 의 false/undefined 구분과 같은 철학). 기준값이 없으면(옛 캐시) 되돌리기를
+ * 구분할 수 없어 서버 수기값을 지키는 쪽을 택한다 — 돈이 걸린 값은 지키는 쪽이 안전하다.
+ */
+const preserveServerManualFields = (
+  localRow: PartTimeSalaryRow,
+  serverRow: PartTimeSalaryRow,
+  synced: PartTimeSalaryRow | undefined
+): PartTimeSalaryRow => {
+  const next: PartTimeSalaryRow = { ...localRow };
+  let preserved = false;
+  const hoursRevertedHere = synced?.hoursOverridden === true && localRow.hoursOverridden !== true;
+  if (localRow.hoursOverridden !== true && serverRow.hoursOverridden === true && !hoursRevertedHere) {
+    next.accumulatedHours = serverRow.accumulatedHours;
+    next.hoursOverridden = true;
+    preserved = true;
+  }
+  const attendanceRevertedHere = synced?.attendanceOverridden === true && localRow.attendanceOverridden !== true;
+  if (localRow.attendanceOverridden !== true && serverRow.attendanceOverridden === true && !attendanceRevertedHere) {
+    next.attendanceDates = serverRow.attendanceDates;
+    next.attendanceOverridden = true;
+    preserved = true;
+  }
+  if (preserved) {
+    // 시간이 바뀌었으면 금액도 그 시간으로 — 시간과 금액이 어긋난 채 올라가면 안 된다.
+    next.calculatedSalary = computePartTimeSalary(next.hourlyRate, next.accumulatedHours, next.tipsEtcAmount);
+    next.actualPaidAmount = syncPartTimeActualPaid(next.actualPaidAmount, next.calculatedSalary);
+  }
+  return next;
+};
+
 const mergePendingLocalRows = (
   localRows: PartTimeSalaryRow[],
   serverRows: PartTimeSalaryRow[] | null,
@@ -177,7 +275,8 @@ const mergePendingLocalRows = (
     const changedHere = synced
       ? rowFingerprint(localRow) !== rowFingerprint(synced)
       : localRow.edited === true;
-    merged.push(changedHere ? localRow : serverRow);
+    // 내 행이 이겨도 다른 기기가 직접 정한 시간·출근일은 필드 단위로 지킨다(위 helper 설명 참고).
+    merged.push(changedHere ? preserveServerManualFields(localRow, serverRow, synced) : serverRow);
   });
   // 서버에 없는 행(이 기기에서 새로 만든 수기 행 등)은 뒤에 붙여 살린다.
   return [...merged, ...remainingLocal.values()];
@@ -295,16 +394,200 @@ interface PartTimeSalaryRow {
   memo: string;
 }
 
+/** 마감 flush 가 막힌 이유. 부르는 쪽(MonthlySettleTab)이 이유별로 다른 안내를 띄운다. */
+export type PartTimeCloseBlockReason = "network" | "empty" | "unnamed" | "zeroPaid" | "manualWork";
+
+/**
+ * 파트타이머 급여대장 마감제출 전, 이 기기의 미저장 편집분을 서버에 반영 보장한다(정직원 flushFullTimeSalaryForClose 짝).
+ *
+ * 이 표의 저장에는 불변식이 있다(2026-07-31 Codex 11R에서 확립 — 업로드 경로를 추가하면 반드시 같이 적용):
+ *  · 서버 조회는 캐시 폴백 없는 서버 전용(getSharedDataFromServer)만. 실패하면 올리지 않고 마감을 막는다(fail-closed).
+ *  · 제외 목록을 확정하기 전에는 급여를 올리지 않는다 — 여기서는 서버(또는 못 올린 로컬 사본)에서 제외를 먼저
+ *    확정하고, 그 목록으로 행을 걸러서 올린다. 화면이 제외 미확정 상태로 받아 둔 편집분도 이 필터로 바로잡힌다.
+ *  · 통째로 덮지 않는다 — 서버를 읽어 mergePendingLocalRows 로 '이 기기에서 정말 바뀐 행만' 얹는다.
+ *  · 사본이 없으면 빈 배열이 아니라 null — 빈 배열을 올리면 서버 대장이 통째로 지워진다.
+ *  · '못 올림' 표시는 올리는 동안 사본이 안 바뀌었을 때만 지운다 — 지우면 그 사이 편집이 조용히 사라진다.
+ */
+export async function flushPartTimeSalaryForClose(
+  branchName: string,
+  selectedMonth: string
+): Promise<{ blocked: boolean; reason?: PartTimeCloseBlockReason }> {
+  // 화면이 수기 근무(manual_parttime)를 아직 확정하지 못했으면 마감하지 않는다 — 그 화면의 시간은
+  // 실제보다 적을 수 있고, 화면 저장·이탈 flush 는 이 상태에서 업로드를 거부한다. 마감만 열어 두면
+  // 그 가드를 우회하는 뒷문이 된다(Codex P0 2026-08-01). 마감 버튼은 이 탭이 떠 있을 때만 보이므로
+  // 화면이 게시한 플래그가 곧 진실이다(지점 대조 포함 — 다른 지점의 낡은 플래그는 무시).
+  if ((window as any).__ugdPartTimeManualWorkUnresolvedBranch === branchName) {
+    return { blocked: true, reason: "manualWork" };
+  }
+  // 자동저장·화면이탈 flush 와 같은 직렬화 체인에 선다. 밖에서 따로 쓰면 진행 중이던 자동저장이
+  // 늦게 끝나며 방금 올린 값을 옛 값으로 되돌리고, synced 기준값과 어긋나 다음 병합이 그 옛 값을
+  // "다른 기기의 수정"으로 오인해 영구히 굳힌다(Codex P0 2026-08-01).
+  const chain = getPartTimeSaveChain(branchName);
+  const task = chain.current.catch(() => {}).then(() => flushPartTimeSalaryForCloseInner(branchName, selectedMonth));
+  chain.current = task.catch(() => {});
+  return task;
+}
+
+async function flushPartTimeSalaryForCloseInner(
+  branchName: string,
+  selectedMonth: string
+): Promise<{ blocked: boolean; reason?: PartTimeCloseBlockReason }> {
+  const storageKey = `erp_monthly_part_time_salary_${branchName}_${selectedMonth}`;
+  const dataKey = `part_time_salaries:${branchName}:${selectedMonth}`;
+  const exclusionStorageKey = `erp_monthly_part_time_exclusions_${branchName}_${selectedMonth}`;
+  const exclusionDataKey = `part_time_salary_exclusions:${branchName}:${selectedMonth}`;
+  const pendingKey = pendingLocalSaveStorageKey(storageKey);
+  const exclusionPendingKey = pendingLocalSaveStorageKey(exclusionStorageKey);
+  const syncedKey = `${storageKey}_synced`;
+  const readJson = (key: string): any | null => {
+    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+
+  // 1) 제외 목록 확정. 못 올린 로컬 사본이 있으면 그것이 최신(사용자가 서버 확정 후 바꾼 값 — persist 가
+  //    확정 전 제외 편집을 거부하므로 이 사본은 항상 확정 후의 것이다). 없으면 서버가 진실.
+  const exclusionRaw = localStorage.getItem(exclusionPendingKey) === "1" ? localStorage.getItem(exclusionStorageKey) : null;
+  const pendingExclusions: string[] | null = (() => {
+    try { const parsed = exclusionRaw ? JSON.parse(exclusionRaw) : null; return Array.isArray(parsed) ? parsed : null; } catch { return null; }
+  })();
+  let exclusions: string[];
+  if (pendingExclusions) {
+    exclusions = pendingExclusions;
+  } else {
+    try {
+      const server = await gasClient.getSharedDataFromServer<string[]>(exclusionDataKey);
+      exclusions = Array.isArray(server) ? server : [];
+    } catch { return { blocked: true, reason: "network" }; }
+  }
+  const excluded = new Set(exclusions);
+
+  // 2) 서버 급여 행(서버 전용, 실패 시 마감 차단). null = 아직 저장된 적 없는 달.
+  let serverRows: PartTimeSalaryRow[] | null = null;
+  try {
+    const fetched = await gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(dataKey);
+    if (Array.isArray(fetched)) serverRows = fetched.filter((row) => !excluded.has(row.employeeId));
+  } catch { return { blocked: true, reason: "network" }; }
+
+  // 3) 확정할 최종 행 결정. **화면 스냅샷이 최우선이다** — 사용자가 보고 확정하는 것은 화면의 표이므로,
+  //    화면이 떠 있으면 그 행을 원본으로 병합해 올린다. 로컬 사본/서버만 보면, 아무것도 안 고친 달에
+  //    화면에는 새로 집계된 행이 보이는데 확정은 옛 서버 값으로 되는 어긋남이 생긴다(Codex 스톱훅 2026-08-02).
+  //    스냅샷이 없거나 달이 다르면(이 함수가 화면 밖에서 불린 비정상 경로) 종전대로 사본/서버 순서.
+  const bridge = partTimeScreenSnapshots.get(branchName);
+  const snapshot = bridge?.snapshot();
+  const screenRows: PartTimeSalaryRow[] | null =
+    snapshot && snapshot.month === selectedMonth
+      ? toStorableRows(snapshot.rows.filter((row) => !excluded.has(row.employeeId)))
+      : null;
+  const localRaw = localStorage.getItem(storageKey);
+  const localRows: PartTimeSalaryRow[] | null = (() => {
+    try { const parsed = localRaw ? JSON.parse(localRaw) : null; return Array.isArray(parsed) ? parsed : null; } catch { return null; }
+  })();
+  const salaryPending = localStorage.getItem(pendingKey) === "1" && !!localRows;
+  // 병합 기준값 — '이 기기에서 정말 바뀐 행'만 서버 위에 얹기 위한 마지막 업로드 성공본.
+  const syncedRaw = readJson(syncedKey);
+  const syncedById = new Map<string, PartTimeSalaryRow>(
+    Array.isArray(syncedRaw) ? syncedRaw.map((row: PartTimeSalaryRow) => [row.employeeId, row]) : []
+  );
+  let finalRows: PartTimeSalaryRow[];
+  let uploadSalary = false;
+  if (screenRows && screenRows.length > 0) {
+    // 화면의 표를 원본으로 병합해 올린다 — 통째로 덮지 않고, 사람이 고친 행만 서버 위에 얹는다(자동저장과 같은 규칙).
+    const merged = mergePendingLocalRows(screenRows, serverRows, syncedById);
+    // 병합은 사람이 고친 값만 본다(fingerprint) — 자동 집계 필드(누적시간·출근일·급여)는 비교 밖이라,
+    // 아무도 안 고친 행은 서버의 **옛 집계**가 그대로 확정된다(화면 12시간 vs 확정 10시간 — Codex High 2026-08-02).
+    // 화면은 방금 일일마감·수기근무로 새로 집계했고 수기근무는 위 게이트가 확정을 보장하므로,
+    // 자동 필드만 화면 값으로 덮어 '보이는 표 그대로' 확정한다. 사람이 직접 정한 값
+    // (hoursOverridden/attendanceOverridden=true)은 병합 결과를 그대로 둔다 — 다른 기기에서 정한
+    // 값일 수 있어 화면 값으로 되돌리면 그 수정을 지운다. 금액은 최종 시간·시급으로 다시 계산해
+    // 시간과 금액이 어긋난 채 확정되지 않게 한다(reconcileLoadedRow 와 같은 규칙).
+    // 다른 기기의 수기 시간·출근일 보존은 병합 함수(preserveServerManualFields)가 이미 처리했다 —
+    // 여기서는 '자동 집계' 필드만 화면의 새 집계값으로 맞춰 확정본 = 보이는 표를 만든다.
+    const screenById = new Map(screenRows.map((row) => [row.employeeId, row]));
+    finalRows = toStorableRows(merged.map((row) => {
+      const onScreen = screenById.get(row.employeeId);
+      if (!onScreen) return row; // 다른 기기가 만든, 이 화면에 없는 행 — 병합 결과 그대로.
+      const next: PartTimeSalaryRow = { ...row };
+      if (next.hoursOverridden !== true) {
+        next.accumulatedHours = onScreen.accumulatedHours;
+        next.autoAccumulatedHours = onScreen.autoAccumulatedHours;
+      }
+      if (next.attendanceOverridden !== true) next.attendanceDates = onScreen.attendanceDates;
+      next.calculatedSalary = computePartTimeSalary(next.hourlyRate, next.accumulatedHours, next.tipsEtcAmount);
+      next.actualPaidAmount = syncPartTimeActualPaid(next.actualPaidAmount, next.calculatedSalary);
+      return next;
+    }));
+    uploadSalary = true;
+  } else if (salaryPending && localRows) {
+    // 미저장 편집이 있으면 병합해서 올린다 — 방금 지우거나 고친 값이 옛 서버값에 밀려 확정되는 것을 막는다.
+    finalRows = toStorableRows(mergePendingLocalRows(localRows.filter((row) => !excluded.has(row.employeeId)), serverRows, syncedById));
+    uploadSalary = true;
+  } else if (serverRows && serverRows.length > 0) {
+    finalRows = serverRows;
+  } else if (localRows && localRows.length > 0) {
+    // 서버는 비었는데 로컬에 대장이 남아 있으면 복구 저장(레거시 상태 만회 — 정직원 flush 와 같은 단계).
+    finalRows = toStorableRows(localRows.filter((row) => !excluded.has(row.employeeId)));
+    uploadSalary = true;
+  } else {
+    return { blocked: true, reason: "empty" };
+  }
+  if (finalRows.length === 0) return { blocked: true, reason: "empty" };
+
+  // 4) 돈이 새는 상태로는 확정하지 않는다(관리자 엑셀 다운로드 게이트와 같은 취지 — 거기서 막히면
+  //    지점은 이미 '확정했다'고 믿은 뒤라 늦다. 제출 순간에 알려 바로 고치게 한다).
+  //    확정본(finalRows)과 화면(screenRows) **둘 다** 본다 — 병합은 이 기기에서 안 고친 행을 서버 값으로
+  //    두므로, 화면에만 보이는 위반(예: 새로 집계된 근무시간이 있는데 시급이 빈 행)이 확정본 검사만으로는
+  //    새어 나갈 수 있다. 사용자가 보는 표에 위반이 보이면 그대로 막는 것이 맞다.
+  const trimmedName = (row: PartTimeSalaryRow) => String(row.name || "").trim();
+  const gateRows = screenRows ? [...finalRows, ...screenRows] : finalRows;
+  if (gateRows.some((row) => !trimmedName(row))) return { blocked: true, reason: "unnamed" };
+  if (gateRows.some((row) => trimmedName(row) && Number(row.accumulatedHours) > 0 && !(Number(row.calculatedSalary) > 0))) {
+    return { blocked: true, reason: "zeroPaid" };
+  }
+
+  // 5) 서버 반영. **제외 목록을 급여보다 먼저 쓴다** — 급여만 성공하고 제외가 실패하면, 제외 기준으로
+  //    행이 빠진 급여 문서만 남고 제외 기록이 없어 다른 기기의 재조립이 그 사람을 자동 행으로 되살린다.
+  //    반대(제외만 성공)는 무해하다 — 읽는 쪽이 모두 제외 목록으로 행을 거르므로 급여 문서에 남은
+  //    행은 어차피 화면·엑셀에서 빠진다(Codex P1 2026-08-01, 부분 성공이 무해해지는 순서).
+  try {
+    if (pendingExclusions) await gasClient.saveSharedData(exclusionDataKey, pendingExclusions);
+    if (uploadSalary) {
+      // 급여를 올릴 땐 프로필도 함께(모든 업로드 경로 공통 — 다음 달 시급·계좌가 여기서 따라온다).
+      await Promise.all([
+        gasClient.saveSharedData(dataKey, finalRows),
+        gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(finalRows)),
+      ]);
+    }
+  } catch { return { blocked: true, reason: "network" }; }
+
+  // 6) 올린 값을 기준값으로 남기고, 올리는 동안 사본이 안 바뀐 경우에만 '못 올림' 표시를 지운다.
+  //    (바뀌었으면 표시를 남겨 화면 쪽 재시도가 그 새 값을 올린다 — 여기서 지우면 그 편집이 조용히 사라진다.)
+  if (uploadSalary) {
+    localStorage.setItem(syncedKey, JSON.stringify(finalRows));
+    if (localStorage.getItem(storageKey) === localRaw) {
+      localStorage.setItem(storageKey, JSON.stringify(finalRows));
+      localStorage.removeItem(pendingKey);
+    }
+    // 올린 최종본을 화면에도 되반영한다 — 기준값(synced)만 앞서가고 화면이 옛 값으로 남으면,
+    // 다음 편집 때 손대지 않은 행까지 "이 기기에서 바뀐 행"으로 오판돼 다른 기기의 수정을 덮는다.
+    if (screenRows) bridge?.reconcileUploaded(selectedMonth, screenRows, finalRows);
+  }
+  if (pendingExclusions && localStorage.getItem(exclusionStorageKey) === exclusionRaw) {
+    localStorage.removeItem(exclusionPendingKey);
+  }
+  return { blocked: false };
+}
+
 export function MonthlyPartTimeSalarySubTab({
   branchName,
   selectedMonth,
   history,
-  triggerToast
+  triggerToast,
+  isLocked = false
 }: {
   branchName: string;
   selectedMonth: string;
   history: any[];
   triggerToast: (msg: string, type?: "success" | "error") => void;
+  isLocked?: boolean;
 }) {
   const [salaries, setSalaries] = useState<PartTimeSalaryRow[]>([]);
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
@@ -342,6 +625,49 @@ export function MonthlyPartTimeSalarySubTab({
   const manualWorkUnresolvedRef = useRef(true);
   manualWorkUnresolvedRef.current = manualWorkUnresolved;
   /**
+   * 마감 flush(모듈 함수 flushPartTimeSalaryForClose)가 화면의 '수기 근무 미확정' 상태를 볼 수 있게
+   * 창에 게시한다(매출집계의 __ugdSalesSummaryInvalid 와 같은 패턴). 미확정인 화면의 시간은 실제보다
+   * 적을 수 있어, 그 상태로 마감을 확정하면 급여 누락이 굳는다 — 화면 저장의 fail-closed 가드를
+   * 마감 경로에도 똑같이 적용하기 위한 다리다. 지점명을 함께 담아 다른 지점의 낡은 플래그를 걸러 낸다.
+   */
+  useEffect(() => {
+    (window as any).__ugdPartTimeManualWorkUnresolvedBranch = manualWorkUnresolved ? branchName : null;
+    return () => { (window as any).__ugdPartTimeManualWorkUnresolvedBranch = null; };
+  }, [manualWorkUnresolved, branchName]);
+  /** 화면 행의 ref 사본 — 마감 flush 스냅샷이 등록 시점이 아니라 '실행 시점'의 최신 표를 읽게 한다. */
+  const salariesRef = useRef<PartTimeSalaryRow[]>([]);
+  salariesRef.current = salaries;
+  /**
+   * 마감 flush 에 '화면에 보이는 표'를 내어 주는 스냅샷 등록. 제출 중에는 표가 잠기므로(부모 isLocked)
+   * flush 가 읽는 스냅샷은 사용자가 마지막으로 본 값 그대로다. 달·지점이 바뀌면 다시 등록하고,
+   * 화면을 떠나면 지운다 — flush 는 스냅샷이 없으면 종전대로 사본/서버 값으로 동작한다.
+   */
+  useEffect(() => {
+    partTimeScreenSnapshots.set(branchName, {
+      snapshot: () => ({ month: selectedMonth, rows: salariesRef.current }),
+      // 마감 flush 가 올린 최종본을 화면에 되반영한다. flush 를 시작한 뒤 사용자가 고친 행
+      // (baseline 과 지문이 달라진 행)은 화면 값을 지킨다 — 자동저장 완료 지점과 같은 reconcile 규칙.
+      reconcileUploaded: (month, baseline, uploaded) => {
+        if (month !== selectedMonth) return; // 그 사이 결산월을 옮겼으면 옛 달의 반영은 버린다.
+        const baselineById = new Map<string, PartTimeSalaryRow>(baseline.map((row) => [row.employeeId, row]));
+        setSalaries((current) => {
+          const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+          const uploadedIds = new Set(uploaded.map((row) => row.employeeId));
+          const reconciledRows = uploaded.map((up) => {
+            const onScreen = currentById.get(up.employeeId);
+            if (!onScreen) return up;
+            const base = baselineById.get(up.employeeId);
+            if (base && rowFingerprint(onScreen) !== rowFingerprint(base)) return onScreen;
+            return up;
+          });
+          // 올라간 목록에 없는 화면 행(그 사이 추가한 수기 행 등)은 지킨다 — 아직 안 올라갔을 뿐이다.
+          return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+        });
+      },
+    });
+    return () => { partTimeScreenSnapshots.delete(branchName); };
+  }, [branchName, selectedMonth]);
+  /**
    * 이 안내를 이미 띄웠는지. 재시도가 15초마다 돌면서 같은 토스트를 반복하면 화면을 덮어 버린다.
    * 못 읽은 상태는 상단 배너가 계속 말해 주므로, 토스트는 한 번이면 된다.
    */
@@ -360,8 +686,11 @@ export function MonthlyPartTimeSalarySubTab({
    * 저장은 "서버 읽기 → 병합 → 쓰기"라 시간이 걸린다. 여러 저장이 겹치면 느린 앞 저장이 나중에 끝나
    * 옛 값으로 되돌린다("16000"까지 친 뒤 "1600" 저장이 늦게 도착하는 식). 앞 저장이 끝난 뒤에
    * 다음 저장을 시작해 그 역전을 없앤다.
+   *
+   * 지점별 모듈 체인을 쓴다 — 마감 flush(flushPartTimeSalaryForClose)도 같은 줄에 서야 하기 때문.
+   * ref 와 같은 { current } 모양이라 아래 코드는 그대로다.
    */
-  const salarySaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const salarySaveChainRef = getPartTimeSaveChain(branchName);
   /** 편집 순번. 저장이 끝난 뒤 "그 사이 또 고쳤는지"를 가려 '못 올림' 표시를 성급히 지우지 않게 한다. */
   const salaryEditSeqRef = useRef(0);
   /** 못 올린 값을 다시 올리려는 타이머. 연결이 끊겼다 돌아오면 스스로 회복한다. */
@@ -404,20 +733,6 @@ export function MonthlyPartTimeSalarySubTab({
       return new Map<string, PartTimeSalaryRow>();
     }
   }, [salarySyncedKey]);
-
-  const buildPartTimeProfiles = useCallback((sourceSalaries: PartTimeSalaryRow[]) => {
-    return sourceSalaries.reduce((result: Record<string, any>, sal) => {
-      result[sal.employeeId] = {
-        residentNumber: sal.residentNumber,
-        entryDate: sal.entryDate,
-        contractStatus: sal.contractStatus,
-        bank: sal.bank,
-        accountNumber: sal.accountNumber,
-        hourlyRate: sal.hourlyRate
-      };
-      return result;
-    }, {});
-  }, []);
 
   /** 재시도 실패 때 다시 예약하려면 아래에 정의된 scheduleSalaryRetry 가 필요해 ref 로 이어 준다. */
   const scheduleSalaryRetryRef = useRef<(() => void) | null>(null);
@@ -758,7 +1073,7 @@ export function MonthlyPartTimeSalarySubTab({
       });
     }, 500);
     return true; // 편집을 받아들였다. 부르는 쪽이 성공 안내를 띄워도 되는지 이걸로 가린다.
-  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, manualWorkUnresolved, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
+  }, [branchName, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, manualWorkUnresolved, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
 
   // 재시도 타이머가 부를 수 있게 최신 저장 함수를 ref 에 담아 둔다.
   persistPartTimeSalariesRef.current = persistPartTimeSalaries;
@@ -840,6 +1155,8 @@ export function MonthlyPartTimeSalarySubTab({
         const pendingSalaries = savedSalaries ? JSON.parse(savedSalaries) : null;
         const pendingExclusions = savedExclusions ? JSON.parse(savedExclusions) : null;
         const saveTasks: Promise<unknown>[] = [];
+        // 실제로 올린 병합본. 성공 후 로컬 작업본·화면을 이 값으로 맞추는 데 쓴다(아래 설명).
+        let uploadedMerged: PartTimeSalaryRow[] | null = null;
         if (salaryPending && Array.isArray(pendingSalaries)) {
           // 탭을 옮기며 올릴 때도 통째로 덮으면 그 사이 다른 기기가 고쳐 둔 것이 지워진다.
           // 올리기 전에 서버를 읽어 **이 기기에서 실제로 바뀐 행만** 얹는다(자동저장 경로와 같은 규칙).
@@ -860,6 +1177,7 @@ export function MonthlyPartTimeSalarySubTab({
                   // 올린 것과 같은 값을 기준값으로 남긴다. 안 남기면 다음 재시도 때
                   // 이미 올린 행까지 "이 기기에서 바뀐 행"으로 잡혀 상대의 수정을 덮는다.
                   localStorage.setItem(salarySyncedKey, JSON.stringify(merged));
+                  uploadedMerged = merged;
                 });
               })
           );
@@ -876,10 +1194,34 @@ export function MonthlyPartTimeSalarySubTab({
             // 다르면 표시가 남아 다음 진입·재시도 때 그 새 값이 올라간다.
             // (사본이 아예 없던 경우도 null === null 로 같아 표시가 정리된다.)
             if (salaryPending && localStorage.getItem(salaryStorageKey) === savedSalaries) {
+              // **로컬 작업본도 올린 병합본으로 맞춘다.** 기준값(synced)만 병합본으로 앞서가고 작업본·화면이
+              // 옛 값으로 남으면, 돌아와서 아무 칸이나 고칠 때 손대지 않은 행까지 지문이 달라져
+              // "이 기기에서 바뀐 행"으로 오판돼 다른 기기의 수정을 옛값으로 덮는다(Codex High 2026-08-02).
+              if (uploadedMerged) localStorage.setItem(salaryStorageKey, JSON.stringify(uploadedMerged));
               localStorage.removeItem(salaryPendingKey);
             }
             if (exclusionPending && localStorage.getItem(exclusionStorageKey) === savedExclusions) {
               localStorage.removeItem(exclusionPendingKey);
+            }
+            // 화면도 병합본으로 맞춘다 — flush 시작 후 사용자가 고친 행(지문 변화)은 화면 값을 지킨다
+            // (자동저장 완료 지점과 같은 reconcile). 언마운트 뒤라면 setSalaries 는 조용히 무시된다.
+            if (uploadedMerged && Array.isArray(pendingSalaries)) {
+              const baselineById = new Map<string, PartTimeSalaryRow>(
+                (pendingSalaries as PartTimeSalaryRow[]).map((row) => [row.employeeId, row])
+              );
+              const uploadedRows = uploadedMerged;
+              setSalaries((current) => {
+                const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+                const uploadedIds = new Set(uploadedRows.map((row) => row.employeeId));
+                const reconciledRows = uploadedRows.map((up) => {
+                  const onScreen = currentById.get(up.employeeId);
+                  if (!onScreen) return up;
+                  const base = baselineById.get(up.employeeId);
+                  if (base && rowFingerprint(onScreen) !== rowFingerprint(base)) return onScreen;
+                  return up;
+                });
+                return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+              });
             }
           })
           .catch((error) => {
@@ -890,7 +1232,7 @@ export function MonthlyPartTimeSalarySubTab({
         return Promise.resolve();
       }
     }
-  }, [branchName, buildPartTimeProfiles, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
+  }, [branchName, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
 
   useEffect(() => {
     let active = true;
@@ -1151,45 +1493,76 @@ export function MonthlyPartTimeSalarySubTab({
               ...salary,
               tipsEtcAmount: salary.tipsEtcAmount || "0"
             }));
-            // 올리기 전에 서버를 먼저 읽는다. 그냥 덮으면 그 사이 다른 기기가 고쳐 둔 것이 통째로 지워진다.
-            // 못 읽으면 null로 두고 종전처럼 로컬을 올린다 — 편집분을 잃지 않는 쪽이 먼저다.
-            let serverRows: PartTimeSalaryRow[] | null = null;
-            try {
-              // 캐시 폴백이 있는 getSharedData로 읽으면 옛 사본을 최신으로 착각해 상대 수정을 덮는다 — 서버 전용으로 읽는다.
-              const fetched = await gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey);
-              if (Array.isArray(fetched)) serverRows = fetched.filter((salary) => !excluded.has(salary.employeeId));
-            } catch (error) {
-              // 서버 상태를 모른 채 올리면 다른 기기 수정이 소리 없이 사라진다. 못 올린 표시를 남긴 채 물러난다
-              // (이 기기 편집분은 화면에 살려 두고, 재시도를 예약한다).
-              // **재시도 예약이 핵심이다** — 화면을 새로 연 직후 이 경로로 빠지면, 예약이 없을 때
-              // 사용자가 더 고치지 않는 한 그 값은 영영 안 올라간다(화면은 멀쩡해 보인다).
-              console.warn("밀린 편집분을 올리기 전 서버를 읽지 못해 전송을 미뤘습니다.", error);
-              setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
-              scheduleSalaryRetry();
-              return;
-            }
-            const uploadRows = toStorableRows(mergePendingLocalRows(restoredRows, serverRows, readSyncedRows()));
-            setSalaries((current) => mergeKeepingManualRows(uploadRows, current, excluded));
-            // 프로필(주민번호·입사일·은행·계좌·시급)도 함께 올린다. 다른 두 저장 경로는 늘 같이 올리는데
-            // 이 경로만 빠져 있었다 — 그러면 급여대장은 올라갔는데 시급이 서버에 없어,
-            // **다음 달에 전월 시급이 따라오지 않고** 다른 기기에서도 계좌가 비어 보인다.
-            await Promise.all([
-              gasClient.saveSharedData(salaryDataKey, uploadRows),
-              gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(uploadRows))
-            ]);
-            // **올리는 사이에 사용자가 더 고쳤으면 여기서 손대면 안 된다.**
-            // 이 경로는 화면에 들어오자마자 밀린 편집분을 올리는데, 그 몇 초 사이에 셀을 고치는 일이 흔하다.
-            // 그때 옛 값(uploadRows)으로 로컬 사본과 기준값을 덮고 '못 올림' 표시까지 지우면,
-            // 방금 고친 값이 로컬에서도 사라지고 다시 올라가지도 않는다.
-            // 사본이 그대로일 때만 확정하고, 바뀌었으면 그 새 저장에 맡긴다(표시가 남아 있어 다시 올라간다).
-            if (localStorage.getItem(salaryStorageKey) === local) {
-              localStorage.setItem(salaryStorageKey, JSON.stringify(uploadRows));
-              localStorage.setItem(salarySyncedKey, JSON.stringify(uploadRows));
-              localStorage.removeItem(salaryPendingKey);
-              // 제외 목록이 아직 안 올라갔으면 초록으로 돌리지 않는다 — 여기서 '저장됨'으로 바꾸면
-              // 제외만 로컬에 남은 상태를 다 저장된 것으로 보여 준다.
-              if (localStorage.getItem(exclusionPendingKey) !== "1") setSalarySaveState("saved");
-            }
+            // 화면 복원은 즉시 한다 — 시각적 복구를 저장 순서에 묶을 이유가 없다.
+            setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
+            // **서버 읽기→병합→쓰기는 자동저장과 같은 직렬화 체인에 세운다.**
+            // 밖에서 따로 돌면, 이 재전송이 서버를 오가는 사이 사용자가 셀을 고쳐 500ms 자동저장이
+            // 최신값을 먼저 올리고, 늦게 끝난 이 재전송이 옛값(uploadRows)을 다시 올려 되돌린다
+            // (Codex High 2026-08-02 — 마감 flush 가 같은 이유로 체인에 들어간 것과 동일).
+            // 체인에 서면 나중에 enqueue 된 자동저장이 반드시 뒤에 실행돼 최신값으로 수렴한다.
+            const resendTask = salarySaveChainRef.current.catch(() => {}).then(async () => {
+              // **실행 시점에 이 재전송이 아직 유효한지 재확인한다.** 체인 앞 순번(이전 마운트의 이탈 flush,
+              // 마감 flush 등)이 이미 올려 '못 올림' 표시가 지워졌거나, 그 사이 새 편집이 사본을 바꿨으면
+              // 이 task 가 들고 있는 local 은 낡은 값이다 — 올리면 방금 올라간 최신값을 되돌린다
+              // (Codex High 2026-08-02, 언마운트→같은 달 재진입 경로). 새 값은 그 경로가 책임진다.
+              if (localStorage.getItem(salaryPendingKey) !== "1" || localStorage.getItem(salaryStorageKey) !== local) return;
+              // 올리기 전에 서버를 먼저 읽는다. 그냥 덮으면 그 사이 다른 기기가 고쳐 둔 것이 통째로 지워진다.
+              let serverRows: PartTimeSalaryRow[] | null = null;
+              try {
+                // 캐시 폴백이 있는 getSharedData로 읽으면 옛 사본을 최신으로 착각해 상대 수정을 덮는다 — 서버 전용으로 읽는다.
+                const fetched = await gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey);
+                if (Array.isArray(fetched)) serverRows = fetched.filter((salary) => !excluded.has(salary.employeeId));
+              } catch (error) {
+                // 서버 상태를 모른 채 올리면 다른 기기 수정이 소리 없이 사라진다. 못 올린 표시를 남긴 채 물러난다.
+                // **재시도 예약이 핵심이다** — 화면을 새로 연 직후 이 경로로 빠지면, 예약이 없을 때
+                // 사용자가 더 고치지 않는 한 그 값은 영영 안 올라간다(화면은 멀쩡해 보인다).
+                console.warn("밀린 편집분을 올리기 전 서버를 읽지 못해 전송을 미뤘습니다.", error);
+                scheduleSalaryRetry();
+                return;
+              }
+              const uploadRows = toStorableRows(mergePendingLocalRows(restoredRows, serverRows, readSyncedRows()));
+              // **화면 반영은 '재전송을 시작한 뒤 사용자가 안 고친 행'만.** 늦게 끝난 이 task 가 화면을
+              // 통째로 uploadRows(옛 스냅샷)로 되돌리면, 그 사이 고친 값이 화면에서 사라지고 이후 편집 때
+              // 그 옛 화면값이 다시 서버로 올라간다(Codex High 2026-08-02). 자동저장 완료 지점(atSaveTimeById
+              // reconcile)과 같은 규칙 — 시작 시점 사본과 지문이 달라진 행은 화면 값을 지킨다.
+              const atResendById = new Map<string, PartTimeSalaryRow>(restoredRows.map((row) => [row.employeeId, row]));
+              setSalaries((current) => {
+                const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+                const uploadedIds = new Set(uploadRows.map((row) => row.employeeId));
+                const reconciledRows = uploadRows.map((uploaded) => {
+                  const onScreen = currentById.get(uploaded.employeeId);
+                  if (!onScreen) return uploaded; // 서버/병합에서 온, 화면에 없던 행 — 화면에 들인다
+                  const atResend = atResendById.get(uploaded.employeeId);
+                  if (atResend && rowFingerprint(onScreen) !== rowFingerprint(atResend)) return onScreen;
+                  return uploaded;
+                });
+                // 재전송 시작 후 새로 추가한 행(수기 등)도 지킨다 — 아직 안 올라갔을 뿐이다.
+                return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+              });
+              // 프로필(주민번호·입사일·은행·계좌·시급)도 함께 올린다. 다른 두 저장 경로는 늘 같이 올리는데
+              // 이 경로만 빠져 있었다 — 그러면 급여대장은 올라갔는데 시급이 서버에 없어,
+              // **다음 달에 전월 시급이 따라오지 않고** 다른 기기에서도 계좌가 비어 보인다.
+              await Promise.all([
+                gasClient.saveSharedData(salaryDataKey, uploadRows),
+                gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(uploadRows))
+              ]);
+              // **올리는 사이에 사용자가 더 고쳤으면 여기서 손대면 안 된다.**
+              // 이 경로는 화면에 들어오자마자 밀린 편집분을 올리는데, 그 몇 초 사이에 셀을 고치는 일이 흔하다.
+              // 그때 옛 값(uploadRows)으로 로컬 사본과 기준값을 덮고 '못 올림' 표시까지 지우면,
+              // 방금 고친 값이 로컬에서도 사라지고 다시 올라가지도 않는다.
+              // 사본이 그대로일 때만 확정하고, 바뀌었으면 그 새 저장에 맡긴다(표시가 남아 있어 다시 올라간다).
+              if (localStorage.getItem(salaryStorageKey) === local) {
+                localStorage.setItem(salaryStorageKey, JSON.stringify(uploadRows));
+                localStorage.setItem(salarySyncedKey, JSON.stringify(uploadRows));
+                localStorage.removeItem(salaryPendingKey);
+                // 제외 목록이 아직 안 올라갔으면 초록으로 돌리지 않는다 — 여기서 '저장됨'으로 바꾸면
+                // 제외만 로컬에 남은 상태를 다 저장된 것으로 보여 준다.
+                if (localStorage.getItem(exclusionPendingKey) !== "1") setSalarySaveState("saved");
+              }
+            });
+            salarySaveChainRef.current = resendTask.catch(() => {}); // 체인이 에러로 끊기지 않게 흡수
+            // 업로드 실패는 바깥 catch 가 재시도를 예약한다(종전과 동일한 실패 처리).
+            await resendTask;
             return;
           }
         }
@@ -1232,7 +1605,7 @@ export function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedSalaries();
-  }, [branchName, buildPartTimeProfiles, excludedEmployeeIds, exclusionPendingKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry]);
+  }, [branchName, excludedEmployeeIds, exclusionPendingKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry]);
 
   useEffect(() => {
     const loadSharedProfiles = async () => {
@@ -1385,6 +1758,7 @@ export function MonthlyPartTimeSalarySubTab({
   }, [branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
+    if (isLocked) return; // 마감 확정 후에는 입력을 받지 않는다(정직원 급여대장 updateRow 와 같은 가드).
     const nextSalaries = salaries.map(item => {
       if (item.employeeId !== empId) return item;
       // 금액칸은 쉼표를 넣어 보여 주므로, 저장할 땐 쉼표를 떼고 숫자만 남긴다.
@@ -1425,6 +1799,7 @@ export function MonthlyPartTimeSalarySubTab({
    * 말일에 예상 시간을 적어 둔 뒤 실제 근무가 기록되면 이 버튼으로 실제값에 맞춘다.
    */
   const handleRestoreAutoHours = (employee: PartTimeSalaryRow) => {
+    if (isLocked) return;
     const autoHours = employee.autoAccumulatedHours ?? "";
     if (autoHours === "") return;
     const who = employee.name.trim() || "이름 없는 행";
@@ -1450,6 +1825,7 @@ export function MonthlyPartTimeSalarySubTab({
    * 수기 행은 다시 만들어질 곳이 없으니 목록에서 빼는 것으로 끝이다 — 그쪽에는 "삭제"라고 말해야 맞다.
    */
   const handleRemoveRow = (employee: PartTimeSalaryRow) => {
+    if (isLocked) return;
     const manual = isManualRow(employee);
     const who = employee.name.trim() || "이름 없는 행";
     const question = manual
@@ -1482,6 +1858,7 @@ export function MonthlyPartTimeSalarySubTab({
    *  · 같은 사람 두 줄 막기 → 성명 칸에서 손을 뗄 때(onBlur) 확인하는 warnIfDuplicateName.
    */
   const handleAddManualRow = () => {
+    if (isLocked) return;
     const newRow: PartTimeSalaryRow = {
       employeeId: newManualId(),
       name: "",
@@ -1600,6 +1977,12 @@ export function MonthlyPartTimeSalarySubTab({
           </button>
         </div>
       )}
+      {/* 마감 확정 잠금 안내 — 정직원 급여대장과 같은 문구·색(확정 상태라 emerald, 실패 경고 아님). */}
+      {isLocked && (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+          마감제출이 확정되어 입력값이 잠겨 있습니다. 수정하려면 마감수정 버튼을 눌러주세요.
+        </div>
+      )}
       <div className="flex justify-between items-center pb-3 border-b border-gray-50 flex-col sm:flex-row gap-3">
         <div>
           <h3 className="text-sm font-black text-zinc-900 leading-snug w-fit">
@@ -1642,9 +2025,12 @@ export function MonthlyPartTimeSalarySubTab({
               저장 대기 중
             </div>
           ) : (
-            <div className="flex-1 sm:flex-none px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm">
+            // 잠금 중에도 '못 올림(retry)' 배지는 위 분기가 우선한다 — 잠겼다고 미전송 상태를 감추면 안 된다.
+            <div className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm ${
+              isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"
+            }`}>
               <Check className="w-3.5 h-3.5" />
-              {salarySaveState === "saving" ? "저장 중…" : "자동저장"}
+              {isLocked ? "확정 잠금" : salarySaveState === "saving" ? "저장 중…" : "자동저장"}
             </div>
           )}
         </div>
@@ -1680,7 +2066,8 @@ export function MonthlyPartTimeSalarySubTab({
         <button
           type="button"
           onClick={handleAddManualRow}
-          className="ml-auto px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2"
+          disabled={isLocked}
+          className="ml-auto px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
           title="직원명부에 없는 사람(일용직 등)을 직접 추가합니다. 명부에 있는 사람은 '근무기록 없는 인원 보기'로 펼쳐 쓰세요."
         >
           <Plus className="w-3.5 h-3.5" />
@@ -1740,6 +2127,7 @@ export function MonthlyPartTimeSalarySubTab({
                         {...cellProps(rowIndex, COL_NAME)}
                         aria-label="성명"
                         type="text"
+                        disabled={isLocked}
                         value={sal.name}
                         onChange={(e) => handleUpdate(sal.employeeId, "name", e.target.value)}
                         // 커서가 빠질 때 같은 사람이 이미 있는지 알린다(입력 도중엔 알리지 않는다 —
@@ -1762,10 +2150,11 @@ export function MonthlyPartTimeSalarySubTab({
                       <button
                         type="button"
                         tabIndex={-1}
+                        disabled={isLocked}
                         onClick={() => handleRemoveRow(sal)}
                         aria-label={`${sal.name || "이름 없는 행"} ${isManualRow(sal) ? "삭제" : "제외"}`}
                         title={isManualRow(sal) ? "이 행을 삭제합니다" : "이번 달 급여대장에서만 제외합니다"}
-                        className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-rose-50 hover:text-rose-600 focus:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400"
+                        className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-rose-50 hover:text-rose-600 focus:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400 disabled:text-gray-200 disabled:cursor-not-allowed"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -1776,6 +2165,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_RESIDENT)}
                       aria-label={`${sal.name} 주민등록번호`}
                       type="text"
+                      disabled={isLocked}
                       value={sal.residentNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "residentNumber", e.target.value)}
                       className={`${cellInput} font-mono font-bold text-gray-800 tracking-tighter text-center`}
@@ -1786,6 +2176,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_ENTRY_DATE)}
                       aria-label={`${sal.name} 입사일자`}
                       type="date"
+                      disabled={isLocked}
                       value={toDateInputValue(sal.entryDate)}
                       onChange={(e) => handleUpdate(sal.employeeId, "entryDate", e.target.value)}
                       className={`${cellInput} text-gray-800 text-center`}
@@ -1796,6 +2187,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_BANK)}
                       aria-label={`${sal.name} 은행`}
                       type="text"
+                      disabled={isLocked}
                       value={sal.bank}
                       onChange={(e) => handleUpdate(sal.employeeId, "bank", e.target.value)}
                       className={`${cellInput} font-bold text-gray-800 text-center`}
@@ -1806,6 +2198,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_ACCOUNT)}
                       aria-label={`${sal.name} 입금 계좌번호`}
                       type="text"
+                      disabled={isLocked}
                       value={sal.accountNumber}
                       onChange={(e) => handleUpdate(sal.employeeId, "accountNumber", e.target.value)}
                       className={`${cellInput} font-mono font-medium text-gray-850`}
@@ -1821,6 +2214,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_HOURLY_RATE)}
                       aria-label={`${sal.name} 시급`}
                       type="text"
+                      disabled={isLocked}
                       value={formatWithCommas(sal.hourlyRate || "")}
                       onChange={(e) => handleUpdate(sal.employeeId, "hourlyRate", e.target.value)}
                       placeholder="시급 입력"
@@ -1837,6 +2231,7 @@ export function MonthlyPartTimeSalarySubTab({
                         {...cellProps(rowIndex, COL_HOURS)}
                         aria-label={`${sal.name} 누적시간`}
                         type="number"
+                        disabled={isLocked}
                         value={sal.accumulatedHours}
                         onChange={(e) => handleUpdate(sal.employeeId, "accumulatedHours", e.target.value)}
                         title={
@@ -1848,7 +2243,7 @@ export function MonthlyPartTimeSalarySubTab({
                           isHoursOverridden(sal) ? "parttime-hours-manual" : "text-blue-600"
                         }`}
                       />
-                      {isHoursOverridden(sal) && (sal.autoAccumulatedHours ?? "") !== "" && (
+                      {!isLocked && isHoursOverridden(sal) && (sal.autoAccumulatedHours ?? "") !== "" && (
                         <button
                           type="button"
                           tabIndex={-1}
@@ -1867,6 +2262,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_TIPS)}
                       aria-label={`${sal.name} 팁/기타`}
                       type="text"
+                      disabled={isLocked}
                       value={formatWithCommas(sal.tipsEtcAmount || "")}
                       onChange={(e) => handleUpdate(sal.employeeId, "tipsEtcAmount", e.target.value)}
                       placeholder="0"
@@ -1883,6 +2279,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_ATTENDANCE)}
                       aria-label={`${sal.name} 근무일정`}
                       type="text"
+                      disabled={isLocked}
                       value={sal.attendanceDates}
                       onChange={(e) => handleUpdate(sal.employeeId, "attendanceDates", e.target.value)}
                       className={`${cellInput} text-[10px] font-mono text-zinc-600 truncate`}
@@ -1894,6 +2291,7 @@ export function MonthlyPartTimeSalarySubTab({
                       {...cellProps(rowIndex, COL_MEMO)}
                       aria-label={`${sal.name} 기타 비고`}
                       type="text"
+                      disabled={isLocked}
                       value={sal.memo}
                       onChange={(e) => handleUpdate(sal.employeeId, "memo", e.target.value)}
                       className={`${cellInput} font-medium placeholder-gray-300`}
