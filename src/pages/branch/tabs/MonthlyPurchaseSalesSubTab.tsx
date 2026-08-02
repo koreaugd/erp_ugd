@@ -258,13 +258,19 @@ export function MonthlyPurchaseSalesSubTab({
       const nextRows = prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: nextValue };
+        // 아래 두 미러링은 옛 선입금 행(isPrepaid === true)에는 적용하지 않는다.
+        // 그 행의 이달사용액은 '발주액 합계'로, 이체금액과 뜻이 다른 별개의 숫자다. 미러링을 걸면
+        // 이체금액을 한 번 고치는 순간 발주액이 조용히 덮여 사라지고, export가 그 행의 사용액으로
+        // monthlyUsageAmount를 그대로 쓰기 때문에 대장 금액까지 바뀐다(Codex 정지리뷰 2026-08-02).
+        // 선입금 체크박스가 화면에서 사라져 되돌릴 방법도 없으므로 되돌릴 수 없는 손실이 된다.
+        const isLegacyPrepaid = updated.isPrepaid === true;
         // 이체 필요금액이 바뀌면 이달사용액이 따라간다(두 값은 통상 같다).
-        if (field === "transferAmount") {
+        if (field === "transferAmount" && !isLegacyPrepaid) {
           updated.monthlyUsageAmount = nextValue;
         }
         // 이체 필요?를 다시 체크(true)하면 이달사용액은 이체 필요금액을 다시 미러링한다.
         // (결제완료 상태에서 따로 적은 값은 '이체 필요' 복귀 시 이체금액 기준으로 되돌린다.)
-        if (field === "transferNeeded" && val === true) {
+        if (field === "transferNeeded" && val === true && !isLegacyPrepaid) {
           updated.monthlyUsageAmount = updated.transferAmount || "";
         }
         return updated;
@@ -497,9 +503,11 @@ export function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
-                      disabled={isLocked || row.transferNeeded !== false}
+                      // 옛 선입금 행은 이체 필요 상태여도 사용액(발주액 합계)을 그대로 export하므로 편집을 열어 둔다.
+                      // 잠가 두면 엑셀에는 나가는데 화면에서 고칠 수 없는 숫자가 된다.
+                      disabled={isLocked || !(row.isPrepaid === true || row.transferNeeded === false)}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder={row.transferNeeded === false ? "이달 사용액" : "-"}
+                      placeholder={row.isPrepaid === true ? "발주액 합계" : (row.transferNeeded === false ? "이달 사용액" : "-")}
                       className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>
