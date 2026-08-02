@@ -145,7 +145,10 @@ export function MonthlyPurchaseSalesSubTab({
       ...row,
       id: `p_${selectedMonth}_${row.id || Date.now()}`,
       transferAmount: "",
-      // 폐지된 선입금 충전액도 함께 비운다 — 읽는 곳은 없지만, 안 비우면 죽은 값이 새 달로 계속 딸려간다.
+      // 폐지된 선입금 표식은 새 달로 넘기지 않는다.
+      // 넘기면 금액이 빈 새 행인데도 레거시 취급을 받아 이체금액→이달사용액 미러링이 꺼진 채 동작하고,
+      // export도 사용액을 0으로 내보낸다(Codex 정지리뷰 2026-08-02). 레거시 보호는 옛 달에만 필요하다.
+      isPrepaid: false,
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       // 이월 시 '결제완료' 상태는 초기화한다 — 다음 달 결제 여부는 아직 미정이므로 '이체 필요'로 시작.
@@ -327,7 +330,9 @@ export function MonthlyPurchaseSalesSubTab({
       const resetRows = currentRows.map((row) => ({
         ...row,
         transferAmount: "",
-        prepaidChargeAmount: "", // 폐지된 레거시 — 금액 초기화 때 같이 비운다(위 emptyAmounts와 동일).
+        // 금액을 다 비우면 지킬 레거시 값도 없다 — 표식까지 끊어 새로 입력하는 값이 새 규칙(미러링)을 따르게 한다.
+        isPrepaid: false,
+        prepaidChargeAmount: "",
         monthlyUsageAmount: "",
         // 금액 초기화 시 '결제완료' 상태도 초기화 — 재입력한 이체가 결제완료로 오인돼 배너·엑셀에서 누락되는 것을 방지.
         transferNeeded: true

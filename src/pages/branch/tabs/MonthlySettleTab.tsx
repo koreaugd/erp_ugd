@@ -270,6 +270,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       ...row,
       id: `p_${nextMonth}_${row.id || Date.now()}`,
       transferAmount: "",
+      // 폐지된 선입금 표식은 다음 달로 넘기지 않는다(MonthlyPurchaseSalesSubTab emptyAmounts와 같은 규칙).
+      // 넘기면 빈 새 행이 레거시 취급을 받아 미러링이 꺼지고 export 사용액이 0으로 나간다.
+      isPrepaid: false,
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       // 이월 시 '결제완료' 상태는 초기화 — 다음 달은 '이체 필요'로 시작(월 단위 결제 상태).
@@ -427,6 +430,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     const resetRows = purchaseRows.map((row) => ({
       ...row,
       transferAmount: "",
+      // 금액을 다 비우면 지킬 레거시 값도 없다 — 표식까지 끊어 새 입력이 새 규칙을 따르게 한다.
+      isPrepaid: false,
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
       // 금액 초기화 시 '결제완료' 상태도 초기화 — 이후 재입력한 이체가 결제완료로 오인돼 누락되는 것을 방지.

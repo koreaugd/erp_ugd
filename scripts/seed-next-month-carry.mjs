@@ -46,10 +46,13 @@ const readShared = async (dataKey) => {
 };
 
 // carryMonthlyPurchasesToNextMonth 와 동일: 금액 3종 비우고 '이체 필요'로 초기화.
+// 폐지된 선입금 표식(isPrepaid)도 함께 끊는다 — 남겨서 넘기면 금액이 빈 새 행이 레거시 취급을 받아
+// 이체금액→이달사용액 미러링이 꺼지고 export 사용액이 0으로 나간다(앱 이월 경로와 같은 규칙, Codex 8R).
 const carryRow = (row) => ({
   ...row,
   id: `p_${nextMonth}_${row.id}`,
   transferAmount: "",
+  isPrepaid: false,
   prepaidChargeAmount: "",
   monthlyUsageAmount: "",
   transferNeeded: true,
@@ -109,7 +112,7 @@ for (const item of plan) {
   const ok =
     Array.isArray(actual) &&
     actual.length === item.rows.length &&
-    actual.every((r) => r.transferAmount === "" && r.monthlyUsageAmount === "" && r.prepaidChargeAmount === "" && r.transferNeeded === true) &&
+    actual.every((r) => r.transferAmount === "" && r.monthlyUsageAmount === "" && r.prepaidChargeAmount === "" && r.transferNeeded === true && r.isPrepaid === false) &&
     actual.every((r, i) => r.vendorName === item.rows[i].vendorName && r.category === item.rows[i].category && r.accountNumber === item.rows[i].accountNumber);
   if (!ok) failures++;
   console.log(`  ${ok ? "OK  " : "실패"} ${item.branchName.padEnd(16)} ${Array.isArray(actual) ? actual.length : "?"}행, 금액 전부 공란`);
