@@ -44,10 +44,10 @@ const Checked = () => (
 );
 
 // 체크박스 조합에 따른 금액칸 규칙. 넓은 화면의 표와 좁은 화면의 카드가 이 하나를 공유한다.
-const CHECKBOX_RULES: Array<{ situation: string; prepaid: ReactNode; transferNeeded: ReactNode; usage: ReactNode; input: ReactNode }> = [
+// 선입금(충전) 업체 행과 '선입금?' 열은 2026-08-02 개념 폐지와 함께 삭제했다 — 이제 '이체 필요?' 하나로만 갈린다.
+const CHECKBOX_RULES: Array<{ situation: string; transferNeeded: ReactNode; usage: ReactNode; input: ReactNode }> = [
   {
     situation: "이번 달 송금 예정",
-    prepaid: <Unchecked />,
     transferNeeded: (
       <span className="inline-flex items-center gap-1"><Checked /><span className="text-[10px] text-zinc-500">기본</span></span>
     ),
@@ -56,32 +56,25 @@ const CHECKBOX_RULES: Array<{ situation: string; prepaid: ReactNode; transferNee
   },
   {
     situation: "이미 결제 완료",
-    prepaid: <Unchecked />,
     transferNeeded: <Unchecked />,
     usage: "직접 입력",
     input: <><b className="font-black">실제 이달사용액</b>만. 이체필요 금액은 잠김</>,
-  },
-  {
-    situation: "선입금(충전) 업체",
-    prepaid: <Checked />,
-    transferNeeded: <span className="text-[10px] text-zinc-500">상황에 따라</span>,
-    usage: "직접 입력 (발주액 합계)",
-    input: <><b className="font-black">충전금액</b> + <b className="font-black">실제 이달사용액</b></>,
   },
 ];
 
 export const purchaseSalesGuideSteps: GuideStep[] = [
   {
-    // 자릿값 입력칸에 붙인다. below로 두면 아래 매입매출 표의 말풍선과 같은 자리로 떨어져 가려지므로
-    // above(상단)로 띄운다(사용자 요청 2026-07-18).
+    // 캐치테이블 예약정산금 입력칸에 붙인다(앵커 이름은 옛 라벨 '자릿값' 시절 것을 그대로 둔다 — 화면의 data-guide와 짝).
+    // below로 두면 아래 매입매출 표의 말풍선과 같은 자리로 떨어져 가려지므로 above(상단)로 띄운다(사용자 요청 2026-07-18).
     anchor: "sales-summary-seat-charge",
-    title: "자릿값(예약정산금)",
+    title: "캐치테이블 예약정산금",
     placement: "above",
     width: 400,
     body: (
       <Bullets
         items={[
           <>캐치테이블 이용 매장은 <b className="font-black text-rose-700">캐치테이블 관리자페이지 → 정산 →<br />부가세 참고자료 → 해당 월 선택</b> 후 나오는 금액을 입력하세요.</>,
+          <>예약 매출은 POS 실매출에 잡히지 않으므로 <b className="font-black">매출구성 합계와는 별개</b>입니다. 해당 없으면 0을 입력하세요.</>,
         ]}
       />
     ),
@@ -126,7 +119,6 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
             <thead>
               <tr className="bg-zinc-100 text-zinc-600">
                 <th className="text-left font-black py-1.5 px-2 whitespace-nowrap">상황</th>
-                <th className="text-center font-black py-1.5 px-2">선입금?</th>
                 <th className="text-center font-black py-1.5 px-2">이체필요?</th>
                 <th className="text-left font-black py-1.5 px-2">실제사용금액</th>
                 <th className="text-left font-black py-1.5 px-2">입력할 칸</th>
@@ -136,7 +128,6 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
               {CHECKBOX_RULES.map((rule) => (
                 <tr key={rule.situation} className="border-t border-gray-100">
                   <td className="py-1.5 px-2 whitespace-nowrap">{rule.situation}</td>
-                  <td className="py-1.5 px-2 text-center">{rule.prepaid}</td>
                   <td className="py-1.5 px-2 text-center">{rule.transferNeeded}</td>
                   <td className="py-1.5 px-2">{rule.usage}</td>
                   <td className="py-1.5 px-2">{rule.input}</td>
@@ -150,21 +141,12 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
               <div key={rule.situation} className="rounded-lg border border-gray-200 p-2 space-y-1">
                 <p className="font-black text-zinc-900">{rule.situation}</p>
                 <p className="flex items-center gap-1.5 text-[11px]">
-                  <span className="text-zinc-500">선입금?</span> {rule.prepaid}
-                  <span className="text-zinc-500 ml-2">이체필요?</span> {rule.transferNeeded}
+                  <span className="text-zinc-500">이체필요?</span> {rule.transferNeeded}
                 </p>
                 <p className="text-[11px]"><span className="text-zinc-500">실제사용금액</span> {rule.usage}</p>
                 <p className="text-[11px]"><span className="text-zinc-500">입력할 칸</span> {rule.input}</p>
               </div>
             ))}
-          </div>
-
-          {/* 참고 박스: 본문 규칙이 아니라 보충 예시임을 회색 배경 + '참고' 라벨로 구분한다. */}
-          <div className="mt-2.5 rounded-lg bg-zinc-100 px-3 py-2 text-[11px] text-zinc-600">
-            <span className="inline-flex items-center gap-1 font-black text-zinc-500">💡 참고</span>
-            <p className="mt-1">
-              <b className="font-black text-zinc-700">선입금(충전) 업체 예</b> — 찬수산, 영평, 마블러스푸드, SPC 등 미리 충전해 둔 잔액에서 차감해 쓰는 업체입니다.
-            </p>
           </div>
 
           <p className="mt-2.5 text-[11.5px] text-zinc-600">
