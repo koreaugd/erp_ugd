@@ -2900,10 +2900,13 @@ function AdminCashDiffHistorySection() {
 // 이상치 이력 캐시 유효시간 — 이 안에서는 날짜를 바꿔도 다시 읽지 않는다(수동 새로고침은 즉시 무효화).
 const ANOMALY_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const MONTHLY_CLOSE_SECTIONS: Array<{ key: "salesSummary" | "purchase" | "salary"; label: string }> = [
+// 지점 월말마감의 섹션 키(MonthlySettleTab CloseSection)와 같은 문자열을 쓴다 — 다르면 상태가 영영 '미제출'로 보인다.
+type MonthlyCloseSectionKey = "salesSummary" | "purchase" | "salary" | "partTimeSalary";
+const MONTHLY_CLOSE_SECTIONS: Array<{ key: MonthlyCloseSectionKey; label: string }> = [
   { key: "salesSummary", label: "매출집계" },
   { key: "purchase", label: "매입매출" },
   { key: "salary", label: "정직원 급여" },
+  { key: "partTimeSalary", label: "파트타이머 급여" },
 ];
 
 // 법인 분류 — 지점명 키워드로 3개 법인으로 나눈다. 실제 지점명 표기가 다양해(연하동 대학로점/연하동 연남본점/
@@ -2933,7 +2936,7 @@ function AdminMonthlyClosingStatusSection() {
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   // '확정후수정' 버튼을 누르면 뜨는 말풍선. 표가 가로 스크롤 상자 안이라 화면(fixed) 좌표로 띄운다.
-  const [modPopup, setModPopup] = useState<{ left: number; top?: number; bottom?: number; branch: string; section: "salary" | "purchase" | "salesSummary"; rec: any } | null>(null);
+  const [modPopup, setModPopup] = useState<{ left: number; top?: number; bottom?: number; branch: string; section: MonthlyCloseSectionKey; rec: any } | null>(null);
   // 말풍선을 띄운 버튼(앵커)을 기억해 스크롤 시 위치를 따라가게 한다(닫지 않는다).
   const modAnchorRef = useRef<HTMLElement | null>(null);
   // 버튼 좌표로부터 말풍선 위치를 계산한다: 아래 공간이 부족하면 위로 뒤집어 하단 잘림을 막는다.
@@ -2947,7 +2950,7 @@ function AdminMonthlyClosingStatusSection() {
       ? { left, top: undefined as number | undefined, bottom: Math.max(MARGIN, window.innerHeight - r.top + 6) }
       : { left, top: r.bottom + 6, bottom: undefined as number | undefined };
   }, []);
-  const sectionLabel = (s: string) => (s === "salary" ? "정직원 급여대장" : s === "purchase" ? "매입매출" : "매출집계");
+  const sectionLabel = (s: string) => (s === "salary" ? "정직원 급여대장" : s === "purchase" ? "매입매출" : s === "partTimeSalary" ? "파트타이머 급여대장" : "매출집계");
   // 관리자가 이 지점·섹션 엑셀을 마지막으로 다운로드한 시각(브라우저에 기록).
   const dlTimeKey = (branch: string, section: string) => `admin_section_dl_${branch}_${selectedMonth}_${section}`;
   const markDownloaded = (branch: string, section: string) => {
@@ -2992,6 +2995,7 @@ function AdminMonthlyClosingStatusSection() {
       salary: pendingCount("salary"),
       purchase: pendingCount("purchase"),
       salesSummary: pendingCount("salesSummary"),
+      partTimeSalary: pendingCount("partTimeSalary"),
     };
   }, [rows]);
 
@@ -3062,7 +3066,7 @@ function AdminMonthlyClosingStatusSection() {
       // Promise.all이 reject → 아래 catch에서 다운로드를 취소한다. 실패를 삼켜 빈/오래된 데이터로 채우면
       // 파트타이머급여·현금지출·카드지출·현금관리 시트가 '데이터 없음/구값'인 채 '정상 파일'처럼 다운로드돼
       // (중복이체·누락·stale) 눈에 띄지 않는 오류가 된다. (전지점 매출집계 다운로드와 동일한 fail-closed 원칙)
-      const [purchases, roster, salaries, exclusions, profiles, history, manualWork] = await Promise.all([
+      const [purchases, roster, salaries, exclusions, profiles, history, manualWork, freshClosings] = await Promise.all([
         gasClient.getSharedDataFromServer<any[]>(`monthly_purchases:${branchName}:${selectedMonth}`),
         gasClient.getBranchOwnRosterFromServer(branchName),
         gasClient.getSharedDataFromServer<any[]>(`part_time_salaries:${branchName}:${selectedMonth}`),
@@ -3072,7 +3076,27 @@ function AdminMonthlyClosingStatusSection() {
         // 근무일지에 수기로 적은 파트타이머 근무. 이것 없이 만든 엑셀은 그만큼 시간이 적게 찍히고
         // 그 표가 그대로 이체로 이어진다 — 그래서 다른 소스와 똑같이 서버 전용(실패 시 다운로드 취소)으로 읽는다.
         gasClient.getSharedDataFromServer<any[]>(`manual_parttime:${branchName}`),
+        // 파트타이머급여 섹션의 확정 여부도 '신선하게' 읽는다(화면 캐시는 다른 기기의 방금 변경을 못 본다).
+        gasClient.getSharedDataFromServer<any[]>("monthly_closings"),
       ]);
+
+      // 이 파일의 '파트타이머급여' 시트는 파트타이머급여 섹션의 산출물이다 — 매입매출 확정만 보고 내려받으면
+      // 지점이 아직 마감제출하지 않은 급여가 '정상 파일'처럼 나간다(Codex 스톱훅 지적 2026-08-02).
+      // 다만 이 섹션이 생기기 전 과거 달은 기록 자체가 없으므로 하드 차단하면 과거 자료를 받을 길이 없다 —
+      // confirmedButEmpty 와 같은 방식으로 명시적으로 알리고 관리자가 결정한다.
+      const ptCloseRec = (Array.isArray(freshClosings) ? freshClosings : [])
+        .filter((r) => r.branchName === branchName && r.month === selectedMonth && (r.section || "purchase") === "partTimeSalary")
+        .sort((a, b) => String(b.updatedAt || b.confirmedAt || "").localeCompare(String(a.updatedAt || a.confirmedAt || "")))[0];
+      if (ptCloseRec?.status !== "confirmed") {
+        const ptLabel = ptCloseRec?.status === "editing" ? "수정중" : "미제출";
+        const proceed = window.confirm(
+          `${branchName} · ${selectedMonth} 파트타이머 급여가 아직 확정되지 않았습니다(상태: ${ptLabel}).\n\n` +
+          `이 파일의 '파트타이머급여' 시트에는 지점이 마감제출하지 않은 값이 담깁니다.\n` +
+          `지점이 [월말마감 → 파트타이머 급여대장]에서 마감제출한 뒤 받으면 확정값으로 받을 수 있습니다.\n\n` +
+          `그래도 지금 받으시겠습니까?`
+        );
+        if (!proceed) return;
+      }
 
       // 매입매출 확정건에는 매입 데이터가 있어야 정상. 서버가 정상 응답했으나 비어 있으면(레거시/미저장) 재확정을 안내하고 중단.
       if (!Array.isArray(purchases) || purchases.length === 0) {
@@ -3323,7 +3347,7 @@ function AdminMonthlyClosingStatusSection() {
   // 취소되어 '미제출(pending)'인 섹션은 표시하지 않는다 — 초기화 정리 저장이 실패해 표식이 찌꺼기로 남아도 무해하게 한다.
   // 수정기록 버튼 — 엑셀 다운로드 버튼처럼 항상 자리에 있고, '확정 후 수정' 기록이 있을 때만 색이 켜져(검정) 클릭할 수 있다.
   // 기록이 없으면 회색 비활성. 클릭하면 말풍선으로 (내 다운로드 시각 + 수정 이력)을 보여준다. 스타일·크기는 엑셀 버튼과 통일.
-  const modifiedButton = (rec: any, branchName: string, section: "salary" | "purchase" | "salesSummary") => {
+  const modifiedButton = (rec: any, branchName: string, section: MonthlyCloseSectionKey) => {
     const has = !!rec?.editedAfterConfirm && rec?.status !== "pending";
     return (
       <button
@@ -3377,7 +3401,7 @@ function AdminMonthlyClosingStatusSection() {
         <div className="space-y-1.5">
           {/* 섹션 제목 = 바닐라 알약(지점 DESIGN.md §6, 색만 연한 관리자 바닐라). bg-amber-50 → var(--admin-vanilla) */}
           <h2 className="inline-flex w-fit items-center rounded-full border border-[#212121] bg-amber-50 px-3 py-1.5 text-[11px] font-black text-gray-900">제출현황</h2>
-          <p className="text-[11px] text-gray-400">선택한 월 기준 지점별 3개 마감(매출집계·매입매출·정직원 급여) 상태</p>
+          <p className="text-[11px] text-gray-400">선택한 월 기준 지점별 4개 마감(매출집계·매입매출·정직원 급여·파트타이머 급여) 상태</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {/* 정직원급여·매출집계 '법인별' 배치 다운로드는 각 법인 밴드(제목 행)에 있다.
@@ -3390,10 +3414,11 @@ function AdminMonthlyClosingStatusSection() {
         </div>
       </div>
 
-      {/* 미제출 요약 카드 3개 — 섹션과 구분되는 배경색 + 검정 테두리 */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* 미제출 요약 카드 4개 — 섹션과 구분되는 배경색 + 검정 테두리 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">정직원 급여<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.salary}</span></div>
         <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">매입매출<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.purchase}</span></div>
+        <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">파트타이머 급여<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.partTimeSalary}</span></div>
         <div className="rounded-xl border border-[#212121] bg-[#FBF4E6] px-3 py-2.5 flex items-center justify-between gap-2"><span className="text-[11px] font-black text-gray-800 leading-tight">매출집계<br />미제출</span><span className="text-xl font-black text-gray-900">{sectionStats.salesSummary}</span></div>
       </div>
 
@@ -3424,7 +3449,7 @@ function AdminMonthlyClosingStatusSection() {
                 </div>
                 {/* 그 법인 지점 표 */}
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-xs table-fixed">
+                  <table className="w-full min-w-[920px] text-xs table-fixed">
                     {/* 표 헤더 = 엘리스(admin-redesign thead tr, 연한 엘리스블루). 라벨은 text-[#212121]로 100% 검정
                         (text-gray-*는 68% 회색으로 치환돼 흐려짐 — DESIGN.md §9-1).
                         법인별 배치 다운로드 버튼은 위 법인 밴드에 있다. 여기 헤더는 라벨만.
@@ -3435,6 +3460,7 @@ function AdminMonthlyClosingStatusSection() {
                         <th className="w-[160px] py-2 px-3 text-[#212121]">지점</th>
                         <th className="w-[220px] py-2 px-3 text-center text-[#212121]">정직원급여</th>
                         <th className="w-[220px] py-2 px-3 text-center text-[#212121]">월말마감</th>
+                        <th className="w-[160px] py-2 px-3 text-center text-[#212121]">파트타이머급여</th>
                         <th className="w-[160px] py-2 px-3 text-center text-[#212121]">매출집계</th>
                       </tr>
                     </thead>
@@ -3472,6 +3498,13 @@ function AdminMonthlyClosingStatusSection() {
                                 {monthlyCloseBadge(bySection.purchase?.status || null)}
                                 {dlBtn("purchase")}
                                 {modifiedButton(bySection.purchase, branch.branchName, "purchase")}
+                              </span>
+                            </td>
+                            {/* 파트타이머급여 — 엑셀 버튼은 없다. 파트타이머 급여 시트는 월말마감(매입매출) 5시트 통합 엑셀에 들어 있다. */}
+                            <td className="py-2 px-3 text-center">
+                              <span className="inline-flex items-center justify-center gap-1 flex-wrap">
+                                {monthlyCloseBadge(bySection.partTimeSalary?.status || null)}
+                                {modifiedButton(bySection.partTimeSalary, branch.branchName, "partTimeSalary")}
                               </span>
                             </td>
                             <td className="py-2 px-3 text-center">
