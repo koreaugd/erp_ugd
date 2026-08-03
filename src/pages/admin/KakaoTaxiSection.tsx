@@ -2534,14 +2534,19 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                       {visibleMembers.map((m) => {
                         // 어떤 행이든 쓰기가 진행 중이면 전 행을 잠근다(동시 쓰기 race 방지)
                         const busy = memberWriteBusy || regBusy;
+                        // 이용중지된 사람도 목록에는 남아 있다(카카오가 blocked 를 함께 준다) — 지금 못 타는
+                        // 사람이 멀쩡한 사람들 사이에 섞여 보이므로 이름을 붉게 적어 갈라 놓는다.
+                        const blocked = m.status === "blocked";
                         return (
                           <tr key={m.id} className="border-t border-gray-100">
                             <td className="px-4 py-2">{accountLabel(m.account_key)}</td>
-                            <td className="px-4 py-2 font-bold text-[#212121]">{m.name || "(이름 없음)"}</td>
+                            {/* 붉은색은 DESIGN.md §11 오류 hex — text-rose-* 는 관리자 스코프에서 검정으로 죽는다 */}
+                            <td className={`px-4 py-2 font-bold ${blocked ? "text-[#B91C1C]" : "text-[#212121]"}`}>{m.name || "(이름 없음)"}</td>
                             <td className="px-4 py-2">{m.department || "-"}</td>
                             <td className="px-4 py-2">{m.mobile_phone || "-"}</td>
                             <td className="px-4 py-2">{(m.group_ids || []).map((id) => groupNameById.get(id) || id).join(", ") || "-"}</td>
-                            <td className="px-4 py-2">{MEMBER_STATUS_LABEL[m.status] || m.status}</td>
+                            {/* 색만으로 의미를 나누지 않는다 — 색이 죽어도 '이용중지' 글자가 그대로 남는다 */}
+                            <td className={`px-4 py-2 ${blocked ? "font-bold text-[#B91C1C]" : ""}`}>{MEMBER_STATUS_LABEL[m.status] || m.status}</td>
                             <td className="px-4 py-2">
                               <span className="inline-flex gap-1.5">
                                 <button onClick={() => startEdit(m)} disabled={busy}
@@ -2549,10 +2554,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 <button onClick={() => void sendTms(m)} disabled={busy}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">알림톡</button>
                                 {m.status === "blocked" ? (
+                                  // 글자만 붉게 — 테두리까지 붉히면 옆의 [삭제]와 똑같아 보인다. 복구 동작과
+                                  // 되돌릴 수 없는 파괴 동작이 한눈에 갈려야 한다(Codex 지적 2026-08-03).
                                   <button onClick={() => void runMemberAction(m, "이용중지 해제", () => gasClient.unblockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     // 재조회 목록에 여전히 있고 blocked 가 풀렸으면 확인, 목록에서 사라졌으면 판정 불가
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status !== "blocked" : null; })} disabled={busy}
-                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">이용중지 해제</button>
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 text-[#B91C1C] disabled:opacity-50">이용중지 해제</button>
                                 ) : (
                                   <button onClick={() => void runMemberAction(m, "이용중지", () => gasClient.blockKakaoTaxiMember([m.id], adminPinHash, m.account_key),
                                     (list) => { const f = list.find((x) => x.id === m.id); return f ? f.status === "blocked" : null; })} disabled={busy}
