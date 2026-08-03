@@ -15,7 +15,9 @@ export interface SalesSummary {
   netSales: string;
   menuSales: string;
   liquorSales: string;
-  coverCharge: string; // 커버차지(자릿값) — 전 지점 입력, 안 받는 매장은 0
+  // 커버차지(자릿값)·배달매출 — POS 실매출에는 들어 있으나 메뉴/주류 어느 쪽에도 안 잡히는 금액을 모아 적는다.
+  // 전 지점 입력, 해당 없으면 0. (필드 이름은 커버차지만 있던 시절 것을 유지 — 과거 데이터와 키를 맞춘다.)
+  coverCharge: string;
   seatCharge: string;  // 캐치테이블 예약정산금 — POS 실매출에 안 잡히는 별도 정산금
   // ── 아래는 입력칸이 없어진 레거시 필드다(결제구성 섹션·영수건수 삭제, 2026-08-02).
   // 지운 게 아니라 남겨 둔다: 과거 달에 저장된 값이 로드→저장 왕복에서 날아가지 않게 하고,
@@ -41,7 +43,7 @@ const REQUIRED_FIELDS: Array<{ key: keyof SalesSummary; label: string }> = [
   { key: "seatCharge", label: "캐치테이블 예약정산금" },
   { key: "menuSales", label: "메뉴매출" },
   { key: "liquorSales", label: "주류매출" },
-  { key: "coverCharge", label: "커버차지(자릿값)" },
+  { key: "coverCharge", label: "커버차지·배달매출" },
 ];
 
 const num = (v?: string) => Number(cleanNumeric(String(v || ""))) || 0;
@@ -417,10 +419,11 @@ export function SalesSummarySection({
           <div className={pillTitleCls}><Utensils className="w-3.5 h-3.5" /> 매출구성</div>
           {rowField("menuSales", "메뉴매출", { row: 0, col: 0 })}
           {rowField("liquorSales", "주류매출", { row: 1, col: 0 })}
-          {/* 커버차지는 전 지점 입력칸이다. 안 받는 매장은 0을 넣으면 되고, 0도 '채워진 값'으로 본다. */}
-          {rowField("coverCharge", "커버차지(자릿값)", { row: 2, col: 0 })}
-          <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 커버차지(자릿값)를 받지 않는 매장은 <span className="font-black">0</span>을 입력하세요.</p>
-          {autoRow("실매출과 차이(메뉴+주류+커버)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
+          {/* 전 지점 입력칸이다. 해당 없으면 0을 넣으면 되고, 0도 '채워진 값'으로 본다.
+              메뉴·주류로 안 잡히는 실매출(커버차지·배달매출)을 여기 모아야 아래 검산이 맞는다. */}
+          {rowField("coverCharge", "커버차지·배달매출", { row: 2, col: 0 })}
+          <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 자릿값(커버차지)과 <span className="font-black">배달매출</span>을 합쳐 입력하세요. 둘 다 없으면 <span className="font-black">0</span>을 입력하세요.</p>
+          {autoRow("실매출과 차이(메뉴+주류+커버·배달)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
         </div>
         <div className={cardCls}>
           <div className={pillTitleCls}><TrendingUp className="w-3.5 h-3.5" /> 매출요약</div>
