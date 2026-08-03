@@ -3041,7 +3041,7 @@ function AdminMonthlyClosingStatusSection() {
           // 옛 '자리값' 한 칸에 두 개념이 섞여 있었다 — 커버차지를 빠뜨리면 필수 입력값이 엑셀에서 사라진다.
           { 항목: "메뉴매출", 값: num(s.menuSales) },
           { 항목: "주류매출", 값: num(s.liquorSales) },
-          { 항목: "커버차지(자릿값)", 값: num(s.coverCharge) },
+          { 항목: "커버차지·배달매출", 값: num(s.coverCharge) },
           { 항목: "예약정산금", 값: num(s.seatCharge) },
           { 항목: "빈칸 사유", 값: s.blankReason || "" },
         ];
@@ -3277,7 +3277,7 @@ function AdminMonthlyClosingStatusSection() {
           "메뉴매출": num(d.menuSales),
           "주류매출": num(d.liquorSales),
           // 커버차지(POS 실매출 구성)와 예약정산금(캐치테이블, POS 미포함)을 나눠 적는다 — 위 지점별 시트와 같은 규칙.
-          "커버차지(자릿값)": num(d.coverCharge),
+          "커버차지·배달매출": num(d.coverCharge),
           "예약정산금": num(d.seatCharge),
           "예약정산금내역": "",
         };
