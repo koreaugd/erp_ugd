@@ -5,6 +5,29 @@ on:
     branches:
       - main
       - master # Run on push to main or master branch
+    # 앱 번들에 들어가지 않는 파일만 바뀐 커밋은 배포하지 않는다.
+    #
+    # 왜 필요한가: 배포하면 app-version.json 의 버전이 커밋 SHA 로 바뀌고(vite.config.ts),
+    # 열려 있는 지점 화면이 그걸 감지해 새로고침한다(useAppUpdateWatcher).
+    # 화면 내용이 하나도 안 바뀌는 문서·스크립트 커밋 때문에 마감 중인 지점을 새로고침시킬 이유가 없다.
+    # (감시기가 입력 중에는 미루긴 하지만, 이득이 0인 새로고침은 애초에 만들지 않는다.)
+    #
+    # scripts/ 는 로컬에서만 도는 운영 도구라 dist 에 포함되지 않는다.
+    #
+    # [주의] .github/** 도 무시하므로, **이 워크플로만 고친 커밋은 배포가 돌지 않는다.**
+    # 빌드 방식·VITE_GAS_URL 주입·clean 정책처럼 '배포 결과를 바꾸는' 수정을 했다면 다음 둘 중 하나를 해야 한다.
+    #   1) 아래 workflow_dispatch 로 수동 실행 (Actions 탭 → Deploy to GitHub Pages → Run workflow,
+    #      또는  gh workflow run deploy.yml --ref main )
+    #   2) 앱 파일 변경과 함께 푸시
+    # 이걸 잊으면 '고쳤는데 운영엔 반영 안 된' 상태가 조용히 유지된다.
+    paths-ignore:
+      - 'docs/**'
+      - 'scripts/**'
+      - '.github/**'
+      - '.gitignore'
+      - '**.md'
+  # 수동 배포 통로. paths-ignore 로 건너뛴 변경을 즉시 반영해야 할 때 쓴다.
+  workflow_dispatch:
 
 # Allow this job to run in parallel or queue up
 concurrency:
