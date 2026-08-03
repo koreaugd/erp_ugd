@@ -62,7 +62,13 @@ async function main() {
   const { getFirestore, doc, getDocFromServer, runTransaction } = await import("firebase/firestore");
   const { default: config } = await import("../firebase-applet-config.json", { with: { type: "json" } });
   const { blockedTargets, reportBlocked } = await import("./lib/close-guard.mjs");
-  const { signInAsAdmin } = await import("./lib/admin-auth.mjs");
+  const { signInAsAdmin, signInAsPersonalAdmin } = await import("./lib/admin-auth.mjs");
+
+  // 급여대장 키는 PIN 관리자가 접근할 수 없다(firestore.rules isSalaryKey → canReadSalary, PIN 계정 제외).
+  // 백업에 급여 키가 하나라도 있으면 개인 관리자 계정으로 로그인해야 한다 —
+  // 안 그러면 급여 시더가 남긴 백업을 이 도구로 되돌릴 수 없다(Codex 지적).
+  const isSalaryKey = (dataKey) => /^(monthly_fulltime_salary|part_time_salaries|part_time_salary_exclusions|part_time_profiles)(:|%3A)/
+    .test(decodeURIComponent(String(dataKey || "")));
 
   const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
   const BACKUP_DIR = resolve(SCRIPT_DIR, "backups");
@@ -79,6 +85,16 @@ async function main() {
   const stampOf = (name) => Number(name.match(/-(\d{10,})\.json$/)?.[1] ?? 0);
 
   const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+  // 트랜잭션형 시더가 '커밋 전'에 남기는 예비 스냅샷(.pending, unsafe:true)은 복구에 쓸 수 없다.
+  // 그 값은 미리보기 시점의 것이라, 실제로 덮어쓴 값과 다르고 건너뛴 문서까지 되돌린다.
+  // (정식 백업은 커밋 뒤 조건부 복구 형식으로 다시 쓰이고, 그때 예비본은 지워진다.)
+  if (backup.unsafe === true) {
+    console.error("이 파일은 커밋 전 예비 스냅샷이라 되돌리기에 쓸 수 없습니다(unsafe: true).");
+    console.error(`  ${backup.note || ""}`);
+    console.error("  같은 이름의 정식 백업(.json, .pending 없는 것)을 쓰세요. 없다면 시더가 커밋 후 중단된 것이므로");
+    console.error("  서버 현재 값을 직접 확인한 뒤 수동으로 판단해야 합니다.");
+    process.exit(1);
+  }
   if (!Array.isArray(backup.entries)) {
     console.error("중단: 백업 파일에 entries 배열이 없습니다.");
     process.exit(1);
@@ -86,13 +102,39 @@ async function main() {
   const targetKeys = new Set(backup.entries.map((e) => e.dataKey));
 
   // 순서 가드: 같은 키를 건드린 '더 나중' 백업이 남아 있으면 그것부터 되돌려야 한다.
+  //
+  // '.json.pending' 도 함께 본다. 시더가 커밋한 뒤 정식 백업을 쓰기 전에 죽으면 그 파일만 남는데,
+  // 그건 '이 뒤에 커밋됐을 수도 있는 작업'의 유일한 흔적이다. 이름이 .json 으로 끝나지 않는다고 빼면,
+  // 그 알 수 없는 작업을 건너뛴 채 공유 문서를 옛 값으로 되돌려 나중 마감기록을 지운다(Codex 지적).
+  // 예비본은 순서를 단정할 수 없으므로(정식 백업과 같은 시각 스탬프를 갖는다) 겹치기만 하면 무조건 막는다.
   const thisStamp = stampOf(basename(backupPath));
   const laterConflicts = [];
+  const pendingConflicts = [];
   for (const name of readdirSync(BACKUP_DIR)) {
-    if (!name.endsWith(".json") || stampOf(name) <= thisStamp) continue;
-    const other = JSON.parse(readFileSync(resolve(BACKUP_DIR, name), "utf-8"));
+    const isPending = name.endsWith(".json.pending");
+    if (!name.endsWith(".json") && !isPending) continue;
+    if (resolve(BACKUP_DIR, name) === resolve(backupPath)) continue;
+    if (!isPending && stampOf(name) <= thisStamp) continue;
+    let other;
+    try {
+      other = JSON.parse(readFileSync(resolve(BACKUP_DIR, name), "utf-8"));
+    } catch {
+      // 쓰다 만 파일도 '작업이 있었다'는 신호다 — 조용히 넘기지 않는다.
+      (isPending ? pendingConflicts : laterConflicts).push({ name, overlap: ["(파일을 읽을 수 없음)"] });
+      continue;
+    }
     const overlap = (other.entries || []).map((e) => e.dataKey).filter((k) => targetKeys.has(k));
-    if (overlap.length > 0) laterConflicts.push({ name, overlap });
+    if (overlap.length === 0) continue;
+    // 예비본은 스탬프가 이 백업보다 이르더라도 막는다(그 실행이 커밋 후 중단됐을 수 있다).
+    if (isPending) pendingConflicts.push({ name, overlap });
+    else laterConflicts.push({ name, overlap });
+  }
+  if (pendingConflicts.length > 0) {
+    console.error("중단: 커밋 후 중단된 것으로 보이는 예비 백업(.pending)이 같은 문서를 갖고 있습니다.\n");
+    for (const c of pendingConflicts) console.error(`  ${c.name}  (겹치는 문서 ${c.overlap.length}개: ${c.overlap.join(", ")})`);
+    console.error("\n그 실행이 실제로 썼는지 서버 현재 값으로 확인한 뒤, 예비 파일을 치우고 다시 시도하세요.");
+    console.error("(정식 백업이 없다는 것은 그 실행이 커밋 뒤 죽었을 수 있다는 뜻입니다 — 되돌리면 그 작업이 사라집니다.)");
+    process.exit(1);
   }
   if (laterConflicts.length > 0) {
     console.error("중단: 같은 문서를 나중에 건드린 백업이 남아 있습니다. 나중 것부터 되돌리세요.\n");
@@ -102,7 +144,15 @@ async function main() {
 
   const app = initializeApp(config);
   const db = getFirestore(app, config.firestoreDatabaseId);
-  await signInAsAdmin(app);
+  // 급여 키가 섞여 있으면 개인 관리자로 로그인한다. 자격증명이 없으면 여기서 멈춘다 —
+  // PIN 계정으로 진행하면 쓰기가 규칙에 막혀 '일부만 복구'된 채 끝난다.
+  const needsPersonalAdmin = backup.entries.some((e) => isSalaryKey(e.dataKey));
+  if (needsPersonalAdmin) {
+    console.log("※ 급여대장 키가 포함된 백업 — 개인 관리자 계정으로 로그인합니다(UGD_PERSONAL_ADMIN_EMAIL/_PASSWORD).");
+    await signInAsPersonalAdmin(app);
+  } else {
+    await signInAsAdmin(app);
+  }
 
   const sharedRef = (dataKey) => doc(db, "shared_data", encodeURIComponent(dataKey));
   const readShared = async (dataKey) => {
