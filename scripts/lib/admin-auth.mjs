@@ -32,3 +32,27 @@ export async function signInAsAdmin(app) {
   const { getAuth, signInWithEmailAndPassword } = await import("firebase/auth");
   return signInWithEmailAndPassword(getAuth(app), ADMIN_EMAIL, `ugd-${readAdminPin()}`);
 }
+
+/**
+ * 급여대장(part_time_salaries / monthly_fulltime_salary …) 전용 로그인.
+ *
+ * 위의 PIN 관리자(admin@ugd-erp.example)는 2026-07-28 규칙에서 급여 키 접근이 의도적으로 막혀 있다
+ * (firestore.rules: "PIN 관리자는 여기서 의도적으로 배제 — isAdmin() 쓰지 말 것").
+ * 그래서 급여를 다루는 스크립트는 개인 관리자 계정(users 문서 role='admin')으로 로그인해야 한다.
+ *
+ * 자격증명은 환경변수로만 받는다 — 저장소에 남기지 않는다.
+ *   UGD_PERSONAL_ADMIN_EMAIL / UGD_PERSONAL_ADMIN_PASSWORD
+ */
+export async function signInAsPersonalAdmin(app) {
+  const email = String(process.env.UGD_PERSONAL_ADMIN_EMAIL || "").trim();
+  const password = String(process.env.UGD_PERSONAL_ADMIN_PASSWORD || "");
+  if (!email || !password) {
+    throw new Error(
+      "급여대장은 개인 관리자 계정이 필요합니다.\n" +
+      "  환경변수 UGD_PERSONAL_ADMIN_EMAIL / UGD_PERSONAL_ADMIN_PASSWORD 를 설정하고 다시 실행하세요.\n" +
+      "  (구글 로그인 전용 계정이면 비밀번호가 없으므로, 이메일+비밀번호 관리자 계정이 따로 있어야 합니다.)"
+    );
+  }
+  const { getAuth, signInWithEmailAndPassword } = await import("firebase/auth");
+  return signInWithEmailAndPassword(getAuth(app), email, password);
+}

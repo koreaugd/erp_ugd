@@ -16,7 +16,7 @@
  *   read-modify-write 를 해서 서로의 레코드를 덮어쓴다. 그래서 읽기→13건 병합→쓰기를 한 트랜잭션에 담는다.
  *   급여 문서도 같은 트랜잭션 안에서 읽어, 검사한 그 데이터가 확정되는 것을 보장한다.
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, collection, doc, getDocFromServer, getDocsFromServer, runTransaction } from "firebase/firestore";
 
 import config from "../firebase-applet-config.json" with { type: "json" };
-import { signInAsAdmin } from "./lib/admin-auth.mjs";
+import { signInAsPersonalAdmin } from "./lib/admin-auth.mjs";
 import { sectionStatus } from "./lib/close-guard.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,10 @@ if (!/^\d{4}-\d{2}$/.test(String(MONTH))) {
 
 const app = initializeApp(config);
 const db = getFirestore(app, config.firestoreDatabaseId);
-await signInAsAdmin(app);
+// 정직원 급여대장(monthly_fulltime_salary:*)은 급여 키라 PIN 관리자가 읽을 수 없다
+// (firestore.rules isSalaryKey → canReadSalary 는 PIN 계정을 의도적으로 제외).
+// signInAsAdmin 으로는 이 스크립트가 첫 조회에서 permission-denied 로 죽는다 — 개인 관리자 계정이 필요하다.
+await signInAsPersonalAdmin(app);
 
 const sharedRef = (dataKey) => doc(db, "shared_data", encodeURIComponent(dataKey));
 const salaryKey = (b) => `monthly_fulltime_salary:${b}:${MONTH}`;
@@ -94,19 +97,33 @@ if (skips.length) {
   console.log(`\n건너뜀 ${skips.length}곳`);
   skips.forEach((s) => console.log(`  - ${s.branchName}: ${s.why}`));
 }
-if (targets.length === 0) { console.log("\n확정할 지점이 없습니다."); process.exit(0); }
+if (targets.length === 0) {
+  // --commit 으로 불렀는데 한 곳도 확정하지 못했다면 실패로 끝낸다. 종료코드만 보는 자동화는
+  // '전부 이미 확정됨'과 '게이트에 걸려 하나도 자격이 없음'을 구분할 수 없다 — 위 건너뜀 사유를 읽게 해야 한다.
+  // dry-run 은 정보 조회이므로 0 으로 끝낸다. (다른 확정·시더 스크립트와 같은 규약)
+  console.log(`\n확정할 지점이 없습니다.${commit ? " (--commit 이었으나 쓴 것이 없어 실패로 끝냅니다 — 위 건너뜀 사유를 확인하세요)" : ""}`);
+  process.exit(commit ? 1 : 0);
+}
 if (!commit) { console.log("\ndry-run 입니다. 아무것도 쓰지 않았습니다. 실제로 확정하려면 --commit 을 붙이세요."); process.exit(0); }
 
 // ---------------------------------------------------------------- 백업 후 확정
 mkdirSync(resolve(SCRIPT_DIR, "backups"), { recursive: true });
 const backupPath = resolve(SCRIPT_DIR, "backups", `salary-close-backup-${MONTH}-${Date.now()}.json`);
-writeFileSync(backupPath, JSON.stringify({
-  month: MONTH,
+// monthly_closings 는 전 지점·전 섹션이 한 배열에 든 공유 문서다. 무조건 복구형 백업을 남기면,
+// 이 스크립트 실행 뒤 다른 지점이 제출한 마감기록까지 옛 배열로 되돌려 지운다.
+// 예비본은 '.pending' 에 unsafe 표식과 함께 두고, 커밋 뒤 조건부 복구형 정식 백업을 쓴다(다른 확정 스크립트와 동일).
+const pendingBackupPath = `${backupPath}.pending`;
+writeFileSync(pendingBackupPath, JSON.stringify({
+  month: MONTH, unsafe: true,
+  note: "트랜잭션 커밋 전 예비 스냅샷 — 이 파일로는 되돌릴 수 없다(실제 덮어쓴 값이 아님).",
   entries: [{ dataKey: CLOSINGS_KEY, previous: closingsSnap.exists() ? closingsSnap.data().value ?? null : null }],
 }, null, 2), "utf-8");
-console.log(`\n백업 저장: ${backupPath}`);
+console.log(`\n예비 백업: ${pendingBackupPath}`);
 
 const now = new Date().toISOString();
+// 트랜잭션이 실제로 읽은 직전 값과 실제로 쓴 값 — 정식 백업은 이 값으로 만든다.
+let livePreimage = null;
+let finalList = null;
 const applied = [];
 const aborted = [];
 
@@ -122,6 +139,8 @@ await runTransaction(db, async (tx) => {
   }
 
   let list = closeSnap.exists() && Array.isArray(closeSnap.data().value) ? [...closeSnap.data().value] : [];
+  // 트랜잭션이 실제로 읽은 직전 값(= 되돌릴 대상). 미리보기 시점 값과 다를 수 있다.
+  livePreimage = closeSnap.exists() ? closeSnap.data().value ?? null : null;
 
   for (const t of targets) {
     const branchName = t.branchName;
@@ -150,8 +169,17 @@ await runTransaction(db, async (tx) => {
   }
 
   if (applied.length === 0) throw new Error("확정할 대상이 남지 않았습니다(전부 상태가 바뀜). 아무것도 쓰지 않았습니다.");
+  finalList = list.map((r) => ({ ...r }));
   tx.set(sharedRef(CLOSINGS_KEY), { value: list, updatedAt: now });
 });
+
+// 정식 백업 — 실제로 덮어쓴 값 기준의 조건부 복구형. 이걸 쓴 뒤에야 예비본을 치운다.
+writeFileSync(backupPath, JSON.stringify({
+  month: MONTH,
+  entries: [{ dataKey: CLOSINGS_KEY, previous: livePreimage, expectedAfter: finalList, expectedUpdatedAt: now }],
+}, null, 2), "utf-8");
+rmSync(pendingBackupPath, { force: true });
+console.log(`백업 저장: ${backupPath}`);
 
 console.log(`\n확정 완료 ${applied.length}곳: ${applied.join(", ")}`);
 if (aborted.length) {
@@ -170,7 +198,11 @@ for (const branchName of applied) {
   if (!ok) failures++;
   console.log(`  ${ok ? "OK  " : "실패"} ${branchName.padEnd(20)} ${st}`);
 }
-console.log(failures === 0
-  ? "\n전체 검증 통과."
-  : `\n검증 실패 ${failures}건 — 되돌리려면: node scripts/revert-backup.mjs "${backupPath}" --commit`);
-process.exit(failures === 0 ? 0 : 1);
+// 성공 판정에 aborted 를 넣는다. 일부만 확정하고도 "통과"로 끝나면 그 달 마감이 다 된 것으로 오인된다
+// (다른 확정·시더 스크립트와 같은 게이트).
+console.log(`\n■ 결과  확정 ${applied.length}건 / 확정 직전 제외 ${aborted.length}건 / 대상이던 지점 ${targets.length}곳`);
+if (failures > 0) console.log(`검증 실패 ${failures}건 — 되돌리려면: node scripts/revert-backup.mjs "${backupPath}" --commit`);
+else if (applied.length === 0) console.log("확정된 지점이 없습니다 — 미리보기 이후 전부 상태가 바뀌었습니다.");
+else if (aborted.length) console.log("일부 지점이 제외됐습니다 — 위 목록을 확인하고 필요하면 다시 실행하세요.");
+else console.log("전체 검증 통과.");
+process.exit(failures === 0 && applied.length > 0 && aborted.length === 0 ? 0 : 1);

@@ -14,6 +14,10 @@ db_simulation.json
 # *.xlsx           : 지점별 거래처 이체리스트 등 원본 엑셀
 scripts/backups/
 *.xlsx
+# .ods(리브레오피스) 도 같은 성격 — 지점이 보내온 월말정산 원본이 이 형식으로도 온다.
+*.ods
+# 지점에서 받은 월말정산 원본을 모아 두는 작업 폴더. 매출·급여 실적이라 저장소에 두지 않는다.
+월말결산*/
 __pycache__/
 
 # firestore-backups/ : backup-firestore.mjs 가 뜨는 전체 컬렉션 스냅샷(개인정보·계좌 포함).
