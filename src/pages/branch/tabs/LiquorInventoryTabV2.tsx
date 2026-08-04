@@ -441,14 +441,14 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
       </div>
       <GuideCallouts open={guideOpen} steps={liquorGuideSteps} onClose={() => setGuideOpen(false)} />
 
-      {/* 상단은 '고르고 넣는' 도구 줄이다 — 카드 안에 카드를 겹쳐 넣으면 빈 공간만 커진다.
+      {/* 상단은 '고르고 넣는' 도구 줄이다 — 표준 제목 밴드 카드(DESIGN.md §6-3).
           분류 칩과 상품 등록 폼을 한 줄로 붙이고 여백·글자를 표 크기에 맞춰 줄였다. */}
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-        <div>
-          <h3 className="text-sm font-black text-gray-900 w-fit">주류 재고 관리표</h3>
-          <p className="text-[11px] text-gray-400 mt-1">재고 시트에 날짜별 입고·판매를 바로 적습니다.</p>
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">주류 재고 관리표</h3>
+          <p className="branch-band-meta">재고 시트에 날짜별 입고·판매를 바로 적습니다.</p>
         </div>
-        <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+        <div className="p-4 flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
           <div className="flex flex-wrap gap-1.5">
             {["전체", ...LIQUOR_CATEGORIES].map((item) => (
               <button
@@ -493,56 +493,50 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
         </div>
       </section>
 
-      {/* 섹션이 overflow-hidden이라 칩을 그 안에 두면 윗부분이 잘린다 — 테두리에 걸치도록 바깥에서 얹는다. */}
+      {/* 표준 제목 밴드 카드(DESIGN.md §6-3). 카드가 overflow-hidden이라 키 이동 칩은
+          카드 밖 relative 래퍼 기준으로 밴드 상단선에 걸친다. */}
       <div className="relative">
       <SheetKeyHint />
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="space-y-1.5">
-            {/* 다른 섹션 제목과 같은 h3 — 알약 디자인이 CSS에서 h3에 걸린다. p로 두면 그냥 글자로 보인다. */}
-            <h3 className="text-sm font-black text-gray-900 w-fit">재고 시트</h3>
-            <p className="text-[11px] text-gray-400 font-bold">
-              날짜 칸에 입고·판매를 바로 적으면 자동 저장됩니다.
-              <b className="text-slate-600"> 왼쪽으로 스크롤하면 이번 달 지난 날</b>을 볼 수 있습니다.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">재고 시트</h3>
+          {/* 월 이동은 밴드 필터 — 모양(28px 흰 알약)은 `.branch-band-filters` CSS 가 자동으로 입힌다. */}
+          <div className="branch-band-filters">
             <button
               type="button"
               onClick={() => setSheetMonth((current) => addMonthsToMonthInputValue(current, -1))}
-              className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50"
             >
               전월
             </button>
-            <span className="h-[38px] px-3 rounded-xl border border-slate-200 bg-slate-50 text-xs font-black text-slate-700 font-mono flex items-center">
+            <span className="flex h-[28px] items-center rounded-full border border-[#212121] bg-[#ffffff] px-3 text-[11px] font-black font-mono">
               {sheetMonth}
             </span>
             <button
               type="button"
               disabled={isCurrentMonth}
               onClick={() => setSheetMonth((current) => addMonthsToMonthInputValue(current, 1))}
-              className="h-[38px] px-3 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="disabled:opacity-40 disabled:cursor-not-allowed"
             >
               다음달
             </button>
-            <button
-              type="button"
-              onClick={() => setSheetMonth(currentMonth)}
-              className="h-[38px] px-3 rounded-xl border border-[#2E6DB4]/20 bg-[#2E6DB4]/10 text-xs font-black text-[#1A3C6E] hover:bg-[#2E6DB4]/15"
-            >
+            <button type="button" onClick={() => setSheetMonth(currentMonth)}>
               이번달
             </button>
+          </div>
+          {/* 설명문은 사용자 지시로 삭제(2026-08-04) — 작성방법 말풍선이 대신한다. */}
+          <div className="branch-band-actions">
             {!loaded ? (
-              <div className="h-[38px] px-4 rounded-xl bg-amber-50 text-amber-700 text-xs font-black flex items-center">불러오는 중…</div>
+              <div className="flex h-[28px] items-center rounded-full bg-amber-50 px-3 text-[11px] font-black text-amber-700">불러오는 중…</div>
             ) : saveStatus === "error" ? (
               // 클라우드에 못 올라간 값이 있다는 뜻 — 초록 배지로 "저장됨"이라 안심시키면 안 된다.
-              <div className="h-[38px] px-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-black flex items-center whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">
+              // 실패 경고색은 hex — bg-rose-* 는 지점 스코프가 안내색으로 치환해 경고가 죽는다(DESIGN.md §12).
+              <div className="flex h-[28px] items-center rounded-full bg-[#FDE2E2] px-3 text-[11px] font-black text-[#B91C1C] whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">
                 동기화 실패 · 재시도 중
               </div>
             ) : saveStatus === "saving" ? (
-              <div className="h-[38px] px-4 rounded-xl bg-amber-50 text-amber-700 text-xs font-black flex items-center">저장 중…</div>
+              <div className="flex h-[28px] items-center rounded-full bg-amber-50 px-3 text-[11px] font-black text-amber-700">저장 중…</div>
             ) : (
-              <div className="h-[38px] px-4 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-black flex items-center">자동저장됨</div>
+              <div className="flex h-[28px] items-center rounded-full bg-emerald-50 px-3 text-[11px] font-black text-emerald-700">자동저장됨</div>
             )}
           </div>
         </div>
@@ -553,26 +547,28 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
             className="text-xs border-separate border-spacing-0 table-fixed"
             style={{ width: FROZEN_W + sheetDates.length * COL_DAY_CELL_W * 3 }}
           >
-            <thead className="bg-[#202A5A] text-white font-black">
+            {/* 옛 네이비(bg-[#202A5A])·흰 글자 클래스는 스코프 CSS에 눌려 실제로 그려진 적 없는 죽은 코드였다 —
+                표준 엘리스 헤더 규칙(index.css)이 색·선을 담당한다(2026-08-04 정리). */}
+            <thead className="font-black">
               <tr>
                 <th
                   rowSpan={2}
                   style={{ left: 0, width: COL_CATEGORY_W, minWidth: COL_CATEGORY_W }}
-                  className="sticky top-0 z-30 bg-[#202A5A] p-1.5 text-left border-r border-white/20"
+                  className="sticky top-0 z-30 p-1.5 text-left border-r border-white/20"
                 >
                   분류
                 </th>
                 <th
                   rowSpan={2}
                   style={{ left: LEFT_ITEM, width: COL_ITEM_W, minWidth: COL_ITEM_W }}
-                  className="sticky top-0 z-30 bg-[#202A5A] p-1.5 text-left border-r border-white/20"
+                  className="sticky top-0 z-30 p-1.5 text-left border-r border-white/20"
                 >
                   상품명
                 </th>
                 <th
                   rowSpan={2}
                   style={{ left: LEFT_COST, width: COL_COST_W, minWidth: COL_COST_W }}
-                  className="sticky top-0 z-30 bg-[#202A5A] p-1.5 text-center whitespace-nowrap border-r border-white/20"
+                  className="sticky top-0 z-30 p-1.5 text-center whitespace-nowrap border-r border-white/20"
                   title="한 병(개)을 들여오는 가격입니다. 날짜와 무관한 상품 정보라 한 번 적으면 계속 유지됩니다."
                 >
                   입고가
@@ -580,7 +576,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                 <th
                   rowSpan={2}
                   style={{ left: LEFT_SALE, width: COL_SALE_W, minWidth: COL_SALE_W }}
-                  className="sticky top-0 z-30 bg-[#202A5A] p-1.5 text-center whitespace-nowrap border-r border-white/20"
+                  className="sticky top-0 z-30 p-1.5 text-center whitespace-nowrap border-r border-white/20"
                   title="손님에게 파는 가격입니다."
                 >
                   판매가
@@ -588,7 +584,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                 <th
                   rowSpan={2}
                   style={{ left: LEFT_MARGIN, width: COL_MARGIN_W, minWidth: COL_MARGIN_W }}
-                  className="sticky top-0 z-30 bg-[#202A5A] p-1.5 text-center whitespace-nowrap border-r border-white/20"
+                  className="sticky top-0 z-30 p-1.5 text-center whitespace-nowrap border-r border-white/20"
                   title="(판매가 − 입고가) ÷ 판매가. 자동 계산됩니다."
                 >
                   마진률
@@ -602,12 +598,12 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
                   월초
                 </th>
                 {sheetDates.map((date) => (
+                  // 헤더 배경·선은 index.css 표준 규칙(엘리스+검정선)이 칠한다(2026-08-04 밴드 이관).
+                  // 오늘 강조는 "오늘 입력" 라벨 + 본문 열의 rose 테두리 띠가 맡는다(§9-2 개정).
                   <th
                     key={date}
                     colSpan={3}
-                    className={`sticky top-0 z-20 p-1.5 text-center whitespace-nowrap border-l border-white/20 ${
-                      date === todayKey ? "bg-rose-600" : "bg-[#202A5A]"
-                    }`}
+                    className="sticky top-0 z-20 p-1.5 text-center whitespace-nowrap"
                   >
                     {date.slice(5)}
                     {date === todayKey && <span className="ml-1 text-[9px] font-black">오늘 입력</span>}

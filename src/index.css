@@ -2626,10 +2626,11 @@ input[type=number] {
 }
 
 .branch-redesign #tab-view-settle > div,
-.branch-redesign #tab-view-settle > section,
+.branch-redesign #tab-view-settle > section:not(.branch-sheet-card),
 .branch-redesign #tab-view-settle #settle-form,
-.branch-redesign #tab-view-settle [id*="section"],
-.branch-redesign #tab-view-settle [class*="space-y"] > section {
+/* [2026-08-04 밴드 이관] 표준 카드는 검정 테두리를 지킨다 — 제외. */
+.branch-redesign #tab-view-settle [id*="section"]:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle [class*="space-y"] > section:not(.branch-sheet-card) {
   border-color: rgba(33, 33, 33, 0.12) !important;
 }
 
@@ -2642,19 +2643,20 @@ input[type=number] {
 }
 
 .branch-redesign #settle-header-controls,
-.branch-redesign #sales-section,
-.branch-redesign #cash-closing-section,
-.branch-redesign #staff-attendance-section,
-.branch-redesign #memo-section,
+.branch-redesign #sales-section:not(.branch-sheet-card),
+.branch-redesign #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #memo-section:not(.branch-sheet-card),
 .branch-redesign #tab-view-settle div[class*="bg-white"][class*="rounded-2xl"] {
   border-color: rgba(33, 33, 33, 0.12) !important;
 }
 
 .branch-redesign #tab-view-settle,
 .branch-redesign #tab-view-settle > div,
+/* [2026-08-04 밴드 이관] 표준 카드(.branch-sheet-card)는 검정 1px 테두리를 지켜야 하므로 제외한다. */
 .branch-redesign #tab-view-settle > div > div,
-.branch-redesign #tab-view-settle > div > section,
-.branch-redesign #tab-view-settle section,
+.branch-redesign #tab-view-settle > div > section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle section:not(.branch-sheet-card),
 .branch-redesign #tab-view-settle div[class*="rounded-2xl"],
 .branch-redesign #tab-view-settle div[class*="rounded-3xl"] {
   border-color: rgba(33, 33, 33, 0.1) !important;
@@ -2662,10 +2664,10 @@ input[type=number] {
 }
 
 .branch-redesign #tab-view-settle #settle-header-controls,
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   border: 1px solid rgba(33, 33, 33, 0.1) !important;
 }
 
@@ -2766,11 +2768,11 @@ input[type=number] {
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -2832,11 +2834,11 @@ input[type=number] {
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -2856,10 +2858,11 @@ input[type=number] {
 /* 자식 선택자(> section)를 쓰면 안 된다.
    조작법 칩을 얹으려고 섹션을 relative 래퍼로 한 겹 감싸는 순간 손자가 되어 규칙에서 빠지고,
    그 카드만 테두리가 사라진다. 깊이와 무관하게 걸리도록 후손 선택자로 둔다. */
-.branch-redesign #orders-tab-view section,
-.branch-redesign #liquor-inventory-tab section,
-.branch-redesign #tab-view-orders #orders-tab-view section,
-.branch-redesign #tab-view-liquorInventory #liquor-inventory-tab section {
+/* [2026-08-04 밴드 이관] 표준 카드는 자체 규격(16px·검정 1px·그림자 없음)을 지킨다 — 제외. */
+.branch-redesign #orders-tab-view section:not(.branch-sheet-card),
+.branch-redesign #liquor-inventory-tab section:not(.branch-sheet-card),
+.branch-redesign #tab-view-orders #orders-tab-view section:not(.branch-sheet-card),
+.branch-redesign #tab-view-liquorInventory #liquor-inventory-tab section:not(.branch-sheet-card) {
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
   box-shadow: 0 16px 38px rgba(33, 33, 33, 0.035) !important;
@@ -3155,11 +3158,11 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 }
 
 .branch-redesign #tab-view-settle #settle-header-controls,
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -3377,11 +3380,11 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -3411,11 +3414,11 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -3469,11 +3472,11 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -3833,8 +3836,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   border: 1px solid var(--branch-black) !important;
 }
 
-.branch-redesign #orders-tab-view > section,
-.branch-redesign #liquor-inventory-tab > section,
+.branch-redesign #orders-tab-view > section:not(.branch-sheet-card),
+.branch-redesign #liquor-inventory-tab > section:not(.branch-sheet-card),
 .branch-redesign #roster-tab-view > div.bg-white,
 .branch-redesign #office-work-log-tab > div.bg-white,
 .branch-redesign #tab-view-overtimeLog > div > div.bg-white,
@@ -3855,8 +3858,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 
 .branch-redesign #tab-view-settle #settle-header-controls,
 .branch-redesign #tab-view-settle #settlement-finance-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -4056,11 +4059,11 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   padding: 0 !important;
 }
 
-.branch-redesign #tab-view-settle #sales-section,
-.branch-redesign #tab-view-settle #expenses-section > div,
-.branch-redesign #tab-view-settle #cash-closing-section,
-.branch-redesign #tab-view-settle #staff-attendance-section,
-.branch-redesign #tab-view-settle #memo-section {
+.branch-redesign #tab-view-settle #sales-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #expenses-section > div:not(.expense-grid-wrap),
+.branch-redesign #tab-view-settle #cash-closing-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #staff-attendance-section:not(.branch-sheet-card),
+.branch-redesign #tab-view-settle #memo-section:not(.branch-sheet-card) {
   background: var(--branch-ghost) !important;
   border: 1px solid var(--branch-black) !important;
   border-radius: 28px !important;
@@ -4175,8 +4178,10 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   border: 1px solid var(--branch-black) !important;
   color: var(--branch-black) !important;
 }
-/* 발주 매트릭스 헤더 — 분류마다 색을 달리한다(DESIGN.md §12).
-   2026-07-31에 전부 엘리스로 통일해 봤다가, 분류 구분이 어려워 곧바로 원래대로 되돌렸다(사용자 확인). */
+/* 분류색이 사는 자리(DESIGN.md §12): 밴드의 대분류 셀렉트 · 거래처 추가 카드의 셀렉트/칩.
+   [개정 2026-08-04] 매트릭스 '머리글'은 더 이상 이 색을 쓰지 않는다 — 밴드 이관으로 머리글이 표준
+   엘리스가 되면서(파일 뒤쪽 `#orders-tab-view thead th` 규칙이 이 배경을 덮는다) 2026-07-31의
+   "머리글 분류색" 결정은 폐기됐다(사용자 지시 — 바닐라 밴드와 뭉개져 보임). */
 .branch-redesign .order-cat-food {
   background: var(--branch-vanilla) !important;
 }
@@ -4194,6 +4199,60 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
    색(분류)은 그대로 두고 테두리만 연하게 낮춘다. */
 .branch-redesign .order-cat-soft {
   border-color: rgba(33, 33, 33, 0.14) !important;
+}
+
+/* [밴드 이관 2026-08-04] 발주내역 리포트의 대분류 셀렉트가 밴드 필터로 들어갔다.
+   `.branch-band-filters :where(...)` 흰 알약 강제(파일 뒤쪽, 같은 !important)가 위 .order-cat-* 를
+   순서로 이기므로, 특이성(0,3,1)을 높여 분류색을 되살린다. 값은 위 .order-cat-* 와 동일하게 유지할 것. */
+.branch-redesign .branch-band-filters select.order-cat-food { background: var(--branch-vanilla) !important; }
+.branch-redesign .branch-band-filters select.order-cat-side { background: var(--branch-alice) !important; }
+.branch-redesign .branch-band-filters select.order-cat-liquor { background: var(--branch-honey) !important; }
+.branch-redesign .branch-band-filters select.order-cat-etc { background: #ffffff !important; }
+
+/* [2026-08-04 사용자 지시] 발주내역 리포트 머리글 = 표준 엘리스(§9-1 — 밴드 탭 헤더).
+   대분류색 머리글(2026-07-31 결정)은 밴드 이관 뒤 바닐라 밴드와 한 덩어리로 뭉개져 폐기했다 —
+   분류색은 밴드의 대분류 셀렉트와 거래처 추가 카드의 칩이 계속 보여 준다.
+   `html body …` 접두는 고정칸 ghost 규칙(`html body .branch-redesign.branch-redesign .sticky`, 0,3,2)과
+   `.order-cat-*`(0,2,0)를 특이성으로 이기기 위해 필요하다 — 줄이면 색이 도로 사라진다. */
+html body .branch-redesign.branch-redesign #orders-tab-view thead th {
+  background: var(--branch-alice) !important;
+  color: #212121 !important;
+  /* 머리글 선은 오른쪽·아래만(§9-1-A). `.order-cat` 가 사방 1px 검정을 강제해
+     윗선이 밴드 아래선과 겹쳐 두 줄로 보였다(사용자 지적 2026-08-04). */
+  border: 0 !important;
+  border-right: 1px solid var(--branch-black) !important;
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+/* 맨 오른쪽 '일 합계' 칸(첫 줄, rowSpan)의 오른쪽 선은 카드 테두리가 이미 그린다 — 뺀다.
+   th:last-child 를 그냥 쓰면 둘째 줄 마지막 거래처 칸까지 걸리므로 첫 줄만 짚는다(§9-1-A 함정). */
+html body .branch-redesign.branch-redesign #orders-tab-view thead tr:first-child > th:last-child {
+  border-right: 0 !important;
+}
+/* 일 컬럼(왼쪽 고정 날짜열)도 머리글과 같은 엘리스(사용자 지시). 커서 행 띠(box-shadow 막)는 그 위에 그대로 얹힌다.
+   td.sticky 전체가 아니라 날짜 셀 전용 클래스로 좁힌다 — 하단 합계행의 '합계' 고정칸까지 물들면
+   요약 행 성격이 깨진다(Codex 2차 P2). */
+html body .branch-redesign.branch-redesign #orders-tab-view tbody td.order-day-cell {
+  background: var(--branch-alice) !important;
+}
+
+/* [2026-08-04 사용자 지시] 주류 재고 시트 머리글(첫 줄: 분류·상품명·입고가·판매가·마진률·월초·날짜) = 표준 엘리스.
+   둘째 줄(입/판/재)은 본문 열 색과 짝이라 배경은 그대로 둔다. 특이성 사정은 위 발주 머리글 규칙과 같다.
+   선은 오른쪽·아래만 1px 검정(§9-1-A) — 원래 border-white/20 이라 엘리스 위에서 격자가 안 보였다(사용자 지적). */
+html body .branch-redesign.branch-redesign #liquor-inventory-tab thead tr:first-child th {
+  background: var(--branch-alice) !important;
+  color: #212121 !important;
+  border: 0 !important;
+  border-right: 1px solid var(--branch-black) !important;
+  border-bottom: 1px solid var(--branch-black) !important;
+}
+/* 월초(고정 구간 끝) 칸만 본문과 같은 2px 진한 경계를 유지 — 헤더만 1px 이면 같은 세로선이 중간에 얇아진다. */
+html body .branch-redesign.branch-redesign #liquor-inventory-tab thead tr:first-child th.liquor-stock-alice-green {
+  border-right: 2px solid #0f172a !important;
+}
+/* 둘째 줄(입/판/재) 아래 선도 같은 1px 검정으로 — 왼쪽 고정 구간(rowSpan 칸)의 아래 선과 이어져
+   머리글 전체가 한 줄로 닫힌다(종전 black/20 은 옆 구간보다 옅어 끊겨 보였다). */
+html body .branch-redesign.branch-redesign #liquor-inventory-tab thead tr:nth-child(2) th {
+  border-bottom: 1px solid var(--branch-black) !important;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -4334,20 +4393,13 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   background: transparent !important;
 }
 
-/* 구획 제목 줄 — 투명·무테두리, 바닐라 알약이 컬럼 위에 얹힌다.
-   제목↔표 간격은 지출내역 섹션(space-y-4=16px)과 동일하게 맞춘다(DESIGN.md §6-3). */
-.branch-redesign #sales-section .settle-group-th {
-  background: transparent !important;
-  border: 0 !important;
-  padding: 0 0 16px 2px;
-  text-align: left;
-  vertical-align: bottom;
-}
+/* (구획 제목 줄(.settle-group-th)은 밴드 이관(2026-08-04)으로 삭제 — 제목은 카드 밴드가 맡는다.) */
 
-/* 컬럼 라벨셀(엑셀 헤더) — 바닐라 + 검정 격자, 볼드 12px 솔리드 검정.
-   내부 구분선은 각 셀 오른쪽 테두리가 맡고, 그룹 시작셀(is-groupstart: 마감정보 첫칸·매출 첫칸)만 왼쪽을 닫는다. */
+/* 컬럼 라벨셀(엑셀 헤더) — 밴드 탭 표준 엘리스 + 검정 격자, 볼드 11px 솔리드 검정(DESIGN.md §9-1).
+   표가 밴드 바로 아래 붙으므로 위 선은 긋지 않는다(§9-1-A — 밴드 아래선과 겹쳐 두 줄이 된다).
+   내부 구분선은 각 셀 오른쪽 테두리가 맡고, 그룹 시작셀(is-groupstart: 매출 첫칸·리뷰 칸)만 왼쪽을 닫는다. */
 .branch-redesign #sales-section .settle-col-th {
-  background: var(--branch-vanilla) !important;
+  background: var(--branch-alice) !important;
   color: var(--branch-black) !important;
   font-weight: 900;
   /* 컬럼 헤더 폰트는 섹션 제목 알약과 동일하게 11px (DESIGN.md §6·§9-1) */
@@ -4355,12 +4407,15 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   text-align: center;
   white-space: nowrap;
   padding: 6px 8px;
-  border-top: 1px solid var(--branch-black) !important;
   border-right: 1px solid var(--branch-black) !important;
   border-bottom: 1px solid var(--branch-black) !important;
 }
 .branch-redesign #sales-section .settle-col-th.is-groupstart {
   border-left: 1px solid var(--branch-black) !important;
+}
+/* 표가 카드 왼쪽 끝에 붙으므로 첫 칸의 왼쪽 선은 카드 테두리가 대신 그린다(§9-1-A). */
+.branch-redesign #sales-section .settle-col-th:first-child {
+  border-left: 0 !important;
 }
 
 /* 입력셀(엑셀 본문) — 옅은 검정 격자. 셀 높이는 근무자 표와 동일한 h-9(36px, DESIGN.md §9-1) */
@@ -4373,6 +4428,20 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
 }
 .branch-redesign #sales-section .settle-cell.is-groupstart {
   border-left: 1px solid rgba(33, 33, 33, 0.1) !important;
+}
+/* 첫 칸(날짜)의 왼쪽 선도 카드 테두리가 대신 그린다(§9-1-A). */
+.branch-redesign #sales-section .settle-cell:first-child {
+  border-left: 0 !important;
+}
+
+/* [밴드 이관 2026-08-04] 미니달력이 absolute 드롭다운으로 카드 밖까지 열린다 —
+   표준 카드의 overflow:hidden 을 이 카드만 풀고, 대신 밴드 위 모서리를 카드 곡률에 맞춰 깎는다
+   (풀지 않으면 달력 아랫부분이 카드 경계에서 잘린다). */
+.branch-redesign #sales-section.branch-sheet-card {
+  overflow: visible;
+}
+.branch-redesign #sales-section.branch-sheet-card > .branch-band {
+  border-radius: 15px 15px 0 0;
 }
 
 /* 간격 컬럼 — 두 구획 사이의 '약간의 간격'. 테두리·배경 없이 비워 둔다. */
@@ -4515,8 +4584,8 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
    두 벌을 따로 두는 이유는 DESIGN_ADMIN.md §1 — 지점/관리자 토큰은 서로를 참조하지 않아서,
    관리자 클래스를 지점 화면에 쓰면 변수 미정의로 배경이 아예 안 칠해진다.
 
-   [적용 범위] 지금은 **월말 업무 · 인사·기타** 탭만 이 모양이다. 일일 업무 탭들은 아직
-   알약 제목(.branch-pill-title) + 바닐라 헤더를 쓴다 — 손댈 때 함께 옮긴다.
+   [적용 범위] **월말 업무 · 인사·기타 · 일일 업무(일일마감·주류재고·발주)** 전부 이 모양이다
+   (일일 업무는 2026-08-04 이관). 지점 대시보드만 자체 카드(.branch-dash-card)를 쓴다.
 
    쓰는 법은 DESIGN_ADMIN.md §4-0 과 동일:
      <section className="branch-sheet-card">
@@ -4722,6 +4791,19 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
    사파리 등 일부 브라우저는 OS 렌더링이라 무시할 수 있다 — 그래서 칸 색이 본체다.) */
 .branch-redesign #expenses-section option.expense-usage-transfer-option {
   background: var(--branch-vanilla);
+  color: #212121;
+  font-weight: 900;
+}
+
+/* '현금입금' 지출분류 강조(사용자 지시 2026-08-04) — 지출이 아니라 입금이라 갈라 보여야 한다.
+   계좌이체(바닐라)와 같은 방식, 색만 허니듀. 특이성·함정 사정은 위 expense-usage-transfer 규칙과 같다. */
+.branch-redesign #expenses-section select.expense-class-cashin {
+  background: var(--branch-honey) !important;
+  color: #212121 !important;
+  font-weight: 900 !important;
+}
+.branch-redesign #expenses-section option.expense-class-cashin-option {
+  background: var(--branch-honey);
   color: #212121;
   font-weight: 900;
 }
