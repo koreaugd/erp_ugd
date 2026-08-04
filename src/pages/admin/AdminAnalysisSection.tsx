@@ -74,11 +74,15 @@ function SummaryMomText({ mom, tone }: { mom: string; tone?: SummaryTone }) {
 function renderSummaryCells(col: SummaryCol, key: number, negBad?: boolean) {
   return (
     <Fragment key={key}>
-      {/* admin-group-start = 항목 그룹(매출/인건비/…) 경계선. nth-child 로 그으면 colSpan 쓰는 정산부 행과
-          마지막 이익비중 칸에서 위치가 어긋난다(Codex P2) — 셀에 직접 클래스로 박는다. */}
-      <td className={`admin-group-start py-1.5 px-2 text-right font-mono font-bold ${negBad && col.amount < 0 ? "admin-rate-hot" : "text-gray-700"}`}>{formatNumber(col.amount)}</td>
+      {/* admin-group-end = 항목 그룹(매출/인건비/…) 경계선. nth-child 로 그으면 colSpan 쓰는 정산부 행과
+          마지막 이익비중 칸에서 위치가 어긋난다(Codex P2) — 셀에 직접 클래스로 박는다.
+          [왜 '끝' 칸인가 — 2026-08-03] 예전엔 그룹의 **첫 칸 왼쪽**(admin-group-start)에 그었다.
+          그런데 표의 다른 세로선(본문 격자·헤더 격자)은 전부 **칸의 오른쪽**에 그린다. 경계가 같은 자리인데
+          한쪽은 왼쪽, 한쪽은 오른쪽에 그리니 **선 두 개가 나란히 서서 겹쳐 보였다**(사용자 지적).
+          그룹의 **마지막 칸 오른쪽**으로 옮겨 다른 선들과 같은 픽셀에 겹치게 했다 — 이제 한 줄이다. */}
+      <td className={`py-1.5 px-2 text-right font-mono font-bold ${negBad && col.amount < 0 ? "admin-rate-hot" : "text-gray-700"}`}>{formatNumber(col.amount)}</td>
       <td className="py-1.5 px-2 text-right font-mono text-gray-400">{col.share === null ? "—" : `${(col.share * 100).toFixed(1)}%`}</td>
-      <td className="py-1.5 px-2 text-right"><SummaryMomText mom={col.mom} tone={col.tone} /></td>
+      <td className="admin-group-end py-1.5 px-2 text-right"><SummaryMomText mom={col.mom} tone={col.tone} /></td>
     </Fragment>
   );
 }
@@ -100,54 +104,64 @@ function renderHqLine(line: HqStatementLine) {
 }
 
 /**
- * 지점 손익계산서 탭의 지점 선택 — 드롭다운 대신 **전 지점을 한 줄에 펼친다**(2026-07-23 사용자 지시:
- * "드롭다운이 불편하다"). WAI-ARIA 탭 패턴대로 tablist/tab + ←/→·Home/End 를 배선하고, 마우스만 쓰는
- * 사람을 위해 좌우 화살표 버튼도 함께 둔다. 칩 모양은 다른 관리자 토글과 같은 `.admin-period-chip`.
+ * 결산월 드롭다운 — 줄의 **맨 왼쪽**에 둔다(사용자 지시 2026-08-03).
+ * "지금 몇 월을 보고 있나"는 화면 해석의 전제라, 오른쪽 끝 도구 묶음에 섞이면 눈에 안 들어온다.
+ * 칩 모양·색은 `.admin-band-filters`(흰 바탕)가 정한다 — 여기서 다시 칠하지 않는다.
  */
-function BranchTabPicker({ branches, value, onChange }: { branches: string[]; value: string; onChange: (branch: string) => void }) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const index = Math.max(0, branches.indexOf(value));
-  /** 순환 이동. 키보드로 옮겼을 때만 그 칩에 포커스를 옮긴다 —
-   *  화살표 버튼 클릭에서까지 옮기면 연속 클릭 중에 포커스가 버튼에서 빠져나간다. */
-  const move = (next: number, focusChip: boolean) => {
-    if (branches.length === 0) return;
-    const bounded = ((next % branches.length) + branches.length) % branches.length;
-    onChange(branches[bounded]);
-    if (focusChip) listRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']")[bounded]?.focus();
-  };
-  if (branches.length === 0) return null;
+function AnalysisMonthPicker({ month, months, onChange }: { month: string; months: string[]; onChange: (v: string) => void }) {
+  if (months.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5">
-      <button type="button" aria-label="이전 지점" onClick={() => move(index - 1, false)}
-        className="admin-period-chip h-7 w-7 shrink-0 rounded-full text-[13px] font-black leading-none cursor-pointer">‹</button>
-      <div ref={listRef} role="tablist" aria-label="지점 선택" className="flex flex-wrap gap-1 min-w-0">
-        {branches.map((b, i) => (
-          <button
-            key={b}
-            type="button"
-            role="tab"
-            aria-selected={b === value}
-            // 탭 목록은 통째로 탭키 정지점 하나만 갖는다(선택된 칩). 그 안에서는 방향키로 옮긴다.
-            tabIndex={b === value ? 0 : -1}
-            onClick={() => onChange(b)}
-            onKeyDown={(e) => {
-              const step = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1
-                : e.key === "Home" ? 0 : e.key === "End" ? branches.length - 1 : null;
-              if (step === null) return;
-              e.preventDefault();
-              move(step, true);
-            }}
-            className={`admin-period-chip h-7 px-2.5 rounded-full text-[11px] font-black cursor-pointer ${b === value ? "is-active" : ""}`}
-          >
-            {b}
-          </button>
-        ))}
-      </div>
-      <button type="button" aria-label="다음 지점" onClick={() => move(index + 1, false)}
-        className="admin-period-chip h-7 w-7 shrink-0 rounded-full text-[13px] font-black leading-none cursor-pointer">›</button>
+    <div className="admin-band-filters">
+      <select value={month} onChange={(e) => onChange(e.target.value)} aria-label="결산월 선택">
+        {months.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
     </div>
   );
 }
+
+/**
+ * 분석 탭 공통 컨트롤 — 월 선택 · db파일 업로드 · 새로고침.
+ *
+ * 예전에는 화면 맨 위에서 **한 줄(카드 하나)을 통째로** 차지했다. 정작 매달 바꾸는 건 월 하나뿐인데
+ * 표가 그만큼 아래로 밀렸다(2026-08-03 사용자 지시로 정리). 이제 탭마다 이미 있는 줄
+ * ([손익 종합|본사 종합] 칩 · 지점 드롭다운) **오른쪽 끝**에 얹는다.
+ *
+ * 크기·모양은 `.admin-band-filters`(DESIGN_ADMIN.md §4-0)를 그대로 빌린다 — 값을 새로 정하지 않아야
+ * 다른 화면 필터와 같은 덩치로 유지된다. `ml-auto` 로 그 줄의 오른쪽 끝에 붙는다.
+ */
+function AnalysisTopControls({ onUpload, uploading, onRefresh, loading, uploadedAtLabel }: {
+  onUpload: (file: File) => void;
+  uploading: boolean;
+  onRefresh: () => void;
+  loading: boolean;
+  uploadedAtLabel: string;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <div className="admin-band-filters ml-auto">
+      <input ref={fileRef} type="file" accept=".xlsx" className="hidden" aria-label="db파일 업로드"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUpload(f);
+          // 같은 파일을 다시 올릴 수 있게 값을 비운다 — 안 비우면 두 번째부터 change 가 안 뜬다.
+          e.target.value = "";
+        }} />
+      {/* 마지막 업로드 시각은 줄을 하나 더 쓰지 않도록 **툴팁**으로 옮겼다(마우스를 올리면 보인다). */}
+      <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+        title={uploadedAtLabel ? `마지막 업로드: ${uploadedAtLabel}` : "04 에이전트의 db파일.xlsx 를 올립니다"}>
+        {uploading ? "업로드 중…" : "db파일"}
+      </button>
+      <button type="button" onClick={onRefresh} disabled={loading}>
+        {loading ? "불러오는 중…" : "새로고침"}
+      </button>
+    </div>
+  );
+}
+
+/* [2026-08-03] 지점 손익계산서의 지점 선택은 **드롭다운**이다(사용자 지시).
+   2026-07-23에 '드롭다운이 불편하다'는 지시로 전 지점을 한 줄에 펼치는 칩(BranchTabPicker)을 썼었는데,
+   지점이 늘어 칩 줄이 두 줄로 접히면서 월 선택·업로드 같은 공통 컨트롤을 같은 줄에 얹을 자리가 없어졌다.
+   그래서 칩 구현은 걷어내고 select 로 되돌렸다(구현을 남겨 두면 죽은 코드가 된다 — 필요하면 이 커밋에서 꺼낸다). */
 
 /** PRIME 상태 배지 — 목표(60%) 이하 허니 / 60~70 바닐라 / 70 초과 빨강(05 PNG 의 PRIME 배지). */
 function PrimeBadge({ value }: { value: number | null }) {
@@ -171,7 +185,6 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
   // 손익 종합 페이지 상단 모드 탭: 요약표(table) / 본사 종합(trend, 전지점 총합이라 지점 선택 없음).
   const [summaryMode, setSummaryMode] = useState<"table" | "trend">("table");
   const requestRef = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -251,7 +264,8 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
       setUploadMessage("업로드 실패: 파일을 처리하지 못했습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      // 고른 파일을 비우는 일은 <input> 을 들고 있는 AnalysisTopControls 가 맡는다
+      // (같은 파일을 연달아 올릴 때 change 이벤트가 안 뜨는 것을 막는 처리다).
     }
   };
 
@@ -357,30 +371,12 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
 
   return (
     <section className="space-y-5">
-      {/* 필터 + 업로드 (세 탭 공통) — 페이지 제목은 사용자 지시로 뺐다(2026-07-22, 표가 바로 보이게) */}
-      <section className="admin-sales-filter-section bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <select value={month} onChange={(e) => setMonth(e.target.value)}
-            className="h-8 rounded-lg border border-gray-200 px-2 text-[11px] font-bold" aria-label="분석 월 선택">
-            {months.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-          {/* 지점 선택은 드롭다운을 걷어내고 아래 전용 줄(BranchTabPicker)로 옮겼다(2026-07-23 사용자 지시). */}
-          {uploadedAtLabel &&<span className="text-[11px] font-bold text-gray-400">마지막 업로드: {uploadedAtLabel}</span>}
-          <div className="ml-auto flex items-center gap-2">
-            <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" aria-label="db파일 업로드"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUpload(f); }} />
-            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-              className="h-8 px-3 rounded-xl bg-slate-800 text-white text-[11px] font-black disabled:opacity-50">
-              {uploading ? "업로드 중…" : "db파일 업로드"}
-            </button>
-            <button onClick={() => void load()} disabled={loading}
-              className="h-8 px-3 rounded-xl bg-slate-100 text-slate-600 text-[11px] font-black disabled:opacity-50">
-              {loading ? "불러오는 중…" : "새로고침"}
-            </button>
-          </div>
-        </div>
-        {uploadMessage && <p className={`text-[11px] font-black ${uploadMessage.startsWith("업로드 완료") ? "text-gray-500" : "admin-rate-hot"}`}>{uploadMessage}</p>}
-      </section>
+      {/* [2026-08-03 사용자 지시] 월 선택·db파일 업로드·새로고침이 화면 맨 위에서 **한 줄을 통째로**
+          쓰고 있었다. 탭마다 이미 있는 줄(모드 칩 · 지점 선택) 오른쪽 끝에 얹어 세로 공간을 돌려준다.
+          → 아래 각 탭의 `<AnalysisTopControls />` 참고. 여기는 안내 문구만 남긴다. */}
+      {uploadMessage && (
+        <p className={`text-[11px] font-black ${uploadMessage.startsWith("업로드 완료") ? "text-gray-500" : "admin-rate-hot"}`}>{uploadMessage}</p>
+      )}
 
       {loadError && <p className="text-xs font-black text-rose-600">손익DB를 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요.</p>}
       {!loading && !loadError && rows.length === 0 && (
@@ -391,23 +387,66 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
         <p className="text-xs font-black text-rose-600">{month} 데이터가 없습니다. db파일을 갱신해 업로드해주세요.</p>
       )}
 
+      {/* ── 탭별 상단 줄 (2026-08-03) ─────────────────────────────────────────────────
+          공통 컨트롤(월·db파일 업로드·새로고침)을 예전엔 화면 맨 위 카드가 한 줄 통째로 들고 있었다.
+          그걸 없애고 탭마다 이미 있는 줄(모드 칩·지점 드롭다운) 오른쪽 끝에 얹었다.
+
+          [P0] 이 줄은 **데이터가 없어도 반드시 그린다.** 탭 본문(`curRows.length > 0`) 안에 넣었더니
+          손익DB가 비었을 때 업로드 버튼까지 같이 사라져, "db파일 업로드로 올려주세요" 안내만 뜨고
+          정작 올릴 방법이 없는 막다른 화면이 됐다(코덱스 리뷰 2026-08-03). 그래서 본문과 분리한다.
+          ──────────────────────────────────────────────────────────────────────── */}
+      {view === "summary" && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AnalysisMonthPicker month={month} months={months} onChange={setMonth} />
+          {/* 모드 탭: [손익 종합]=요약표·순위표 / [본사 종합]=05 본사 대시보드(KPI·추이·손익계산서) */}
+          {[{ id: "table", label: "손익 종합" }, { id: "trend", label: "본사 종합" }].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setSummaryMode(m.id as "table" | "trend")}
+              aria-pressed={summaryMode === m.id}
+              className={`admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black ${summaryMode === m.id ? "is-active" : ""}`}
+            >
+              {m.label}
+            </button>
+          ))}
+          <AnalysisTopControls
+            onUpload={(f) => void handleUpload(f)} uploading={uploading}
+            onRefresh={() => void load()} loading={loading} uploadedAtLabel={uploadedAtLabel}
+          />
+        </div>
+      )}
+      {view === "charts" && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AnalysisMonthPicker month={month} months={months} onChange={setMonth} />
+          <AnalysisTopControls
+            onUpload={(f) => void handleUpload(f)} uploading={uploading}
+            onRefresh={() => void load()} loading={loading} uploadedAtLabel={uploadedAtLabel}
+          />
+        </div>
+      )}
+      {view === "branch" && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AnalysisMonthPicker month={month} months={months} onChange={setMonth} />
+          {/* 지점 선택 드롭다운. 크기·모양은 `.admin-band-filters` 를 빌린다(값 재정의 금지 — §4-0).
+              지점 목록이 비어도(=DB 없음) 컨트롤 줄 자체는 남아야 업로드로 복구할 수 있다. */}
+          {branchNames.length > 0 && (
+            <div className="admin-band-filters">
+              <select value={branch} onChange={(e) => setBranchPick(e.target.value)} aria-label="지점 선택" className="min-w-36">
+                {branchNames.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
+          <AnalysisTopControls
+            onUpload={(f) => void handleUpload(f)} uploading={uploading}
+            onRefresh={() => void load()} loading={loading} uploadedAtLabel={uploadedAtLabel}
+          />
+        </div>
+      )}
+
       {/* ─────────────── ① 손익 종합 ─────────────── */}
       {!loading && view === "summary" && curRows.length > 0 && (
         <>
-          {/* 상단 모드 탭: [손익 종합]=요약표·순위표 / [본사 종합]=05 본사 대시보드(KPI·추이·손익계산서) */}
-          <div className="flex gap-1.5">
-            {[{ id: "table", label: "손익 종합" }, { id: "trend", label: "본사 종합" }].map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setSummaryMode(m.id as "table" | "trend")}
-                aria-pressed={summaryMode === m.id}
-                className={`admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black ${summaryMode === m.id ? "is-active" : ""}`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
 
           {/* 본사 종합 — 05 본사 대시보드/손익계산서 PNG 재현(전지점 총합 기준이라 지점 선택 없음).
               표시용 총매출=전지점 이익금 합계, 이익률 분모=전사 총매출. 산식·검증은 pnlDb.buildHqOverview. */}
@@ -489,10 +528,29 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
               읽기 전용 엑셀형(DESIGN.md §9): 바닐라+검정 격자 헤더(§9-1) · 헤더/매장명 열 스크롤 고정 ·
               클릭한 행에 §9-3 커서 띠. 재료비=식재료+주류원가 · 하단 정산부는 본사 행 기준. */}
           {summaryTable && (
-            <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-              <div>
-                <h2 className="admin-pill-title">손익 요약표</h2>
-                <p className="text-xs text-gray-400 mt-2">{month} · 전월({prevMonthOf(month)}) 대비 증감 · 본사 손익요약표와 동일 산식 (매출 순) · 행을 클릭하면 표시됩니다</p>
+            <section className="admin-sales-overview-section admin-summary-card bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              {/* 제목 밴드 — 월말업무 > 제출현황 탭과 같은 문법(사용자 지시 2026-08-03).
+                  제목을 알약으로 띄우지 않고 **표 전체 폭에 띠로 깐 뒤 컬럼 헤더를 바로 아래 붙인다.**
+                  띠(연한 바닐라)와 컬럼 줄(엘리스)이 두 톤으로 갈라져, 어디까지가 제목이고
+                  어디부터가 표인지 한눈에 나뉜다.
+                  · 바닐라는 `bg-amber-50` 이 관리자 스코프에서 `--admin-vanilla` 로 치환된 값이다(DESIGN_ADMIN §3).
+                  · 컬럼 줄의 엘리스는 `.admin-design-preview .admin-sales-overview-section th` 가 `!important` 로
+                    이미 주고 있다 — 여기서 색을 또 주면 규칙이 두 곳으로 갈라진다.
+                  · [주의] 띠는 스크롤 칸(.admin-summary-scroll) **바깥**에 둔다. 안에 넣으면 표를 옆으로
+                    밀 때 제목까지 같이 밀려 나간다(제출현황도 같은 이유로 바깥에 있다).
+                  · 카드에 `overflow-hidden` 이 필요하다 — 없으면 띠의 위쪽 모서리가 카드의 둥근 모서리
+                    밖으로 삐져나온다. 대신 `p-5` 를 걷어내고 띠·각주가 각자 여백을 갖는다. */}
+              {/* [높이 53px] 제출현황 밴드와 세로폭을 같게 맞춘다(사용자 지시 2026-08-03).
+                  그쪽은 `py-2.5`(위아래 10px) + 안에 든 **h-8(32px) 다운로드 버튼** + 아래 선 1px = 53px 이다.
+                  이 밴드에는 버튼이 없어 글자 높이(약 17px)만큼밖에 안 서므로, 같은 여백을 줘도 37px 에 그친다.
+                  그래서 최소 높이를 직접 못 박는다 — `items-center` 라 내용은 가운데에 선다.
+                  (box-sizing 이 border-box 라 53px 안에 위아래 여백 20px + 아래 선 1px 이 포함된다.) */}
+              <div className="admin-band">
+                {/* 제목만 14px(.admin-band-title) — 제출현황 밴드 제목과 같은 크기다.
+                    분석 탭은 `.admin-analysis-uniform` 이 전부 11px 로 누르므로 **클래스로만** 예외를 준다
+                    (여기에 text-sm 을 적으면 !important 에 덮여 죽은 코드가 된다). 설명 문구는 11px 유지. */}
+                <h3 className="admin-band-title">손익 요약표</h3>
+                <p className="admin-band-meta">{month} · 전월({prevMonthOf(month)}) 대비 증감 · 본사 손익요약표와 동일 산식 (매출 순) · 행을 클릭하면 표시됩니다</p>
               </div>
               <div className="admin-summary-scroll">
                 <table className="w-full min-w-[1040px] admin-summary-table">
@@ -502,7 +560,9 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                       {summaryTable.columns.map((c) => (
                         <th key={c} colSpan={3} className="admin-sum-h1 py-1.5 px-2">{c}</th>
                       ))}
-                      <th rowSpan={2} className="admin-sum-h1 py-2 px-2 text-center">이익비중</th>
+                      {/* admin-col-last = 표의 맨 오른쪽 칸. 여기에 세로선을 그으면 바로 옆 카드 테두리와
+                          검정 선이 두 줄로 붙어 보인다(index.css 의 .admin-col-last 참고). */}
+                      <th rowSpan={2} className="admin-sum-h1 admin-col-last py-2 px-2 text-center">이익비중</th>
                     </tr>
                     <tr>
                       {summaryTable.columns.map((c) => (
@@ -537,7 +597,9 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                       >
                         <td title={row.지점} className={`admin-summary-name py-1.5 px-2 whitespace-nowrap ${isSubtotal ? "font-black text-[#212121]" : "font-bold text-[#2C3E50]"}`}>{row.지점}</td>
                         {row.cols.map((col, ci) => renderSummaryCells(col, ci, ci === 4))}
-                        <td className="admin-group-start py-1.5 px-2 text-right font-mono font-bold text-gray-500">
+                        {/* 이 칸(이익비중) 왼쪽 경계는 바로 앞 '이익' 그룹의 마지막 칸이 오른쪽에 긋는다 —
+                            여기에 또 그으면 선이 두 줄이 된다. */}
+                        <td className="py-1.5 px-2 text-right font-mono font-bold text-gray-500">
                           {row.profitShare === null ? "—" : isSubtotal ? "100%" : `${(row.profitShare * 100).toFixed(1)}%`}
                         </td>
                       </tr>
@@ -555,40 +617,47 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                         }}
                         className={`cursor-pointer ${line.strong ? "admin-statement-strong" : "admin-summary-hq"} ${activeSummaryRow === `hq:${line.label}` ? "admin-summary-row-active" : ""}`}
                       >
-                        <td colSpan={13} className="py-1.5 px-2 text-right font-black text-[#212121]">{line.label}</td>
-                        <td className={`admin-group-start py-1.5 px-2 text-right font-mono font-black ${line.amount < 0 ? "text-gray-500" : "text-[#1A3C6E]"}`}>{formatNumber(line.amount)}</td>
+                        {/* 경계선은 '그룹의 마지막 칸 오른쪽'에 그린다(renderSummaryCells 주석 참고).
+                            이 행은 앞쪽을 colSpan 하나로 묶으므로, 그 칸이 곧 '기타' 그룹의 마지막 칸이다. */}
+                        <td colSpan={13} className="admin-group-end py-1.5 px-2 text-right font-black text-[#212121]">{line.label}</td>
+                        <td className={`py-1.5 px-2 text-right font-mono font-black ${line.amount < 0 ? "text-gray-500" : "text-[#1A3C6E]"}`}>{formatNumber(line.amount)}</td>
                         <td className="py-1.5 px-2" />
-                        <td className="py-1.5 px-2 text-right"><SummaryMomText mom={line.mom} tone={line.tone} /></td>
-                        <td className="admin-group-start py-1.5 px-2 text-right font-mono font-black text-[#212121]">{line.shareLabel}</td>
+                        <td className="admin-group-end py-1.5 px-2 text-right"><SummaryMomText mom={line.mom} tone={line.tone} /></td>
+                        <td className="py-1.5 px-2 text-right font-mono font-black text-[#212121]">{line.shareLabel}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {/* 본사 행이 없는 달은 소계에서 끝난다 — "형식이 다르다"로 오해하지 않게 이유를 밝힌다.
-                  (db파일의 본사 행은 2026-05부터 존재하며, 05 산출물 손익요약표도 그 두 달치뿐이다) */}
-              {summaryTable.hq === null && (
-                <p className="font-bold admin-rate-hot">
-                  {month}은 db파일에 <b>본사 행</b>이 없어 하단 정산부(본사지출 · 합계 · 배당/인센 · 이익잉여금)를 계산할 수 없습니다 — 소계까지만 표시됩니다.
+              {/* 각주 — 카드에서 `p-5` 를 걷어냈으므로 이 묶음이 자기 여백을 갖는다.
+                  표와 각주 사이에 옅은 선을 그어 "표가 여기서 끝났다"를 보이게 한다. */}
+              <div className="px-4 py-3 space-y-2 border-t border-gray-100">
+                {/* 본사 행이 없는 달은 소계에서 끝난다 — "형식이 다르다"로 오해하지 않게 이유를 밝힌다.
+                    (db파일의 본사 행은 2026-05부터 존재하며, 05 산출물 손익요약표도 그 두 달치뿐이다) */}
+                {summaryTable.hq === null && (
+                  <p className="font-bold admin-rate-hot">
+                    {month}은 db파일에 <b>본사 행</b>이 없어 하단 정산부(본사지출 · 합계 · 배당/인센 · 이익잉여금)를 계산할 수 없습니다 — 소계까지만 표시됩니다.
+                  </p>
+                )}
+                <p className="font-bold text-gray-400">
+                  전월대비: <span className="admin-delta-up font-black">초록=개선</span> / <span className="admin-delta-down font-black">빨강=악화</span> · 매출·이익 증가는 좋음, 인건비·재료비·기타 증가는 나쁨 · 신규=전월 데이터 없음 · 재료비=식재료+주류원가
                 </p>
-              )}
-              <p className="font-bold text-gray-400">
-                전월대비: <span className="admin-delta-up font-black">초록=개선</span> / <span className="admin-delta-down font-black">빨강=악화</span> · 매출·이익 증가는 좋음, 인건비·재료비·기타 증가는 나쁨 · 신규=전월 데이터 없음 · 재료비=식재료+주류원가
-              </p>
+              </div>
             </section>
           )}
 
-          <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-            <div>
-              <h2 className="admin-pill-title">지점별 손익 순위</h2>
-              <p className="text-xs text-gray-400 mt-1">{month} · 이익금 순. 막대 = 그 달 최댓값 대비. 붉은 값 = 경보 기준. MOM = 이익률 전월 대비(%p).</p>
+          {/* 제목 밴드 + 엑셀형 표 = 관리자 표준(DESIGN_ADMIN.md §4-0) */}
+          <section className="admin-sales-overview-section admin-sheet-card">
+            <div className="admin-band">
+              <h3 className="admin-band-title">지점별 손익 순위</h3>
+              <p className="admin-band-meta">{month} · 이익금 순. 막대 = 그 달 최댓값 대비. 붉은 값 = 경보 기준. MOM = 이익률 전월 대비(%p).</p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1080px] text-xs">
-                <thead className="text-left">
+            <div className="admin-sheet-scroll">
+              <table className="admin-sheet min-w-[1080px]">
+                <thead>
                   <tr>
                     {["#", "지점", "매출", "이익금", "이익률", "식재료율", "인건비율", "PRIME", "생산성", "회전율", "객단가", "MOM"].map((h, i) => (
-                      <th key={h} className={`py-2 px-2 text-[11px] font-black text-[#212121] ${i >= 2 ? "text-right" : ""}`}>{h}</th>
+                      <th key={h} className={i >= 2 ? "text-right" : ""}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -749,14 +818,9 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
 
       {/* ─────────────── ③ 지점 손익계산서 ───────────────
           손익 종합·본사 종합과 같은 타이포(11px)·컴팩트 KPI·2열 배치로 통일(2026-07-22 사용자 지시) */}
-      {/* [바깥에 둔다] 아래 본문은 '그 달 그 지점 데이터가 없으면' 안내문만 렌더한다. 지점 선택줄이 그 안에 있으면
-          데이터 없는 지점을 고른 순간 선택줄이 사라져 다른 지점으로 돌아올 수 없다. */}
-      {/* 카드 껍데기는 위 필터 바와 같은 문법(admin-sales-filter-section = 검정 테두리 카드). */}
-      {!loading && view === "branch" && branchNames.length > 0 && (
-        <section className="admin-sales-filter-section bg-white rounded-2xl border border-gray-100 px-3 py-2">
-          <BranchTabPicker branches={branchNames} value={branch} onChange={setBranchPick} />
-        </section>
-      )}
+      {/* [지점 선택줄은 위쪽 '탭별 상단 줄'에 있다] 아래 본문은 '그 달 그 지점 데이터가 없으면'
+          안내문만 렌더한다. 선택줄이 이 안에 있으면 데이터 없는 지점을 고른 순간 선택줄이 사라져
+          다른 지점으로 돌아올 수 없다 — 업로드 버튼이 사라지던 것과 같은 종류의 막다른 길이다. */}
       {!loading && view === "branch" && (
         branchRow === null ? (
           curRows.length > 0 && <p className="text-xs font-black text-rose-600">{branch}의 {month} 데이터가 없습니다.</p>
@@ -786,9 +850,17 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
           </section>
 
           <div className="admin-chart-grid">
-            {/* 왼쪽: 손익계산서 → PRIME 게이지 순(2026-07-22 사용자 지시로 순서 교환) */}
-            <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-              <h2 className="admin-pill-title">손익계산서</h2>
+            {/* 왼쪽: 손익계산서 → PRIME 게이지 순(2026-07-22 사용자 지시로 순서 교환)
+
+                ┌─ [A안] 한 카드에 그대로 두고 **맨 위 제목만 밴드**로 올린다 ─────────────────
+                │  카드 중간의 `PRIME COST` 는 섹션 제목이 아니라 값 옆에 붙는 라벨이라 알약으로 남긴다.
+                │  (밴드로 만들면 카드 한가운데에 바닐라 띠가 가로로 끼어든다.)
+                │  장점: 손익계산서와 PRIME 게이지가 "한 지점의 수익 구조"로 묶여 읽힌다. 카드 수가 안 는다.
+                │  단점: 카드 안에 제목 양식이 두 가지(밴드+알약) 섞인다.
+                └──────────────────────────────────────────────────────────────────── */}
+            <section className="admin-sales-overview-section admin-sheet-card">
+              <div className="admin-band"><h3 className="admin-band-title">손익계산서</h3></div>
+              <div className="p-5 space-y-4">
               <table className="w-full admin-hq-statement">
                 <thead>
                   <tr>
@@ -821,12 +893,19 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                 <div className="admin-prime-target" style={{ left: `${PRIME_TARGET * 100}%` }} />
               </div>
               <p className="font-bold text-gray-400">노랑=식재료율 · 파랑=인건비율 · 빨간 세로선=목표 60%</p>
-            </section>
-            <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-              <div>
-                <h2 className="admin-pill-title">매출 · 이익 추이</h2>
-                <p className="text-xs text-gray-400 mt-1">{branch} · 최근 {TREND_MONTHS}개월 · 선=이익률</p>
               </div>
+            </section>
+            {/* ┌─ [B안] 제목마다 카드 하나 ─ 카드 안에 제목이 하나뿐이라 전부 밴드로 통일된다 ────────
+                │  부연 설명은 밴드 안(.admin-band-meta)으로 넣어 제목과 한 줄에 붙인다.
+                │  장점: 제목 양식이 한 가지뿐이고, 어디까지가 한 덩어리인지 카드 경계로 분명해진다.
+                │  단점: 카드가 늘어 세로가 길어지고, 원래 한 묶음이던 내용이 갈라진다.
+                └──────────────────────────────────────────────────────────────────── */}
+            <section className="admin-sales-overview-section admin-sheet-card">
+              <div className="admin-band">
+                <h3 className="admin-band-title">매출 · 이익 추이</h3>
+                <p className="admin-band-meta">{branch} · 최근 {TREND_MONTHS}개월 · 선=이익률</p>
+              </div>
+              <div className="p-5">
               <PnlComboChart
                 showValues
                 categories={trendCats}
@@ -835,13 +914,15 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                   { label: "이익금", tone: "vanilla", values: trendVals(branch, (mr) => mr.reduce((s, r) => s + r.이익금, 0)) },
                 ]}
                 line={{ label: "이익률", values: trendVals(branch, (mr) => (mr[0] ? profitRateOf(mr[0]) : null)) }} />
+              </div>
             </section>
 
-            <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-              <div>
-                <h2 className="admin-pill-title">식재료율 · 인건비율 추이</h2>
-                <p className="text-xs text-gray-400 mt-1">{branch} · 최근 {TREND_MONTHS}개월 · 경보 기준 각 35%</p>
+            <section className="admin-sales-overview-section admin-sheet-card">
+              <div className="admin-band">
+                <h3 className="admin-band-title">식재료율 · 인건비율 추이</h3>
+                <p className="admin-band-meta">{branch} · 최근 {TREND_MONTHS}개월 · 경보 기준 각 35%</p>
               </div>
+              <div className="p-5">
               {(() => {
                 const pair = trendPairOf(branch, (mr) => (mr[0] ? foodRateOf(mr[0]) : null), (mr) => (mr[0] ? laborRateOf(mr[0]) : null));
                 return (
@@ -850,14 +931,16 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                     current={pair.a} compare={pair.b} />
                 );
               })()}
+              </div>
             </section>
 
             {/* 05 branch PNG 처럼 객단가(막대)와 영수건수(선)를 한 차트에 겹쳐 카드 수를 줄인다. */}
-            <section className="admin-sales-overview-section bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-              <div>
-                <h2 className="admin-pill-title">객단가 &amp; 영수건수</h2>
-                <p className="text-gray-400 mt-1">{branch} · 최근 {TREND_MONTHS}개월 · 막대=영수건수 · 선=객단가(원)</p>
+            <section className="admin-sales-overview-section admin-sheet-card">
+              <div className="admin-band">
+                <h3 className="admin-band-title">객단가 &amp; 영수건수</h3>
+                <p className="admin-band-meta">{branch} · 최근 {TREND_MONTHS}개월 · 막대=영수건수 · 선=객단가(원)</p>
               </div>
+              <div className="p-5">
               <PnlComboChart
                 showValues
                 lineZeroBase={false}
@@ -867,6 +950,7 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                 line={{ label: "객단가(원)", values: trendVals(branch, (mr) => (mr[0] && mr[0].객단가 > 0 ? mr[0].객단가 : null)) }}
                 lineAxisFormat={(v) => `${Math.round(v / 1000).toLocaleString("ko-KR")}천`}
                 lineValueFormat={(v) => `${formatNumber(Math.round(v))}원`} />
+              </div>
             </section>
           </div>
         </div>
