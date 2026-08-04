@@ -491,8 +491,13 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
       // '전체'였던 계정이 새 지점만 조용히 잃는다 — 그래서 저장 직전에 목록을 다시 받는다.
       let list = branches;
       try {
-        const fresh = await getFirebaseLoginBranches();
-        if (!Array.isArray(fresh) || fresh.length === 0) throw new Error("빈 지점 목록");
+        const raw = await getFirebaseLoginBranches();
+        if (!Array.isArray(raw) || raw.length === 0) throw new Error("빈 지점 목록");
+        // [휴업 지점을 여기서도 걸러야 한다] 이 목록은 그대로 계정의 허용지점으로 **저장**된다.
+        // 걸르지 않으면 화면에서 감춘 지점이 [전체 지점] 한 번에 되살아나 권한에 다시 박힌다
+        // (코덱스 stop-time 2026-08-03 — 다른 선택지는 다 걸렀는데 이 재조회만 빠져 있었다).
+        const fresh = raw.filter((b) => !isClosedBranch(b.branchName));
+        if (fresh.length === 0) throw new Error("휴업 지점을 뺀 목록이 비었음");
         list = fresh;
         setBranches(fresh);
       } catch (e) {
