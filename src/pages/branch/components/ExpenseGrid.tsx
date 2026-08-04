@@ -10,6 +10,7 @@ import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import {
+  CASH_DEFAULT_CLASSIFICATION,
   CASH_USAGES,
   EXPENSE_CLASSIFICATIONS,
   EXPENSE_USAGES,
@@ -53,17 +54,19 @@ const VARIANT_STYLE: Record<
   Variant,
   { sumText: string; sumBg: string; cellOutline: string; headHighlight: string }
 > = {
+  // headHighlight(편집 중인 열·행 강조)는 두 변형 모두 바닐라 hex — 커서 강조 표준색(DESIGN.md §9-3).
+  // 헤더 기본색이 엘리스가 되면서(밴드 이관) amber/blue-100 은 지점 스코프 치환으로 엘리스와 구분되지 않는다.
   cash: {
     sumText: "text-amber-600",
     sumBg: "bg-amber-50",
     cellOutline: "outline-2 -outline-offset-2 outline-[#2E6DB4]",
-    headHighlight: "bg-amber-100 text-amber-800"
+    headHighlight: "bg-[#F4F2CC] text-[#212121]"
   },
   card: {
     sumText: "text-blue-600",
     sumBg: "bg-blue-50",
     cellOutline: "outline-2 -outline-offset-2 outline-[#2E6DB4]",
-    headHighlight: "bg-blue-100 text-blue-800"
+    headHighlight: "bg-[#F4F2CC] text-[#212121]"
   }
 };
 
@@ -78,6 +81,10 @@ export function ExpenseGrid({
 }: ExpenseGridProps) {
   const style = VARIANT_STYLE[variant];
   const errorRows = new Set(errorRowIndexes);
+
+  // 현금지출의 새 행 기본 분류는 "소모품등 기타"(사용자 지시 2026-08-04) — 카드는 종전대로 "식재료".
+  const defaultClassification = variant === "cash" ? CASH_DEFAULT_CLASSIFICATION : undefined;
+  const newEmptyRow = () => createEmptyExpenseRow(defaultClassification);
 
   // 현금지출 사용처에서는 쿠팡·네이버를 뺀다 — 온라인 결제라 카드에서만 쓰는 항목이다.
   const usageOptions = variant === "cash" ? CASH_USAGES : EXPENSE_USAGES;
@@ -126,7 +133,7 @@ export function ExpenseGrid({
   const appendRow = (focusCol?: number) => {
     if (rows.length >= MAX_EXPENSE_ROWS) return;
     if (focusCol !== undefined) requestFocus(rows.length, focusCol);
-    onRowsChange((prev) => (prev.length >= MAX_EXPENSE_ROWS ? prev : [...prev, createEmptyExpenseRow()]));
+    onRowsChange((prev) => (prev.length >= MAX_EXPENSE_ROWS ? prev : [...prev, newEmptyRow()]));
   };
 
   const updateCell = (rowIndex: number, field: keyof ExpenseRow, value: string) => {
@@ -135,14 +142,14 @@ export function ExpenseGrid({
       // 마지막 행에 내용이 들어오면 그 아래로 빈 행을 한 줄 깔아둔다(엑셀처럼 계속 내려가며 입력).
       const last = next[next.length - 1];
       if (last && !isExpenseRowBlank(last) && next.length < MAX_EXPENSE_ROWS) {
-        next.push(createEmptyExpenseRow());
+        next.push(newEmptyRow());
       }
       return next;
     });
   };
 
   const removeRow = (rowIndex: number) => {
-    onRowsChange((prev) => padExpenseRows(prev.filter((_, i) => i !== rowIndex)));
+    onRowsChange((prev) => padExpenseRows(prev.filter((_, i) => i !== rowIndex), defaultClassification));
   };
 
 
@@ -159,33 +166,38 @@ export function ExpenseGrid({
     ].join(" ");
 
   return (
-    <div className="relative bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+    // 표준 제목 밴드 카드(DESIGN.md §6-3). 키 이동 칩은 카드 밖 relative 래퍼 기준으로 밴드 상단선에 걸친다.
+    // expense-grid-wrap: 옛 `#expenses-section > div` 카드 ID 규칙이 이 래퍼를 카드로 오인해 덮지 않게 하는 표식(index.css :not).
+    <div className="relative expense-grid-wrap">
       {/* 조작법은 표를 보는 순간 알아야 한다 — 작성방법 버튼을 눌러야 보이면 늦다. */}
       <SheetKeyHint />
-      <div className="flex flex-wrap items-center justify-between gap-2" data-guide={guideKey}>
-        <h3 className="text-sm font-black text-gray-800 w-fit">{title}</h3>
-        <span className={`text-xs font-extrabold ${style.sumText} ${style.sumBg} px-2.5 py-1 rounded-lg`}>
-          합계: {formatNumber(sum)} 원
-        </span>
+      <section className="branch-sheet-card">
+      <div className="branch-band" data-guide={guideKey}>
+        <h3 className="branch-band-title">{title}</h3>
+        <div className="branch-band-actions">
+          <span className={`text-xs font-extrabold ${style.sumText} ${style.sumBg} px-2.5 py-1 rounded-lg`}>
+            합계: {formatNumber(sum)} 원
+          </span>
+        </div>
       </div>
 
-      {/* ── PC: 엑셀형 시트 ─────────────────────────────────── */}
+      {/* ── PC: 엑셀형 시트 — 밴드 바로 아래 부착(§6-3 강제: 카드 안 '떠 있는 상자' 금지) ── */}
       <div className="hidden xl:block">
-        <div className="border-t border-l border-gray-200 rounded-md overflow-hidden">
-          {/* 머리글 — 지금 편집 중인 열을 함께 강조한다 */}
-          <div className={`${GRID_COLS} bg-gray-100`}>
-            <span className="border-r border-b border-gray-200" />
+        <div>
+          {/* 머리글 — 밴드 탭 표준 엘리스(hex — bg-gray-* 는 스코프 치환됨, §9-1). 편집 중인 열은 바닐라로 강조. */}
+          <div className={GRID_COLS}>
+            <span className="border-r border-b border-gray-200 bg-[#E6EBF3]" />
             {COLUMN_LABELS.map((label, col) => (
               <span
                 key={label}
-                className={`border-r border-b border-gray-200 px-2 py-1.5 text-[11px] font-bold text-center truncate transition-colors ${
-                  activeCell?.col === col ? style.headHighlight : "text-gray-600"
+                className={`border-r border-b border-gray-200 px-2 py-1.5 text-[11px] font-black text-center truncate transition-colors ${
+                  activeCell?.col === col ? style.headHighlight : "bg-[#E6EBF3] text-[#212121]"
                 }`}
               >
                 {label}
               </span>
             ))}
-            <span className="border-r border-b border-gray-200" />
+            <span className="border-b border-gray-200 bg-[#E6EBF3]" />
           </div>
 
           {/* 데이터 행 */}
@@ -208,17 +220,17 @@ export function ExpenseGrid({
                     {rowIndex + 1}
                   </span>
 
-                  {/* 지출분류 */}
+                  {/* 지출분류 — '현금입금'은 지출이 아니라 입금이라 허니듀로 갈라 보인다(사용자 지시 2026-08-04, 계좌이체=바닐라와 같은 방식) */}
                   <div className={cellWrap(rowIndex, COL_CLASSIFICATION)}>
                     <select
                       {...cellProps(rowIndex, COL_CLASSIFICATION)}
                       aria-label={cellLabel(rowIndex, COL_CLASSIFICATION)}
                       value={row.classification}
                       onChange={(e) => updateCell(rowIndex, "classification", e.target.value)}
-                      className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer`}
+                      className={`${cellBase} appearance-none pr-5 font-semibold cursor-pointer${row.classification === "현금입금" ? " expense-class-cashin" : ""}`}
                     >
                       {EXPENSE_CLASSIFICATIONS.map((item) => (
-                        <option key={item} value={item}>
+                        <option key={item} value={item} className={item === "현금입금" ? "expense-class-cashin-option" : undefined}>
                           {item}
                         </option>
                       ))}
@@ -315,7 +327,7 @@ export function ExpenseGrid({
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-2 gap-3">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
           <p className="text-[10px] text-gray-400 leading-relaxed">
             화살표·Tab·Enter로 칸을 옮깁니다. 분류·사용처 목록은 <b>Alt+↓</b> 또는 클릭으로 펼칩니다.
             <br />
@@ -332,8 +344,8 @@ export function ExpenseGrid({
         </div>
       </div>
 
-      {/* ── 좁은 화면: 기존 카드형 입력 유지 ────────────────── */}
-      <div className="xl:hidden space-y-3">
+      {/* ── 좁은 화면: 기존 카드형 입력 유지(카드 padding 이 사라져 자기 여백을 갖는다) ── */}
+      <div className="xl:hidden space-y-3 p-4">
         <div className="space-y-3 max-h-[290px] overflow-y-auto pr-1">
           {rows.map((row, rowIndex) => (
             <div
@@ -354,13 +366,14 @@ export function ExpenseGrid({
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <div className="flex flex-col space-y-1">
                   <span className="text-[10px] font-bold text-gray-400">지출 분류</span>
+                  {/* 모바일도 PC와 같은 기준으로 강조한다 — '현금입금'은 허니듀. */}
                   <select
                     value={row.classification}
                     onChange={(e) => updateCell(rowIndex, "classification", e.target.value)}
-                    className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white"
+                    className={`px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold bg-white${row.classification === "현금입금" ? " expense-class-cashin" : ""}`}
                   >
                     {EXPENSE_CLASSIFICATIONS.map((item) => (
-                      <option key={item} value={item}>
+                      <option key={item} value={item} className={item === "현금입금" ? "expense-class-cashin-option" : undefined}>
                         {item}
                       </option>
                     ))}
@@ -432,6 +445,7 @@ export function ExpenseGrid({
           <Plus className="w-3.5 h-3.5" /> 행 추가
         </button>
       </div>
+      </section>
     </div>
   );
 }

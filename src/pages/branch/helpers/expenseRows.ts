@@ -2,12 +2,14 @@
 // 지출 내역(현금/카드) 행의 기본값·빈행 판정·행 수 보정을 한곳에서 관리한다.
 import type { ExpenseRow } from "../types";
 
+// '현금입금'은 목록 가운데(사용자 지시 2026-08-04) — 성격이 다른 항목이라 지출 분류들 사이에서
+// 색(허니듀, ExpenseGrid)과 자리로 구분한다.
 export const EXPENSE_CLASSIFICATIONS: ExpenseRow["classification"][] = [
   "식재료",
   "소모품등 기타",
+  "현금입금",
   "부식비",
-  "음료",
-  "현금입금"
+  "음료"
 ];
 
 /**
@@ -17,11 +19,12 @@ export const EXPENSE_CLASSIFICATIONS: ExpenseRow["classification"][] = [
  *  · 계좌이체는 카드 지출에 적되 결제가 아니라 **본사에 이체를 요청하는 건**이라 사용처로
  *    구분해 두어야 한다. 눈에 띄게 색으로도 표시한다(ExpenseGrid).
  */
-// 계좌이체를 맨 위에 둔다(사용자 지시 2026-07-31) — 다른 사용처와 성격이 달라 먼저 눈에 띄어야 한다.
+// 계좌이체는 목록 가운데(사용자 지시 2026-08-04, 종전 '맨 위' 지시를 대체) — 색(바닐라)이 이미
+// 성격 차이를 알려 주므로 자리는 흐름 가운데에 둔다.
 export const EXPENSE_USAGES: ExpenseRow["usage"][] = [
-  "계좌이체",
   "쿠팡",
   "네이버",
+  "계좌이체",
   "인근매장",
   "그외기타"
 ];
@@ -45,10 +48,16 @@ export const MIN_EXPENSE_ROWS = 7;
 /** 자동 증식이 폭주하지 않도록 하는 상한. */
 export const MAX_EXPENSE_ROWS = 50;
 
+// 현금지출의 기본 분류는 "소모품등 기타"(사용자 지시 2026-08-04) — 카드는 종전대로 "식재료".
+// ExpenseGrid(variant)와 DailySettleTab의 현금 쪽 padExpenseRows 호출이 이 값을 넘긴다.
+export const CASH_DEFAULT_CLASSIFICATION: ExpenseRow["classification"] = "소모품등 기타";
+
 // 기본 사용처는 중립값 "그외기타" — 현금지출 사용처에서 쿠팡/네이버를 빼도(현금엔 안 맞음)
 // 기본값이 목록에 없어 빈 칸으로 보이는 일이 없게 한다. 카드는 필요 시 쿠팡/네이버를 직접 고른다.
-export const createEmptyExpenseRow = (): ExpenseRow => ({
-  classification: "식재료",
+export const createEmptyExpenseRow = (
+  classification: ExpenseRow["classification"] = "식재료"
+): ExpenseRow => ({
+  classification,
   usage: "그외기타",
   detail: "",
   amount: ""
@@ -90,9 +99,12 @@ export const isExpenseRowBlank = (row: ExpenseRow): boolean =>
  * - 배열이 아니거나 비어 있으면 빈 행으로 채운다(행이 0개가 되어 입력 자체가 막히는 것을 방지).
  * - 맨 아래에 항상 빈 행이 최소 한 줄 남도록 MIN_EXPENSE_ROWS까지 채운다.
  */
-export const padExpenseRows = (rows: unknown): ExpenseRow[] => {
+export const padExpenseRows = (
+  rows: unknown,
+  defaultClassification?: ExpenseRow["classification"]
+): ExpenseRow[] => {
   const source = Array.isArray(rows) ? (rows as ExpenseRow[]) : [];
-  const next = source.map((row) => ({ ...createEmptyExpenseRow(), ...row }));
-  while (next.length < MIN_EXPENSE_ROWS) next.push(createEmptyExpenseRow());
+  const next = source.map((row) => ({ ...createEmptyExpenseRow(defaultClassification), ...row }));
+  while (next.length < MIN_EXPENSE_ROWS) next.push(createEmptyExpenseRow(defaultClassification));
   return next;
 };
