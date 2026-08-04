@@ -66,8 +66,13 @@ export function RosterTab({ branchName }: { branchName: string }) {
         const pendingEmployees = readLocalStaffList(branchName);
         const saveSeq = ++rosterSaveSeqRef.current;
         gasClient.saveBranchOwnRoster(branchName, pendingEmployees)
-          .then(() => {
-            if (rosterSaveSeqRef.current === saveSeq) localStorage.removeItem(staffListPendingStorageKey(branchName));
+          .then((result) => {
+            if (rosterSaveSeqRef.current !== saveSeq) return;
+            localStorage.removeItem(staffListPendingStorageKey(branchName));
+            // 탭을 떠난 뒤라 화면은 없다 — 저장본만 서버 결과로 맞춰 다음에 들어올 때 유령이 안 보이게 한다.
+            if (result.rejected?.length) {
+              localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(result.employees || []));
+            }
           })
           .catch((error) => {
             console.error("직원 명단 탭 이동 전 저장에 실패했습니다.", error);
@@ -97,8 +102,16 @@ export function RosterTab({ branchName }: { branchName: string }) {
         // 샘플 제거 또는 로컬 미반영 저장분이 있는 경우 branch_own_rosters 정리
         const needsUpdate = shouldPreserveLocal || ownRoster.some((e: any) => isSampleEmployee(e)) || ownRoster.length !== merged.length;
         if (needsUpdate) {
-          await gasClient.saveBranchOwnRoster(branchName, merged);
+          const result = await gasClient.saveBranchOwnRoster(branchName, merged);
+          if (cancelled) return;
           localStorage.removeItem(staffListPendingStorageKey(branchName));
+          // 되살아남 방지 가드가 일부를 제외했으면 화면·저장본을 서버 결과에 맞춘다(로컬 유령 방지).
+          if (result.rejected?.length) {
+            const serverList = (result.employees || []) as Employee[];
+            employeesRef.current = serverList;
+            setEmployees(serverList);
+            localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(serverList));
+          }
         }
       } catch (error) {
         console.warn("직원 명단 원격 동기화에 실패했습니다.", error);
@@ -191,8 +204,18 @@ export function RosterTab({ branchName }: { branchName: string }) {
     rosterSaveTimerRef.current = null;
     const saveNow = () => {
       gasClient.saveBranchOwnRoster(branchName, normalized)
-        .then(() => {
-          if (rosterSaveSeqRef.current === saveSeq) localStorage.removeItem(staffListPendingStorageKey(branchName));
+        .then((result) => {
+          if (rosterSaveSeqRef.current !== saveSeq) return;
+          localStorage.removeItem(staffListPendingStorageKey(branchName));
+          // 서버가 일부를 제외했으면(다른 지점으로 옮겨진 사람) 화면·저장본을 서버 결과로 맞춘다.
+          // 안 맞추면 이 기기에만 남아 계속 보이는 유령이 된다(Codex 지적 2026-08-04).
+          if (result.rejected?.length) {
+            const serverList = (result.employees || []) as Employee[];
+            employeesRef.current = serverList;
+            setEmployees(serverList);
+            localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(serverList));
+            alert(`${result.rejected.map((item: any) => item?.name).filter(Boolean).join(", ")} 님은 이 지점에서 이동·삭제 처리되어 명단에 등록되지 않았습니다.\n다시 근무하는 경우 '직원 추가'로 등록해 주세요.`);
+          }
         })
         .catch((error) => {
           console.error("직원 명단 저장에 실패했습니다.", error);
@@ -437,7 +460,29 @@ export function RosterTab({ branchName }: { branchName: string }) {
       });
     }
 
-    saveEmployees([...employees, ...nextEmployees]);
+    // [순서가 중요하다] 새로 추가한 사람은 **정식 등록 경로**(addToBranchOwnRoster)를 **먼저 끝낸 뒤**
+    // 통째 저장을 한다. 명부 저장은 통째 쓰기라, 그 사람이 예전에 이 지점에서 빠져나갔던 적이 있으면
+    // 되살아남 방지 가드에 걸려 제외된다. 정식 등록이 그 표시를 풀어 주므로 그 뒤 저장은 온전히 통과한다.
+    //
+    // 예전엔 둘을 동시에 던졌는데, 통째 저장이 먼저 닿으면 "제외됨" 응답이 와서 화면·저장본이 신규 직원을
+    // 지우고 경고까지 띄운 뒤, 곧이어 등록이 성공해 **서버에는 있는데 화면에는 없는** 상태가 됐다
+    // (실행 순서에 따라 결과가 달라지는 race — Codex 지적 2026-08-04). 순차 실행으로 없앤다.
+    const mergedEmployees = [...employees, ...nextEmployees];
+    // 원격 왕복 전에 화면·저장본부터 즉시 반영한다(중간에 탭을 떠나도 입력이 날아가지 않게).
+    employeesRef.current = mergedEmployees;
+    setEmployees(mergedEmployees);
+    localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(mergedEmployees));
+    localStorage.setItem(staffListPendingStorageKey(branchName), "1");
+    void (async () => {
+      for (const employee of nextEmployees) {
+        try {
+          await gasClient.addToBranchOwnRoster(branchName, employee as any);
+        } catch (error) {
+          console.warn("신규 직원 등록에 실패했습니다(통째 저장으로 재시도).", error);
+        }
+      }
+      saveEmployees(mergedEmployees);
+    })();
     setRosterAddDrafts([createStaffAddDraft()]);
     localStorage.removeItem(staffAddDraftStorageKey(branchName));
   };
