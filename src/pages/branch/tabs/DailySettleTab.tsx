@@ -12,7 +12,7 @@ import { formatNumber } from "../../../utils/formatNumber";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { ExpenseGrid } from "../components/ExpenseGrid";
-import { getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
+import { CASH_DEFAULT_CLASSIFICATION, getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import { createDailySettleValidationTargets, createEmployeeFromStaffRow, createStaffAddDraft, employeeNameKey, getAddReasonChoiceClass, getDailyStaffValidationKey, isSampleEmployee, needsOvertimeReason, normalizeRosterEmployee, parseStaffAddReasonChoice, shouldSkipDailyRosterRegistration, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
@@ -145,7 +145,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const [loadingTransferBranches, setLoadingTransferBranches] = useState(false);
 
   // Expenses — 시트처럼 빈 행을 미리 깔아두고, 마지막 행을 채우면 아래로 자동 증식한다.
-  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([]));
+  // 현금지출 새 행 기본 분류 = "소모품등 기타"(사용자 지시 2026-08-04). 카드는 기본값("식재료") 그대로.
+  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
   const [cardExpenses, setCardExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([]));
 
   // Personnel List states
@@ -161,18 +162,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   // writer(작성자란은 수정자일 뿐 원작성자가 아니다)로 덮어쓰지 않기 위한 보존용 참조.
   const originalSubmittedByRef = useRef<{ name: string; uid: string }>({ name: "", uid: "" });
 
-  // 개인 로그인 세션(구글·이메일 공통)에서도 마감 작성자는 지점이 직접 입력한다(사용자 지시 2026-07-26).
-  // 편의로 '신규 작성 폼을 여는 순간'에만 계정 이름을 기본값으로 깔아 주고, 그 뒤로는 입력칸을 절대 건드리지 않는다.
-  // 전부 지우면 지운 채로 둔다(필수 검증은 제출 시점에서 잡는다).
-  //   ※ 예전에는 writer를 의존성에 둔 effect로 채웠는데, 그러면 "한 번만 채우기"가 아니라
-  //     "빈 값이 될 때마다 다시 채우기"가 되어 세 글자를 다 지우는 순간 이름이 되살아났다(2026-07-28 수정).
+  // 마감 작성자는 매일 실제 마감한 사람이 직접 적는다(사용자 지시 2026-08-04).
+  // 신규 폼을 열어도 계정 이름을 기본값으로 깔지 않는다 — 공용 계정으로 여러 사람이 쓰는 지점에서
+  // 자동 입력된 이름이 그대로 제출되는 것을 막기 위함이다(필수 검증은 제출 시점에서 잡는다).
   // 실제 로그인 계정은 submittedByUid/modifiedByUid 로 별도 기록되어 감사 추적은 그대로 유지된다.
+  // personalDefaultWriter 는 제출 버튼 옆 "로그인 계정" 안내 표시에만 쓴다.
   const personalDefaultWriter = isPersonalSession ? String(user?.name ?? "").trim() : "";
-  // 폼 초기화 지점들은 비동기 로드 뒤에 실행되므로, 의존성을 늘려 부트스트랩을 다시 돌리는 대신 ref로 최신 값을 읽는다.
-  const personalDefaultWriterRef = useRef(personalDefaultWriter);
-  useEffect(() => {
-    personalDefaultWriterRef.current = personalDefaultWriter;
-  }, [personalDefaultWriter]);
   const [isEditApproved, setIsEditApproved] = useState<boolean>(false);
   const [timeErrors, setTimeErrors] = useState<Record<string, string>>({});
 
@@ -236,7 +231,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       setStaffMemo(draft.staffMemo || "");
       setReviewMemo(draft.reviewMemo || "");
       setOtherMemo(draft.otherMemo || "");
-      setCashExpenses(padExpenseRows(draft.cashExpenses));
+      setCashExpenses(padExpenseRows(draft.cashExpenses, CASH_DEFAULT_CLASSIFICATION));
       setCardExpenses(padExpenseRows(draft.cardExpenses));
       setStaffRows(Array.isArray(draft.staffRows) ? draft.staffRows : []);
       return true;
@@ -592,7 +587,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           if (metadataParsed) {
             // Restore from perfect JSON metadata
             setStaffRows(isHeadOffice ? distributeHeadOfficeOvertime(metadataParsed.staffRows || []) : metadataParsed.staffRows || []);
-            setCashExpenses(padExpenseRows(metadataParsed.cashExpenses));
+            setCashExpenses(padExpenseRows(metadataParsed.cashExpenses, CASH_DEFAULT_CLASSIFICATION));
             setCardExpenses(padExpenseRows(metadataParsed.cardExpenses));
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
             setNaverReviewCount(metadataParsed.naverReviewCount !== undefined ? String(metadataParsed.naverReviewCount) : "");
@@ -629,7 +624,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 };
               });
 
-            setCashExpenses(padExpenseRows(savedCashExps));
+            setCashExpenses(padExpenseRows(savedCashExps, CASH_DEFAULT_CLASSIFICATION));
             setCardExpenses(padExpenseRows(savedCardExps));
 
              // Map staff from fallback
@@ -695,15 +690,15 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setDeliverySales("");
           setNaverReviewCount("");
           setExistingRecordHadNaverReview(false);
-          setCashExpenses(padExpenseRows([]));
+          setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
           setCardExpenses(padExpenseRows([]));
           setMemo("");
           setCashBalance("");
           setPrevDayCash(prevCashVal);
           setCashDiffReason("");
-          // 신규 작성 폼 — 개인 세션이면 계정 이름을 기본값으로 깔아 준다(이후 자동 개입 없음).
+          // 신규 작성 폼 — 작성자는 빈칸으로 두어 직접 입력받는다(2026-08-04).
           // 임시저장 초안이 있으면 바로 아래 restoreDraftIfAvailable가 사용자가 마지막에 둔 값으로 덮어쓴다.
-          setWriter(personalDefaultWriterRef.current);
+          setWriter("");
           setStaffMemo("");
           setReviewMemo("");
           setOtherMemo("");
@@ -726,8 +721,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         setExistingRecordHadNaverReview(false);
         setPrevDayCash("0");
         setCashDiffReason("");
-        // 이 경로도 '신규 작성 폼을 연 상태'다 — 정상 경로와 같은 기본 작성자를 깔아 준다.
-        setWriter(personalDefaultWriterRef.current);
+        // 이 경로도 '신규 작성 폼을 연 상태'다 — 정상 경로와 같이 작성자는 빈칸으로 둔다.
+        setWriter("");
         setStaffMemo("");
         setReviewMemo("");
         setOtherMemo("");
@@ -1418,7 +1413,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setExistingRecordId(null);
     originalSubmittedByRef.current = { name: "", uid: "" };
     setIsEditApproved(true);
-    setWriter(personalDefaultWriterRef.current);
+    setWriter("");
     setTimeErrors({});
     setValidationErrors(false);
     setValidationTargets(createDailySettleValidationTargets());
@@ -1429,7 +1424,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setDeliverySales("");
     setNaverReviewCount("");
     setExistingRecordHadNaverReview(false);
-    setCashExpenses(padExpenseRows([]));
+    setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
     setCardExpenses(padExpenseRows([]));
     setMemo("");
     setCashBalance("");
@@ -1806,15 +1801,17 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       </div>
       <GuideCallouts open={dailyGuideOpen} steps={dailySettleGuideSteps} onClose={() => setDailyGuideOpen(false)} />
 
-      {/* 마감정보 + 매출 — 엑셀형 가로 1자형, 한 테두리(한 카드) 안에 하나의 표 (DESIGN.md §9-1)
+      {/* 마감정보 + 매출 — 표준 제목 밴드 카드(DESIGN.md §6-3) + 엑셀형 가로 1자형 표(§9-1).
           두 구획(마감정보·매출)을 하나의 표로 잇고, 사이에 빈 간격 컬럼(settle-spacer) 하나로 '약간의 간격'만 준다.
-          구획 제목(h3)은 §6 바닐라 알약이 각 컬럼 그룹 위에 얹힌다. 라벨줄=바닐라+검정 격자(엑셀 헤더),
-          입력줄=투명 셀+옅은 격자. 검증 오류는 §9대로 셀(td) 배경을 붉게.
+          구획별 알약 제목 줄(마감정보/매출/당일 신규 리뷰)은 밴드 제목 하나로 합쳤다(밴드 이관 2026-08-04) —
+          컬럼 라벨(마감 대상 날짜·카드매출·네이버 신규 리뷰 갯수)이 구획을 스스로 설명한다.
+          라벨줄=엘리스+검정 격자(밴드 탭 헤더 색, §9-1), 입력줄=투명 셀+옅은 격자. 검증 오류는 §9대로 셀(td) 배경을 붉게.
           매출 컬럼은 지점 && 잠금해제일 때만(기존 동작 보존), 마감정보는 항상.
-          미니달력은 absolute 드롭다운이라 표를 overflow로 감싸지 않는다(달력이 잘리지 않게). */}
-      <div className="relative bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="sales-section">
-        {/* 키보드로 칸을 옮길 수 있는 섹션이므로 조작법 칩을 섹션 위 테두리에 걸쳐 붙인다(근무자·지출내역과 동일). */}
+          미니달력이 absolute 드롭다운으로 카드 밖까지 열리므로, 이 카드만 overflow:hidden을 풀어 둔다(index.css #sales-section). */}
+      <div className="relative">
+        {/* 키 이동 칩은 제목 밴드 상단선에 걸친다 — 카드 밖 relative 래퍼 기준(DESIGN.md §6-3). */}
         <SheetKeyHint />
+        <section className="branch-sheet-card" id="sales-section">
         {(() => {
           // 매출 컬럼은 지점(본사 아님) && 잠금 해제일 때만. 마감정보 컬럼은 항상.
           const salesShown = !isHeadOffice && !(hasExistingRecord && !isEditApproved);
@@ -1826,7 +1823,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             { key: "cashBalance" as const, label: "금고 현금잔액", value: cashBalance, setter: setCashBalance, req: true, groupStart: false },
           ];
           return (
-            <div className="relative">
+            <>
+              <div className="branch-band">
+                <h3 className="branch-band-title">{salesShown ? "마감정보 · 매출" : "마감정보"}</h3>
+                {salesShown && (
+                  <div className="branch-band-actions">
+                    <span className="daily-total-chip">
+                      당일 총매출 <b className="ml-1 font-mono text-base">{formatNumber(totalSales)}</b> 원
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="relative">
               {/* 좁은 화면에서 표가 페이지를 밀지 않도록 표만 가로 스크롤(overflow-x).
                   미니달력은 absolute 드롭다운이라 이 스크롤 래퍼 '밖'(형제)에 두어 잘리지 않게 한다. */}
               <div className="overflow-x-auto">
@@ -1840,30 +1848,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 {salesShown && <col style={{ width: 132 }} />}
               </colgroup>
               <thead>
-                {/* 구획 제목 줄 — 투명·무테두리, 바닐라 알약이 컬럼 위에 얹힌다 */}
-                <tr>
-                  <th colSpan={2} className="settle-group-th">
-                    <h3 className="text-sm font-black text-gray-800 w-fit">마감정보</h3>
-                  </th>
-                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
-                  {salesShown && (
-                    <th colSpan={5} className="settle-group-th">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-black text-gray-800 w-fit">매출</h3>
-                        <span className="daily-total-chip">
-                          당일 총매출 <b className="ml-1 font-mono text-base">{formatNumber(totalSales)}</b> 원
-                        </span>
-                      </div>
-                    </th>
-                  )}
-                  {salesShown && <th className="settle-spacer" aria-hidden="true" />}
-                  {salesShown && (
-                    <th className="settle-group-th">
-                      <h3 className="text-sm font-black text-gray-800 w-fit whitespace-nowrap">당일 신규 리뷰</h3>
-                    </th>
-                  )}
-                </tr>
-                {/* 컬럼 라벨 줄 — 바닐라 헤더셀 + 검정 격자 */}
+                {/* 컬럼 라벨 줄 — 엘리스 헤더셀 + 검정 격자(구획 제목은 위 밴드로 합침) */}
                 <tr>
                   <th className="settle-col-th is-groupstart">마감 대상 날짜<span className="settle-req">필수</span></th>
                   <th className="settle-col-th">마감 작성자<span className="settle-req">필수</span></th>
@@ -1975,10 +1960,13 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
               </div>
               {/* 미니달력: 스크롤 래퍼 '밖'에 두어 잘리지 않게(표 바로 아래에 열린다) */}
               {showStatusCalendar && renderMiniCalendar()}
-            </div>
+              </div>
+            </>
           );
         })()}
 
+        {/* 표 아닌 안내 블록만 자기 여백을 갖는다(DESIGN.md §6-3). */}
+        <div className="mx-4 my-2.5">
         {!hasExistingRecord ? (
           // 큰 회색 박스로 감쌀 만한 내용이 아니다 — 한 줄 안내다.
           <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
@@ -2001,6 +1989,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             </span>
           </div>
         )}
+        </div>
+        </section>
       </div>
 
       {/* Prominent Red warning for duplicate records */}
@@ -2056,9 +2046,9 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                     triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
                     return;
                   }
-                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter(personalDefaultWriterRef.current);
+                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
                   originalSubmittedByRef.current = { name: "", uid: "" };
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([])); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION)); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 id="daily-settle-reset-button"
@@ -2130,9 +2120,12 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         />
       </div>
 
-      {/* CASH SETTLE/CLOSING SECTION (현금마감) */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="cash-closing-section">
-        <h3 className="text-sm font-black text-gray-800 w-fit">현금마감 정산 (시재 일치 점검)</h3>
+      {/* CASH SETTLE/CLOSING SECTION (현금마감) — 표준 제목 밴드 카드(DESIGN.md §6-3) */}
+      <section className="branch-sheet-card" id="cash-closing-section">
+        <div className="branch-band">
+          <h3 className="branch-band-title">현금마감 정산 (시재 일치 점검)</h3>
+        </div>
+        <div className="p-4 space-y-3">
 
         {/* 입력 칸이 하나도 없는 순수 계산 표시다. 카드 7장으로 쪼개 두니 300px를 쓰면서도
             정작 "전일 + 매출 − 지출 = 이론값, 실사와 얼마나 다른가" 라는 흐름이 안 보였다.
@@ -2194,36 +2187,28 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           }
           return null;
         })()}
-      </div>
+        </div>
+      </section>
             </>
           )}
 
-      {/* STAFF HOURS TABLE SECTION */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3" id="staff-attendance-section">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
-          <div>
-            <h3 className="text-sm font-black text-gray-800 w-fit" data-guide="daily-staff-limit">근무자</h3>
-            {isHeadOffice && (
-              <p className="text-[11px] text-gray-400 mt-1 leading-normal">
-                본사 직원별 오늘 업무시간과 업무내용을 기록하고, 쉬는 날은 휴무로 체크합니다.
-              </p>
-            )}
-          </div>
+      {/* STAFF HOURS TABLE SECTION — 표준 제목 밴드 카드(DESIGN.md §6-3).
+          키 이동 칩은 밴드 상단선에 걸친다(카드 밖 relative 래퍼 기준). */}
+      <div className="relative">
+      <SheetKeyHint />
+      <section className="branch-sheet-card" id="staff-attendance-section">
+        <div className="branch-band">
+          <h3 className="branch-band-title" data-guide="daily-staff-limit">근무자</h3>
+          {isHeadOffice && (
+            <p className="branch-band-meta">
+              본사 직원별 오늘 업무시간과 업무내용을 기록하고, 쉬는 날은 휴무로 체크합니다.
+            </p>
+          )}
         </div>
 
-        <div className="rounded-2xl border border-amber-200 bg-[#F8F6A8] px-5 py-4 text-sm leading-relaxed text-zinc-900 shadow-sm">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 text-lg" aria-hidden="true">⚠️</span>
-            <div className="space-y-1">
-              <p className="font-black">전체 직원 목록이 보여도 실제로 일한 직원만 출근/퇴근 시간을 작성하면 됩니다.</p>
-              <p className="text-xs font-bold text-zinc-700">근무하지 않은 직원은 비워두거나 삭제하지 않아도 됩니다. <span className="font-black text-zinc-950">시간은 숫자만 입력해도 자동 변환됩니다.</span> 예: <span className="font-black text-zinc-950">13</span> 입력 시 <span className="font-black text-zinc-950">13:00</span>으로 인식</p>
-            </div>
-          </div>
-        </div>
-
-        {/* 근무자 추가 — 발주관리 '거래처 추가'와 같은 방식: 한 줄 입력 + Plus '추가' 버튼(즉시 추가).
+        {/* 근무자 추가 — 밴드의 연장 줄(.branch-band-toolbar). 발주관리 '거래처 추가'와 같은 한 줄 즉시 추가.
             이름을 적고 추가를 누르면 아래 표에 바로 한 명이 붙는다(여러 명은 반복 입력). */}
-        <div className="flex flex-wrap items-center gap-1.5 p-3 rounded-xl border border-gray-100">
+        <div className="branch-band-toolbar">
           <span className="text-[11px] font-black text-gray-500 mr-0.5">근무자 추가</span>
           <input
             type="text"
@@ -2267,11 +2252,20 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           </button>
         </div>
 
+        {/* 글자 크기는 등재값 본문 12px(text-xs) — text-sm(14px)은 밴드 제목 외 금지(DESIGN.md §6-0-1). */}
+        <div className="mx-4 my-3 rounded-2xl border border-amber-200 bg-[#F8F6A8] px-5 py-4 text-xs leading-relaxed text-zinc-900 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 text-lg" aria-hidden="true">⚠️</span>
+            <div className="space-y-1">
+              <p className="font-black">전체 직원 목록이 보여도 실제로 일한 직원만 출근/퇴근 시간을 작성하면 됩니다.</p>
+              <p className="text-xs font-bold text-zinc-700">근무하지 않은 직원은 비워두거나 삭제하지 않아도 됩니다. <span className="font-black text-zinc-950">시간은 숫자만 입력해도 자동 변환됩니다.</span> 예: <span className="font-black text-zinc-950">13</span> 입력 시 <span className="font-black text-zinc-950">13:00</span>으로 인식</p>
+            </div>
+          </div>
+        </div>
+
         {isHeadOffice && (
           <>
-          {/* 칩은 표 바로 위에. 표 컨테이너가 overflow-auto라 그 안에 두면 잘린다 — 바깥 relative 층에 얹는다. */}
-          <div className="relative pt-4">
-          <SheetKeyHint />
+          {/* 키 이동 칩은 카드 밖 래퍼가 밴드 상단선에 걸쳐 그린다 — 표 위 중복 칩은 제거(밴드 이관 2026-08-04). */}
           <div className="max-h-[60vh] overflow-auto">
             <table className="w-full text-left border-collapse text-xs min-w-[1160px] whitespace-nowrap">
               <thead className="sticky top-0 z-10">
@@ -2481,8 +2475,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
               </tbody>
             </table>
           </div>
-          </div>
-          <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+          <div className="m-4 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
             <div className="mb-2 flex items-center justify-between gap-2">
               <h4 className="text-xs font-black text-slate-800">하루 합산 초과/조기퇴근 내역</h4>
               <span className="text-[10px] font-bold text-slate-400">동일 직원의 추가 근무구간을 합산합니다.</span>
@@ -2509,9 +2502,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         )}
 
         {!isHeadOffice && (
-        // 칩은 표 바로 위에. 표 컨테이너가 overflow-auto라 그 안에 두면 잘린다 — 바깥 relative 층에 얹는다.
-        <div className="relative pt-4">
-        <SheetKeyHint />
+        // 키 이동 칩은 카드 밖 래퍼가 밴드 상단선에 걸쳐 그린다 — 표 위 중복 칩은 제거(밴드 이관 2026-08-04).
         <div className="max-h-[60vh] overflow-auto">
           <table className="staff-sheet w-full text-left border-separate text-xs min-w-[980px] whitespace-nowrap [&_td]:border-r [&_td]:border-b [&_td]:border-black/10 [&_td:first-child]:border-l" style={{ borderSpacing: 0 }}>
             <thead className="sticky top-0 z-10">
@@ -2679,15 +2670,18 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             </tbody>
           </table>
         </div>
-        </div>
         )}
+      </section>
       </div>
 
-      {/* ADDITIONAL FREE NOTES */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4" id="memo-section">
-        <label className="text-xs font-extrabold text-[#1C3C6E] border-b border-gray-100 pb-2">
-          {isHeadOffice ? "본사 특이사항 기록" : "특이사항 기록 (본부 보고 및 카톡보고 자동 연동)"}
-        </label>
+      {/* ADDITIONAL FREE NOTES — 표준 제목 밴드 카드(DESIGN.md §6-3) */}
+      <section className="branch-sheet-card" id="memo-section">
+        <div className="branch-band">
+          <h3 className="branch-band-title">
+            {isHeadOffice ? "본사 특이사항 기록" : "특이사항 기록 (본부 보고 및 카톡보고 자동 연동)"}
+          </h3>
+        </div>
+        <div className="p-4 space-y-4">
 
         {!isHeadOffice && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
@@ -2734,7 +2728,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             className="w-full p-3 border border-amber-200 rounded-xl text-xs focus:outline-hidden focus:border-amber-500 transition-all bg-amber-50/20"
           />
         </div>
-      </div>
+        </div>
+      </section>
 
       {/* FINAL SUBMIT ACTION ROW */}
       <div className="flex gap-4 items-center justify-end pt-4">

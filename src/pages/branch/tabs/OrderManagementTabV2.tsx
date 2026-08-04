@@ -817,14 +817,18 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
       </div>
       <GuideCallouts open={guideOpen} steps={orderGuideSteps} onClose={() => setGuideOpen(false)} />
 
-      {/* 입력 도구 줄 — 라벨을 따로 두고 칸을 키우면 세로로만 길어진다.
+      {/* 입력 도구 줄 — 표준 제목 밴드 카드(DESIGN.md §6-3).
           한 줄에 붙이고 글자·높이를 표에 맞춰 줄였다(주류재고 상단과 같은 규칙). */}
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-        <h3 className="text-sm font-black text-gray-900 w-fit">거래처 추가</h3>
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">거래처 추가</h3>
+        </div>
+        <div className="p-4 space-y-3">
         {/* 안내 말풍선은 대분류·거래처명 칸을 따로 가리키지 않고 이 줄 전체를 하나로 가리킨다.
             둘로 나누면 말풍선이 서로 겹치고, 어차피 "왼쪽부터 오른쪽으로" 한 흐름이라 나눌 이유가 없다. */}
         <div className="flex flex-wrap items-center gap-1.5" data-guide="order-vendor-add">
-          {/* 고른 대분류의 색이 그대로 칸에 들어간다 — 아래 거래처 칩·표 머리글과 같은 색이라 눈으로 이어진다. */}
+          {/* 고른 대분류의 색이 그대로 칸에 들어간다 — 아래 거래처 칩과 같은 색이라 눈으로 이어진다.
+              (매트릭스 표 머리글은 2026-08-04부터 표준 엘리스 — 분류색은 여기·칩·밴드 셀렉트만 쓴다, §12) */}
           <select
             value={vendorCategory}
             onChange={(e) => setVendorCategory(e.target.value as OrderCategory | "")}
@@ -868,51 +872,51 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
             ))
           )}
         </div>
+        </div>
       </section>
 
-      {/* 섹션이 overflow-hidden이라 칩을 그 안에 두면 윗부분이 잘린다 — 테두리에 걸치도록 바깥에서 얹는다. */}
+      {/* 표준 제목 밴드 카드(DESIGN.md §6-3). 카드가 overflow-hidden이라 키 이동 칩은
+          카드 밖 relative 래퍼 기준으로 밴드 상단선에 걸친다. */}
       <div className="relative">
       <SheetKeyHint />
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-gray-100 space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="space-y-1">
-              <h3 className="text-sm font-black text-gray-900">발주내역 리포트</h3>
-              <p className="text-[11px] text-gray-400">
-                날짜별 칸에 금액을 입력하면 자동 저장됩니다. 특이사항은 칸을 고른 뒤 메모 아이콘(또는 우클릭)으로 남깁니다.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <div className="flex h-8 items-center rounded-lg bg-[#2E6DB4]/10 px-2.5 text-[11px] font-black text-[#1A3C6E]">월 합계 {formatNumber(monthTotal)}원</div>
-              {/* 불러오는 동안 칸이 잠긴다. 이유를 안 알려주면 고장으로 보인다.
-                  저장이 클라우드에 못 올라갔으면 초록 "저장됨"으로 안심시키면 안 된다 — 빨갛게 알린다. */}
-              {!loaded ? (
-                <div className="flex h-8 items-center rounded-lg bg-amber-50 px-2.5 text-[11px] font-black text-amber-700">불러오는 중…</div>
-              ) : saveStatus === "error" ? (
-                <div className="flex h-8 items-center rounded-lg bg-rose-50 px-2.5 text-[11px] font-black text-rose-700 whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">동기화 실패 · 재시도 중</div>
-              ) : saveStatus === "saving" ? (
-                <div className="flex h-8 items-center rounded-lg bg-amber-50 px-2.5 text-[11px] font-black text-amber-700">저장 중…</div>
-              ) : (
-                <div className="flex h-8 items-center rounded-lg bg-emerald-50 px-2.5 text-[11px] font-black text-emerald-700">자동저장됨</div>
-              )}
-            </div>
-          </div>
-          {/* 필터는 도구 줄이다 — 표만큼 넓힐 이유가 없어 내용 폭에 맞춰 붙인다. */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="h-8 w-[132px] rounded-lg border border-gray-200 px-2 text-[11px] font-bold" />
-            <select data-guide="order-report-category" value={reportCategory} onChange={(e) => { setReportCategory(e.target.value as OrderReportCategory); setOrderDraftCells({}); }} className={`h-8 w-[124px] rounded-lg px-2 text-[11px] font-extrabold ${reportCategory === ALL_ORDER_CATEGORIES ? "border border-gray-200 bg-white" : getOrderCategoryHeaderClass(reportCategory)}`}>
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">발주내역 리포트</h3>
+          {/* 필터는 밴드 필터 자리 — 모양(28px 흰 알약)은 `.branch-band-filters` CSS 가 자동으로 입힌다.
+              대분류 셀렉트의 분류색(.order-cat-*)은 index.css 가 흰 알약 강제보다 뒤에서 되살린다. */}
+          <div className="branch-band-filters">
+            <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)} className="w-[132px]" />
+            <select data-guide="order-report-category" value={reportCategory} onChange={(e) => { setReportCategory(e.target.value as OrderReportCategory); setOrderDraftCells({}); }} className={`w-[124px] ${reportCategory === ALL_ORDER_CATEGORIES ? "" : getOrderCategoryHeaderClass(reportCategory)}`}>
               <option value={ALL_ORDER_CATEGORIES}>전체보기</option>
               {ORDER_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
-            <select value={reportVendor} onChange={(e) => setReportVendor(e.target.value)} className="h-8 w-[150px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold">
+            <select value={reportVendor} onChange={(e) => setReportVendor(e.target.value)} className="w-[150px]">
               <option value="전체">전체 거래처</option>
               {reportVendors.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
             </select>
           </div>
+          {/* 설명문은 사용자 지시로 삭제(2026-08-04) — 작성방법 말풍선이 대신한다. */}
+          <div className="branch-band-actions">
+            <div className="flex h-[28px] items-center rounded-full bg-[#2E6DB4]/10 px-3 text-[11px] font-black text-[#1A3C6E]">월 합계 {formatNumber(monthTotal)}원</div>
+            {/* 불러오는 동안 칸이 잠긴다. 이유를 안 알려주면 고장으로 보인다.
+                저장이 클라우드에 못 올라갔으면 초록 "저장됨"으로 안심시키면 안 된다 — 빨갛게 알린다.
+                실패 경고색은 hex — bg-rose-* 는 지점 스코프가 안내색으로 치환해 경고가 죽는다(DESIGN.md §12). */}
+            {!loaded ? (
+              <div className="flex h-[28px] items-center rounded-full bg-amber-50 px-3 text-[11px] font-black text-amber-700">불러오는 중…</div>
+            ) : saveStatus === "error" ? (
+              <div className="flex h-[28px] items-center rounded-full bg-[#FDE2E2] px-3 text-[11px] font-black text-[#B91C1C] whitespace-nowrap" title="입력값이 아직 클라우드에 저장되지 않았습니다. 인터넷 연결을 확인해 주세요. 연결이 돌아오면 자동으로 다시 저장을 시도합니다.">동기화 실패 · 재시도 중</div>
+            ) : saveStatus === "saving" ? (
+              <div className="flex h-[28px] items-center rounded-full bg-amber-50 px-3 text-[11px] font-black text-amber-700">저장 중…</div>
+            ) : (
+              <div className="flex h-[28px] items-center rounded-full bg-emerald-50 px-3 text-[11px] font-black text-emerald-700">자동저장됨</div>
+            )}
+          </div>
         </div>
         <div className="max-h-[70vh] overflow-auto" data-guide="order-matrix">
           <table className="w-full min-w-[760px] text-xs">
-            <thead className="sticky top-0 z-20 bg-gray-50 text-gray-600 font-black border-b shadow-sm">
+            {/* 머리글 색은 index.css 가 표준 엘리스로 칠한다(2026-08-04 사용자 지시 — 대분류색 머리글 폐기).
+                thead 의 border-b·shadow 는 밴드 아래선과 겹쳐 두 줄로 보여 뺐다(§9-1-A). */}
+            <thead className="sticky top-0 z-20 font-black">
               <tr>
                 <th rowSpan={2} className="sticky left-0 z-30 bg-gray-50 p-2 w-12 border-r align-middle">일</th>
                 {categoryHeaderGroups.map((group, index) => (
@@ -1011,7 +1015,9 @@ export function OrderManagementTabV2({ branchName }: { branchName: string }) {
                         띠는 index.css 의 `#orders-tab-view tbody tr:focus-within` 이 그린다.
                         여기서는 날짜 숫자 색만 바꿔 "몇 일 줄인지"를 한 번 더 짚어 준다. */}
                     <td
-                      className={`sticky left-0 z-20 p-1.5 text-center font-mono font-black border-r transition-colors ${
+                      // order-day-cell: 일 컬럼만 머리글과 같은 엘리스로(index.css). td.sticky 전체로 잡으면
+                      // 하단 합계행의 '합계' 고정칸까지 물들어 요약 밴드 성격이 깨진다(Codex 2차 P2).
+                      className={`order-day-cell sticky left-0 z-20 p-1.5 text-center font-mono font-black border-r transition-colors ${
                         rowActive ? "text-[#2E6DB4]" : "text-gray-600"
                       }`}
                     >
