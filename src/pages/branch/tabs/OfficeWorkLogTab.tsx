@@ -1,6 +1,5 @@
 // src/pages/branch/tabs/OfficeWorkLogTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ClipboardList } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { toLocalMonthInputValue } from "../helpers/formatters";
@@ -125,13 +124,17 @@ export function OfficeWorkLogTab({ branchName }: { branchName: string }) {
     ];
     while (cells.length % 7 !== 0) cells.push(null);
     return (
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+      <section className="branch-sheet-card">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">근무 달력</h3>
+          <p className="branch-band-meta">
+            근무 <b>{calendarSummary.workDates.size}일</b> · 휴무 <b>{calendarSummary.offDates.size}일</b> ·
+            지점파견 <b>{calendarSummary.dispatchDates.size}일</b>
+          </p>
+        </div>
+        <div className="p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2 text-xs font-black">
-            <span className="rounded-lg bg-sky-50 px-2.5 py-1 text-sky-700">근무 {calendarSummary.workDates.size}일</span>
-            <span className="rounded-lg bg-gray-100 px-2.5 py-1 text-gray-600">휴무 {calendarSummary.offDates.size}일</span>
-            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-700">지점파견 {calendarSummary.dispatchDates.size}일</span>
-          </div>
           <div className="flex gap-2 text-[11px] font-bold text-gray-500">
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-500" />근무</span>
             <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-gray-400" />휴무</span>
@@ -174,44 +177,51 @@ export function OfficeWorkLogTab({ branchName }: { branchName: string }) {
             );
           })}
         </div>
+        </div>
       </section>
     );
   };
 
   return (
     <div className="space-y-5 animate-fade-in" id="office-work-log-tab">
-      <section className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
-            <ClipboardList className="w-5 h-5 text-[#2E6DB4]" /> 본사 근무내역
-          </h3>
-          <p className="text-xs text-gray-400 mt-1">월별로 본사 직원의 근무시간, 근무지점, 업무내용을 확인합니다.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-xs font-black" />
-          <button type="button" onClick={() => setShowCalendar((value) => !value)} className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-black text-[#2E6DB4]">
-            달력 {showCalendar ? "닫기" : "보기"}
-          </button>
-          <button type="button" onClick={() => void load()} className="px-3 py-2 rounded-xl bg-zinc-900 text-white text-xs font-black">새로고침</button>
+      <section className="branch-sheet-card">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">본사 근무내역</h3>
+          {/* 모양(28px·11px·알약·흰 바탕)은 `.branch-band-filters` 가 !important 로 강제한다 — 여기 적지 않는다. */}
+          <div className="branch-band-filters">
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="조회월 선택" title="조회월 선택" />
+            <button type="button" onClick={() => setShowCalendar((value) => !value)} aria-pressed={showCalendar}>
+              달력 {showCalendar ? "닫기" : "보기"}
+            </button>
+            <button type="button" onClick={() => void load()}>새로고침</button>
+          </div>
+          <p className="branch-band-meta">월별로 본사 직원의 근무시간, 근무지점, 업무내용을 확인합니다.</p>
         </div>
       </section>
 
       {showCalendar && renderWorkCalendar()}
 
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <section className="branch-sheet-card">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">근무 상세 내역</h3>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
-            <thead className="bg-gray-50 text-left text-xs text-gray-500 font-black border-b">
+          {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·굵기를 여기 적지 않는다. */}
+          {/* 본문 12px(§6-0-1) — `text-sm`(14px)은 표 본문 규격이 아니다. 머리글 11px 은 `.branch-sheet-head` 가 준다. */}
+          <table className="branch-sheet-head w-full min-w-[980px] text-xs">
+            <thead>
               <tr>
-                <th className="p-3 w-28">날짜</th>
-                <th className="p-3 w-24">직원</th>
-                <th className="p-3 w-32">근무지점</th>
-                <th className="p-3 w-20">상태</th>
-                <th className="p-3 w-28">시간</th>
-                <th className="p-3 w-24 text-right">근무</th>
-                <th className="p-3 w-24 text-right">초과</th>
-                <th className="p-3">업무내용</th>
-                <th className="p-3 w-40">초과 사유</th>
+                <th className="w-28">날짜</th>
+                <th className="w-24">직원</th>
+                <th className="w-32">근무지점</th>
+                <th className="w-20">상태</th>
+                <th className="w-28">시간</th>
+                <th className="w-24 text-right">근무</th>
+                <th className="w-24 text-right">초과</th>
+                <th>업무내용</th>
+                <th className="w-40">초과 사유</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">

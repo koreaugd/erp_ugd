@@ -1,11 +1,11 @@
 // src/pages/branch/tabs/MonthlyFullTimeSalarySubTab.tsx
 // 월말마감정산 - 정직원 급여대장 탭 (비밀번호 잠금 + 직원현황 자동연동, 전 컬럼 수정 가능)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Check, X } from "lucide-react";
+import { X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch } from "../../../utils/salaryAccess";
-import { SheetKeyHint } from "../../../components/SheetKeyHint";
+
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatResidentNumber, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey, readLocalStaffList } from "../helpers/staffHelpers";
@@ -141,11 +141,19 @@ export function MonthlyFullTimeSalarySubTab({
   selectedMonth,
   triggerToast,
   isLocked = false,
+  registerAddRow,
+  showOtSummary = false,
 }: {
   branchName: string;
   selectedMonth: string;
   triggerToast: (msg: string, type?: "success" | "error") => void;
   isLocked?: boolean;
+  /* '직원 추가' 버튼이 밴드(부모 MonthlySettleTab)로 올라갔다(2026-08-04) — 행 추가 동작을 부모에 등록한다.
+     null = 등록 해제. 이 탭은 SalaryAccessGate 뒤라 재잠금 시 언마운트되는데, 해제하지 않으면
+     밴드 버튼이 묵은 클로저로 잠긴 급여대장에 행을 넣을 수 있다(Codex P0 2026-08-04). */
+  registerAddRow?: (fn: (() => void) | null) => void;
+  /* 초과근무 누적 참고 박스 — 밴드의 토글 버튼(부모)이 켰을 때만 그린다(2026-08-04). */
+  showOtSummary?: boolean;
 }) {
   // 급여대장 열람 권한 판정용 세션(계정별 허용 지점) — 판정은 canReadSalaryBranch가 한다.
   const { user } = useAuthContext();
@@ -406,6 +414,13 @@ export function MonthlyFullTimeSalarySubTab({
     }]);
   };
 
+  // 매 렌더마다 최신 함수를 부모 밴드의 '직원 추가' 버튼에 등록하고(오래된 클로저 방지),
+  // 언마운트(게이트 재잠금 포함) 시 해제한다 — 잠긴 뒤에도 밴드 버튼이 행을 넣는 우회를 막는다(Codex P0).
+  useEffect(() => {
+    registerAddRow?.(addManualRow);
+    return () => { registerAddRow?.(null); };
+  });
+
   const deleteRow = (id: string) => {
     if (isLocked) return;
     // 급여(금전) 행이라 오클릭 삭제를 막기 위해 한 번 확인한다.
@@ -449,11 +464,13 @@ export function MonthlyFullTimeSalarySubTab({
   const emptyColSpan = 16; // 전체 열 수(연장근무 3열 포함, 삭제는 이름칸 ×로 통합)
 
   return (
-    <div className="space-y-5 animate-fade-in" id="fulltime-salary-subtab">
-      {/* 초과근무일지 집계 — 월말마감 헤더 바로 아래, 급여대장 제목 위. 읽기 전용 참고.
+    <div className="animate-fade-in" id="fulltime-salary-subtab">
+      {/* 초과근무일지 집계 — 밴드의 '초과근무 누적' 버튼을 눌렀을 때만 펼친다(2026-08-04). 읽기 전용 참고.
           급여에 자동 반영하지 않는다(휴무로 대체하는 인원이 있어 지급 대상만 지점이 직접 연장근무 '근무시간' 칸에 옮겨 적는다).
-          색은 이 탭의 디자인 토큰(--branch-vanilla/honey + 검정 테두리)을 따른다 — 옛 인디고 팔레트 금지. */}
-      <div className="rounded-2xl border border-zinc-900 bg-white px-4 py-3 space-y-2" data-guide="fulltime-overtime-summary">
+          색은 이 탭의 디자인 토큰(--branch-vanilla/honey + 검정 테두리)을 따른다 — 옛 인디고 팔레트 금지.
+          카드 p-4 래퍼가 사라졌으므로 표 아닌 블록들은 자기 여백(mx-4 등)을 갖는다. */}
+      {showOtSummary && (
+      <div className="mx-4 mt-4 rounded-2xl border border-zinc-900 bg-white px-4 py-3 space-y-2" data-guide="fulltime-overtime-summary">
         <div className="text-xs font-black text-zinc-900 w-fit">
           초과근무 누적 <span className="font-bold text-zinc-400">(초과근무일지의 '총'과 동일 · 전월누적 포함 · 참고용)</span>
         </div>
@@ -474,9 +491,11 @@ export function MonthlyFullTimeSalarySubTab({
                   key={x.name}
                   title={dup ? "급여대장에 같은 이름이 2명 이상 있습니다. 이 시간은 동명이인의 합산일 수 있으니 초과근무일지에서 개별 확인해 주세요." : undefined}
                   className={`inline-flex items-center gap-1 rounded-full border border-zinc-900 px-2.5 py-1 text-[11px] font-black text-zinc-900 ${
+                    /* 상태 구분색이라 옛 진한 값을 hex 로 박는다 — 토큰은 팔레트 개정(2026-08-04)으로
+                       연해져서, 양수/음수 구분이 흰 바탕에서 흐려진다(§2-1 원래 채도 원칙). */
                     dup ? "bg-rose-100 text-rose-700"
-                    : x.hours < 0 ? "bg-[var(--branch-honey)]"
-                    : "bg-[var(--branch-vanilla)]"
+                    : x.hours < 0 ? "bg-[#CFDECA]"
+                    : "bg-[#EFF0A3]"
                   }`}
                 >
                   {dup ? "⚠ " : ""}{x.name} <b className="font-mono">{x.hours > 0 ? `+${x.hours}h` : `${x.hours}h`}</b>
@@ -490,42 +509,27 @@ export function MonthlyFullTimeSalarySubTab({
           동명이인은 한 이름으로 합산 표시되니(⚠) 해당 시 초과근무일지에서 개별 확인해 주세요.
         </p>
       </div>
+      )}
 
-      {/* 제목은 위 월말마감 헤더 필("정직원 급여대장")이 맡는다 — 여기 또 적으면 한 화면에 같은 이름이 두 번 보인다. */}
-      <div className="flex justify-between items-center pb-3 border-b border-gray-50">
-        <p className="text-[10px] text-gray-400 font-semibold">
-          직원현황의 정직원 이름이 자동으로 채워집니다. 모든 칸은 직접 수정할 수 있고, 명단에 없으면 '직원 추가'로 넣으세요.
-        </p>
-        <div className="flex gap-2">
-          <button
-            onClick={addManualRow}
-            disabled={isLocked}
-            className="p-1 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            <Plus className="w-3.5 h-3.5" /> 직원 추가
-          </button>
-          <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
-            <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
-          </div>
-        </div>
-      </div>
-
+      {/* 설명문·도구 줄은 없앴다(사용자 지시 2026-08-04) — '직원 추가'·'자동저장'·'초과근무 누적' 토글은
+          밴드의 월 필터 오른쪽(부모 MonthlySettleTab)으로 올라갔다. 기본 상태에선 표가 밴드에 바로 붙는다. */}
       {isLocked && (
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+        <div className="mx-4 mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
           마감제출이 확정되어 입력값이 잠겨 있습니다. 수정하려면 마감수정 버튼을 눌러주세요.
         </div>
       )}
 
-      {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
-      <div className="relative">
-      <SheetKeyHint />
       {/* 발주관리처럼 스크롤 래퍼엔 테두리·둥근 모서리를 두지 않는다 — rounded가 표의 직각 검정 모서리를 잘라내고
-          border-gray-100 회색 선이 검정 격자 바깥에 겹쳐 보인다. 표 테두리는 표(헤더 CSS)가 직접 그린다. */}
+          border-gray-100 회색 선이 검정 격자 바깥에 겹쳐 보인다. 표 테두리는 표(헤더 CSS)가 직접 그린다.
+          키 이동 칩은 카드(밴드 상단선)로 올라갔다 — 부모 MonthlySettleTab 이 그린다(2026-08-04). */}
       <div className="max-h-[70vh] overflow-auto" data-guide="fulltime-salary-table">
         {/* border-separate 필수 — collapse에서는 sticky 헤더/고정열의 테두리가 스크롤을 따라오지 않아 선이 깨진다(index.css 참고). */}
         <table className="text-left text-[11px] border-separate font-medium" style={{ minWidth: 1750, borderSpacing: 0 }}>
           <thead className="sticky top-0 z-20">
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 text-[10px] tracking-wider">
+            {/* 머리글 색·격자 = 지점 표준. 이 표는 2줄 머리글(rowSpan/colSpan)이라 `.branch-sheet-head` 를
+                붙이면 둘째 줄 th 까지 top:0 에 붙어 스크롤 때 첫 줄과 겹친다 — thead 통째 sticky 를 유지하고
+                색·선은 index.css 의 `#fulltime-salary-subtab thead th` 규칙이 입힌다(2026-08-04). */}
+            <tr>
               {/* 성명만 왼쪽 고정(발주관리 '일' 컬럼과 같은 패턴). 다른 열은 고정하지 않는다 — 여러 열 sticky는 오프셋이 어긋나 표가 깨졌다. */}
               <th rowSpan={2} className={`${th} w-24 sticky left-0 z-30`}>성명</th>
               <th rowSpan={2} className={`${th} w-20`}>직급</th>
@@ -542,7 +546,7 @@ export function MonthlyFullTimeSalarySubTab({
               <th rowSpan={2} className={`${th} w-28 text-indigo-700 whitespace-nowrap`}>총 금액</th>
               <th rowSpan={2} className={`${th} w-96 whitespace-nowrap`}>기타내용 (퇴사일 및 퇴직금 등)</th>
             </tr>
-            <tr className="bg-zinc-50 text-zinc-500 text-[10px] tracking-wider">
+            <tr>
               <th className={`${th} w-20 whitespace-nowrap`}>근무시간</th>
               <th className={`${th} w-24`}>시급</th>
               <th className={`${th} w-28`}>계</th>
@@ -634,7 +638,6 @@ export function MonthlyFullTimeSalarySubTab({
             </tfoot>
           )}
         </table>
-      </div>
       </div>
     </div>
   );

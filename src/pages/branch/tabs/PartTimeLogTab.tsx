@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/PartTimeLogTab.tsx
 // 파트타이머일지 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
@@ -94,6 +94,8 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
   const [loading, setLoading] = useState(true);
   // 저장이 도는 중임을 알리는 작은 배지. 화면은 이미 바뀌어 있으므로 표를 막지 않는다.
   const [saving, setSaving] = useState(false);
+  // 수기 입력 폼은 버튼을 눌렀을 때만 펼친다(2026-08-04) — 평소엔 표가 밴드에 바로 붙는다.
+  const [showManual, setShowManual] = useState(false);
   const [records, setRecords] = useState<any[]>([]);
   /** 직원현황에 등록된 파트타이머 이름. 수정창 성명 드롭다운의 목록이 된다. */
   const [rosterPartTimerNames, setRosterPartTimerNames] = useState<string[]>([]);
@@ -577,60 +579,57 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
         />
       )}
       {/* List Table Left */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-        <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-black text-gray-800 w-fit">파트타이머 근무 일지</h3>
-              {saving && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> 저장 중…
-                </span>
-              )}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-0.5 font-bold">지점에 출근하여 실근무한 아르바이트 직원 출퇴근 로그입니다.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-40">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-              <input
-                type="search"
-                value={nameFilter}
-                onChange={(e) => setNameFilter(e.target.value)}
-                placeholder="이름 검색"
-                aria-label="파트타이머 직원명 검색"
-                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-7 text-xs font-bold text-gray-700 outline-none transition focus:border-[#2E6DB4]"
-              />
-              {nameFilter && (
-                <button
-                  type="button"
-                  onClick={() => setNameFilter("")}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                  title="검색어 지우기"
-                  aria-label="검색어 지우기"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
+      <div className="branch-sheet-card lg:col-span-2">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3).
+            [2026-08-04 사용자 지시] 설명문 삭제 · 월/이름검색/새로고침은 제목 오른쪽 필터 자리로 —
+            모양(28px 흰 알약)은 `.branch-band-filters` CSS 가 자동으로 입힌다(검색 돋보기 아이콘은
+            알약 padding 강제와 겹쳐 뺐다 — type=search 라 크롬이 지우기 ×를 자체 제공한다). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">파트타이머 근무 일지</h3>
+          <div className="branch-band-filters">
             {/* 저장이 도는 동안은 달을 바꾸지 못하게 한다. 저장에 실패하면 "고치기 전 화면"으로 되돌리는데,
                 그 사이 달이 바뀌어 있으면 지난달 목록을 이번 달 자리에 되돌려 놓게 된다. */}
-            <input type="month" value={selectedMonth} disabled={saving} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white disabled:opacity-50 disabled:cursor-not-allowed" />
+            <input type="month" value={selectedMonth} disabled={saving} onChange={(e) => setSelectedMonth(e.target.value)} aria-label="조회 월" className="disabled:opacity-50 disabled:cursor-not-allowed" />
+            <input
+              type="search"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="이름 검색"
+              aria-label="파트타이머 직원명 검색"
+              className="w-32"
+            />
             <button
               onClick={() => void loadData(true)}
               disabled={saving}
-              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className="w-3 h-3" /> 새로고침
+            </button>
+            {saving && <span className="text-[10px] font-black text-zinc-500">저장 중…</span>}
+          </div>
+          {/* 수기 입력 토글은 오른쪽 끝(사용자 지시 2026-08-04). band-actions 는 자동 스타일이 없어
+              필터 알약과 같은 모양(28px 흰 알약, 눌림=검정)을 직접 입힌다. */}
+          <div className="branch-band-actions">
+            <button
+              type="button"
+              aria-pressed={showManual}
+              onClick={() => setShowManual((v) => !v)}
+              className={`h-[28px] rounded-full border border-[#212121] px-3 text-[11px] font-black flex items-center cursor-pointer transition-colors ${
+                /* 흰 바탕은 hex 로 — `bg-white` 는 지점 스코프에서 고스트 회색으로 치환된다(§12, 실측 2026-08-04). */
+                showManual ? "bg-[#212121] text-[#F4F2CC]" : "bg-[#ffffff] text-[#212121]"
+              }`}
+            >
+              수기 입력
             </button>
           </div>
         </div>
 
-        {/* Manual Part-Timer Registration Form */}
-        {/* 저장이 도는 동안은 입력칸도 함께 잠근다.
+        {/* Manual Part-Timer Registration Form — '수기 입력' 버튼을 눌렀을 때만 펼친다(2026-08-04).
+            저장이 도는 동안은 입력칸도 함께 잠근다.
             등록이 끝나면 성공 표시로 입력칸을 비우는데, 그 사이 다음 건을 치고 있었다면
             방금 친 내용이 그때 지워진다 — 사용자는 자기가 쓴 글이 왜 사라졌는지 알 수 없다. */}
-        <div className="flex flex-wrap gap-2.5 rounded-xl bg-gray-50 p-3 border border-gray-100 items-center">
+        {showManual && (
+        <div className="mx-4 my-3 flex flex-wrap gap-2.5 rounded-xl bg-gray-50 p-3 border border-gray-100 items-center">
           <span className="w-full text-xs font-black text-gray-600">파트타이머 근무 수기 입력</span>
           <input value={manualName} disabled={saving} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4] disabled:opacity-50 disabled:cursor-not-allowed" />
           <input type="date" value={manualDate} disabled={saving} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:border-[#2E6DB4] disabled:opacity-50 disabled:cursor-not-allowed" />
@@ -690,6 +689,7 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
           {/* 등록도 수정·삭제와 같은 목록을 덮어쓴다 — 저장이 도는 동안은 함께 잠근다. */}
           <button disabled={saving} onClick={() => void saveManualPartTime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">등록</button>
         </div>
+        )}
 
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center space-y-2">
@@ -699,19 +699,20 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
         ) : (
           // 한 달치 기록이 통째로 세로로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
           <div className="max-h-[60vh] overflow-auto">
-            <table className="w-full text-left text-xs border-collapse font-medium animate-fade-in">
-              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(243_244_246)]">
-                <tr className="text-gray-400 font-bold">
-                  <th className="py-2 px-2">마감일자</th>
-                  <th className="py-2 px-2">직원명</th>
-                  {branchName === "본사" && <th className="py-2 px-2">근무지점</th>}
-                  <th className="py-2 px-2">출근</th>
-                  <th className="py-2 px-2">퇴근</th>
-                  <th className="py-2 px-2 text-center">근무시간</th>
-                  <th className="py-2 px-2">작성자 (결재)</th>
+            {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·그림자를 여기 적지 않는다. */}
+            <table className="branch-sheet-head w-full text-left text-xs border-collapse font-medium animate-fade-in">
+              <thead>
+                <tr>
+                  <th>마감일자</th>
+                  <th>직원명</th>
+                  {branchName === "본사" && <th>근무지점</th>}
+                  <th>출근</th>
+                  <th>퇴근</th>
+                  <th className="text-center">근무시간</th>
+                  <th>작성자 (결재)</th>
                   {/* 지점도 자기 지점 근무기록을 고치고 지울 수 있다. 잘못 올라간 기록을 고치려고
                       매번 본사에 연락해야 했다. 누가 고쳤는지는 수정이력에 남는다(editActor). */}
-                  <th className="py-2 px-2 text-center">관리</th>
+                  <th className="text-center">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -757,13 +758,14 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
       </div>
 
       {/* Summary Aggregate Right */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-fit space-y-4">
-        <div>
-          <h3 className="text-sm font-black text-gray-800">파트타이머 보상 집계</h3>
-          <p className="text-[10px] text-gray-400 mt-0.5 font-medium">아르바이트 인원들의 총 근무시간과 총 출근날수를 집계합니다.</p>
+      <div className="branch-sheet-card h-fit">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 필터·버튼은 밴드 안 제자리에 들어간다. */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">파트타이머 보상 집계</h3>
+          <p className="branch-band-meta">아르바이트 인원들의 총 근무시간과 총 출근날수를 집계합니다.</p>
         </div>
 
-        <div className="divide-y divide-gray-50 font-bold text-xs">
+        <div className="p-4 divide-y divide-gray-50 font-bold text-xs">
           {filteredSummaryList.length === 0 ? (
             <p className="py-8 text-center text-gray-400">
               {normalizedNameFilter ? "검색된 집계 대상자가 없습니다." : "집계 정보가 존재하지 않습니다."}

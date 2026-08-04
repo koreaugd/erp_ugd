@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/SalesSummarySection.tsx
 // 월말마감 매입매출 탭 상단 - 매출집계 섹션 (자동계산 + 검증 + 경고 + 빈칸사유)
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
-import { AlertTriangle, TrendingUp, Utensils, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { formatNumber } from "../../../utils/formatNumber";
@@ -292,95 +292,101 @@ export function SalesSummarySection({
   // 훅이 없는 칸을 만나면 옆 칸으로 흘려보내므로 들쭉날쭉한 격자도 그대로 동작한다.
   const { cellProps } = useSheetKeyboardNav({ rowCount: 4, colCount: 2 });
 
-  // ---- 렌더 헬퍼: 라벨(좌) + 입력값(우). 모든 칸 필수(빈칸이면 붉게 표시), 0 입력은 유효 ----
+  // ---- 렌더 헬퍼: 세로형 엑셀 시트 한 행(§9-1 개정 2026-08-04) — 왼쪽 라벨 열 = 헤더 취급(엘리스),
+  //      오른쪽 값 칸 = 납작 투명 입력. 모양은 index.css `#sales-summary-section .sales-sheet-*` 가 정한다.
+  //      모든 칸 필수(빈칸이면 값 칸을 오류색 §11 hex 로 표시), 0 입력은 유효.
   // guideAnchor: 작성방법 안내 말풍선이 붙을 칸에만 붙인다(GuideCallouts가 data-guide로 찾는다).
   const rowField = (
     fieldKey: keyof SalesSummary,
     label: string,
-    /** 셀 좌표. 열 = 카드(0 매출구성 / 1 결제구성 / 2 매출요약), 행 = 그 카드 안의 순번. */
+    /** 셀 좌표. 열 = 카드(0 매출구성 / 1 매출요약), 행 = 그 카드 안의 순번. */
     cell: { row: number; col: number },
-    guideAnchor?: string
+    guideAnchor?: string,
+    /** 성격이 갈리는 행(캐치테이블) 앞을 1px 검정으로 끊는다. */
+    sep = false
   ) => {
     const isBlank = !filled(String(data[fieldKey] || ""));
     const err = showErrors && isBlank;
     return (
-      <div key={fieldKey} className="flex items-center justify-between gap-2" data-guide={guideAnchor}>
-        <span className={`text-[11px] font-black shrink-0 ${err ? "text-rose-600" : "text-zinc-700"}`}>{label}</span>
-        <input
-          {...cellProps(cell.row, cell.col)}
-          aria-label={label}
-          type="text"
-          inputMode="numeric"
-          value={formatWithCommas(String(data[fieldKey] || ""))}
-          disabled={isLocked}
-          onChange={(e) => update(fieldKey, e.target.value)}
-          placeholder="입력(0 가능)"
-          className={`w-28 p-1.5 border-2 rounded-lg text-xs font-mono font-black text-right focus:outline-none disabled:text-gray-400 ${err ? "border-rose-500 bg-rose-50 text-rose-700 placeholder-rose-300 focus:border-rose-600" : "border-zinc-300 bg-white focus:border-[#2E6DB4]"}`}
-        />
+      <div key={fieldKey} className={`sales-sheet-row ${sep ? "sales-sheet-row-sep" : ""}`} data-guide={guideAnchor}>
+        <span className={`sales-sheet-label ${err ? "text-[#B91C1C]" : "text-[#212121]"}`}>{label}</span>
+        <div className={`sales-sheet-cell ${err ? "is-error" : ""}`}>
+          <input
+            {...cellProps(cell.row, cell.col)}
+            aria-label={label}
+            type="text"
+            inputMode="numeric"
+            value={formatWithCommas(String(data[fieldKey] || ""))}
+            disabled={isLocked}
+            onChange={(e) => update(fieldKey, e.target.value)}
+            placeholder="입력(0 가능)"
+            className={`sheet-cell-input w-full h-9 px-2.5 text-xs font-mono font-black text-right focus:outline-none ${err ? "text-[#B91C1C]" : "text-zinc-900"}`}
+          />
+        </div>
       </div>
     );
   };
 
-  // strong: 카드의 최종값(합계)용. 바로 위 입력칸과 한 덩어리로 읽히도록 구분선을 빼고 라벨·테두리를 진하게 한다.
+  // 자동 계산 행. strong = 카드의 최종 합계 — 앞을 1px 검정으로 끊고 값을 강조한다.
   const autoRow = (label: string, value: string, warn = false, strong = false) => (
-    <div className={`flex items-center justify-between gap-2 ${strong ? "pt-1.5" : "pt-2 mt-1 border-t border-zinc-200"}`}>
-      <span className={`text-[11px] font-black shrink-0 ${strong ? "text-zinc-900" : "text-zinc-500"}`}>{label} <span className="text-[9px] font-bold text-zinc-400">자동</span></span>
-      <span className={`w-28 p-1.5 rounded-lg text-xs font-mono font-black text-right border-2 ${warn ? "bg-rose-50 text-rose-600 border-rose-400" : strong ? "bg-zinc-50 text-blue-700 border-zinc-900" : "bg-zinc-50 text-blue-700 border-zinc-200"}`}>{value}</span>
+    <div className={`sales-sheet-row ${strong ? "sales-sheet-row-sep" : ""}`}>
+      <span className="sales-sheet-label text-[#212121]">
+        {label} <span className="text-[9px] font-bold text-zinc-500">자동</span>
+      </span>
+      <span className={`sales-sheet-cell h-9 px-2.5 text-xs font-mono font-black ${warn ? "is-error text-[#B91C1C]" : strong ? "bg-[#F6F5FA] text-[#2E6DB4]" : "text-[#2E6DB4]"}`}>{value}</span>
     </div>
   );
 
-  // 카드: 흰 바탕 + 검정 테두리 (다른 섹션과 동일). 제목은 노란(바닐라) pill.
+  // 상자: 흰 바탕 + 검정 테두리, 안쪽 여백 없음 — 제목 줄·시트가 상자 폭을 꽉 채운다(§6-3과 같은 원리).
   // rounded-xl 사용: bg-white+rounded-2xl/3xl에 걸린 테두리색 !important 덮어쓰기를 피해 검정 테두리를 살린다.
-  const cardCls = "bg-white rounded-xl border border-zinc-900 p-4 space-y-2.5";
-  // 기존 섹션 제목과 동일: 캡슐(rounded-full) + 1px 검정 테두리 + 바닐라 바탕
-  const pillTitleCls = "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[11px] font-black leading-none";
+  const cardCls = "bg-white rounded-xl border border-zinc-900 overflow-hidden";
 
   return (
-    <div className="relative bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-4 animate-fade-in" id="sales-summary-section">
+    /* 표준 카드 — 카드에 padding 을 주지 않는다(제목 밴드가 카드 폭을 꽉 채워야 한다).
+       안쪽 내용이 자기 여백(p-4)을 갖는다(DESIGN.md §6-3). */
+    /* 키 이동 칩은 제목 밴드 상단선에 걸친다(2026-08-04) — 카드 overflow:hidden 을 피해 카드 밖 래퍼 기준. */
+    <div className="relative">
       <SheetKeyHint />
-      {/* 헤더 (월말마감결산포탈과 동일 배치): 제목 pill(좌) / 결산월 선택 + 마감버튼(우), 제출상태는 그 아래 */}
-      <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 pb-3 border-b border-gray-50">
-        <div>
-          <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
-            매출집계
-          </div>
+    <div className="branch-sheet-card animate-fade-in" id="sales-summary-section">
+      {/* 제목 밴드 = 지점 표준. 제목 → 결산월(필터) → 제출상태·마감버튼 순으로 자리가 고정된다. */}
+      <div className="branch-band">
+        <h3 className="branch-band-title">매출집계</h3>
+        {/* 모양(28px·11px·알약·흰 바탕)은 `.branch-band-filters` 가 !important 로 강제한다 — 여기 적지 않는다. */}
+        <div className="branch-band-filters">
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => onMonthChange?.(e.target.value)}
+            disabled={!onMonthChange}
+            data-guide="sales-summary-month"
+            aria-label="결산월 선택"
+            title="결산월 선택"
+          />
         </div>
-        <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-          <div className="flex flex-wrap items-center gap-2 justify-end">
-            <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => onMonthChange?.(e.target.value)}
-              disabled={!onMonthChange}
-              data-guide="sales-summary-month"
-              className="p-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-xs font-extrabold rounded-xl shadow-inner focus:outline-none cursor-pointer disabled:cursor-not-allowed"
-            />
-            <button onClick={handleSubmitClick} className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
-              <CheckCircle2 className="w-3.5 h-3.5" /> 마감제출
+        <div className="branch-band-actions">
+          <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
+          <span className={`monthly-close-status-pill rounded-lg px-2.5 py-1 text-[11px] font-black ${closeStatus === "confirmed" ? "monthly-close-status-confirmed" : closeStatus === "editing" ? "monthly-close-status-editing" : "monthly-close-status-missing"}`}>
+            {closeStatus === "confirmed" ? "확정" : closeStatus === "editing" ? "수정중" : "미제출"}
+          </span>
+          <button onClick={handleSubmitClick} className="monthly-action-confirm p-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
+            <CheckCircle2 className="w-3.5 h-3.5" /> 마감제출
+          </button>
+          {closeStatus === "editing" ? (
+            <button onClick={() => onCancelEdit?.()} className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
+              <X className="w-3.5 h-3.5" /> 마감수정 취소
             </button>
-            {closeStatus === "editing" ? (
-              <button onClick={() => onCancelEdit?.()} className="monthly-action-edit-cancel p-2 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
-                <X className="w-3.5 h-3.5" /> 마감수정 취소
-              </button>
-            ) : (
-              <button onClick={() => onEdit?.()} className="monthly-action-edit p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
-                <Pencil className="w-3.5 h-3.5" /> 마감수정
-              </button>
-            )}
-            <button onClick={() => onCancel?.()} className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
-              <Trash2 className="w-3.5 h-3.5" /> 마감취소
+          ) : (
+            <button onClick={() => onEdit?.()} className="monthly-action-edit p-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
+              <Pencil className="w-3.5 h-3.5" /> 마감수정
             </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
-            <span className={`monthly-close-status-pill rounded-lg px-2.5 py-1 text-[11px] font-black ${closeStatus === "confirmed" ? "monthly-close-status-confirmed" : closeStatus === "editing" ? "monthly-close-status-editing" : "monthly-close-status-missing"}`}>
-              {closeStatus === "confirmed" ? "확정" : closeStatus === "editing" ? "수정중" : "미제출"}
-            </span>
-          </div>
+          )}
+          <button onClick={() => onCancel?.()} className="monthly-action-cancel p-2 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-subtle">
+            <Trash2 className="w-3.5 h-3.5" /> 마감취소
+          </button>
         </div>
       </div>
 
+      <div className="p-4 space-y-4">
       {/* 확정 후 수정 시 제출 전 사유 입력(부모에서 주입) */}
       {reasonBox}
 
@@ -416,29 +422,30 @@ export function SalesSummarySection({
           빈 칸에는 아무것도 렌더하지 않는다(빈 카드 껍데기를 두면 입력할 수 있는 칸처럼 보인다). */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={cardCls}>
-          <div className={pillTitleCls}><Utensils className="w-3.5 h-3.5" /> 매출구성</div>
+          {/* 제목 줄 = 바닐라 미니 밴드(§6-3과 같은 원리, 글자만 — 아이콘 금지 §6-1) */}
+          <div className="sales-sheet-title">매출구성</div>
           {rowField("menuSales", "메뉴매출", { row: 0, col: 0 })}
           {rowField("liquorSales", "주류매출", { row: 1, col: 0 })}
           {/* 전 지점 입력칸이다. 해당 없으면 0을 넣으면 되고, 0도 '채워진 값'으로 본다.
               메뉴·주류로 안 잡히는 실매출(커버차지·배달매출)을 여기 모아야 아래 검산이 맞는다. */}
           {rowField("coverCharge", "커버차지·배달매출", { row: 2, col: 0 })}
-          <p className="text-[9px] text-zinc-900 leading-snug pt-0.5">※ 자릿값(커버차지)과 <span className="font-black">배달매출</span>을 합쳐 입력하세요. 둘 다 없으면 <span className="font-black">0</span>을 입력하세요.</p>
+          <p className="sales-sheet-note">※ 자릿값(커버차지)과 <span className="font-black">배달매출</span>을 합쳐 입력하세요. 둘 다 없으면 <span className="font-black">0</span>을 입력하세요.</p>
           {autoRow("실매출과 차이(메뉴+주류+커버·배달)", formatNumber(compositionDiff), filled(data.netSales) && compositionDiff !== 0)}
         </div>
         <div className={cardCls}>
-          <div className={pillTitleCls}><TrendingUp className="w-3.5 h-3.5" /> 매출요약</div>
+          <div className="sales-sheet-title">매출요약</div>
           {rowField("totalSales", "총매출", { row: 0, col: 1 })}
           {rowField("totalDiscount", "총할인", { row: 1, col: 1 })}
           {rowField("netSales", "실매출", { row: 2, col: 1 })}
           {/* 여기부터는 POS가 아니라 캐치테이블에서 받아 적는 값이다. 위 세 칸(POS 실적)과 성격이 달라
-              구분선으로 끊는다. 예약정산금은 POS 실매출에 잡히지 않으므로 실매출과 겹치지 않는다. */}
-          <div className="pt-2.5 mt-1 border-t border-zinc-200 space-y-2.5">
-            {rowField("seatCharge", "캐치테이블 예약정산금", { row: 3, col: 1 }, "sales-summary-seat-charge")}
-            <p className="text-[9px] text-zinc-900 leading-snug">※ 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요. 해당 없으면 <span className="font-black">0</span>을 입력하세요.</p>
-            {autoRow("실매출 + 캐치테이블", formatNumber(netWithCatchTable), false, true)}
-          </div>
+              1px 검정 선(sep)으로 끊는다. 예약정산금은 POS 실매출에 잡히지 않으므로 실매출과 겹치지 않는다. */}
+          {rowField("seatCharge", "캐치테이블 예약정산금", { row: 3, col: 1 }, "sales-summary-seat-charge", true)}
+          <p className="sales-sheet-note">※ 캐치테이블 예약 이용 매장은 <span className="text-rose-600 font-black">캐치테이블 관리자페이지 → 정산 → 부가세 참고자료</span> → 해당 월 선택 후 나오는 금액을 입력하세요. 해당 없으면 <span className="font-black">0</span>을 입력하세요.</p>
+          {autoRow("실매출 + 캐치테이블", formatNumber(netWithCatchTable), false, true)}
         </div>
       </div>
+      </div>
+    </div>
     </div>
   );
 }

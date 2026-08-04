@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyCashExpensesSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo } from "react";
-import { Coins } from "lucide-react";
+import type { ReactNode } from "react";
 import { formatNumber } from "../../../utils/formatNumber";
 import { toNumberPromptValue } from "../helpers/formatters";
 import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "../helpers/chipClasses";
@@ -18,13 +18,17 @@ export function MonthlyCashExpensesSubTab({
   selectedMonth,
   history,
   isAdmin = false,
-  refreshHistory
+  refreshHistory,
+  monthPicker
 }: {
   branchName: string;
   selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
+  /* 결산월 선택기. 예전엔 카드 위에 "결산월 선택:" 한 줄이 따로 떠 있었다 —
+     제목 밴드 안 필터 자리에 들어가야 관리자 화면과 같은 모양이 된다(DESIGN.md §6-3). */
+  monthPicker?: ReactNode;
 }) {
   const { user } = useAuthContext();
   // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
@@ -160,7 +164,7 @@ export function MonthlyCashExpensesSubTab({
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-expenses-subtab">
+    <div className="branch-sheet-card animate-fade-in" id="cash-expenses-subtab">
       {editExpense && (
         <AdminRecordEditModal
           title="현금지출 수정"
@@ -175,63 +179,62 @@ export function MonthlyCashExpensesSubTab({
           onSave={() => void saveEditExpense()}
         />
       )}
-      <div className="flex justify-between items-center pb-3 border-b border-gray-50">
-        <div>
-          <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5 font-sans">
-            <Coins className="w-5 h-5 text-orange-500" />
-            월 현금 지출 내역부 (일일보고 연동)
-          </h3>
-          <p className="text-[10px] text-gray-400 font-bold mt-0.5">
-             매일 마감 일지 작성 시 각 가맹 지점에서 현금 금고에서 차감하고 신고한 실시간 개별 지출 전표의 자동 집계 장부입니다.
-          </p>
+      {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1).
+          총계는 값 하나짜리라 별도 박스를 두지 않고 부연 한 줄로 접었다. */}
+      <div className="branch-band">
+        <h3 className="branch-band-title">월 현금지출 내역부</h3>
+        {monthPicker}
+        {/* 사용처·분류항목 거르개도 밴드 안 필터 자리에 둔다(DESIGN.md §6-3).
+            종전에는 카드 안쪽에 회색 상자로 따로 떠 있어 관리자 화면과 모양이 달랐다.
+            모양(28px·11px·흰 알약)은 `.branch-band-filters` 가 정하므로 여기 적지 않는다. */}
+        <div className="branch-band-filters">
+          <select
+            value={usageFilter}
+            onChange={(e) => setUsageFilter(e.target.value)}
+            aria-label="사용처 거르개"
+          >
+            {usageOptions.map((option) => (
+              <option key={option} value={option}>
+                사용처: {option}
+              </option>
+            ))}
+          </select>
+          <select
+            value={classificationFilter}
+            onChange={(e) => setClassificationFilter(e.target.value)}
+            aria-label="분류항목 거르개"
+          >
+            {classificationOptions.map((option) => (
+              <option key={option} value={option}>
+                분류항목: {option}
+              </option>
+            ))}
+          </select>
         </div>
-
-        <div className="bg-orange-50/50 p-2.5 px-4 rounded-xl border border-orange-100 text-right">
-          <span className="text-[9px] text-orange-600 font-black block leading-none">월 현금지출 총계</span>
-          <span className="text-sm font-black text-zinc-850 font-mono mt-1 block">{formatNumber(totalSum)} 원</span>
-        </div>
+        <p className="branch-band-meta">
+          일일 마감에서 현금 금고에서 차감하고 신고한 지출 전표를 자동 집계한 장부입니다 ·
+          월 총계 <b>{formatNumber(totalSum)}원</b>
+        </p>
       </div>
 
-      <div className="monthly-expense-filter-bar flex flex-wrap items-center gap-3">
-        <select
-          value={usageFilter}
-          onChange={(e) => setUsageFilter(e.target.value)}
-          className="monthly-expense-filter-select"
-        >
-          {usageOptions.map((option) => (
-            <option key={option} value={option}>
-              사용처: {option}
-            </option>
-          ))}
-        </select>
-        <select
-          value={classificationFilter}
-          onChange={(e) => setClassificationFilter(e.target.value)}
-          className="monthly-expense-filter-select"
-        >
-          {classificationOptions.map((option) => (
-            <option key={option} value={option}>
-              분류항목: {option}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
-      <div className="max-h-[60vh] overflow-auto rounded-2xl border border-gray-100">
-        <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] uppercase">
-              <th className="py-2 px-2.5 w-[96px]">마감 일자</th>
-              <th className="py-2 px-2.5 w-[72px]">결제 수단</th>
-              <th className="py-2 px-2.5 text-right w-[104px]">지출 금액</th>
-              <th className="py-2 px-2.5">거래처 (사용처)</th>
-              <th className="py-2 px-2.5">분류 항목</th>
-              <th className="py-2 px-2.5">지출내용 (세부)</th>
-              <th className="py-2 px-2.5">비고</th>
-              <th className="py-2 px-2.5">작성자</th>
-              <th className="py-2 px-2.5">입력 시각</th>
-              <th className="py-2 px-2.5 text-center">관리</th>
+      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
+          [2026-08-04] 카드 안쪽 여백(p-4)과 표 테두리(rounded-2xl border)를 걷어냈다 — 카드가 이미
+          테두리를 그리므로 상자가 겹쳐 보였다(현금관리 탭과 같은 모양으로, §9-1-A). */}
+      <div className="max-h-[60vh] overflow-auto">
+        {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·굵기·테두리를 여기 적지 않는다(DESIGN.md §6-3-1). */}
+        <table className="branch-sheet-head w-full text-left text-xs border-collapse whitespace-nowrap">
+          <thead>
+            <tr>
+              <th className="w-[96px]">마감 일자</th>
+              <th className="w-[72px]">결제 수단</th>
+              <th className="text-right w-[104px]">지출 금액</th>
+              <th>거래처 (사용처)</th>
+              <th>분류 항목</th>
+              <th>지출내용 (세부)</th>
+              <th>비고</th>
+              <th>작성자</th>
+              <th>입력 시각</th>
+              <th className="text-center">관리</th>
             </tr>
           </thead>
           <tbody className="sheet-rows-soft divide-y text-[11px] font-sans">

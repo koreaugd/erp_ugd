@@ -719,10 +719,13 @@ export function RosterTab({ branchName }: { branchName: string }) {
       </AnimatePresence>
 
       {/* Addition Left Form */}
-      <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-        <h3 className="text-sm font-black text-gray-800 w-fit">신규 등록</h3>
+      <div className="branch-sheet-card">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">신규 등록</h3>
+        </div>
 
-        <div className="space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-100 text-xs">
+        <div className="m-4 space-y-2 bg-zinc-50 p-3 rounded-xl border border-gray-100 text-xs">
           {rosterAddDrafts.map((draft, draftIndex) => (
             <div key={draft.id} className="flex flex-wrap items-center gap-2">
               <span className="font-extrabold text-zinc-800 w-8">추가</span>
@@ -776,21 +779,18 @@ export function RosterTab({ branchName }: { branchName: string }) {
       </div>
 
       {/* Roster Right list */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4 min-w-0">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-3">
-          <div>
-            <h3 className="text-sm font-black text-gray-800">지점 등록 근무 인원</h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">명부에 등록된 리스트가 매 정산 기록에 자동 출현합니다.</p>
-          </div>
-
-          <div className="flex gap-2 text-[10px] font-black">
-            <span className="px-3 py-1 bg-amber-50 text-amber-700 rounded-lg">정직원: {regularCount}명</span>
-            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg">파트타이머: {partTimeCount}명</span>
-          </div>
+      <div className="branch-sheet-card min-w-0">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">지점 등록 근무 인원</h3>
+          <p className="branch-band-meta">
+            명부에 등록된 리스트가 매 정산 기록에 자동 출현합니다 ·
+            정직원 <b>{regularCount}명</b> · 파트타이머 <b>{partTimeCount}명</b>
+          </p>
         </div>
 
         <div className="overflow-hidden">
-          <table className="w-full table-fixed text-left text-xs border-collapse">
+          <table className="branch-sheet-head w-full table-fixed text-left text-xs border-collapse">
             <colgroup>
               <col className="w-[8%]" />
               <col className="w-[13%]" />
@@ -801,25 +801,26 @@ export function RosterTab({ branchName }: { branchName: string }) {
               <col className="w-[15%]" />
               <col className="w-[9%]" />
             </colgroup>
+            {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 여기 색·굵기를 적지 않는다. */}
             <thead>
-              <tr className="border-b border-gray-100 text-gray-400 font-bold">
-                <th className="py-2.5 px-2 leading-tight">근무자번호</th>
-                <th className="py-2.5 px-2 leading-tight">성명</th>
-                <th className="py-2.5 px-2 leading-tight">
+              <tr>
+                <th className="leading-tight">근무자번호</th>
+                <th className="leading-tight">성명</th>
+                <th className="leading-tight">
                   <span className="block">주민등록번호</span>
                   <span className="block">앞6자리</span>
                 </th>
-                <th className="py-2.5 px-2 leading-tight">분류</th>
-                <th className="py-2.5 px-2 leading-tight">추가 사유</th>
-                <th className="py-2.5 px-2 leading-tight">
+                <th className="leading-tight">분류</th>
+                <th className="leading-tight">추가 사유</th>
+                <th className="leading-tight">
                   <span className="block">입사일자</span>
                   <span className="block">지점이동 날짜</span>
                 </th>
-                <th className="py-2.5 px-2 leading-tight">
+                <th className="leading-tight">
                   <span className="block">핸드폰번호</span>
                   <span className="block">급여변동</span>
                 </th>
-                <th className="py-2.5 px-2 text-right leading-tight">활동</th>
+                <th className="text-right leading-tight">활동</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-medium">

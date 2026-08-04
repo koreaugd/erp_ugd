@@ -98,7 +98,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
   const defaultStandardHours = isExtraHoursBranch ? 10.5 : 10;
 
   // 일일마감 '작성방법 보기' 토글(여러 섹션 안내를 한 번에). 탭 진입 시 기본으로 켜 둔다(사용자가 닫을 수 있음).
-  const [dailyGuideOpen, setDailyGuideOpen] = useState(true);
+  // 작성방법 말풍선은 기본 닫힘 — 자동으로 열리면 매일 닫는 일이 생긴다(사용자 지시 2026-08-04).
+  const [dailyGuideOpen, setDailyGuideOpen] = useState(false);
   const [settleDate, setSettleDate] = useState<string>(getTodayDateStr());
   // 마감 작성자는 매일 확인 후 직접 입력합니다. 이전 기기/날짜의 이름을 자동으로 채우지 않습니다.
   const [writer, setWriter] = useState<string>("");
@@ -1797,7 +1798,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           onClick={() => setDailyGuideOpen((prev) => !prev)}
           aria-pressed={dailyGuideOpen}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer ${
-            dailyGuideOpen ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900 hover:brightness-95"
+            dailyGuideOpen ? "bg-zinc-900 text-[#F4F2CC]" : "bg-[#F4F2CC] text-zinc-900 hover:brightness-95"
           }`}
         >
           <BookOpen className="w-3.5 h-3.5" /> {dailyGuideOpen ? "작성방법 닫기" : "작성방법 보기"}
@@ -2011,7 +2012,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         } transition-all space-y-4`} id="existing-record-warning-box">
           {/* 승인 전에만 안내한다 — 승인 후에는 아래 본문이 '승인되었습니다'로 바뀌므로 이 배너는 감춘다. */}
           {!isEditApproved && (
-            <div className="rounded-2xl border border-zinc-900 bg-[#EFF0A3] p-4 text-sm font-black text-zinc-950">
+            <div className="rounded-2xl border border-zinc-900 bg-[#F4F2CC] p-4 text-sm font-black text-zinc-950">
               기존 마감 기록이 있는 날짜입니다. 수정하려면 아래의 [수정모드로 진행할 것을 승인함] 버튼을 눌러 주세요.
             </div>
           )}

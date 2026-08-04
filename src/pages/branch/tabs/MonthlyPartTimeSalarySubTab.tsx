@@ -1,5 +1,5 @@
 // src/pages/branch/tabs/MonthlyPartTimeSalarySubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { AlertTriangle, Check, Plus, RotateCcw, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
@@ -581,13 +581,20 @@ export function MonthlyPartTimeSalarySubTab({
   selectedMonth,
   history,
   triggerToast,
-  isLocked = false
+  isLocked = false,
+  monthPicker,
+  bandActions
 }: {
   branchName: string;
   selectedMonth: string;
   history: any[];
   triggerToast: (msg: string, type?: "success" | "error") => void;
   isLocked?: boolean;
+  /* 결산월 선택기. 예전엔 카드 위에 "결산월 선택:" 한 줄이 따로 떠 있었다 —
+     제목 밴드 안 필터 자리에 들어가야 다른 월말 탭들과 같은 모양이 된다(DESIGN.md §6-3). */
+  monthPicker?: ReactNode;
+  /* 제출상태 + 마감 컨트롤. 밴드 오른쪽 끝(.branch-band-actions)에 선다. */
+  bandActions?: ReactNode;
 }) {
   const [salaries, setSalaries] = useState<PartTimeSalaryRow[]>([]);
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
@@ -1954,7 +1961,21 @@ export function MonthlyPartTimeSalarySubTab({
   const cellInput = "sheet-cell-input w-full h-9 px-2 text-xs focus:outline-none";
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="parttime-salaries-subtab">
+    /* 표준 카드 — 카드에 padding 을 주지 않는다(제목 밴드가 카드 폭을 꽉 채워야 한다).
+       안쪽 내용이 자기 여백(p-4)을 갖는다(DESIGN.md §6-3). */
+    /* 키 이동 칩은 제목 밴드 상단선에 걸친다(2026-08-04) — 카드 overflow:hidden 을 피해 카드 밖 래퍼 기준. */
+    <div className="relative">
+      <SheetKeyHint />
+    <div className="branch-sheet-card animate-fade-in" id="parttime-salaries-subtab">
+      {/* 제목 밴드 = 지점 표준. 제목엔 글자만 — 아이콘 금지(§6-1). 설명문은 삭제(사용자 지시 2026-08-04). */}
+      <div className="branch-band">
+        <h3 className="branch-band-title">파트타이머 급여대장</h3>
+        {monthPicker}
+        {bandActions && <div className="branch-band-actions">{bandActions}</div>}
+      </div>
+
+      {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드 연장 줄에 바로 붙어야 관리자 화면과 같다.
+          표 아닌 블록(경고·배지 줄)만 자기 여백(mx-4)을 갖는다. */}
       {/* 수기 근무를 못 읽으면 근무시간이 실제보다 적게 나온다. 그 사실을 말하지 않으면 '정상 집계'로
           보이는 화면을 그대로 믿고 급여를 적게 지급하게 된다 — 조용히 넘어가면 안 되는 실패다. */}
       {/* 색은 지점 실패색 3종을 hex 그대로 쓴다(DESIGN.md §11 · §2 매핑표).
@@ -1963,7 +1984,7 @@ export function MonthlyPartTimeSalarySubTab({
           같은 파일의 '저장 대기 중' 배지와 같은 조합이라 두 경고가 한 화면에서 같은 색으로 읽힌다.
           글자는 경고 배너 규격 12px·700(§6). 버튼은 색으로 의미를 나누지 않고 검정+고스트(§10). */}
       {manualWorkFailed && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 bg-[#FDE2E2] border border-[#C93A3A]">
+        <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 bg-[#FDE2E2] border border-[#C93A3A]">
           <AlertTriangle className="w-3.5 h-3.5 text-[#B91C1C] shrink-0" />
           <span className="text-xs font-bold text-[#B91C1C]">
             근무일지에 수기로 적은 근무를 불러오지 못했습니다. 아래 누적시간이 실제보다 적을 수 있으니, 다시 시도한 뒤 금액을 확정해 주세요.
@@ -1979,74 +2000,22 @@ export function MonthlyPartTimeSalarySubTab({
       )}
       {/* 마감 확정 잠금 안내 — 정직원 급여대장과 같은 문구·색(확정 상태라 emerald, 실패 경고 아님). */}
       {isLocked && (
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+        <div className="mx-4 mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
           마감제출이 확정되어 입력값이 잠겨 있습니다. 수정하려면 마감수정 버튼을 눌러주세요.
         </div>
       )}
-      <div className="flex justify-between items-center pb-3 border-b border-gray-50 flex-col sm:flex-row gap-3">
-        <div>
-          <h3 className="text-sm font-black text-zinc-900 leading-snug w-fit">
-            파트타이머 급여대장
-          </h3>
-          <p className="text-[10px] text-gray-400 font-extrabold mt-1">
-             직원현황의 파트타이머 리스트가 자동으로 연동되고, 이번 달 일일 일지(근무일지에 수기로 적은 근무 포함)에서 실시간 근무시간과 출근일이 집계되어 프리필링됩니다.
-             누적시간은 직접 고쳐 쓸 수 있습니다 — 말일에 그날 저녁 근무를 예상해 적어 두는 경우가 그렇습니다.
-          </p>
-        </div>
-
-        <div className="flex w-full sm:w-auto items-center gap-2">
-          {/* 이번 달 근무기록이 없어 숨은 인원을 펼친다.
-              이 통로가 없으면 "아직 안 찍힌 사람"에게 예상 시간을 적을 방법이 수기 행뿐이라, 나중에 그 사람의
-              근무기록이 올라오면 자동 행과 수기 행이 겹쳐 한 사람이 두 줄이 된다(= 급여 이중 지급).
-              알약 토글이라 모서리는 rounded-full, 켜짐=검정+바닐라 글자·꺼짐=바닐라+검정 글자(DESIGN.md §10).
-              글자는 버튼 기준 11px·900(§6-0-1). 토큰에 없는 색을 만들지 않으려고 hover 전용 색은 두지 않는다. */}
-          {hiddenZeroHourCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowZeroHourRows((current) => !current)}
-              aria-pressed={showZeroHourRows}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[11px] font-black flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2 ${
-                showZeroHourRows ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900"
-              }`}
-              title="이번 달 근무기록이 아직 없는 파트타이머까지 표에 펼칩니다. 말일에 예상 시간을 적을 때 씁니다."
-            >
-              {showZeroHourRows ? "근무기록 없는 인원 숨기기" : `근무기록 없는 인원 ${hiddenZeroHourCount}명 보기`}
-            </button>
-          )}
-          {/* 저장 상태 배지 — 실제 상태를 보여준다(§11).
-              늘 초록 '자동저장'만 띄우면, 서버에 못 올린 동안에도 올라간 줄 알고 화면을 닫게 된다.
-              못 올린 상태는 오류색 hex 로 못 박는다 — bg-rose-* 는 지점 스코프에서 색이 죽는다(§11·§12). */}
-          {salarySaveState === "retry" ? (
-            <div
-              className="flex-1 sm:flex-none px-4 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]"
-              title="연결이 불안정해 아직 서버에 올리지 못했습니다. 적으신 내용은 이 기기에 남아 있고, 연결이 돌아오면 자동으로 다시 올립니다."
-            >
-              <AlertTriangle className="w-3.5 h-3.5" />
-              저장 대기 중
-            </div>
-          ) : (
-            // 잠금 중에도 '못 올림(retry)' 배지는 위 분기가 우선한다 — 잠겼다고 미전송 상태를 감추면 안 된다.
-            <div className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-2 shadow-sm ${
-              isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"
-            }`}>
-              <Check className="w-3.5 h-3.5" />
-              {isLocked ? "확정 잠금" : salarySaveState === "saving" ? "저장 중…" : "자동저장"}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 요약 — 숫자 세 개와 경고, 그리고 오른쪽 끝에 '행 추가'(사용자 지시 2026-07-31).
-          표 바로 위 한 줄에 두어 "여기서 행을 늘린다"가 표와 붙어 읽히게 한다. */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2">
+      {/* 요약 + 조작 버튼 — 한 줄로 병합(사용자 지시 2026-08-04 "불필요한 행 병합").
+          밴드의 연장 줄(.branch-band-toolbar)로, 바로 아래에 표 머리글이 붙는다.
+          왼쪽 = 집계 숫자·경고, 오른쪽 = 근무기록없는인원 토글 · 저장 배지 · 행 추가. */}
+      <div className="branch-band-toolbar">
         <span className="text-[11px] font-black text-zinc-500">
-          누적근무 <b className="ml-1 font-mono text-sm text-zinc-800">{formatNumber(totalHours)} hr</b>
+          누적근무 <b className="ml-1 font-mono text-xs text-zinc-800">{formatNumber(totalHours)} hr</b>
         </span>
         <span className="text-[11px] font-black text-zinc-500">
-          급여합계(세전) <b className="ml-1 font-mono text-sm text-[#2E6DB4]">{formatNumber(totalSalary)} 원</b>
+          급여합계(세전) <b className="ml-1 font-mono text-xs text-[#2E6DB4]">{formatNumber(totalSalary)} 원</b>
         </span>
         <span className="text-[11px] font-black text-zinc-500">
-          인원 <b className="ml-1 font-mono text-sm text-zinc-800">{formatNumber(visibleSalaries.length)} 명</b>
+          인원 <b className="ml-1 font-mono text-xs text-zinc-800">{formatNumber(visibleSalaries.length)} 명</b>
         </span>
         {/* 이름·시급이 빠진 행은 급여가 통째로 빠지거나 0원으로 나간다. 조용히 두면 적어 뒀다고 믿고
             마감해 버리므로 눈에 띄게 알린다. 둘 다면 더 급한 '성명'을 보여준다. */}
@@ -2061,43 +2030,83 @@ export function MonthlyPartTimeSalarySubTab({
         ) : (
           <span className="text-[10px] font-bold text-zinc-400">100% 자동 산정</span>
         )}
-        {/* 직원명부에도 일일마감에도 없는 사람을 넣는 길. 이 표는 그 두 곳에서만 행을 만들기 때문에
-            이 버튼이 없으면 일용직처럼 명부에 없는 사람에게 급여를 줄 방법이 없다. */}
-        <button
-          type="button"
-          onClick={handleAddManualRow}
-          disabled={isLocked}
-          className="ml-auto px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-          title="직원명부에 없는 사람(일용직 등)을 직접 추가합니다. 명부에 있는 사람은 '근무기록 없는 인원 보기'로 펼쳐 쓰세요."
-        >
-          <Plus className="w-3.5 h-3.5" />
-          행 추가
-        </button>
+        {/* 오른쪽 묶음 — 종전의 배지 줄(근무기록없는인원 토글·저장 배지)을 이 줄에 병합(2026-08-04).
+            토글이 조건부라 묶음 래퍼에 ml-auto 를 준다(첫 항목이 무엇이든 오른쪽 끝으로). */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* 이번 달 근무기록이 없어 숨은 인원을 펼친다.
+              이 통로가 없으면 "아직 안 찍힌 사람"에게 예상 시간을 적을 방법이 수기 행뿐이라, 나중에 그 사람의
+              근무기록이 올라오면 자동 행과 수기 행이 겹쳐 한 사람이 두 줄이 된다(= 급여 이중 지급). */}
+          {hiddenZeroHourCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowZeroHourRows((current) => !current)}
+              aria-pressed={showZeroHourRows}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-black flex items-center justify-center gap-1.5 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2 border border-zinc-900 ${
+                showZeroHourRows ? "bg-zinc-900 text-[#F4F2CC]" : "bg-white text-zinc-900"
+              }`}
+              title="이번 달 근무기록이 아직 없는 파트타이머까지 표에 펼칩니다. 말일에 예상 시간을 적을 때 씁니다."
+            >
+              {showZeroHourRows ? "근무기록 없는 인원 숨기기" : `근무기록 없는 인원 ${hiddenZeroHourCount}명 보기`}
+            </button>
+          )}
+          {/* 저장 상태 배지 — 실제 상태를 보여준다(§11). 못 올린 상태는 오류색 hex(§11·§12). */}
+          {salarySaveState === "retry" ? (
+            <div
+              className="px-3 py-1.5 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 shadow-sm bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]"
+              title="연결이 불안정해 아직 서버에 올리지 못했습니다. 적으신 내용은 이 기기에 남아 있고, 연결이 돌아오면 자동으로 다시 올립니다."
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              저장 대기 중
+            </div>
+          ) : (
+            // 잠금 중에도 '못 올림(retry)' 배지는 위 분기가 우선한다 — 잠겼다고 미전송 상태를 감추면 안 된다.
+            <div className={`px-3 py-1.5 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 shadow-sm ${
+              isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"
+            }`}>
+              <Check className="w-3.5 h-3.5" />
+              {isLocked ? "확정 잠금" : salarySaveState === "saving" ? "저장 중…" : "자동저장"}
+            </div>
+          )}
+          {/* 직원명부에도 일일마감에도 없는 사람을 넣는 길. 이 표는 그 두 곳에서만 행을 만들기 때문에
+              이 버튼이 없으면 일용직처럼 명부에 없는 사람에게 급여를 줄 방법이 없다. */}
+          <button
+            type="button"
+            onClick={handleAddManualRow}
+            disabled={isLocked}
+            className="px-4 py-1.5 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#2E6DB4] focus:ring-offset-2 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
+            title="직원명부에 없는 사람(일용직 등)을 직접 추가합니다. 명부에 있는 사람은 '근무기록 없는 인원 보기'로 펼쳐 쓰세요."
+          >
+            <Plus className="w-3.5 h-3.5" />
+            행 추가
+          </button>
+        </div>
       </div>
 
-      {/* Ledger Table */}
-      {/* 표가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
-      <div className="relative">
-      <SheetKeyHint />
-      <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-xs">
+      {/* Ledger Table — 도구 줄 바로 아래 전면 부착. 테두리·둥근 모서리 금지(카드가 이미 그린다, §9-1-A).
+          키 이동 칩은 카드(밴드 상단선) 위로 올라갔다(2026-08-04). */}
+      <div className="overflow-x-auto">
         {/* 성명은 길어야 네 글자, 근무일정은 숫자 7개까지라 그 폭에 맞춰 좁혔다(사용자 지시 2026-07-31).
             좁힌 만큼 표 전체 최소폭도 함께 줄여, 남는 자리가 비고 칸으로 가게 한다.
             성명은 이름 옆에 지우기(×) 버튼이 함께 서므로 **버튼 자리까지 더한 폭**이어야 한다 —
             글자 수만 보고 더 좁히면 이름이 잘리고 버튼과 겹쳐 보인다(2026-07-31 실제 발생). */}
-        <table className="w-full text-left text-xs border-collapse font-medium min-w-[1270px]">
+        {/* 머리글 모양(엘리스 바탕·11px·900·검정·스크롤 고정)은 `.branch-sheet-head` 가 준다 —
+            여기 색·굵기·여백을 적으면 두 곳에서 관리하게 되고, 적어 둔 값은 CSS 에 밀려 렌더에 반영되지도 않는다.
+            본문은 칸이 전부 편집 입력칸이라 `.branch-sheet` 로 통째로 바꾸지 않았다(DESIGN.md §6-3-1).
+            폭(`w-*`)·정렬(`text-right`)·줄바꿈 금지는 CSS 가 정하지 않으므로 남긴다. */}
+        <table className="branch-sheet-head w-full text-left text-xs border-collapse font-medium min-w-[1270px]">
           <thead>
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-550 font-black text-[9px] tracking-wider uppercase">
-              <th className="py-3 px-2 w-24 whitespace-nowrap">성명</th>
-              <th className="py-3 px-3 w-32 whitespace-nowrap">주민등록번호</th>
-              <th className="py-3 px-2 w-28 whitespace-nowrap">입사일자</th>
-              <th className="py-3 px-3 w-20 whitespace-nowrap">은행</th>
-              <th className="py-3 px-3 w-32 whitespace-nowrap">입금 계좌번호</th>
-              <th className="py-3 px-3 w-20 text-right whitespace-nowrap">시급 (원)</th>
-              <th className="py-3 px-2 w-16 text-right whitespace-nowrap">누적시간</th>
-              <th className="py-3 px-2 w-20 text-right whitespace-nowrap">팁/기타</th>
-              <th className="py-3 px-3 w-24 text-right whitespace-nowrap">기본급여 (원)</th>
-              <th className="py-3 px-2 w-24 whitespace-nowrap">근무일정 (출근일)</th>
-              <th className="py-3 px-3 w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
+            <tr>
+              <th className="w-24 whitespace-nowrap">성명</th>
+              <th className="w-32 whitespace-nowrap">주민등록번호</th>
+              <th className="w-28 whitespace-nowrap">입사일자</th>
+              <th className="w-20 whitespace-nowrap">은행</th>
+              <th className="w-32 whitespace-nowrap">입금 계좌번호</th>
+              <th className="w-20 text-right whitespace-nowrap">시급 (원)</th>
+              <th className="w-16 text-right whitespace-nowrap">누적시간</th>
+              <th className="w-20 text-right whitespace-nowrap">팁/기타</th>
+              <th className="w-24 text-right whitespace-nowrap">기본급여 (원)</th>
+              <th className="w-24 whitespace-nowrap">근무일정 (출근일)</th>
+              <th className="w-[260px] whitespace-nowrap">기타 비고 내용 (퇴사일 등)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[10px] font-sans">
@@ -2303,7 +2312,7 @@ export function MonthlyPartTimeSalarySubTab({
           </tbody>
         </table>
       </div>
-      </div>
+    </div>
     </div>
   );
 }
