@@ -367,12 +367,15 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
         </div>
       )}
 
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-        <div>
-          <h3 className="text-sm font-black text-gray-900 w-fit">근로계약서 발송 인적사항 등록</h3>
-          <p className="text-[11px] text-gray-400 mt-1">신규입사·지점이동 구분과 날짜를 고른 뒤 인적사항을 등록해 주세요. 급여가 잘못된 경우에는 기존 내역 삭제요청 후 새로 등록해 주세요.</p>
+      {/* 제목 밴드 = 지점 표준(index.css `.branch-band*`) — 2026-08-03 사용자 지시 */}
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">근로계약서 발송 인적사항 등록</h3>
+          <p className="branch-band-meta">신규입사·지점이동 구분과 날짜를 고른 뒤 인적사항을 등록해 주세요. 급여가 잘못된 경우에는 기존 내역 삭제요청 후 새로 등록해 주세요.</p>
         </div>
 
+        {/* 카드에 안쪽 여백이 없으므로(밴드가 폭을 꽉 채워야 한다) 입력 묶음이 자기 여백을 갖는다. */}
+        <div className="p-4 space-y-3">
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
           {/* 왼쪽: 파트타이머 근로계약서 양식 다운로드 — 허니듀.
               bg-emerald-* 클래스를 버튼에 쓰면 .branch-redesign button[class*="bg-emerald-"] 규칙이
@@ -474,22 +477,28 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
             </button>
           </div>
         </div>
+        </div>
       </section>
 
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-[720px] text-[11px]">
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">등록한 발송 대상</h3>
+          <p className="branch-band-meta">{contracts.length}명</p>
+        </div>
+        {/* 엑셀형 표 = 지점 표준 `.branch-sheet` — 헤더 색·격자·헤더 고정은 클래스가 처리한다. */}
+        <div className="branch-sheet-scroll">
+          <table className="branch-sheet min-w-[720px]">
             <thead>
-              <tr className="bg-gray-50/70 text-left border-b border-gray-100 text-slate-400 font-black whitespace-nowrap">
-                <th className="px-3 py-2.5 w-24">등록일</th>
-                <th className="px-3 py-2.5 w-40 whitespace-nowrap">구분</th>
-                <th className="px-3 py-2.5 w-28 whitespace-nowrap">계약유형</th>
-                <th className="px-3 py-2.5 w-24">이름</th>
-                <th className="px-3 py-2.5 w-32">연락처</th>
-                <th className="px-3 py-2.5 w-24">입사·이동일</th>
-                <th className="px-3 py-2.5 w-20">발송 상태</th>
-                <th className="px-3 py-2.5 w-28">안내</th>
-                <th className="px-3 py-2.5 text-center w-28">요청</th>
+              <tr>
+                <th className="w-24">등록일</th>
+                <th className="w-40">구분</th>
+                <th className="w-28">계약유형</th>
+                <th className="w-24">이름</th>
+                <th className="w-32">연락처</th>
+                <th className="w-24">입사·이동일</th>
+                <th className="w-20">발송 상태</th>
+                <th className="w-28">안내</th>
+                <th className="w-28 text-center">요청</th>
               </tr>
             </thead>
             <tbody>

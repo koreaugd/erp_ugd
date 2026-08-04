@@ -433,7 +433,7 @@ export function LiquorInventoryTabV2({ branchName }: { branchName: string }) {
           onClick={() => setGuideOpen((prev) => !prev)}
           aria-pressed={guideOpen}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer ${
-            guideOpen ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900 hover:brightness-95"
+            guideOpen ? "bg-zinc-900 text-[#F4F2CC]" : "bg-[#F4F2CC] text-zinc-900 hover:brightness-95"
           }`}
         >
           <BookOpen className="w-3.5 h-3.5" /> {guideOpen ? "작성방법 닫기" : "작성방법 보기"}

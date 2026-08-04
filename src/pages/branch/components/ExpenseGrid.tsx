@@ -228,7 +228,7 @@ export function ExpenseGrid({
 
                   {/* 사용처 — 현금입금이면 쓰지 않는 칸이라 잠근다.
                       '계좌이체'는 결제가 아니라 **본사에 이체를 요청하는 건**이라 한눈에 갈라 보이게
-                      칸을 바닐라로 칠한다(사용자 지시 2026-07-31, DESIGN.md 주의색 vanilla #EFF0A3). */}
+                      칸을 바닐라로 칠한다(사용자 지시 2026-07-31, DESIGN.md 주의색 vanilla — 2026-08-04부터 #F4F2CC). */}
                   {usageDisabled ? (
                     <div
                       className="border-r border-b border-gray-200 bg-gray-100 flex items-center justify-center"

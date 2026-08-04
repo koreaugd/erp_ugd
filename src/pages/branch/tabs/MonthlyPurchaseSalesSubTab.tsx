@@ -1,8 +1,8 @@
 // src/pages/branch/tabs/MonthlyPurchaseSalesSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
-import { SheetKeyHint } from "../../../components/SheetKeyHint";
+
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
@@ -102,13 +102,17 @@ export function MonthlyPurchaseSalesSubTab({
   selectedMonth,
   triggerToast,
   resetToken = 0,
-  isLocked = false
+  isLocked = false,
+  registerAddRow
 }: {
   branchName: string;
   selectedMonth: string;
   triggerToast: (msg: string, type?: "success" | "error") => void;
   resetToken?: number;
   isLocked?: boolean;
+  /* '매입 업체 추가' 버튼이 밴드(부모 MonthlySettleTab)로 올라갔다(2026-08-04) —
+     행 추가 동작을 부모에 등록해 밴드 버튼이 이 표에 행을 넣는다. null = 등록 해제(언마운트 시). */
+  registerAddRow?: (fn: (() => void) | null) => void;
 }) {
   const [rows, setRows] = useState<PurchaseSalesRow[]>([]);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -318,6 +322,11 @@ export function MonthlyPurchaseSalesSubTab({
     const newId = handleAddRow();
     if (newId) pendingFocusRowId.current = newId;
   };
+  // 매 렌더마다 최신 함수를 부모 밴드 버튼에 등록하고(오래된 클로저 방지), 언마운트 시 해제한다.
+  useEffect(() => {
+    registerAddRow?.(addRowAndFocus);
+    return () => { registerAddRow?.(null); };
+  });
 
   const handleDeleteRow = (id: string) => {
     if (isLocked) return;
@@ -390,9 +399,9 @@ export function MonthlyPurchaseSalesSubTab({
   }, [displayRows, focusCell]);
 
   return (
-    <div className="space-y-5 animate-fade-in" id="purchase-sales-subtab">
+    <div className="animate-fade-in" id="purchase-sales-subtab">
       {isLocked && (
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+        <div className="mx-4 mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
           월말마감이 확정되어 입력값이 잠겨 있습니다. 수정하려면 상단의 월말마감 수정 버튼을 눌러주세요.
         </div>
       )}
@@ -402,38 +411,27 @@ export function MonthlyPurchaseSalesSubTab({
           있어야 무슨 숫자인지 설명 없이 읽힌다. 합계 행이 바닥에 고정돼 늘 보이므로,
           위쪽에 같은 숫자를 또 띄우면 같은 값을 두 군데서 관리하게 될 뿐이다. */}
 
-      {/* 매입 업체 추가 / 저장 상태 — 지점이 작성하는 표 바로 위에 배치 */}
-      <div className="flex flex-wrap justify-end items-center gap-2">
-        <div className="flex items-center gap-2">
-        <button
-          onClick={addRowAndFocus}
-          disabled={isLocked}
-          className="p-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#2E6DB4] rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-none disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-        >
-          <Plus className="w-3.5 h-3.5" /> 매입 업체 추가
-        </button>
-        <div className={`p-1 px-3.5 rounded-lg text-xs font-black flex items-center gap-1 shadow-subtle ${isLocked ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
-          <Check className="w-3.5 h-3.5" /> {isLocked ? "확정 잠금" : "자동저장"}
-        </div>
-        </div>
-      </div>
+      {/* 매입 업체 추가·자동저장은 밴드의 월 필터 오른쪽으로 올라갔다(부모 MonthlySettleTab, 2026-08-04).
+          키 이동 칩도 카드(밴드 상단선) 위로 — 부모가 그린다.
 
-      {/* Sheet Table — 표 자체가 가로 스크롤(overflow)이라 칩은 바깥 relative 층에 얹는다. */}
-      <div className="relative">
-      <SheetKeyHint />
-      <div className="max-h-[62vh] overflow-auto rounded-2xl border border-gray-100" data-guide="purchase-table">
-        <table className="w-full text-left text-xs border-collapse font-medium">
+          Sheet Table — 밴드 바로 아래 전면 부착. 테두리·둥근 모서리를 두지 않는다 —
+          카드가 이미 테두리를 그리므로 상자가 겹쳐 보인다(§9-1-A). */}
+      <div className="max-h-[62vh] overflow-auto" data-guide="purchase-table">
+        <table className="branch-sheet-head w-full text-left text-xs border-collapse font-medium">
+          {/* 헤더 모양(엘리스 바탕·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 —
+              여기 색·굵기를 적으면 두 곳에서 관리하게 된다.
+              본문은 편집칸이라 `.branch-sheet` 로 통째로 바꾸지 않았다(DESIGN.md §6-3). */}
           <thead>
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] tracking-wider">
-              <th className="py-3 px-3">분류항목</th>
-              <th className="py-3 px-3">업체명</th>
-              <th className="py-3 px-3 w-20 text-center">이체 필요?</th>
-              <th className="py-3 px-3 w-24">이체필요 금액 (원)</th>
-              <th className="py-3 px-3 w-24">실제 이달사용액 (원)</th>
-              <th className="py-3 px-3 w-20">은행</th>
-              <th className="py-3 px-3 min-w-[160px]">계좌번호</th>
-              <th className="py-3 px-3 min-w-[150px]">거래 비고 고지</th>
-              <th className="py-3 px-3 text-center w-12">Action</th>
+            <tr>
+              <th>분류항목</th>
+              <th>업체명</th>
+              <th className="w-20 text-center">이체 필요?</th>
+              <th className="w-24">이체필요 금액 (원)</th>
+              <th className="w-24">실제 이달사용액 (원)</th>
+              <th className="w-20">은행</th>
+              <th className="min-w-[160px]">계좌번호</th>
+              <th className="min-w-[150px]">거래 비고 고지</th>
+              <th className="text-center w-12">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-[11px]">
@@ -580,7 +578,6 @@ export function MonthlyPurchaseSalesSubTab({
             </tfoot>
           )}
         </table>
-      </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyCardExpensesSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo } from "react";
-import { ShoppingCart } from "lucide-react";
+import type { ReactNode } from "react";
 import { formatNumber } from "../../../utils/formatNumber";
 import { toNumberPromptValue } from "../helpers/formatters";
 import { getMonthlyExpenseCategoryChipClass, getMonthlyExpenseUsageChipClass } from "../helpers/chipClasses";
@@ -18,13 +18,17 @@ export function MonthlyCardExpensesSubTab({
   selectedMonth,
   history,
   isAdmin = false,
-  refreshHistory
+  refreshHistory,
+  monthPicker
 }: {
   branchName: string;
   selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
+  /* 결산월 선택기. 예전엔 카드 위에 "결산월 선택:" 한 줄이 따로 떠 있었다 —
+     제목 밴드 안 필터 자리에 들어가야 관리자 화면과 같은 모양이 된다(DESIGN.md §6-3). */
+  monthPicker?: ReactNode;
 }) {
   const { user } = useAuthContext();
   // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
@@ -95,9 +99,7 @@ export function MonthlyCardExpensesSubTab({
   );
   // 지금 표에 보이는 것(필터 적용)의 합. 필터를 걸면 이 숫자가 따라 움직인다.
   const filteredSum = filteredItems.reduce((acc, i) => acc + i.amount, 0);
-  // 이 달 전체 합. 필터와 무관하다 — 위 머리글의 "월 카드지출 총계"는 이 숫자여야 말이 맞는다.
-  // (예전에는 여기에 필터 합계를 넣어 두고 "월 총계"라고 적어, 필터를 걸면 라벨과 숫자가 서로 다른 말을 했다.)
-  const monthSum = useMemo(() => items.reduce((acc, i) => acc + i.amount, 0), [items]);
+  // (월 총계 문구는 밴드 설명과 함께 삭제 — 필터를 안 걸면 '표시 합계'가 곧 월 총계다. 2026-08-04)
   const filterActive = usageFilter !== "전체" || classificationFilter !== "전체";
 
   /**
@@ -177,7 +179,7 @@ export function MonthlyCardExpensesSubTab({
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="card-expenses-subtab">
+    <div className="branch-sheet-card animate-fade-in" id="card-expenses-subtab">
       {editCardExpense && (
         <AdminRecordEditModal
           title="카드지출 수정"
@@ -192,56 +194,50 @@ export function MonthlyCardExpensesSubTab({
           onSave={() => void saveEditCardExpense()}
         />
       )}
-      <div className="flex justify-between items-center pb-3 border-b border-gray-50 font-sans">
-        <div>
-          <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
-            <ShoppingCart className="w-5 h-5 text-blue-500" />
-            월 카드 (법인카드/외식카드 등) 지출 일람표
-          </h3>
-          <p className="text-[10px] text-gray-400 font-bold mt-0.5">
-             일일 지점 마감 영수증 보고 시 기입하여 제출된 카드 사용 영수 금액 전표 일치 내역서입니다.
-          </p>
+      {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+      <div className="branch-band">
+        <h3 className="branch-band-title">월 카드지출 일람표</h3>
+        {monthPicker}
+        {/* 사용처·분류항목 거르개도 밴드 안 필터 자리에 둔다(DESIGN.md §6-3).
+            종전에는 카드 안쪽에 회색 상자로 따로 떠 있어 관리자 화면과 모양이 달랐다.
+            모양(28px·11px·흰 알약)은 `.branch-band-filters` 가 정하므로 여기 적지 않는다. */}
+        <div className="branch-band-filters">
+          <select
+            value={usageFilter}
+            onChange={(e) => setUsageFilter(e.target.value)}
+            aria-label="사용처 거르개"
+          >
+            {usageOptions.map((option) => (
+              <option key={option} value={option}>
+                사용처: {option}
+              </option>
+            ))}
+          </select>
+          <select
+            value={classificationFilter}
+            onChange={(e) => setClassificationFilter(e.target.value)}
+            aria-label="분류항목 거르개"
+          >
+            {classificationOptions.map((option) => (
+              <option key={option} value={option}>
+                분류항목: {option}
+              </option>
+            ))}
+          </select>
         </div>
+        {/* 설명문은 삭제(사용자 지시 2026-08-04). 월 총계는 오른쪽 '표시 합계'가 대신한다
+            (필터를 안 걸면 표시 합계 = 월 총계). */}
 
-        <div className="bg-blue-50/50 p-2.5 px-4 rounded-xl border border-blue-100 text-right">
-          <span className="text-[9px] text-[#2E6DB4] font-black block leading-none">월 카드지출 총계</span>
-          <span className="text-sm font-black text-zinc-850 font-mono mt-1 block">{formatNumber(monthSum)} 원</span>
-        </div>
-      </div>
-
-      <div className="monthly-expense-filter-bar flex flex-wrap items-center gap-3">
-        <select
-          value={usageFilter}
-          onChange={(e) => setUsageFilter(e.target.value)}
-          className="monthly-expense-filter-select"
-        >
-          {usageOptions.map((option) => (
-            <option key={option} value={option}>
-              사용처: {option}
-            </option>
-          ))}
-        </select>
-        <select
-          value={classificationFilter}
-          onChange={(e) => setClassificationFilter(e.target.value)}
-          className="monthly-expense-filter-select"
-        >
-          {classificationOptions.map((option) => (
-            <option key={option} value={option}>
-              분류항목: {option}
-            </option>
-          ))}
-        </select>
-
-        {/* 필터 합계 + 쿠팡·네이버 결제액. ml-auto로 필터 줄 오른쪽 끝에 붙인다. */}
-        <div className="ml-auto flex items-center gap-2.5">
+        {/* 필터 합계 + 쿠팡·네이버 결제액 — 오른쪽 끝(사용자 지시 2026-08-04 재조정).
+            `.branch-band-actions` 가 margin-left:auto 로 밀어 준다. 칩(span) 모양은 손대지 않는다. */}
+        <div className="branch-band-actions">
           {/* 지금 고른 조건의 합. 필터를 걸면 위 "월 카드지출 총계"와 나란히 놓여 전체 대비 얼마인지 보인다. */}
           <span
             className="text-[11px] font-black text-zinc-500"
             title={filterActive ? "지금 필터로 걸러진 내역의 합계입니다." : "필터를 걸지 않아 이 달 전체와 같습니다."}
           >
             {filterActive ? "필터 합계" : "표시 합계"}
-            <b className="ml-1 font-mono text-sm text-zinc-900">{formatNumber(filteredSum)}</b>원
+            <b className="ml-1 font-mono text-xs text-zinc-900">{formatNumber(filteredSum)}</b>원
             <span className="ml-1 font-mono text-zinc-400">({filteredItems.length}건)</span>
           </span>
           <span
@@ -259,20 +255,23 @@ export function MonthlyCardExpensesSubTab({
         </div>
       </div>
 
-      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
-      <div className="max-h-[60vh] overflow-auto rounded-2xl border border-gray-100">
-        <table className="w-full text-left text-xs border-collapse font-sans whitespace-nowrap">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[10px] uppercase">
-              <th className="py-2 px-2.5 w-[96px]">마감 일자</th>
-              <th className="py-2 px-2.5 w-[72px]">결제 수단</th>
-              <th className="py-2 px-2.5 text-right w-[104px]">지출 금액</th>
-              <th className="py-2 px-2.5">사용처 (가맹점)</th>
-              <th className="py-2 px-2.5">항목 (분류)</th>
-              <th className="py-2 px-2.5">지출내용 (세부)</th>
-              <th className="py-2 px-2.5">비고</th>
-              <th className="py-2 px-2.5">작성자</th>
-              <th className="py-2 px-2.5 text-center">관리</th>
+      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
+          [2026-08-04] 카드 안쪽 여백(p-4)과 표 테두리(rounded-2xl border)를 걷어냈다 — 카드가 이미
+          테두리를 그리므로 상자가 겹쳐 보였다(현금관리 탭과 같은 모양으로, §9-1-A). */}
+      <div className="max-h-[60vh] overflow-auto">
+        {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·굵기·테두리를 여기 적지 않는다(DESIGN.md §6-3-1). */}
+        <table className="branch-sheet-head w-full text-left text-xs border-collapse font-sans whitespace-nowrap">
+          <thead>
+            <tr>
+              <th className="w-[96px]">마감 일자</th>
+              <th className="w-[72px]">결제 수단</th>
+              <th className="text-right w-[104px]">지출 금액</th>
+              <th>사용처 (가맹점)</th>
+              <th>항목 (분류)</th>
+              <th>지출내용 (세부)</th>
+              <th>비고</th>
+              <th>작성자</th>
+              <th className="text-center">관리</th>
             </tr>
           </thead>
           <tbody className="sheet-rows-soft divide-y text-[11px]">

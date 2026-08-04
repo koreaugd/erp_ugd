@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlyCashManagementSubTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect } from "react";
-import { CircleDollarSign } from "lucide-react";
+import type { ReactNode } from "react";
 import { formatNumber } from "../../../utils/formatNumber";
 import { toNumberPromptValue } from "../helpers/formatters";
 import { updateDailyMetadata } from "../helpers/dailyOps";
@@ -12,13 +12,17 @@ export function MonthlyCashManagementSubTab({
   selectedMonth,
   history,
   isAdmin = false,
-  refreshHistory
+  refreshHistory,
+  monthPicker
 }: {
   branchName: string;
   selectedMonth: string;
   history: any[];
   isAdmin?: boolean;
   refreshHistory?: () => Promise<void>;
+  /* 결산월 선택기. 예전엔 카드 위에 "결산월 선택:" 한 줄이 따로 떠 있었다 —
+     제목 밴드 안 필터 자리에 들어가야 관리자 화면과 같은 모양이 된다(DESIGN.md §6-3). */
+  monthPicker?: ReactNode;
 }) {
   const { user } = useAuthContext();
   // 개인 로그인 계정이면 이력에 실제 이름을 남긴다. PIN 세션은 예전과 같은 소속 표기를 유지한다.
@@ -107,7 +111,7 @@ export function MonthlyCashManagementSubTab({
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-5 animate-fade-in" id="cash-management-subtab">
+    <div className="branch-sheet-card animate-fade-in" id="cash-management-subtab">
       {editCashManagement && (
         <AdminRecordEditModal
           title={`${editCashManagement.row.date} 현금관리 수정`}
@@ -122,31 +126,32 @@ export function MonthlyCashManagementSubTab({
           onSave={() => void saveEditCashManagement()}
         />
       )}
-      <div>
-        <h3 className="text-sm font-black text-zinc-900 flex items-center gap-1.5">
-          <CircleDollarSign className="w-5 h-5 text-emerald-600" />
-          가맹점 일일 시사 금고 실재고 관리 대장
-        </h3>
-        <p className="text-[10px] text-gray-400 font-bold mt-0.5">
-          일일마감 정보와 완벽 싱크로나이즈되어 매일 전일 시재이월액 + 매출현금유입 - 소액현금지출 = 이론상 현금보유고와 금고 실상액 간 차액 분석 흐름을 보고합니다.
+      {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 제목엔 글자만 — 아이콘 금지(§6-1). */}
+      <div className="branch-band">
+        <h3 className="branch-band-title">일일 금고 실재고 관리 대장</h3>
+        {monthPicker}
+        <p className="branch-band-meta">
+          전일 시재 + 현금매출 − 현금지출 = 이론상 보유고. 금고 실사액과의 차액을 함께 봅니다.
         </p>
       </div>
 
-      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다. */}
-      <div className="max-h-[60vh] overflow-auto rounded-2xl border border-gray-100 shadow-xs">
-        <table className="w-full text-left text-xs border-collapse font-medium whitespace-nowrap">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-zinc-50 border-b border-gray-100 text-zinc-500 font-black text-[9px] tracking-wider uppercase">
-              <th className="py-2 px-2.5">마감 일자</th>
-              <th className="py-2 px-2 text-right">전일 금고현금</th>
-              <th className="py-2 px-2 text-right text-indigo-600">+ 금일 현금매출</th>
-              <th className="py-2 px-2 text-right text-orange-600">- 현금지출 합계</th>
-              <th className="py-2 px-2.5 text-right bg-zinc-100/40">이론상 잔액 (원)</th>
-              <th className="py-2 px-2.5 text-right bg-emerald-50/30">금고 실사 현금 (원)</th>
-              <th className="py-2 px-2.5 text-right">차액 (불일치)</th>
-              <th className="py-2 px-2.5">대조 불일치 사유 소명</th>
-              <th className="py-2 px-2.5 text-center">점검 작성자</th>
-              {isAdmin && <th className="py-2 px-2.5 text-center">관리</th>}
+      {/* 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
+          테두리는 카드가 이미 그리므로 여기서 또 그리지 않는다(선이 두 줄로 겹친다 — §9-1-A). */}
+      <div className="max-h-[60vh] overflow-auto">
+        {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·굵기·테두리를 여기 적지 않는다(DESIGN.md §6-3-1). */}
+        <table className="branch-sheet-head w-full text-left text-xs border-collapse font-medium whitespace-nowrap">
+          <thead>
+            <tr>
+              <th>마감 일자</th>
+              <th className="text-right">전일 금고현금</th>
+              <th className="text-right">+ 금일 현금매출</th>
+              <th className="text-right">- 현금지출 합계</th>
+              <th className="text-right">이론상 잔액 (원)</th>
+              <th className="text-right">금고 실사 현금 (원)</th>
+              <th className="text-right">차액 (불일치)</th>
+              <th>대조 불일치 사유 소명</th>
+              <th className="text-center">점검 작성자</th>
+              {isAdmin && <th className="text-center">관리</th>}
             </tr>
           </thead>
           <tbody className="sheet-rows-soft divide-y text-[11px] font-sans">

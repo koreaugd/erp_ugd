@@ -572,7 +572,7 @@ function SalesTrendChart({ days }: { days: Array<{ date: string; total: number |
             <title>{`${day.date}(${weekday(day.date)}) · ${missing ? "일일마감 미제출" : `${formatNumber(value)}원`}`}</title>
             {!missing && (
               <>
-                <rect x={x} y={y} width={barWidth} height={barHeight} rx={4} fill={isLatest ? "#212121" : "#D8DFE9"} />
+                <rect x={x} y={y} width={barWidth} height={barHeight} rx={4} fill={isLatest ? "#212121" : "#E6EBF3"} />
                 <text
                   x={x + barWidth / 2}
                   y={y - 6}

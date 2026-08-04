@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/OvertimeLogTab.tsx
 // 초과근무일지 탭. BranchConfirmPage에서 분리 — 동작 변경 없음(코드 이동만).
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { AdminRecordEditModal } from "./AdminRecordEditModal";
@@ -33,6 +33,8 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
   };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // 수기 입력 폼은 버튼을 눌렀을 때만 펼친다(2026-08-04) — 평소엔 표가 밴드에 바로 붙는다.
+  const [showManual, setShowManual] = useState(false);
   const [records, setRecords] = useState<any[]>([]);
   const [summaryList, setSummaryList] = useState<any[]>([]);
   const [manualName, setManualName] = useState("");
@@ -253,52 +255,50 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
         />
       )}
       {/* List Table Left */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-        <div className="flex flex-col gap-3 border-b border-gray-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-black text-gray-800 w-fit">초과 근무 내역</h3>
-              {saving && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> 저장 중…
-                </span>
-              )}
-            </div>
-            <p className="text-[10px] text-gray-400 mt-0.5">정직원 초과근무 기록만 표시됩니다.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-40">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-              <input
-                type="search"
-                value={nameFilter}
-                onChange={(e) => setNameFilter(e.target.value)}
-                placeholder="이름 검색"
-                aria-label="초과근무 직원명 검색"
-                className="h-8 w-full rounded-lg border border-gray-200 bg-white pl-8 pr-7 text-xs font-bold text-gray-700 outline-none transition focus:border-[#2E6DB4]"
-              />
-              {nameFilter && (
-                <button
-                  type="button"
-                  onClick={() => setNameFilter("")}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                  title="검색어 지우기"
-                  aria-label="검색어 지우기"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-extrabold bg-white" />
+      <div className="branch-sheet-card lg:col-span-2">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3).
+            [2026-08-04] 설명문 삭제 · 월/이름검색/새로고침/수기입력은 제목 오른쪽 필터 자리로 —
+            모양(28px 흰 알약, 수기입력 눌림=검정)은 `.branch-band-filters` CSS 가 자동으로 입힌다.
+            검색 돋보기 아이콘은 알약 padding 강제와 겹쳐 뺐다(type=search 라 크롬이 지우기 × 제공). */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">초과 근무 내역</h3>
+          <div className="branch-band-filters">
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} aria-label="조회 월" />
+            <input
+              type="search"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="이름 검색"
+              aria-label="초과근무 직원명 검색"
+              className="w-32"
+            />
             <button
               onClick={() => void loadData(true)}
-              className="p-1 px-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-500 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+              className="flex items-center gap-1"
             >
               <RefreshCw className="w-3 h-3" /> 새로고침
             </button>
+            {saving && <span className="text-[10px] font-black text-zinc-500">저장 중…</span>}
+          </div>
+          {/* 수기 입력 토글은 오른쪽 끝 — 근무일지와 같은 자리·같은 모양(2026-08-04). */}
+          <div className="branch-band-actions">
+            <button
+              type="button"
+              aria-pressed={showManual}
+              onClick={() => setShowManual((v) => !v)}
+              className={`h-[28px] rounded-full border border-[#212121] px-3 text-[11px] font-black flex items-center cursor-pointer transition-colors ${
+                /* 흰 바탕은 hex 로 — `bg-white` 는 지점 스코프에서 고스트 회색으로 치환된다(§12, 실측 2026-08-04). */
+                showManual ? "bg-[#212121] text-[#F4F2CC]" : "bg-[#ffffff] text-[#212121]"
+              }`}
+            >
+              수기 입력
+            </button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 rounded-xl bg-gray-50 p-3 border border-gray-100">
+        {/* 수기 입력 폼 — '수기 입력' 버튼을 눌렀을 때만 펼친다(2026-08-04).
+            [p-4 래퍼 제거] 평소엔 아래 표 머리글이 밴드에 바로 붙는다(DESIGN.md §6-3). */}
+        {showManual && (
+        <div className="mx-4 my-3 flex flex-wrap gap-2 rounded-xl bg-gray-50 p-3 border border-gray-100">
           <span className="w-full text-xs font-black text-gray-600">초과근무 수기 입력</span>
           <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="직원명" className="w-24 px-2 py-1 border rounded text-xs" />
           <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="px-2 py-1 border rounded text-xs" />
@@ -318,6 +318,7 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
           <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
           <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">등록</button>
         </div>
+        )}
 
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center space-y-2">
@@ -327,18 +328,19 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
         ) : (
           // 한 달치가 통째로 늘어나 헤더가 스크롤 위로 사라졌다. 표 안에서만 스크롤하고 헤더는 붙여 둔다.
           <div className="max-h-[60vh] overflow-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(243_244_246)]">
-                <tr className="text-gray-400 font-bold">
-                  <th className="py-2 px-2">마감일자</th>
-                  <th className="py-2 px-2">직원명</th>
-                  <th className="py-2 px-2">출근</th>
-                  <th className="py-2 px-2">퇴근</th>
-                  <th className="py-2 px-2 text-center">근무시간</th>
-                  <th className="py-2 px-2 text-center">기준근무</th>
-                  <th className="py-2 px-2 text-center">초과시간</th>
-                  <th className="py-2 px-2 max-w-[150px]">초과사유 및 경위</th>
-                  {isAdmin && <th className="py-2 px-2 text-center">관리</th>}
+            {/* 머리글 모양(엘리스·11px·900·스크롤 고정)은 `.branch-sheet-head` 가 준다 — 색·그림자를 여기 적지 않는다. */}
+            <table className="branch-sheet-head w-full text-left text-xs border-collapse">
+              <thead>
+                <tr>
+                  <th>마감일자</th>
+                  <th>직원명</th>
+                  <th>출근</th>
+                  <th>퇴근</th>
+                  <th className="text-center">근무시간</th>
+                  <th className="text-center">기준근무</th>
+                  <th className="text-center">초과시간</th>
+                  <th className="max-w-[150px]">초과사유 및 경위</th>
+                  {isAdmin && <th className="text-center">관리</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-medium">
@@ -397,13 +399,14 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       </div>
 
       {/* Aggregate Widget Right */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-fit space-y-4">
-        <div>
-          <h3 className="text-sm font-black text-gray-800">초과 근무 인원 집계</h3>
-          <p className="text-[10px] text-gray-400 mt-0.5">누적된 초과 및 음수 근태 보정 시간을집계 대조합니다.</p>
+      <div className="branch-sheet-card h-fit">
+        {/* 제목 밴드 = 지점 표준(DESIGN.md §6-3). 필터·버튼은 밴드 안 제자리에 들어간다. */}
+        {/* 설명문 삭제(사용자 지시 2026-08-04) */}
+        <div className="branch-band">
+          <h3 className="branch-band-title">초과 근무 인원 집계</h3>
         </div>
 
-        <div className="divide-y divide-gray-50 font-bold text-xs">
+        <div className="p-4 divide-y divide-gray-50 font-bold text-xs">
           {filteredSummaryList.length === 0 ? (
             <p className="py-8 text-center text-gray-400">
               {normalizedNameFilter ? "검색된 집계 대상자가 없습니다." : "집계 가능한 초과근무 대상자가 없습니다."}
