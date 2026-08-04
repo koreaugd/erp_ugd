@@ -36,7 +36,9 @@ const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2]
 
 // 엑셀 형식 표의 본문 셀(DESIGN.md §9-1) — 헤더만 검정 격자로 또렷하게, 본문은 옅은 격자.
 // 첫 칸은 왼쪽 선까지 그어야 표가 닫힌다(`first:border-l`).
-const SHEET_TD = "border-r border-b border-black/10 first:border-l px-2 py-1.5 align-top";
+// 본문 셀의 격자·여백은 `.admin-sheet tbody td`(index.css §4-0)가 준다. 이 표에만 필요한
+// 세로 정렬만 남긴다 — 값을 여기서 다시 적으면 다른 표와 어긋난다.
+const SHEET_TD = "align-top";
 
 /**
  * 신청일 표기 — `26-07-31 14:30`.
@@ -383,7 +385,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     }
     return groups;
   }, [flagged]);
-  // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 하이라이트 — 새로 생긴 점검 대상이 눈에 띄게(2026-07-29).
+  // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 짚어 준다.
+  // [2026-08-03] 행 배경 칠하기는 걷어냈다 — 최근 표시는 **알약만** 쓴다(DESIGN_ADMIN §4-4).
+  // 최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌다.
   // 로컬(KST) 기준 날짜 비교 — timeText 는 "YYYY-MM-DD HH:mm:ss" 형태라 앞 10자리 문자열 비교로 충분.
   const recentSinceDate = useMemo(() => {
     const d = new Date();
@@ -401,8 +405,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     note?: string,
   ) => (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <h2 className="admin-pill-title">{title} — {formatNumber(list.length)}건</h2>
+      <div className="admin-band">
+        <h2 className="admin-band-title">{title} — {formatNumber(list.length)}건</h2>
         {note && <p className="mt-1 text-[11px] font-bold text-[#212121]/60">{note}</p>}
       </div>
       <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
@@ -419,12 +423,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           <tbody>
             {list.map(({ row }, i) => (
               <tr key={row.order.id || `noid-${i}`}
-                className={`border-t border-gray-100 ${isRecentOrder(row.timeText) ? "bg-[var(--admin-vanilla)]/45" : ""}`}>
+                className="border-t border-gray-100">
                 {/* 표시만 축약(MM-DD HH:mm) — '최근 3일' 판정(isRecentOrder)과 정렬은 원본 timeText 그대로다 */}
                 <td className="px-2 py-2" title={row.timeText}>
                   {shortTimeText(row.timeText)}
                   {isRecentOrder(row.timeText) && (
-                    <span className="ml-1.5 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-1.5 py-0.5 text-[10px] font-black">최근 3일</span>
+                    <span className="admin-recent-badge">최근 3일</span>
                   )}
                 </td>
                 <td className="px-2 py-2 font-bold text-[#212121]">{row.order.member_name || "(이름 없음)"}</td>
@@ -1753,10 +1757,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   };
 
   // ---------- 공통 헤더 ----------
-  const title = view === "orders" ? "택시 이용내역"
-    : view === "anomaly" ? "이상 이용 점검"
-    : view === "requests" ? "지점 신청 관리"
-    : "카카오T 직원 관리";
+  // 화면 이름은 페이지 맨 위 탭 이름 알약(AdminPage main)이 그린다 — 여기서 들고 있지 않는다(2026-08-03).
   const needsMonth = view === "orders" || view === "anomaly";
 
   return (
@@ -1764,7 +1765,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       {/* 제목은 DESIGN_ADMIN 의 바닐라 알약(.admin-pill-title), 동작 버튼은 알약 칩(.admin-period-chip)
           — 분석 탭과 같은 양식(사용자 지시 2026-07-22 방향). 제목에 아이콘을 넣지 않는다. */}
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="admin-pill-title">{title}</h2>
+        {/* 화면 이름은 페이지 맨 위 탭 이름 알약(AdminPage main)이 "법인택시 · <하위탭>"으로 적는다.
+            여기서 또 적으면 같은 말이 두 줄 나온다(2026-08-03). 이 줄엔 조회 조건·버튼만 둔다. */}
         {needsMonth && (
           <input
             type="month"
@@ -1856,7 +1858,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               내부 마크업을 바꾸지 않고 폭만 줄어든다. */}
           <div className="grid lg:grid-cols-3 gap-5">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100"><h2 className="admin-pill-title">지점별 합계</h2></div>
+              <div className="admin-band"><h2 className="admin-band-title">지점별 합계</h2></div>
               <div className="overflow-x-auto max-h-80 overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead><tr className="text-left">
@@ -1884,7 +1886,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               </div>
             </div>
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100"><h2 className="admin-pill-title">직원별 합계</h2></div>
+              <div className="admin-band"><h2 className="admin-band-title">직원별 합계</h2></div>
               <div className="overflow-x-auto max-h-80 overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead><tr className="text-left">
@@ -1916,8 +1918,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             {/* 퀵·택배 내역 — 이상 점검에서 뺀 logistics 건을 사람이 직접 보는 자리(2026-07-29).
                 순수 조회용 뷰라 위 두 합계·상단 카드의 집계 입력은 건드리지 않는다(퀵 포함 현행 유지). */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
-                <h2 className="admin-pill-title">퀵·택배 내역</h2>
+              <div className="admin-band">
+                <h2 className="admin-band-title">퀵·택배 내역</h2>
                 <span className="text-[11px] font-bold text-[#212121]/60">
                   {formatNumber(logisticsRows.length)}건 · {formatNumber(logisticsAmount)}원
                 </span>
@@ -1958,12 +1960,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-100">
-              <h2 className="admin-pill-title">상세 내역</h2>
+            <div className="admin-band">
+              <h2 className="admin-band-title">상세 내역</h2>
+              {/* 필터는 제목 바로 옆(DESIGN_ADMIN.md §4-0) — 크기·모양은 클래스가 정하므로 여기서 다시 적지 않는다 */}
+              <div className="admin-band-filters">
               <select
                 value={accountFilter}
                 onChange={(e) => setAccountFilter(e.target.value)}
-                className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
                 aria-label="계정 필터"
               >
                 <option value="all">전체 계정</option>
@@ -1973,7 +1976,6 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               <select
                 value={branchFilter}
                 onChange={(e) => setBranchFilter(e.target.value)}
-                className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
                 aria-label="지점 필터"
               >
                 <option value="all">전체 지점</option>
@@ -1987,14 +1989,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 onChange={(e) => setMemberFilter(e.target.value)}
                 placeholder="직원 이름"
                 aria-label="직원 이름으로 찾기"
-                className="h-8 w-32 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white"
+                className="w-32"
               />
               {/* 구분 필터는 드롭다운이 없어 화면에 흔적이 남지 않는다 — 걸려 있으면 칩으로 드러낸다.
                   안 그러면 좁혀진 결과가 0건일 때 "이용내역이 없습니다"가 전체 0건으로 오인된다
                   (코덱스 리뷰 2026-07-29). 해제는 아래 '필터 해제' 버튼이 맡으므로 클릭 동작은 없다. */}
               {verticalFilter === "logistics" && (
                 <span
-                  className="h-8 inline-flex items-center border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-gray-100"
+                  className="inline-flex items-center"
                   title="구분 필터가 걸려 있습니다 — 퀵·택배 이용만 보고 있습니다"
                 >구분: 퀵·택배</span>
               )}
@@ -2002,10 +2004,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               {(accountFilter !== "all" || branchFilter !== "all" || memberFilter !== "" || verticalFilter !== "all") && (
                 <button
                   onClick={() => { setAccountFilter("all"); setBranchFilter("all"); setMemberFilter(""); setVerticalFilter("all"); }}
-                  className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[11px] font-black text-[#212121]"
                 >필터 해제</button>
               )}
-              <span className="text-[11px] font-bold text-[#212121]/60">{formatNumber(visibleRows.length)}건</span>
+              </div>
+              <span className="admin-band-meta">{formatNumber(visibleRows.length)}건</span>
             </div>
             <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
               <table className="w-full text-xs whitespace-nowrap">
@@ -2069,8 +2071,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h2 className="admin-pill-title">직원별 급증 ({shownMonth} vs 전월) — {formatNumber(surges.length)}명</h2>
+            <div className="admin-band">
+              <h2 className="admin-band-title">직원별 급증 ({shownMonth} vs 전월) — {formatNumber(surges.length)}명</h2>
             </div>
             {prevLoading ? (
               <p className="px-4 py-6 text-xs font-bold text-[#212121]/50">전월 자료를 불러오는 중입니다… 잠시 후 이 표가 채워집니다.</p>
@@ -2259,48 +2261,43 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               )}
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
-                  <h2 className="admin-pill-title">
+                <div className="admin-band">
+                  <h2 className="admin-band-title">
                     {/* 필터를 걸면 건수도 필터 기준이 된다 — 그때 전체 대기 건수를 함께 적어
                         "다른 지점에 대기 건이 있는데 없다고 오해"하는 일을 막는다(Codex P2 2026-07-31). */}
                     신청 목록 — 대기 {formatNumber(visibleRequests.filter((r) => r.status === "pending").length)}건 / 전체 {formatNumber(visibleRequests.length)}건
                     {(reqBranchFilter || reqNameFilter || reqTypeFilter) &&
                       ` · 필터 제외 포함 전체 대기 ${formatNumber(requestsData.items.filter((r) => r.status === "pending").length)}건`}
                   </h2>
-                  {/* 필터는 제목 옆에 둔다(사용자 지시 2026-07-31). 지점·종류는 실제 값으로만 목록을 만들어
-                      고를 수 있는 게 곧 존재하는 값이 되게 하고, 이름은 직접 입력한다. */}
-                  <select value={reqBranchFilter} onChange={(e) => setReqBranchFilter(e.target.value)}
-                    className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="지점 필터">
-                    <option value="">지점 전체</option>
-                    {requestBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                  <input value={reqNameFilter} onChange={(e) => setReqNameFilter(e.target.value)} placeholder="이름"
-                    className="h-8 w-24 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="이름 필터" />
-                  <select value={reqTypeFilter} onChange={(e) => setReqTypeFilter(e.target.value)}
-                    className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-white" aria-label="종류 필터">
-                    <option value="">종류 전체</option>
-                    {requestTypeOptions.map((t) => <option key={t} value={t}>{REQUEST_TYPE_LABEL[t as KakaoTaxiRequest["type"]] || t}</option>)}
-                  </select>
-                  {(reqBranchFilter || reqNameFilter || reqTypeFilter) && (
-                    <button onClick={() => { setReqBranchFilter(""); setReqNameFilter(""); setReqTypeFilter(""); }}
-                      className="admin-period-chip h-8 px-3 rounded-full text-[11px] font-black cursor-pointer">필터 해제</button>
-                  )}
+                  {/* 필터는 제목 바로 옆에 둔다(DESIGN_ADMIN.md §4-0). 지점·종류는 실제 값으로만 목록을 만들어
+                      고를 수 있는 게 곧 존재하는 값이 되게 하고, 이름은 직접 입력한다.
+                      크기·모양은 .admin-band-filters 가 정하므로 여기서 다시 적지 않는다. */}
+                  <div className="admin-band-filters">
+                    <select value={reqBranchFilter} onChange={(e) => setReqBranchFilter(e.target.value)} aria-label="지점 필터">
+                      <option value="">지점 전체</option>
+                      {requestBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <input value={reqNameFilter} onChange={(e) => setReqNameFilter(e.target.value)} placeholder="이름"
+                      className="w-24" aria-label="이름 필터" />
+                    <select value={reqTypeFilter} onChange={(e) => setReqTypeFilter(e.target.value)} aria-label="종류 필터">
+                      <option value="">종류 전체</option>
+                      {requestTypeOptions.map((t) => <option key={t} value={t}>{REQUEST_TYPE_LABEL[t as KakaoTaxiRequest["type"]] || t}</option>)}
+                    </select>
+                    {(reqBranchFilter || reqNameFilter || reqTypeFilter) && (
+                      <button onClick={() => { setReqBranchFilter(""); setReqNameFilter(""); setReqTypeFilter(""); }}>필터 해제</button>
+                    )}
+                  </div>
                 </div>
-                <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
-                  {/* 엑셀 형식(DESIGN.md §9-1) — 헤더는 바닐라 배경 + 사방 검정 격자,
-                      본문 셀은 옅은 격자, 표는 border-separate·사각 모서리.
-                      [주의] 관리자 화면이므로 **`--admin-vanilla`** 를 쓴다. 지점 hex(#EFF0A3)를
-                      그대로 박으면 다크 모드에서 관리자 바닐라(#F4F2CC)로 안 바뀌어 혼자 튄다. */}
-                  <table className="w-full text-xs whitespace-nowrap border-separate" style={{ borderSpacing: 0 }}>
-                    {/* 컬럼 순서는 사용자 지시(2026-07-31): 신청일·지점·대상·종류·상태·비고.
-                        승인/반려는 별도 '처리' 칸을 두지 않고 **상태 칸 안에** 둔다 — 아직 처리 안 한
-                        건이 곧 그 줄의 상태이고, 눌러야 할 것과 상태를 한 곳에서 보게 된다. */}
-                    <thead><tr className="text-left">
-                      {["신청일", "지점", "대상", "종류", "상태", "비고"].map((h, i) => (
-                        <th key={h}
-                          className={`bg-[var(--admin-vanilla)] border-t border-r border-b border-[#212121] px-2 py-1.5 text-[11px] font-black text-[#212121] ${i === 0 ? "border-l" : ""}`}>
-                          {h}
-                        </th>
+                <div className="admin-sheet-scroll">
+                  {/* 엑셀형 표 = 관리자 표준 부품 `.admin-sheet`(DESIGN_ADMIN.md §4-0).
+                      헤더 색(엘리스)·격자·헤더 고정·선 겹침 방지는 전부 그 클래스가 처리한다 —
+                      여기서 값을 다시 적지 않는다. 컬럼 순서는 사용자 지시(2026-07-31):
+                      신청일·지점·대상·종류·상태·비고. 승인/반려는 별도 '처리' 칸을 두지 않고
+                      **상태 칸 안에** 둔다 — 아직 처리 안 한 건이 곧 그 줄의 상태이기 때문. */}
+                  <table className="admin-sheet">
+                    <thead><tr>
+                      {["신청일", "지점", "대상", "종류", "상태", "비고"].map((h) => (
+                        <th key={h}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>
@@ -2503,21 +2500,22 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               )}
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-gray-100">
-                  <h2 className="admin-pill-title">
+                <div className="admin-band">
+                  <h2 className="admin-band-title">
                     인증완료 직원 — {formatNumber(visibleMembers.length)}명
                     {memberBranchFilter !== "all" ? ` / 전체 ${formatNumber(membersData.members.length)}명` : ""}
                   </h2>
-                  <select value={memberBranchFilter} onChange={(e) => setMemberBranchFilter(e.target.value)}
-                    className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white" aria-label="지점 필터">
-                    <option value="all">전체 지점</option>
-                    {memberBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-                    <option value="unassigned">부서 미지정</option>
-                  </select>
-                  <input value={memberNameFilter} onChange={(e) => setMemberNameFilter(e.target.value)}
-                    placeholder="이름 검색" aria-label="이름 검색"
-                    className="h-8 w-32 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white" />
-                  <span className="text-[11px] font-bold text-[#212121]/50">(등록 후 아직 인증하지 않은 직원은 카카오 정책상 목록에 나오지 않습니다)</span>
+                  {/* 필터는 제목 바로 옆(DESIGN_ADMIN.md §4-0) — 크기·모양은 클래스가 정한다 */}
+                  <div className="admin-band-filters">
+                    <select value={memberBranchFilter} onChange={(e) => setMemberBranchFilter(e.target.value)} aria-label="지점 필터">
+                      <option value="all">전체 지점</option>
+                      {memberBranchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+                      <option value="unassigned">부서 미지정</option>
+                    </select>
+                    <input value={memberNameFilter} onChange={(e) => setMemberNameFilter(e.target.value)}
+                      placeholder="이름 검색" aria-label="이름 검색" className="w-32" />
+                  </div>
+                  <span className="admin-band-meta">(등록 후 아직 인증하지 않은 직원은 카카오 정책상 목록에 나오지 않습니다)</span>
                 </div>
                 <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
                   <table className="w-full text-xs whitespace-nowrap">

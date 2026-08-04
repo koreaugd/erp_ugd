@@ -568,32 +568,8 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
 
   return (
     <section className="space-y-5 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1.5">
-          {/* 새 관리자 탭 제목은 바닐라 알약(DESIGN.md §6-4, 분석 탭과 동일) */}
-          <h2 className="admin-pill-title">계정 관리</h2>
-          <p className="text-[11px] font-semibold text-zinc-400">
-            개인 계정 가입자의 역할·허용 탭·허용 지점·상태를 관리합니다.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {newSignups > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] px-3 py-1.5 text-[11px] font-black text-[#212121]">
-              신규 {newSignups}건
-            </span>
-          )}
-          {scopeTargets.length > 0 && (
-            <button onClick={() => { setScopePanelOpen((open) => !open); setScopeResult(null); }}
-              className="p-2 px-3 rounded-xl border border-[#212121] bg-[var(--admin-vanilla)] text-xs font-black cursor-pointer">
-              허용지점 정리 {scopeTargets.length}건
-            </button>
-          )}
-          <button onClick={() => void load()} disabled={loading}
-            className="p-2 px-3 rounded-xl border border-gray-200 text-xs font-black cursor-pointer disabled:opacity-40">
-            {loading ? "확인 중..." : "새로고침"}
-          </button>
-        </div>
-      </div>
+      {/* [2026-08-03 사용자 지시] 제목·버튼·필터가 각각 따로 한 줄씩 쓰고 있었다.
+          제목은 페이지 맨 위 탭 이름 알약이 맡고, 버튼·필터는 아래 '계정 목록' 밴드로 옮겼다. */}
 
       {/* 허용지점 일괄 축소 — 가입 기본값이 '전체'이던 시절 계정을 근무지점 한 곳으로 좁힌다.
           되돌리기가 없으므로 무엇이 바뀌는지 전부 보여준 뒤에만 실행한다. */}
@@ -676,35 +652,63 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
         </div>
       )}
 
-      {/* 지점 필터 — 그 지점 소속(가입 시 선택)이거나 그 지점에 들어갈 수 있는 계정만 추린다. */}
-      {profiles !== null && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-black text-gray-700">지점</span>
-          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}
-            className="p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold">
-            <option value="">전체 지점</option>
-            {branches.map((b) => (
-              <option key={b.branchId} value={b.branchName}>{b.branchName}</option>
-            ))}
-          </select>
-          <span className="text-[11px] font-bold text-zinc-400">
-            {branchFilter
-              ? `${visibleProfiles.length}건 · 선택지점이 ${branchFilter}이거나 허용지점에 ${branchFilter}이 포함된 계정`
-              : `${visibleProfiles.length}건`}
-          </span>
-        </div>
-      )}
 
       {/* 카드=검정 1px 테두리, 헤더 라벨=엘리스 배경+100% 검정 11px 볼드(DESIGN.md §4·§9-1 — text-gray-*는 흐려져 금지) */}
       {/* 계정이 많아 표가 화면을 넘긴다 — 높이를 끊고 표 안에서 스크롤한다(사용자 지시 2026-07-29).
           머리글은 sticky 로 붙여 두어 스크롤해도 어느 칸인지 보이게 한다. */}
-      {loading ? <LoadingSpinner /> : profiles === null ? null : (
-        <div id="account-management-table" className="bg-white rounded-2xl border border-[#212121] overflow-x-auto max-h-[34rem] overflow-y-auto">
-          <table className="w-full min-w-[1080px] text-xs">
-            {/* sticky·배경은 index.css 에서 th 에 직접 준다 — thead/tr 배경은 본문이 지나갈 때 헤더를 덮지 못한다
-                (마감 이력 점검 표에서 검증된 패턴). */}
-            <thead className="bg-[var(--admin-alice)]">
-              <tr className="text-[11px] font-black text-[#212121]">
+      {/* 제목 밴드 + 엑셀형 표 = 관리자 표준(DESIGN_ADMIN.md §4-0).
+          헤더 고정·배경·격자는 `.admin-sheet` 가 맡으므로 여기서 다시 적지 않는다. */}
+      {/* [P0 복구 수단 — DESIGN_ADMIN §4-0] 이 카드는 **조회 실패해도 그린다.**
+          한때 `profiles === null ? null` 로 통째로 감췄는데, 그 안에 [새로고침]이 들어 있어
+          한 번 실패하면 오류 배너만 남고 같은 화면에서 다시 시도할 방법이 없었다
+          (코덱스 리뷰 2026-08-03 P1). 비어 있는 상태는 표 안에서 문구로 말한다. */}
+      <div id="account-management-table" className="admin-sheet-card">
+          <div className="admin-band">
+            <h3 className="admin-band-title">계정 목록</h3>
+            {/* 필터는 제목 바로 옆, 실행 버튼은 오른쪽 끝(DESIGN_ADMIN.md §4-0).
+                지점 필터 = 그 지점 소속(가입 시 선택)이거나 그 지점에 들어갈 수 있는 계정만 추린다. */}
+            <div className="admin-band-filters">
+              <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} aria-label="지점 필터" className="min-w-28">
+                <option value="">전체 지점</option>
+                {branches.map((b) => (
+                  <option key={b.branchId} value={b.branchName}>{b.branchName}</option>
+                ))}
+              </select>
+            </div>
+            <p className="admin-band-meta">
+              {branchFilter
+                ? `${visibleProfiles.length}명 · 선택지점이 ${branchFilter}이거나 허용지점에 ${branchFilter}이 포함된 계정`
+                : `${visibleProfiles.length}명 · 개인 계정 가입자의 역할·허용 탭·허용 지점·상태를 관리합니다`}
+            </p>
+            <div className="admin-band-actions">
+              {newSignups > 0 && (
+                <span className="inline-flex items-center h-8 px-3.5 rounded-full border border-[#212121] bg-[var(--admin-vanilla)] text-[11px] font-black text-[#212121]">
+                  신규 {newSignups}건
+                </span>
+              )}
+              {scopeTargets.length > 0 && (
+                <button onClick={() => { setScopePanelOpen((open) => !open); setScopeResult(null); }}
+                  className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer is-active">
+                  허용지점 정리 {scopeTargets.length}건
+                </button>
+              )}
+              <button onClick={() => void load()} disabled={loading}
+                className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer disabled:opacity-40">
+                {loading ? "확인 중..." : "새로고침"}
+              </button>
+            </div>
+          </div>
+          {loading ? (
+            <div className="py-12 text-center"><LoadingSpinner /></div>
+          ) : profiles === null ? (
+            <p className="px-4 py-10 text-center text-[11px] font-bold text-[#212121]/50">
+              계정 목록을 불러오지 못했습니다. 위 [새로고침]을 눌러 다시 시도해주세요.
+            </p>
+          ) : (
+          <div className="admin-sheet-scroll max-h-[34rem]">
+          <table className="admin-sheet min-w-[1080px]">
+            <thead>
+              <tr>
                 {/* 승인은 맨 왼쪽 — 신청관리 탭과 같은 자리(사용자 지시 2026-07-29) */}
                 <th className="px-3 py-2 text-left">승인</th>
                 <th className="px-3 py-2 text-left">이름</th>
@@ -838,8 +842,9 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
               })}
             </tbody>
           </table>
+          </div>
+          )}
         </div>
-      )}
 
       {editingUid && editingProfile && (
         editingProfile.uid === currentUid ? (

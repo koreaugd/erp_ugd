@@ -135,35 +135,9 @@ export function SalaryChangeHistoryTab() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-black text-gray-900 w-fit">급여 변동 이력</h3>
-          <p className="text-[11px] font-semibold text-zinc-400 mt-1">
-            {prevMonthLabel} 대비 {shownMonth} · 기본급(이달 급여)이 달라진 정직원만 표시합니다. 읽기 전용입니다.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="month" value={month} min="2020-01" max="2099-12"
-            onChange={(e) => { if (e.target.value) setMonth(e.target.value); }}
-            className="p-2 px-3 border border-gray-200 rounded-xl text-xs font-bold"
-          />
-          <button onClick={() => void load()} disabled={loading}
-            className="p-2 px-3 rounded-xl border border-gray-200 text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40">
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> 새로고침
-          </button>
-          {/* 내보내면 안 되는 상태는 버튼부터 막는다: 다른 달을 보고 있거나(stale), 못 불러온 지점이 있을 때(불완전). */}
-          <button onClick={() => void downloadExcel()} disabled={loading || stale || failedBranches.length > 0 || !visible.length}
-            title={
-              stale ? "선택한 달의 자료를 아직 불러오지 못했습니다."
-              : failedBranches.length ? "불러오지 못한 지점이 있어 완전한 파일을 만들 수 없습니다. 새로고침 후 다시 시도해주세요."
-              : undefined
-            }
-            className="p-2 px-3 rounded-xl bg-[#212121] text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40">
-            <Download className="w-3.5 h-3.5" /> 엑셀 받기
-          </button>
-        </div>
-      </div>
+      {/* [최상단 제목 카드 삭제 — 사용자 지시 2026-08-03]
+          사이드바에 이미 '급여 변동 이력' 탭 이름이 떠 있어 같은 제목을 한 번 더 적을 이유가 없었다.
+          월 선택·새로고침·엑셀 받기는 아래 '변동 내역' 밴드로 옮겼다. */}
 
       {/* 실패는 반드시 붉게 보여야 한다. 표준 rose 계열을 쓰면 관리자 CSS가 bg-rose-50 → --admin-honey(완료·긍정색)로
           바꿔버려 '실패가 성공처럼' 보인다(index.css의 .admin-redesign .bg-rose-50). DESIGN.md §11의 오류 hex를 직접 박는다. */}
@@ -225,21 +199,53 @@ export function SalaryChangeHistoryTab() {
             </select>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-xs">
-              <thead className="text-[11px] text-[#212121] font-black">
+          <div className="admin-sheet-card">
+            <div className="admin-band">
+              <h3 className="admin-band-title">변동 내역</h3>
+              {/* 조회 월은 필터라 제목 옆(연한 바닐라 — 몇 월을 보는지가 화면 해석의 전제),
+                  실행 버튼은 오른쪽 끝(DESIGN_ADMIN.md §4-0) */}
+              <div className="admin-band-filters">
+                <input
+                  type="month" value={month} min="2020-01" max="2099-12"
+                  onChange={(e) => { if (e.target.value) setMonth(e.target.value); }}
+                  aria-label="조회 월"
+                />
+              </div>
+              <p className="admin-band-meta">
+                {prevMonthLabel} 대비 {shownMonth} · 기본급이 달라진 정직원 {visible.length}명 · 읽기 전용
+              </p>
+              <div className="admin-band-actions">
+                <button onClick={() => void load()} disabled={loading}
+                  className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40">
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> 새로고침
+                </button>
+                {/* 내보내면 안 되는 상태는 버튼부터 막는다: 다른 달을 보고 있거나(stale), 못 불러온 지점이 있을 때(불완전). */}
+                <button onClick={() => void downloadExcel()} disabled={loading || stale || failedBranches.length > 0 || !visible.length}
+                  title={
+                    stale ? "선택한 달의 자료를 아직 불러오지 못했습니다."
+                    : failedBranches.length ? "불러오지 못한 지점이 있어 완전한 파일을 만들 수 없습니다. 새로고침 후 다시 시도해주세요."
+                    : undefined
+                  }
+                  className="h-8 px-3.5 rounded-full bg-[#212121] text-white text-[11px] font-black inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40">
+                  <Download className="w-3.5 h-3.5" /> 엑셀 받기
+                </button>
+              </div>
+            </div>
+            <div className="admin-sheet-scroll">
+            <table className="admin-sheet min-w-[1100px]">
+              <thead>
                 <tr>
-                  <th className="px-4 py-3 text-left">지점</th>
-                  <th className="px-4 py-3 text-left">성명</th>
-                  <th className="px-4 py-3 text-left">직급</th>
-                  <th className="px-4 py-3 text-left">구분</th>
-                  <th className="px-4 py-3 text-right">{prevMonthLabel}</th>
-                  <th className="px-4 py-3 text-right">{shownMonth}</th>
-                  <th className="px-4 py-3 text-right">차액</th>
-                  <th className="px-4 py-3 text-left">비고 (급여대장)</th>
+                  <th>지점</th>
+                  <th>성명</th>
+                  <th>직급</th>
+                  <th>구분</th>
+                  <th className="text-right">{prevMonthLabel}</th>
+                  <th className="text-right">{shownMonth}</th>
+                  <th className="text-right">차액</th>
+                  <th>비고 (급여대장)</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {visible.length === 0 ? (
                   <tr><td colSpan={8} className="px-5 py-16 text-center text-gray-400">
                     {prevMonthLabel} 대비 급여가 달라진 정직원이 없습니다.
@@ -279,6 +285,7 @@ export function SalaryChangeHistoryTab() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <p className="text-[10px] font-semibold text-zinc-400 leading-relaxed">

@@ -1,0 +1,178 @@
+/* src/fonts.css — 본문 글꼴(Noto Sans KR) 자체 호스팅
+
+   [왜 구글 폰트 CDN 을 안 쓰나]
+   예전에는 index.css 맨 위에서
+     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+   로 받아 왔다. 이게 "화면을 열고 몇 초 뒤에 글꼴이 바뀌는" 현상의 원인이었다.
+
+   1) 사슬처럼 이어진 요청 — 브라우저는 (HTML) → (우리 CSS) → (구글 CSS) → (폰트 파일) 순서로만
+      알아낼 수 있다. `@import` 는 우리 CSS 를 다 받아 읽은 **뒤에야** 발견되고, 거기서 다시
+      다른 서버(fonts.googleapis.com / fonts.gstatic.com) 에 DNS·TLS 를 새로 맺어야 했다.
+   2) 그 구글 CSS 자체가 **472KB, @font-face 620개**였다. 구글은 한글을 124조각으로 잘라 두고
+      **화면에 그 글자가 실제로 그려질 때** 해당 조각만 내려받는다.
+   3) 그래서 한글이 다양한 화면(법인택시 신청관리처럼 지점명·직원명·사유가 잔뜩 나오는 표)을 열면
+      조각이 수십 개씩 뒤늦게 도착하고, `display=swap` 이라 **도착할 때마다 그 글자만 다시 그려진다.**
+      사용자에겐 "몇 초 동안 그대로 있다가 글꼴이 슬금슬금 바뀌는" 것으로 보인다.
+
+   [지금 방식]
+   무게별로 **한 덩어리씩** 앱과 같은 주소에서 받는다(public/fonts). 한 번 받으면 캐시에 남고,
+   그 뒤로는 폰트 때문에 다시 그려지는 일이 없다. 조각 나눔이 없으니 "늦게 도착하는 조각"도 없다.
+
+   [무게] 400·500·700·900 네 가지만 둔다. 300(font-light)은 코드에서 한 번도 안 쓰는데 받고 있었다.
+   600(font-semibold)·800(font-extrabold)은 원래도 파일이 없어 브라우저가 700·900으로 맞춰 그린다.
+
+   [파일 4종] 한 무게당 네 조각이며 **겹치지 않는 unicode-range** 로 나눠 맡는다.
+     · korean      (약 535KB) 한글 11,172자 전부 + 아스키. unicode-range 없음 = 나머지 전부 담당.
+     · latin       (약 14KB)  영문·숫자·기본 문장부호. 작아서 먼저 도착해 숫자가 빨리 제 모양이 된다.
+     · latin-ext   (약 5KB)   ₩ 등 확장 라틴.
+     · symbols     (약 29KB)  ▲ ▼ → ※ ① ─ Σ 처럼 위 세 조각에 **없는 글자만**.
+       (만들기: scripts/build-korean-webfont.py 주석 참고)
+
+   [선언 순서가 규칙이다 — 고칠 때 주의] korean 에는 일부러 unicode-range 를 주지 않았다.
+   범위가 없으면 "모든 글자"를 뜻하므로 **먼저** 선언해 밑바탕을 깔고, 뒤따르는 latin-ext ·
+   latin · symbols 가 자기 범위 안에서 그 자리를 되찾는 구조다(같은 글자를 두 곳이 맡으면
+   **나중에 선언한 쪽이 이긴다**). 그래서 korean 은 겹치는 게 정상이고, 문제가 되는 건
+   **뒤쪽 세 개끼리 겹치는 경우**다 — 이긴 파일에 정작 그 글자가 없으면 시스템 글꼴로 떨어져
+   그 글자만 모양이 튄다. 뒤쪽 세 개의 range 는 실제 파일 커버리지에서 계산해 서로 겹치지 않게
+   뽑아 두었으니, 손으로 넓히지 말 것(예: U+2212 − 는 latin, U+20A9 ₩ 는 latin-ext,
+   U+203B ※ 는 symbols 가 각각 혼자 맡는다).
+
+   [주의] url 은 반드시 **상대경로**(`../fonts/...`)로 둔다. 운영 주소가
+   https://koreaugd.github.io/erp_ugd/ 처럼 하위 경로라 `/fonts/...` 로 적으면 404 가 난다
+   (vite.config.ts 의 base: './' 와 같은 이유).
+
+   [주의 2 — 개발 서버 한정] 빌드된 화면에서는 이 파일이 `assets/index-xxxx.css` 로 나가므로
+   `../fonts/` 가 항상 사이트 최상위의 fonts 폴더를 정확히 가리킨다. 그런데 `npm run dev` 는
+   CSS 를 <style> 태그로 밀어 넣기 때문에, 경로가 **CSS 위치가 아니라 지금 열린 주소** 기준으로
+   풀린다. 지금 라우트는 `/` · `/admin` · `/branch-confirm` 한 단계뿐이라 어느 쪽에서도
+   `/fonts/...` 로 잘 풀린다. 나중에 `/admin/무엇` 처럼 **두 단계 라우트를 만들면 개발 화면에서만**
+   글꼴이 404 가 난다(운영은 그대로 정상). 그때는 폰트를 src/assets 로 옮겨 Vite 가 경로를
+   다시 쓰게 하고, index.html 의 preload 를 걷어내면 된다.
+
+   [고치는 법] 무게를 늘리거나 글꼴을 바꾸려면 scripts/build-korean-webfont.py 를 다시 돌린 뒤
+   이 파일과 index.html 의 preload 를 함께 고친다. */
+
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-korean-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-ext-400.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-symbols-400.woff2') format('woff2');
+  unicode-range: U+0391-03A1,U+03A3-03A9,U+03B1-03C1,U+03C3-03C9,U+2010,U+2015-2016,U+2021,U+2025,U+2030,U+2035,U+203B-203C,U+2042,U+2190,U+2192,U+2194-2199,U+21C4-21C5,U+21D0,U+21D2,U+21D4,U+21E6-21E9,U+2200,U+2202-2203,U+2206-2209,U+220B,U+220F,U+2211,U+2213,U+221A,U+221D-2220,U+2225-222C,U+222E,U+2234-2237,U+223D,U+2243,U+2245,U+2248,U+224C,U+2260-2262,U+2264-2267,U+226A-226B,U+226E-226F,U+2272-2273,U+2276-2277,U+2282-2287,U+228A-228B,U+2295-2297,U+2299,U+22A5,U+22DA-22DB,U+22EF,U+2460-2487,U+249C-24E9,U+24EB-24F4,U+2500-2503,U+250C-254B,U+25A0-25A1,U+25A3-25A9,U+25B1-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25C6-25C7,U+25C9-25CC,U+25CE-25D1,U+25E6,U+25EF,U+2605-2606,U+260E-260F,U+261C-261F,U+262F,U+2640,U+2642,U+2660-2661,U+2663-2665,U+2667-266A,U+266C-266D,U+266F,U+271A,U+273D,U+2756,U+2776-277F,U+278A-2793,U+FF01-FF5E;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-korean-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-ext-500.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-symbols-500.woff2') format('woff2');
+  unicode-range: U+0391-03A1,U+03A3-03A9,U+03B1-03C1,U+03C3-03C9,U+2010,U+2015-2016,U+2021,U+2025,U+2030,U+2035,U+203B-203C,U+2042,U+2190,U+2192,U+2194-2199,U+21C4-21C5,U+21D0,U+21D2,U+21D4,U+21E6-21E9,U+2200,U+2202-2203,U+2206-2209,U+220B,U+220F,U+2211,U+2213,U+221A,U+221D-2220,U+2225-222C,U+222E,U+2234-2237,U+223D,U+2243,U+2245,U+2248,U+224C,U+2260-2262,U+2264-2267,U+226A-226B,U+226E-226F,U+2272-2273,U+2276-2277,U+2282-2287,U+228A-228B,U+2295-2297,U+2299,U+22A5,U+22DA-22DB,U+22EF,U+2460-2487,U+249C-24E9,U+24EB-24F4,U+2500-2503,U+250C-254B,U+25A0-25A1,U+25A3-25A9,U+25B1-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25C6-25C7,U+25C9-25CC,U+25CE-25D1,U+25E6,U+25EF,U+2605-2606,U+260E-260F,U+261C-261F,U+262F,U+2640,U+2642,U+2660-2661,U+2663-2665,U+2667-266A,U+266C-266D,U+266F,U+271A,U+273D,U+2756,U+2776-277F,U+278A-2793,U+FF01-FF5E;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-korean-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-ext-700.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-symbols-700.woff2') format('woff2');
+  unicode-range: U+0391-03A1,U+03A3-03A9,U+03B1-03C1,U+03C3-03C9,U+2010,U+2015-2016,U+2021,U+2025,U+2030,U+2035,U+203B-203C,U+2042,U+2190,U+2192,U+2194-2199,U+21C4-21C5,U+21D0,U+21D2,U+21D4,U+21E6-21E9,U+2200,U+2202-2203,U+2206-2209,U+220B,U+220F,U+2211,U+2213,U+221A,U+221D-2220,U+2225-222C,U+222E,U+2234-2237,U+223D,U+2243,U+2245,U+2248,U+224C,U+2260-2262,U+2264-2267,U+226A-226B,U+226E-226F,U+2272-2273,U+2276-2277,U+2282-2287,U+228A-228B,U+2295-2297,U+2299,U+22A5,U+22DA-22DB,U+22EF,U+2460-2487,U+249C-24E9,U+24EB-24F4,U+2500-2503,U+250C-254B,U+25A0-25A1,U+25A3-25A9,U+25B1-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25C6-25C7,U+25C9-25CC,U+25CE-25D1,U+25E6,U+25EF,U+2605-2606,U+260E-260F,U+261C-261F,U+262F,U+2640,U+2642,U+2660-2661,U+2663-2665,U+2667-266A,U+266C-266D,U+266F,U+271A,U+273D,U+2756,U+2776-277F,U+278A-2793,U+FF01-FF5E;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-korean-900.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-ext-900.woff2') format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-latin-900.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Noto Sans KR';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url('../fonts/noto-sans-kr-symbols-900.woff2') format('woff2');
+  unicode-range: U+0391-03A1,U+03A3-03A9,U+03B1-03C1,U+03C3-03C9,U+2010,U+2015-2016,U+2021,U+2025,U+2030,U+2035,U+203B-203C,U+2042,U+2190,U+2192,U+2194-2199,U+21C4-21C5,U+21D0,U+21D2,U+21D4,U+21E6-21E9,U+2200,U+2202-2203,U+2206-2209,U+220B,U+220F,U+2211,U+2213,U+221A,U+221D-2220,U+2225-222C,U+222E,U+2234-2237,U+223D,U+2243,U+2245,U+2248,U+224C,U+2260-2262,U+2264-2267,U+226A-226B,U+226E-226F,U+2272-2273,U+2276-2277,U+2282-2287,U+228A-228B,U+2295-2297,U+2299,U+22A5,U+22DA-22DB,U+22EF,U+2460-2487,U+249C-24E9,U+24EB-24F4,U+2500-2503,U+250C-254B,U+25A0-25A1,U+25A3-25A9,U+25B1-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25C6-25C7,U+25C9-25CC,U+25CE-25D1,U+25E6,U+25EF,U+2605-2606,U+260E-260F,U+261C-261F,U+262F,U+2640,U+2642,U+2660-2661,U+2663-2665,U+2667-266A,U+266C-266D,U+266F,U+271A,U+273D,U+2756,U+2776-277F,U+278A-2793,U+FF01-FF5E;
+}
