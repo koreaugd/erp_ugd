@@ -351,10 +351,120 @@ export async function firebaseGetBranchOwnRosterFromServer(branchName: string) {
   return entry?.employees || [];
 }
 
+/**
+ * 방금 이 지점에서 **빠져나간** 직원을 되살아나지 못하게 막는 유예 시간.
+ *
+ * [왜 필요한가] 직원 명단 탭·일일마감 등 여러 화면이 명부를 **통째로** 저장한다(부분 수정이 아니다).
+ * 그 화면이 열려 있는 사이 연차관리에서 직원을 다른 지점으로 옮기면, 옛 화면의 낡은 목록이
+ * 그대로 저장되면서 **옮긴 직원이 이 지점에 다시 나타난다**(두 지점에 동시 존재 — Codex 지적 2026-08-04).
+ * 그래서 빠져나간 id를 문서에 잠깐 적어 두고(movedOut), 그 사이의 통째 저장에서는 그 id를 걸러낸다.
+ *
+ * [기간] 짧게 두면(처음엔 10분이었다) **오래 열어 둔 탭**이 유예가 끝난 뒤 저장하면서 그대로 되살린다
+ * (Codex 지적 2026-08-04). 그래서 넉넉히 30일로 둔다 — 낡은 저장은 그 안에 반드시 일어난다.
+ *
+ * [그럼 정말 다시 뽑은 사람은?] 표시가 남아 있어도 **정식 등록 경로**(firebaseAddToBranchOwnRoster)가
+ * 그 사람의 표시를 지우고 넣는다. 직원 명단 탭의 '직원 추가'와 지점이동 합류가 모두 이 경로를 탄다.
+ * 즉 막히는 것은 "낡은 목록을 통째로 되쓰는 저장"뿐이고, 사람이 의도적으로 하는 등록은 언제나 통과한다.
+ */
+const ROSTER_MOVED_OUT_GUARD_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 아직 유효한(유예 시간 안의) 이탈 표시만 남긴다. */
+function pruneMovedOut(raw: any): Record<string, string> {
+  const now = Date.now();
+  return Object.fromEntries(
+    Object.entries(raw || {}).filter(([, at]) => {
+      const time = Date.parse(String(at));
+      return Number.isFinite(time) && now - time < ROSTER_MOVED_OUT_GUARD_MS;
+    }) as [string, string][]
+  );
+}
+
+/**
+ * 한 직원을 가리키는 표시 키들 — **id 하나로는 부족하다.**
+ * 일일마감은 근무자 목록의 **이름**으로 명부를 채우면서 없는 사람은 `createEmployeeFromStaffRow` 로
+ * **새 id를 만들어** 등록한다. 그래서 id 만 막으면 옮겨 간 직원이 새 id로 되살아난다(Codex 지적 2026-08-04).
+ * 이름(trim = employeeNameKey 와 같은 규칙)과 주민번호까지 함께 막는다.
+ */
+function rosterGuardKeys(employee: any): string[] {
+  const keys: string[] = [];
+  const id = String(employee?.id || "").trim();
+  const name = String(employee?.name || "").trim();
+  const rrn = String(employee?.residentNumber || "").trim();
+  if (id) keys.push(`id:${id}`);
+  if (name) keys.push(`name:${name}`);
+  if (rrn) keys.push(`rrn:${rrn}`);
+  return keys;
+}
+
 export async function firebaseSaveBranchOwnRoster(branchName: string, employees: any[]) {
   await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부돼 명단이 유실될 수 있다 — 기다렸다 저장한다.
-  await setDoc(doc(getDirectDb(), "branch_own_rosters", encodeURIComponent(branchName)), { branchName, employees, updatedAt: new Date().toISOString() });
-  return { success: true, employees };
+  const db = getDirectDb();
+  const recordRef = doc(db, "branch_own_rosters", encodeURIComponent(branchName));
+  // 통째 저장이라도 트랜잭션 안에서 이탈 표시를 확인해, 방금 빠져나간 직원이 되살아나지 않게 걸러낸다.
+  const result = await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const movedOut = pruneMovedOut(snapshot.exists() ? (snapshot.data() as any).movedOut : {});
+    const blocked = new Set(Object.keys(movedOut));
+    // id·이름·주민번호 중 하나라도 걸리면 뺀다 — 일일마감이 이름으로 새 id를 만들어 넣는 경로까지 막는다.
+    const next = blocked.size
+      ? employees.filter((item: any) => !rosterGuardKeys(item).some((key) => blocked.has(key)))
+      : employees;
+    // 걸러낸 사람을 호출부에 알린다. 안 알리면 화면·localStorage 에는 남고 서버에는 없는
+    // "이 기기에만 있는 유령"이 되어 계속 어긋난다(Codex 지적 2026-08-04).
+    const rejected = next.length === employees.length ? [] : employees.filter((item: any) => !next.includes(item));
+    if (rejected.length) {
+      console.warn(`[명부] ${branchName}: 이 지점에서 빠져나간 직원이 낡은 목록에 남아 있어 저장에서 제외했습니다.`, rejected.map((item: any) => item?.name));
+    }
+    tx.set(recordRef, { branchName, employees: next, movedOut, updatedAt: new Date().toISOString() });
+    return { employees: next, rejected };
+  });
+  return { success: true, employees: result.employees, rejected: result.rejected };
+}
+
+/** 직원을 명부에서 빼면서 '방금 나감' 표시를 남긴다(위 가드용). 없으면 no-op. */
+export async function firebaseRemoveFromBranchOwnRoster(branchName: string, employeeId: string) {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const recordRef = doc(db, "branch_own_rosters", encodeURIComponent(branchName));
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const raw = snapshot.exists() ? (snapshot.data() as any).employees : [];
+    const employees = Array.isArray(raw) ? raw : [];
+    const target = employees.find((item: any) => item?.id === employeeId);
+    if (!target) return { changed: false };
+    const nowIso = new Date().toISOString();
+    // id·이름·주민번호를 모두 표시해 둔다(위 rosterGuardKeys 주석 참고).
+    const movedOut = pruneMovedOut(snapshot.exists() ? (snapshot.data() as any).movedOut : {});
+    rosterGuardKeys(target).forEach((key) => { movedOut[key] = nowIso; });
+    tx.set(recordRef, {
+      branchName,
+      employees: employees.filter((item: any) => item?.id !== employeeId),
+      movedOut,
+      updatedAt: nowIso
+    });
+    return { changed: true };
+  });
+}
+
+/** 직원을 명부에 넣으면서 그 사람의 '나감' 표시를 지운다(정식 합류 = 가드 해제). 이미 있으면 no-op. */
+export async function firebaseAddToBranchOwnRoster(branchName: string, employee: any) {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const recordRef = doc(db, "branch_own_rosters", encodeURIComponent(branchName));
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const raw = snapshot.exists() ? (snapshot.data() as any).employees : [];
+    const employees = Array.isArray(raw) ? raw : [];
+    const movedOut = pruneMovedOut(snapshot.exists() ? (snapshot.data() as any).movedOut : {});
+    rosterGuardKeys(employee).forEach((key) => { delete movedOut[key]; }); // 정식 합류 = 그 사람의 표시를 모두 푼다
+    if (employees.some((item: any) => item?.id === employee?.id)) {
+      // 이미 있으면 명단은 그대로 두되, 이탈 표시만 풀어 준다(중단된 이동의 재개).
+      tx.set(recordRef, { branchName, employees, movedOut, updatedAt: new Date().toISOString() });
+      return { changed: false };
+    }
+    tx.set(recordRef, { branchName, employees: [...employees, employee], movedOut, updatedAt: new Date().toISOString() });
+    return { changed: true };
+  });
 }
 
 export async function firebaseGetSharedData(dataKey: string) {
@@ -531,6 +641,72 @@ export async function firebaseAppendSharedArrayItem(
     const next = [item, ...list];
     tx.set(recordRef, { value: next, updatedAt: nowIso });
     return { outcome: "appended" as const, list: next };
+  });
+}
+
+/**
+ * 공유데이터 문서를 **원자적으로** 읽고-고치고-쓴다(범용 병합).
+ *
+ * 연차관리 지점이동처럼 "현재 값을 기준으로 일부만 바꾸는" 저장은, 미리 읽어둔 값 위에 setDoc하면
+ * 그 사이 다른 기기가 저장한 내용을 통째로 덮어쓴다(Codex 지적 2026-08-04). 트랜잭션 안에서
+ * 서버 최신값을 다시 읽어 mutate를 적용하므로 충돌 시 자동 재시도된다.
+ * mutate가 null을 반환하면 "바꿀 것 없음"으로 보고 아무것도 쓰지 않는다(재시도/재개 경로의 no-op).
+ * mutate는 순수 함수여야 한다 — 트랜잭션 재시도 때 여러 번 불릴 수 있다.
+ * firebaseSaveSharedData의 요일 슬롯 백업 규약도 같은 트랜잭션 안에서 그대로 지킨다.
+ */
+export async function firebaseMutateSharedData(
+  dataKey: string,
+  mutate: (current: unknown) => unknown | null
+): Promise<{ changed: boolean }> {
+  await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부된다 — 준비될 때까지 기다렸다 저장한다.
+  const db = getDirectDb();
+  const encodedKey = encodeURIComponent(dataKey);
+  const recordRef = doc(db, "shared_data", encodedKey);
+  const now = new Date();
+  const nowIso = now.toISOString();
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const current = snapshot.exists() ? snapshot.data().value ?? null : null;
+    const next = mutate(current);
+    if (next === null || next === undefined) return { changed: false };
+    if (snapshot.exists()) {
+      tx.set(doc(db, "shared_data_backups", `${encodedKey}--slot${now.getDay()}`), {
+        dataKey,
+        value: current,
+        sourceUpdatedAt: (snapshot.data() as any).updatedAt || null,
+        backedUpAt: nowIso
+      });
+    }
+    tx.set(recordRef, { value: next, updatedAt: nowIso });
+    return { changed: true };
+  });
+}
+
+/**
+ * 지점 자체 명부(branch_own_rosters)를 **원자적으로** 읽고-고치고-쓴다.
+ * 연차관리의 지점이동/행삭제가 쓴다 — 미리 읽어둔 명부 위에 저장하면 동시에 저장한 다른 기기의
+ * 직원 추가/수정이 유실된다. mutate가 null을 반환하면 아무것도 쓰지 않는다(예: 이미 처리된 재시도).
+ * mutate는 순수 함수여야 한다 — 트랜잭션 재시도 때 여러 번 불릴 수 있다.
+ */
+export async function firebaseMutateBranchOwnRoster(
+  branchName: string,
+  mutate: (employees: any[]) => any[] | null
+): Promise<{ changed: boolean; employees: any[] }> {
+  await waitForFirebaseUser();
+  const db = getDirectDb();
+  const recordRef = doc(db, "branch_own_rosters", encodeURIComponent(branchName));
+  return await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(recordRef);
+    const raw = snapshot.exists() ? (snapshot.data() as any).employees : [];
+    const current = Array.isArray(raw) ? raw : [];
+    const next = mutate(current);
+    // 바꾸지 않았어도 **트랜잭션이 실제로 본 서버 명부**를 돌려준다 — 호출부가 "왜 안 바뀌었는지"(없음/이미 처리됨)를
+    // 판정하려면 이 스냅샷이 필요하다. mutate 안에서 바깥 변수에 적으면 재시도 때 값이 어긋난다.
+    if (next === null || next === undefined) return { changed: false, employees: current };
+    // movedOut(이탈 표시)은 그대로 넘긴다 — 여기서 빠뜨리면 필드가 사라져 되살아남 방지 가드가 풀린다.
+    const movedOut = pruneMovedOut(snapshot.exists() ? (snapshot.data() as any).movedOut : {});
+    tx.set(recordRef, { branchName, employees: next, movedOut, updatedAt: new Date().toISOString() });
+    return { changed: true, employees: next };
   });
 }
 
