@@ -157,7 +157,11 @@ export function SalaryChangeHistoryTab() {
         </div>
       )}
 
-      {loading ? <LoadingSpinner /> : changes === null ? null : (
+      {/* [P0 복구 수단 — DESIGN_ADMIN §4-0] 아래 '변동 내역' 카드는 **조회 실패해도 그린다.**
+          그 안에 [새로고침]·[조회 월]이 들어 있어, 통째로 감추면 한 번 실패한 뒤 같은 화면에서
+          다시 시도할 방법이 없어진다(코덱스 stop-time 2026-08-03 — 계정 관리에서 같은 실수를 했다).
+          여기 요약 KPI·필터 줄은 값이 있어야 의미가 있으므로 그대로 조건 안에 둔다. */}
+      {!loading && changes !== null && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {([
@@ -198,8 +202,10 @@ export function SalaryChangeHistoryTab() {
               {branchNames.map((b) => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
+        </>
+      )}
 
-          <div className="admin-sheet-card">
+      <div className="admin-sheet-card">
             <div className="admin-band">
               <h3 className="admin-band-title">변동 내역</h3>
               {/* 조회 월은 필터라 제목 옆(연한 바닐라 — 몇 월을 보는지가 화면 해석의 전제),
@@ -231,6 +237,13 @@ export function SalaryChangeHistoryTab() {
                 </button>
               </div>
             </div>
+            {loading ? (
+              <div className="py-12 text-center"><LoadingSpinner /></div>
+            ) : changes === null ? (
+              <p className="px-4 py-10 text-center text-[11px] font-bold text-[#212121]/50">
+                급여 변동 이력을 불러오지 못했습니다. 위 [새로고침]을 눌러 다시 시도해주세요.
+              </p>
+            ) : (
             <div className="admin-sheet-scroll">
             <table className="admin-sheet min-w-[1100px]">
               <thead>
@@ -286,8 +299,11 @@ export function SalaryChangeHistoryTab() {
               </tbody>
             </table>
             </div>
+            )}
           </div>
 
+      {!loading && changes !== null && (
+        <>
           <p className="text-[10px] font-semibold text-zinc-400 leading-relaxed">
             · 비교 기준은 <b>기본급(이달 급여)</b>입니다. 연장근무·상여금·택시비는 매달 달라지므로 변동 판정에 넣지 않았고, 엑셀에는 총액도 함께 담깁니다.<br />
             · 중도 입사·퇴사·파견으로 <b>일할 지급</b>한 달은 기본급 칸에 그 달 지급액이 들어 있어 다음 달에 큰 폭 인상으로 보일 수 있습니다. 비고를 함께 확인해주세요.<br />
