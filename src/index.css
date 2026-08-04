@@ -1,4 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+/* 본문 글꼴은 구글 CDN 이 아니라 우리 서버에서 받는다 — 이유는 fonts.css 맨 위 주석 참고.
+   (예전 `@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR...')` 가
+    "화면 열고 몇 초 뒤 글꼴이 바뀌는" 현상의 원인이었다.) */
+@import "./fonts.css";
 @import "tailwindcss";
 
 @theme {
@@ -532,14 +535,23 @@ input[type=number] {
 }
 
 /* 근로계약서 진행 상태 select — 상태 칩은 원래 채도를 유지한다(DESIGN_ADMIN §2-1).
-   Tailwind 표준색은 관리자 스코프가 치환하므로 전용 클래스로 못 박는다(DESIGN.md §12). */
+   Tailwind 표준색은 관리자 스코프가 치환하므로 전용 클래스로 못 박는다(DESIGN.md §12).
+
+   [색 사다리] 손댄 만큼만 진해진다 (사용자 지시 2026-08-03)
+     발송 대기 → 색 없음(아직 아무것도 안 한 기본값) · 발송 완료 → 바닐라 · 서명 완료 → 허니 · 보류 → 검정
+   '발송 대기'는 새로 올라온 모든 줄의 기본값이라, 여기에 색을 칠하면 표 전체가 물들어
+   **정작 봐야 할 진행 중인 줄이 묻힌다.** 그래서 대기만 색을 빼고 글자만 남긴다. */
 .admin-redesign .admin-labor-status-waiting {
-  background: #EFF0A3 !important; /* 바닐라 = 발송 대기(주의·미확인) */
-  color: #1A1A1A !important;
+  /* 색 없이 글자만. [주의] `border: 0` 이 아니라 **테두리를 투명하게**만 한다 —
+     테두리를 없애면 폭·높이가 줄어 상태를 바꿀 때마다 칸이 들썩인다.
+     (전역 `.admin-redesign select` 가 테두리 색을 !important 로 주므로 여기서 이겨야 한다.) */
+  background: transparent !important;
+  border-color: transparent !important;
+  color: #212121 !important;
 }
 
 .admin-redesign .admin-labor-status-sent {
-  background: #D8DFE9 !important; /* 앨리스 = 발송 완료(진행 중) */
+  background: #EFF0A3 !important; /* 바닐라 = 발송 완료(보냈고, 서명 기다리는 중) */
   color: #1A1A1A !important;
 }
 
@@ -932,6 +944,193 @@ input[type=number] {
   letter-spacing: 0;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   관리자 화면 표준 부품 — 제목 밴드(.admin-band*)와 엑셀형 표(.admin-sheet)
+   (사용자 지시 2026-08-03: 앞으로 모든 섹션 제목·표 헤더는 손익 요약표 모양을 따른다)
+
+   [왜 클래스로 묶나] 예전에는 섹션마다 제목 크기·표 헤더 색·선 굵기를 손으로 적었다.
+   그래서 탭마다 조금씩 달랐고, 한 곳을 고쳐도 다른 곳은 그대로였다.
+   여기 정의를 한 벌 두고 각 화면은 클래스만 붙인다 — 여기만 고치면 전부 같이 바뀐다.
+
+   쓰는 법:
+     <section className="admin-sheet-card">
+       <div className="admin-band">
+         <h3 className="admin-band-title">제목</h3>
+         <p className="admin-band-meta">부연 설명</p>          ← 없으면 생략
+         <div className="admin-band-actions">…버튼…</div>      ← 없으면 생략
+       </div>
+       <div className="admin-sheet-scroll">
+         <table className="admin-sheet"> … </table>
+       </div>
+     </section>
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 카드 — 검정 1px 테두리 + 16px 모서리. overflow-hidden 이라야 밴드가 모서리 밖으로 안 삐져나온다.
+   안쪽 여백(padding)은 주지 않는다 — 밴드가 카드 폭을 꽉 채워야 하기 때문. */
+.admin-redesign .admin-sheet-card {
+  background: var(--admin-ghost);
+  border: 1px solid var(--admin-black);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* 제목 밴드 — 표 전체 폭을 채우는 연한 바닐라 띠. 아래 1px 검정 선이 표의 위 테두리를 겸한다.
+   높이 53px 는 월말업무>제출현황 밴드와 같은 값(그쪽은 안에 32px 버튼이 들어 그 높이가 됐다).
+   [주의] 가로 스크롤 칸 **바깥**에 둔다 — 안에 넣으면 표를 옆으로 밀 때 제목이 따라 밀린다. */
+.admin-redesign .admin-band {
+  display: flex;
+  align-items: center;
+  /* [space-between 을 쓰지 않는다] 예전엔 `space-between` 이었는데, 그러면 밴드 안의 항목이
+     **폭 전체에 고르게 벌어져** 필터가 제목에서 멀리 떨어진다(사용자 지적 2026-08-03).
+     왼쪽부터 차례로 붙이고, 오른쪽 끝으로 보낼 것(.admin-band-actions)만 margin-left:auto 로 민다. */
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 53px;
+  padding: 10px 16px;
+  background: var(--admin-vanilla);
+  border-bottom: 1px solid var(--admin-black);
+}
+
+/* [자리 순서를 CSS 가 정한다] 화면마다 제목·설명·필터를 적는 순서가 다르다.
+   `order` 로 못 박아 두면 **어느 순서로 적든** 제목 → 필터 → 설명 → 버튼으로 그려진다.
+   필터가 제목 바로 옆에 붙어야 "무엇을 무엇으로 걸렀는지"가 한 덩어리로 읽힌다. */
+.admin-redesign .admin-band > .admin-band-title { order: 0; }
+.admin-redesign .admin-band > .admin-band-filters { order: 1; }
+.admin-redesign .admin-band > .admin-band-meta { order: 2; }
+.admin-redesign .admin-band > .admin-band-actions { order: 3; }
+/* 제목 14px · 부연 11px — 두 글자 크기가 같으면 위계가 없어 밴드가 그냥 색칠한 줄로 보인다.
+   분석 탭은 `.admin-analysis-uniform` 이 전부 11px 로 누르므로 !important 로 되받는다. */
+.admin-redesign .admin-band-title {
+  font-size: 14px !important;
+  line-height: 20px;
+  font-weight: 900;
+  color: var(--admin-black) !important;
+  letter-spacing: 0;
+}
+.admin-redesign .admin-band-meta {
+  font-size: 11px !important;
+  font-weight: 700;
+  color: rgba(33, 33, 33, 0.55) !important;
+}
+.admin-redesign .admin-band-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto; /* 부연 설명이 있어도 실행 버튼은 항상 오른쪽 끝 */
+}
+
+/* 필터는 **제목 바로 옆**에 붙인다(사용자 지시 2026-08-03).
+   오른쪽 끝으로 밀면 "무엇을 무엇으로 걸렀는지"가 제목과 떨어져 따로 읽힌다.
+   그래서 `margin-left: auto` 를 주지 않는다 — 실행 버튼(.admin-band-actions)과 자리를 나눈다. */
+.admin-redesign .admin-band-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 필터 칸 덩치 = 예전 알약 제목과 같게(11px · 높이 28px · 999px 알약 · 1px 검정).
+   밴드 안에서 제목과 필터가 한 줄로 균일하게 보이게 하려는 것이다.
+   [!important 인 이유] 전역 `.admin-redesign input/select` 가 테두리 색과 18px 라운드를
+   !important 로 강제하므로 그걸 이겨야 알약이 된다.
+   [주의] 화살표까지 지우지 않는다 — select 인지 알 수 있어야 한다. */
+.admin-redesign .admin-band-filters :where(select, input, button, label) {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--admin-black) !important;
+  border-radius: 999px !important;
+  /* 흰 바탕(사용자 지시 2026-08-03). 밴드가 연한 바닐라라, 칩이 고스트(#F6F5FA)면 띠에 묻혀
+     "고를 수 있는 칸"으로 안 읽힌다. 흰색이라야 띠 위에서 또렷하게 떠오른다. */
+  background: #ffffff !important;
+  color: var(--admin-black);
+  font-size: 11px !important;
+  font-weight: 900;
+  line-height: 1;
+}
+.admin-redesign .admin-band-filters button { cursor: pointer; }
+
+/* ── '최근 N일' 알약 (DESIGN_ADMIN.md §4-4) ─────────────────────────────────
+   최근 데이터를 짚어 줄 때 **행 배경을 칠하지 않고 이 알약을 붙인다.** 배경을 칠하면 최근 건이
+   많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려진다(마감 이력 점검에서 실제로 그랬다).
+   기준 구현은 법인택시 > 이상 점검 탭의 배지이고, 그 값을 여기로 옮겨 한곳에서 정한다.
+   [볼드는 여기에만] 날짜 글자는 볼드를 빼고 이 알약만 볼드로 둬야 훑을 때 최근 건만 눈에 걸린다. */
+.admin-redesign .admin-recent-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--admin-black);
+  border-radius: 999px;
+  background: var(--admin-vanilla);
+  color: var(--admin-black);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.admin-redesign .admin-band-filters button:hover { background: var(--admin-vanilla) !important; }
+/* 켜진 필터 칩은 검정 채움(DESIGN.md §10 알약 토글) */
+.admin-redesign .admin-band-filters button.is-active {
+  background: var(--admin-black) !important;
+  color: var(--admin-ghost) !important;
+}
+
+/* 표가 카드 안에서 자체 스크롤할 때. 헤더는 아래 규칙이 sticky 로 붙여 준다. */
+.admin-redesign .admin-sheet-scroll {
+  overflow: auto;
+  max-height: 32rem;
+}
+
+/* 엑셀형 표 (DESIGN.md §9-1). border-separate 라야 sticky 헤더에서 칸 테두리가 함께 움직인다. */
+.admin-redesign .admin-sheet {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+/* ── [P0] 선은 '오른쪽·아래에만' 그린다 ──────────────────────────────────────
+   왼쪽·위에도 그리면 이웃한 칸이 같은 경계를 각각 그려 **선이 두 줄로 겹쳐 굵어진다.**
+   표의 왼쪽·위는 카드 테두리와 제목 밴드의 아래 선이 이미 그리므로 그을 필요도 없다.
+   맨 오른쪽 칸도 마찬가지 — 바로 옆이 카드 테두리라 검정 선이 두 줄로 붙는다.
+   굵기는 **전부 1px**. 굵게 만들어 해결하려 하지 말 것 — 2px 는 그 자체가 두 줄로 보이고,
+   1px 구간과 만나는 자리에서 굵기가 꺾여 더 겹쳐 보인다(2026-08-03에 세 번 되돌렸다).
+
+   헤더 선을 `border` 가 아니라 `inset box-shadow` 로 그리는 이유: 헤더는 sticky 라
+   스크롤 중 크롬이 그 칸의 border 를 그리다 빠뜨린다(선이 사라져 보인다). 그림자는 함께 따라온다.
+   [함정] box-shadow 는 겹쳐 쌓이지 않고 **통째로 갈린다** — 어떤 칸에 그림자를 새로 주면
+   격자선까지 그 선언에 다시 적어야 한다. 빠뜨리면 그 칸만 선이 없어진다. */
+.admin-redesign .admin-sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--admin-alice);
+  border: 0;
+  box-shadow:
+    inset -1px 0 0 0 var(--admin-black),
+    inset 0 -1px 0 0 var(--admin-black);
+  padding: 8px;
+  color: #212121; /* text-gray-* 는 68% 회색으로 치환돼 흐려진다(§9-1) */
+  font-size: 11px;
+  font-weight: 900;
+  text-align: left;
+  white-space: nowrap;
+}
+.admin-redesign .admin-sheet thead th:last-child {
+  box-shadow: inset 0 -1px 0 0 var(--admin-black);
+}
+.admin-redesign .admin-sheet tbody td {
+  padding: 6px 8px;
+  border-right: 1px solid rgba(33, 33, 33, 0.08);
+  border-bottom: 1px solid rgba(33, 33, 33, 0.10);
+  vertical-align: middle;
+}
+.admin-redesign .admin-sheet tbody td:last-child { border-right: 0; }
+/* 마지막 줄 밑선은 카드 테두리와 겹치므로 지운다. */
+.admin-redesign .admin-sheet tbody tr:last-child > td { border-bottom: 0; }
+
 /* ── 손익 요약표: 읽기 전용 엑셀형 (DESIGN.md §9) ──
    · 헤더 = §9-1: 바닐라 배경 + 각 셀 사방 1px 검정 격자 + 검정 볼드 11px
    · border-separate (§9: collapse 는 sticky 에서 테두리가 깨진다) + 스크롤 시 헤더(top)·매장명(left) 고정
@@ -958,24 +1157,70 @@ input[type=number] {
 .admin-redesign .admin-summary-table thead th {
   position: sticky;
   z-index: 40;
-  background: var(--admin-vanilla);
-  border-right: 1px solid var(--admin-black);
-  border-bottom: 1px solid var(--admin-black);
-  border-top: 0;
-  border-left: 0;
+  /* [엘리스] 예전엔 여기가 바닐라였는데, 실제 화면은 늘 엘리스였다 —
+     `.admin-design-preview .admin-sales-overview-section th` 가 !important 로 엘리스를 덮어쓰고 있었고
+     그 미리보기 클래스는 기본으로 켜져 있다. 값이 두 곳에서 어긋난 채였으므로 실제 렌더대로 맞춘다.
+     지금은 이 색이 **의도**이기도 하다: 제목 밴드(연한 바닐라) 바로 아래 컬럼 줄이 붙는 구조라
+     (제출현황 탭과 같은 문법, 2026-08-03) 두 줄이 같은 색이면 한 덩어리로 뭉쳐 보인다. */
+  background: var(--admin-alice);
+  /* ── 격자를 border 가 아니라 inset 그림자로 그린다 (사용자 지적 2026-08-03) ──
+     이 칸들은 스크롤해도 제자리에 붙어 있는 sticky 칸이다. 크롬은 그렇게 떠 있는 표 칸의
+     **border 를 그리다 빠뜨린다.** 그래서 두 가지가 한꺼번에 나타났다.
+       ① 표를 내리는 순간 헤더의 선이 사라진다.
+       ② '구분' 칸은 위·왼쪽 **두 방향 모두 sticky** 라 스크롤 전에도 아래 선이 안 그려져,
+          헤더 밑줄이 그 칸에서 끊겨 있었다(rowSpan=2 라 칸 아래쪽이 h2 줄 아래에 있는데도).
+     그림자는 칸이 어디로 밀려가든 칸과 함께 그려지므로 두 증상이 같이 사라진다.
+     [범위] thead 만 바꾼다 — 본문 셀에는 클릭한 행 커서 띠(.admin-summary-row-active)가
+     이미 box-shadow 를 쓰고 있어, 여기에도 얹으면 그 줄에서 서로 덮어 지운다.
+     [방향] 오른쪽·아래만. 왼쪽은 카드 테두리가, 위는 제목 밴드의 아래 선이 이미 그린다
+     (거기에 또 그으면 선이 두 줄로 겹쳐 보인다). */
+  border: 0;
+  box-shadow:
+    inset -1px 0 0 0 var(--admin-black),
+    inset 0 -1px 0 0 var(--admin-black);
   color: #212121; /* text-gray-* 는 68% 회색으로 치환되므로 리터럴 100% 검정(§9-1) */
   font-weight: 900;
   font-size: 11px;
 }
-.admin-redesign .admin-summary-table .admin-sum-h1 { top: 0; height: 32px; border-top: 1px solid var(--admin-black); }
+.admin-redesign .admin-summary-table .admin-sum-h1 { top: 0; height: 32px; }
+/* 2단 헤더의 아랫줄(금액/%/전월비). 글자는 윗줄과 같은 11px — 예전 10px 은 제출현황 헤더(11px)보다
+   작아 두 표를 나란히 놓으면 이 표만 잘아 보였다(사용자 지적 2026-08-03).
+   top:32px 은 윗줄 높이와 짝이다 — .admin-sum-h1 의 height 를 바꾸면 여기도 같이 바꿔야 한다. */
 .admin-redesign .admin-summary-table .admin-sum-h2 { top: 32px; height: 26px; font-size: 10px; }
+
+/* ── [폭을 늘리지 말 것] 칸 여백·글자·고정열 폭은 원래 값 그대로 둔다 ──
+   이 표는 컬럼이 17개라 **가로가 화면에 겨우 들어맞는다.** 한때 제출현황 표에 맞춘다고
+   칸 여백을 8px→12px, 고정열을 104→120px 로 키웠더니 폭이 약 150px 늘어
+   **맨 오른쪽 '이익' 컬럼이 잘려 가로 스크롤을 해야 했다**(사용자 지적 2026-08-03).
+   본문 글자(11px)·행 높이도 같은 이유로 분석 탭 통일값 그대로다.
+   → 여백은 각 셀의 `py-1.5 px-2` 등 TSX 클래스에 맡기고 여기서 덮어쓰지 않는다.
+   제출현황과 맞추는 것은 **제목 밴드(색·높이·글자)와 카드 모양까지**다. 표 안쪽 치수는 아니다.
+
+   ── 헤더 구분선 (사용자 지시 2026-08-03: 진하게 · 겹치지 않게) ──
+   [겹치지 않는 이유] 선은 **오른쪽·아래에만** 그린다. 왼쪽·위를 함께 주면 이웃한 칸끼리
+   같은 자리에 두 번 그려 2배로 굵어진다. 표의 왼쪽은 카드 테두리가, 위는 제목 밴드의
+   아래 선이 이미 그리므로 여기서 또 그을 필요도 없다.
+   [굵기 — 전부 1px] 굵게 만들어 해결하려 하지 말 것. 2px 로 올렸더니 그 선이 오히려
+   **두 줄처럼** 보이고, 1px 구간과 만나는 자리에서 굵기가 꺾여 더 겹쳐 보였다
+   (2026-08-03에 그룹 경계 → 헤더/본문 경계 순으로 두 번 되돌렸다).
+   선이 흐려 보이면 굵기가 아니라 **같은 자리에 두 번 그리고 있지 않은지**부터 본다. */
+/* 표의 **맨 오른쪽 칸**에는 세로선을 그리지 않는다 — 바로 옆이 카드 테두리라 검정 선이
+   두 줄로 붙어 보인다(사용자 지적 2026-08-03). 헤더 밑줄은 그대로 둔다.
+   [주의] `th:last-child` 로 쓰면 안 된다 — 헤더 아랫줄의 마지막 칸(이익 그룹 전월비)까지 걸려
+   '이익│이익비중' 경계선이 사라진다. 맨 오른쪽 칸에만 클래스를 붙여 짚는다. */
+.admin-redesign .admin-summary-table thead th.admin-col-last {
+  box-shadow: inset 0 -1px 0 0 var(--admin-black);
+}
+.admin-redesign .admin-summary-table tbody td:last-child { border-right: 0; }
 /* 매장명(첫 열) 고정 — 헤더 교차 칸은 top+left 둘 다 고정이라 z 를 한 층 더 올린다.
    폭은 좁게 고정(가장 긴 지점명 기준), 글자는 제목 알약과 같은 11px. */
 .admin-redesign .admin-summary-table .admin-summary-name {
   position: sticky;
   left: 0;
   z-index: 30;
-  /* 11px 로 통일해 폭을 더 줄였다(124→104px). 최장 지점명은 말줄임 + title 툴팁으로 처리. */
+  /* 11px 로 통일해 폭을 더 줄였다(124→104px). 최장 지점명은 말줄임 + title 툴팁으로 처리.
+     [늘리지 말 것] 컬럼이 17개라 여기서 16px 만 키워도 맨 오른쪽 '이익' 컬럼이 밀려 잘린다
+     (2026-08-03에 120px 로 키웠다가 그 이유로 되돌렸다). */
   width: 104px;
   min-width: 104px;
   max-width: 104px;
@@ -983,13 +1228,43 @@ input[type=number] {
   text-overflow: ellipsis;
   text-align: left;
   background: #ffffff;
-  border-right: 2px solid rgba(33, 33, 33, 0.55); /* 고정 블록을 닫는 진한 우측 선(§9) */
+  /* 고정 블록(가로로 밀어도 남는 열)이 끝나는 자리를 알리는 선(§9). 원래 규칙은 2px 지만
+     이 표에서는 **1px + 진한 색**으로 대신한다 — 2px 는 두 줄로 겹쳐 보인다는 지적을 받았다
+     (2026-08-03). 굵기 대신 색(0.55)으로 본문 잔선(0.08)과 구분한다. */
+  border-right: 1px solid rgba(33, 33, 33, 0.55);
 }
-.admin-redesign .admin-summary-table thead .admin-summary-name {
+/* '구분' 칸(고정열 ✕ 헤더가 만나는 칸)만의 예외. 기본 `thead th` 규칙보다 특이성이 높아 이긴다
+   (`.admin-col-last` 와는 서로 다른 칸이라 순서를 다툴 일이 없다). */
+.admin-redesign .admin-summary-table thead th.admin-summary-name {
   z-index: 50;
-  background: var(--admin-vanilla);
-  border-left: 1px solid var(--admin-black);
+  background: var(--admin-alice); /* 헤더 줄과 같은 색 — 이유는 위 thead th 주석 참고 */
+  /* 이 칸만 오른쪽이 '고정 블록이 끝나는 자리'를 알리는 진한 선이라 색이 다르다(굵기는 1px 로 통일).
+     아래 선(헤더 밑줄)은 반드시 함께 적어야 한다 — box-shadow 는 겹쳐 쌓이지 않고 통째로 갈리므로,
+     여기서 빠뜨리면 '구분' 칸만 밑줄이 없어져 헤더 밑줄이 끊겨 보인다.
+     [왼 선 없음] 카드 테두리가 이미 표의 왼쪽을 닫는다 — 또 그으면 검정 선이 두 줄로 겹친다. */
+  border-right: 0;
+  border-left: 0;
+  box-shadow:
+    inset -1px 0 0 0 rgba(33, 33, 33, 0.55),
+    inset 0 -1px 0 0 var(--admin-black);
 }
+
+/* ── 손익 요약표 카드 = 제출현황 탭 카드와 같은 모양 (사용자 지시 2026-08-03) ──
+   이 카드는 `.admin-sales-overview-section` 도 함께 달고 있어서, 아래쪽
+   `#admin-layout-wrapper.admin-design-preview .admin-sales-overview-section` 규칙이
+   30px 둥근 모서리와 보조 outline 을 !important 로 준다. **같은 ID 특이성**으로 되받아야 이긴다(§13-7).
+   · 모서리 30px → 16px : 제출현황 카드(rounded-2xl)와 같은 값
+   · outline 제거 : 테두리와 1px 어긋나 겹쳐 그려지며 선이 굵어 보이던 것(사용자 지적) */
+#admin-layout-wrapper.admin-design-preview .admin-summary-card,
+#admin-layout-wrapper.admin-design-preview .admin-sheet-card {
+  border-radius: 16px !important;
+  outline: none !important;
+}
+
+/* 제목 밴드의 제목만 14px — 분석 탭 11px 통일(위 .admin-analysis-uniform)의 유일한 예외.
+   제출현황 밴드 제목이 text-sm(14px) 이라 같은 크기여야 '제목 → 설명'의 위계가 생긴다.
+   설명 문구는 11px 그대로 둔다. `:where()` 는 특이성 0 이라 클래스 하나만 더 얹으면 이긴다. */
+.admin-redesign .admin-analysis-uniform .admin-band-title { font-size: 14px !important; }
 /* 본문 격자(§9-1: 헤더는 검정, 본문은 옅은 격자로 대비). 바탕은 지점명 칸과 같은 흰색으로 통일. */
 .admin-redesign .admin-summary-table tbody td {
   background: #ffffff;
@@ -997,7 +1272,11 @@ input[type=number] {
   border-bottom: 1px solid rgba(33, 33, 33, 0.10);
 }
 /* 항목 그룹(매출/인건비/…) 경계선 — colSpan 행에서도 어긋나지 않게 셀 클래스로 직접 */
-.admin-redesign .admin-summary-table .admin-group-start { border-left: 1px solid rgba(33, 33, 33, 0.22); }
+/* 항목 그룹(매출/인건비/…) 경계선 — 그룹의 **마지막 칸 오른쪽**에 그린다.
+   표의 다른 세로선(본문 격자·헤더 격자)이 전부 칸의 오른쪽에 그려지므로, 여기만 왼쪽에 그으면
+   같은 경계에 선이 두 개 나란히 서서 겹쳐 보인다(2026-08-03에 admin-group-start 에서 옮겼다).
+   본문 격자(0.08)보다 진한 0.22 로 덮어써 그룹 경계임을 드러낸다. */
+.admin-redesign .admin-summary-table .admin-group-end { border-right: 1px solid rgba(33, 33, 33, 0.22); }
 /* 행 하이라이트: 소계(진하게)·정산부(회색 톤) — sticky 매장명 칸도 같은 배경으로 덮는다 */
 .admin-redesign .admin-summary-table tr.admin-statement-strong td,
 .admin-redesign .admin-summary-table tr.admin-statement-strong .admin-summary-name {
@@ -1243,11 +1522,9 @@ input[type=number] {
   line-height: 1.25;
 }
 
-.admin-design-preview .admin-monthly-closing-status-section {
-  background: color-mix(in srgb, var(--admin-ghost) 94%, #ffffff) !important;
-  border: 1px solid var(--admin-black) !important;
-  box-shadow: 0 10px 24px rgba(33, 33, 33, 0.035) !important;
-}
+/* [삭제됨 2026-08-03] 제출현황 섹션을 카드로 감싸던 규칙(배경·테두리·그림자).
+   이 탭만 흰 카드 안에 통째로 들어가 다른 탭과 달라 보였다(사용자 지적). 껍데기를 걷어냈다 —
+   카드는 안쪽 법인별 표들이 각자 갖고 있으므로 바깥에 한 겹 더 두를 이유가 없다. */
 
 /* 제출현황 섹션의 카드/표 테두리는 이제 컴포넌트에서 명시적으로 준다(법인 섹션·미제출 카드 각각 border-[#212121]).
    예전의 구조 위치 기반 규칙(.grid>div / .overflow-x-auto / nth-of-type)은 재구성 후 빈 스페이서에 검정선을
@@ -4120,38 +4397,20 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
    하위탭을 없애고 세 섹션(정산 변경이력 · 수기 초과근무 대장 · 현금차이 이력)을
    세로로 쌓았다. 각 표는 카드 안에서 자체 스크롤하므로 아래 두 가지가 필요하다. */
 
-/* ① 스크롤 상자 안에서 헤더를 위에 고정. 배경은 thead tr이 아니라 th에 직접 준다
-      — tr 배경은 본문이 그 위로 지나갈 때 헤더를 덮지 못한다. */
-#modification-logs-section thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--admin-alice) !important;
-}
+/* ① 헤더 고정·배경·격자는 이제 표준 부품 `.admin-sheet`(§4-0)가 맡는다 — 세 표 모두 그 클래스를 쓴다.
+      여기에 같은 값을 또 두면 나중에 한쪽만 고쳐 어긋나므로 규칙을 남기지 않는다(2026-08-03). */
 
 /* 관리자 · 인사 › 계정 관리 — 계정이 많아 표를 카드 안에서 스크롤한다(2026-07-29).
    헤더 고정 방식은 위 마감 이력 점검과 같다: 배경은 thead tr이 아니라 th에 직접 줘야
    스크롤한 본문이 헤더 위로 비쳐 보이지 않는다. */
-#account-management-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--admin-alice) !important;
-}
+/* [삭제됨 2026-08-03] 계정 관리 표의 헤더 고정·배경 규칙.
+   표가 표준 부품 `.admin-sheet`(§4-0)로 넘어가면서 같은 배선을 그쪽이 갖게 됐다.
+   두 곳에 두면 한쪽만 고쳐 어긋나므로 여기서는 지운다. */
 
-/* ② 최근 3일 안에 올라온 행 = 바닐라 강조.
-      tbody nth-child 줄무늬가 !important라 인라인 클래스로는 못 이긴다 →
-      ID를 낀 선택자로 특이성을 높여 이긴다(DESIGN.md §8). */
-#modification-logs-section tbody tr.admin-log-recent,
-#modification-logs-section tbody tr.admin-log-recent:nth-child(even),
-#modification-logs-section tbody tr.admin-log-recent:nth-child(odd) {
-  background: var(--admin-vanilla) !important;
-}
-
-/* 최근 행 hover — 새 색을 만들지 않고 같은 바닐라를 살짝 눌러 준다. */
-#modification-logs-section tbody tr.admin-log-recent:hover {
-  background: color-mix(in srgb, var(--admin-vanilla) 93%, var(--admin-black)) !important;
-}
+/* ② [삭제됨 2026-08-03] 최근 3일 행을 바닐라로 칠하던 규칙.
+      사용자 지시로 **행 배경 대신 날짜 옆 '최근 N일' 알약**으로 바꿨다(AdminPage 의 ModlogRecentBadge).
+      최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌기 때문이다.
+      배지는 법인택시 이상 점검의 '최근 3일' 배지와 같은 문법이라 여기 CSS 가 필요 없다. */
 
 /* ============================================================
    [공용] 지점 알약 제목 — `.branch-pill-title`

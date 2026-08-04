@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- lang="en"이면 브라우저 자동번역이 한국어 UI를 영어로 오인해 "퇴근 시간→시간을 맞춰" 식으로 덧씌운다 -->
     <meta name="google" content="notranslate" />
+    <!-- 본문 글꼴 미리 받기. CSS 를 다 읽은 뒤에야 폰트를 찾으러 가면 첫 화면이 시스템 글꼴로
+         잠깐 그려졌다가 바뀐다 — HTML 을 읽는 순간 바로 받기 시작하게 해 그 시간을 줄인다.
+         한글 덩어리 중 실제로 첫 화면을 채우는 두 무게(본문 400 · 제목/강조 900)만 지정한다.
+         500·700 은 CSS 가 알아서 받는다(다 넣으면 자바스크립트 받는 대역폭을 뺏는다).
+         [주의] 경로는 상대경로, crossorigin 은 필수 — 빼면 같은 파일을 두 번 받는다.
+         파일명이 바뀌면 여기도 같이 고칠 것(fonts.css 와 짝이다). -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./fonts/noto-sans-kr-korean-400.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="./fonts/noto-sans-kr-korean-900.woff2" />
     <title>ERP_UGD 일일마감정산 포털</title>
   </head>
   <body>

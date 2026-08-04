@@ -22,10 +22,10 @@ import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
-import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, type AdminPermKey } from "./admin/adminTabRegistry";
+import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, ADMIN_TAB_LABELS, type AdminPermKey } from "./admin/adminTabRegistry";
 import {
   Users, CheckCircle2, AlertTriangle,
-  Calendar, Filter,
+  Calendar,
   Download, FileSpreadsheet, Eye,
   X, Edit3, Save, LogOut, Trash2,
   ChevronRight, Menu
@@ -713,6 +713,28 @@ export default function AdminPage() {
   if (!user || user.role !== "admin") return null;
   const designPreview = new URLSearchParams(window.location.search).get("designPreview") !== "0";
 
+  // 페이지 맨 위 알약에 적을 현재 탭 이름. 하위탭이 있는 화면은 "큰탭 · 하위탭"으로 잇는다.
+  // 문자열은 사이드바 버튼과 같은 값을 쓴다 — 두 곳이 어긋나면 사용자가 다른 화면으로 오해한다.
+  const currentTabLabel = (() => {
+    if (adminSection === "dailySettlement") {
+      return dailySettlementTab === "logs" ? "마감 이력 점검" : "전일 정산현황";
+    }
+    if (adminSection === "monthlyClosing") {
+      return monthlyClosingTab === "cashManagement" ? "현금관리"
+        : monthlyClosingTab === "cashExpenses" ? "현금지출" : "제출현황";
+    }
+    if (adminSection === "analysis") {
+      return analysisTab === "charts" ? "손익 차트"
+        : analysisTab === "branch" ? "지점 손익계산서" : "손익 종합";
+    }
+    if (adminSection === "kakaoTaxi") {
+      return kakaoTaxiTab === "anomaly" ? "법인택시 · 이상 점검"
+        : kakaoTaxiTab === "requests" ? "법인택시 · 지점 신청 관리"
+        : kakaoTaxiTab === "members" ? "법인택시 · 직원 관리" : "법인택시 · 이용내역";
+    }
+    return ADMIN_TAB_LABELS[adminSection] || "대시보드";
+  })();
+
   return (
     <div className={`admin-redesign ${designPreview ? "admin-design-preview" : ""} min-h-screen bg-[#F6F5FA] flex`} id="admin-layout-wrapper">
       
@@ -917,6 +939,11 @@ export default function AdminPage() {
         <MyAccountModal isOpen={myAccountOpen} onClose={() => setMyAccountOpen(false)} />
 
         <main className="grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
+          {/* [탭 이름 알약 — 사용자 지시 2026-08-03] 지금 어느 화면인지 페이지 맨 위에서 바로 읽히게 한다.
+              화면마다 따로 적지 않고 **여기 한 곳**에서 그린다 — 탭이 늘어도 자동으로 붙고, 화면 안에
+              같은 이름을 또 적어 두 번 나오는 일이 없다(하위탭이 있으면 그 이름까지 이어 적는다). */}
+          {sectionAllowed && <h2 className="admin-pill-title">{currentTabLabel}</h2>}
+
           {!sectionAllowed && (
             <div className="flex flex-col items-center justify-center py-24 gap-2">
               <p className="text-sm font-bold text-zinc-600">접근 권한이 없는 화면입니다.</p>
@@ -1666,7 +1693,13 @@ function AdminDashboardAlertHub({
 
 // 이번 달에 일일마감을 빠뜨린(기록 없는) 날짜를 지점별로 보여준다.
 // 기대 일수: 지난달이면 말일까지, 이번달이면 '어제'까지(오늘치는 아직 마감 전일 수 있어 제외).
-function AdminMonthlyMissingDaysPanel({ month }: { month: string }) {
+/** '이번 달 미작성 지점' — 예전엔 카드 한 장이었다. 지점 하나에 알약 하나씩 깔아도 줄이 길어져,
+ *  위 통계 줄의 마지막 칸으로 접어 넣었다(사용자 지시 2026-08-03). 어느 지점이 며칠 빠졌는지는
+ *  마우스를 올렸을 때(title) 전부 보인다.
+ *  [칸 모양은 부모가 정한다] 통계 줄의 다른 칸과 같은 여백·구분선을 써야 하므로 className 을 받는다. */
+function AdminMonthlyMissingDaysPanel({ month, className, labelClass, valueClass }: {
+  month: string; className: string; labelClass: string; valueClass: string;
+}) {
   const [rows, setRows] = useState<Array<{ branchName: string; missing: number[]; error?: boolean }> | null>(null);
   const [loadError, setLoadError] = useState(false);
   useEffect(() => {
@@ -1711,37 +1744,43 @@ function AdminMonthlyMissingDaysPanel({ month }: { month: string }) {
     return () => { cancelled = true; };
   }, [month]);
 
+  // 마우스를 올렸을 때 보여줄 전체 내역 — 칸 하나에 다 적을 수 없으니 여기 담는다.
+  const detail = rows === null ? "불러오는 중입니다."
+    : loadError ? "지점 목록을 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요."
+    : rows.length === 0 ? "모든 지점이 이번 달 일일마감을 빠짐없이 작성했습니다."
+    : [
+        ...(rows.some((r) => !r.error)
+          ? ["[미작성]", ...rows.filter((r) => !r.error).map((r) => `${r.branchName} — ${r.missing.map((d) => `${d}일`).join(", ")}`)]
+          : []),
+        // 확인 못 한 지점을 미작성 목록에 섞으면 "이 지점도 안 썼다"로 읽힌다 — 반드시 따로 묶는다.
+        ...(rows.some((r) => r.error)
+          ? ["", "[확인 불가 — 서버 응답 없음. 미작성 여부를 알 수 없습니다]", ...rows.filter((r) => r.error).map((r) => r.branchName)]
+          : []),
+      ].join("\n");
+
+  // [P0] '미작성'과 '확인 못 함'을 한 숫자로 합치지 않는다(코덱스 stop-time 2026-08-03).
+  // rows 에는 둘이 섞여 들어온다 — 합쳐 세면 서버 응답이 없던 지점이 "마감을 안 한 지점"으로 둔갑한다.
+  // 예전 카드형은 줄마다 '확인 불가'라고 적혀 구분됐는데, 숫자 하나로 접으면서 그 구분이 사라졌다.
+  const missingCount = rows === null ? 0 : rows.filter((r) => !r.error).length;
+  const uncheckedCount = rows === null ? 0 : rows.filter((r) => r.error).length;
+
   return (
-    <div className="bg-white p-4 rounded-2xl border border-gray-100 space-y-2">
-      {/* 제목엔 글자만 둔다(DESIGN.md §6-1) — 예전 경고 아이콘은 뺐다. */}
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-        <h3 className="text-[13px] font-black text-[#2C3E50]">이번 달 미작성 지점</h3>
-        <span className="text-[11px] font-bold text-gray-400">{month} · 기록 없는 날짜 · 어제까지 기준</span>
-      </div>
-      {rows === null ? (
-        <p className="text-[11px] font-bold text-gray-400">불러오는 중…</p>
-      ) : loadError ? (
-        // 관리자 스코프는 text-rose-*를 검정으로 죽인다 — 오류 색은 hex로 못 박는다(DESIGN_ADMIN §2-1).
-        <p className="rounded-lg border border-[#C93A3A] bg-[#FDE2E2] px-2.5 py-1.5 text-[11px] font-black text-[#B91C1C]">지점 목록을 서버에서 불러오지 못했습니다. 새로고침 후 다시 확인해주세요. (미작성 여부를 확인하지 못했습니다.)</p>
-      ) : rows.length === 0 ? (
-        <p className="text-[11px] font-bold text-emerald-600">모든 지점이 이번 달 일일마감을 빠짐없이 작성했습니다.</p>
-      ) : (
-        <div className="divide-y divide-gray-100">
-          {rows.map((r) => (
-            <div key={r.branchName} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5 first:pt-0 last:pb-0">
-              <span className="font-black text-[#2C3E50] text-[12px] w-24 shrink-0 truncate" title={r.branchName}>{r.branchName}</span>
-              {r.error ? (
-                <span className="inline-flex px-1.5 rounded-md bg-gray-200 text-gray-600 text-[10px] font-black shrink-0">확인 불가</span>
-              ) : (
-                <span className="inline-flex px-1.5 rounded-md border border-[#C93A3A] bg-[#FDE2E2] text-[#B91C1C] text-[10px] font-black shrink-0">{r.missing.length}일</span>
+    <div className={className} title={`${month} 기준 · 어제까지\n\n${detail}`}>
+      <span className={`block ${labelClass}`}>이번 달 미작성 지점</span>
+      <span className={valueClass}>
+        {rows === null ? "…"
+          // 관리자 스코프는 text-rose-*를 검정으로 죽인다 — 오류 색은 hex로 못 박는다(DESIGN_ADMIN §2-1).
+          : loadError ? <span className="text-[#B3261E]">확인 불가</span>
+          : (
+            <>
+              {missingCount === 0 ? "0" : <span className="text-[#B3261E]">{missingCount}</span>}
+              {/* 확인 못 한 지점은 숫자에 더하지 않고 따로 적는다 — 이 지점들은 '작성함'도 '미작성'도 아니다. */}
+              {uncheckedCount > 0 && (
+                <span className="ml-1.5 font-sans text-[11px] font-bold text-[#B3261E]">+{uncheckedCount} 확인 불가</span>
               )}
-              <span className="text-[11px] font-bold text-gray-500 min-w-0">
-                {r.error ? "서버 응답이 없어 작성 여부를 확인하지 못했습니다." : r.missing.map((d) => `${d}일`).join(", ")}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+            </>
+          )}
+      </span>
     </div>
   );
 }
@@ -1818,41 +1857,13 @@ function AdminDailySettlementStatusSection({
 
   return (
     <section className="space-y-5">
-      {/* 제목·날짜·다운로드·브랜드 필터를 카드 1장으로 합쳤다 — 브랜드 필터가 카드 한 장을 통째로 쓰고 있었다(2026-07-23). */}
-      <div className="bg-white rounded-2xl border border-gray-100 px-4 py-3 space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-            <h2 className="text-base font-black text-[#2C3E50] tracking-tight">전일 정산현황</h2>
-            <p className="text-[11px] text-gray-400 font-medium">선택한 날짜의 지점별 제출·매출과 마감 이상치</p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <label className="flex items-center gap-1.5 h-8 border border-gray-200 bg-white px-2.5 rounded-lg">
-              <Calendar className="w-3.5 h-3.5 text-[#2E6DB4] shrink-0" />
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="font-mono text-[11px] font-black text-[#2C3E50] border-0 outline-hidden bg-transparent focus:ring-0 p-0 w-[104px]"
-              />
-            </label>
-            <button onClick={handleDownloadExcel} className="flex items-center gap-1.5 h-8 px-3 bg-emerald-600 text-white text-[11px] font-black rounded-lg cursor-pointer">
-              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap border-t border-gray-100 pt-2.5">
-          <Filter className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-          {brandList.map((brand) => (
-            <button key={brand} onClick={() => setSelectedBrand(brand)} className={`h-6 px-2.5 rounded-full text-[11px] font-bold cursor-pointer transition-colors whitespace-nowrap ${selectedBrand === brand ? "bg-[#2E6DB4] text-white" : "bg-gray-100 text-gray-500"}`}>
-              {brand}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* [2026-08-03 사용자 지시] 세 덩어리를 **각각 따로** 보여준다 — ①제출/미제출 요약 ②이번 달 미작성 지점
+          ③전일 정산현황 표. 한때 셋을 한 카드로 합쳤는데, 성격이 다른 내용이 한 상자에 들어가
+          어디까지가 무엇인지 흐려졌다(카드 안에 카드가 겹치는 문제도 함께 났다).
 
-      {/* 현금차이·기타메모는 예전에 대시보드 KPI로 따로 있었다. 같은 날짜를 두 화면에서 나눠 보던 것을
+          현금차이·기타메모는 예전에 대시보드 KPI로 따로 있었다. 같은 날짜를 두 화면에서 나눠 보던 것을
           한 줄로 합쳤다(2026-07-22). 두 칸은 누르면 아래 마감 이상치 표의 해당 분류로 이동한다. */}
-      <div className="bg-white rounded-2xl border border-gray-100 grid grid-cols-1 sm:grid-cols-5 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-100 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 overflow-hidden">
         <div className={statCell}>
           <span className={`block ${statLabel}`}>제출 지점</span>
           <span className={statValue}>{stats.submitted} <span className="text-[11px] font-bold text-gray-300 font-sans">/ {stats.total}</span></span>
@@ -1873,17 +1884,42 @@ function AdminDailySettlementStatusSection({
           <span className={`flex items-center gap-0.5 ${statLabel}`}>ERP 기타메모 <ChevronRight className="w-3 h-3" /></span>
           <span className={statValue}>{anomalyLoading ? "…" : otherMemoCount}</span>
         </button>
+        {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점 수. ERP 기타메모 오른쪽 칸(사용자 지시 2026-08-03). */}
+        <AdminMonthlyMissingDaysPanel
+          month={selectedDate.slice(0, 7)}
+          className={statCell}
+          labelClass={statLabel}
+          valueClass={statValue}
+        />
       </div>
 
-      {/* 선택한 날짜가 속한 '이번 달' 전체에서 일일마감을 빠뜨린 지점·날짜를 한눈에. */}
-      <AdminMonthlyMissingDaysPanel month={selectedDate.slice(0, 7)} />
-
-      {/* 행 여백을 DESIGN.md §8 기준값(thead py-2 px-2 / tbody py-1.5 px-2)에 맞춰 낮췄다 — 예전엔 px-6 py-4라
-          14개 지점이 한 화면에 안 들어왔다(2026-07-23). */}
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse">
-            <thead><tr className="bg-[#D6E4F0]/30 border-b border-gray-100 text-left"><th className="px-3 py-2 text-[11px] font-black text-[#212121]">지점명</th><th className="px-3 py-2 text-[11px] font-black text-[#212121]">브랜드</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">총 매출</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">현금</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-right">카드</th><th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th><th className="px-3 py-2 text-[11px] font-black text-[#212121] text-center">관리</th></tr></thead>
+      {/* 전일 정산현황 = 지점별 제출·매출 표. 제목 밴드는 이 표 바로 위에만 붙는다(사용자 지시 2026-08-03). */}
+      <div className="admin-sheet-card">
+        <div className="admin-band">
+          <h3 className="admin-band-title">전일 정산현황</h3>
+          <div className="admin-band-filters">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              aria-label="조회 날짜"
+              className="font-mono"
+            />
+            <select value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)} aria-label="브랜드 필터" className="min-w-28">
+              {brandList.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+            </select>
+          </div>
+          <p className="admin-band-meta">선택한 날짜의 지점별 제출·매출</p>
+          <div className="admin-band-actions">
+            <button onClick={handleDownloadExcel} className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black inline-flex items-center gap-1.5 cursor-pointer">
+              <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
+            </button>
+          </div>
+        </div>
+        {/* 엑셀형 표 = 관리자 표준 부품 `.admin-sheet`(§4-0) — 헤더 색·격자·헤더 고정은 클래스가 처리한다. */}
+        <div className="admin-sheet-scroll">
+          <table className="admin-sheet min-w-[760px]">
+            <thead><tr><th>지점명</th><th>브랜드</th><th className="text-right">총 매출</th><th className="text-right">현금</th><th className="text-right">카드</th><th>상태</th><th className="text-center">관리</th></tr></thead>
             <tbody className="divide-y divide-gray-100 text-xs">
               {loading ? (
                 <tr><td colSpan={7} className="text-center py-10"><LoadingSpinner size="md" /></td></tr>
@@ -1911,14 +1947,16 @@ function AdminDailySettlementStatusSection({
       {/* 마감 이상치 — 대시보드 '마감현황'에서 옮겨왔다(2026-07-22).
           예전엔 '어제'로 못 박혀 있어 날짜를 바꿔도 따라오지 않았다. 이제 위 날짜 선택을 그대로 따른다.
           예전의 '대시보드' 탭은 '현금차이'와 필터가 완전히 같아 없앴다. */}
-      <section id="admin-closing-anomaly-section" className="admin-dashboard-closing-section bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-            <h2 className="text-base font-black text-[#2C3E50]">마감 이상치</h2>
-            <p className="text-[11px] text-gray-400">{selectedDate} 마감의 현금차이·초과근무·특이사항·기타메모</p>
+      <section id="admin-closing-anomaly-section" className="admin-dashboard-closing-section admin-sheet-card">
+        {/* 제목 밴드 = 관리자 표준(DESIGN_ADMIN.md §4-0) */}
+        <div className="admin-band">
+          <h3 className="admin-band-title">마감 이상치</h3>
+          <p className="admin-band-meta">{selectedDate} 마감의 현금차이·초과근무·특이사항·기타메모</p>
+          <div className="admin-band-actions">
+            <button onClick={reloadAnomalies} className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer">새로고침</button>
           </div>
-          <button onClick={reloadAnomalies} className="h-7 px-2.5 rounded-lg border border-gray-200 text-gray-600 text-[11px] font-black cursor-pointer">새로고침</button>
         </div>
+        <div className="p-4 space-y-3">
         {/* 못 읽은 지점을 밝히지 않으면 '이상 없음'과 '확인 못 함'이 똑같아 보인다(P0-2).
             관리자 스코프는 text-rose-*를 검정으로 죽이므로 오류 색은 hex로 못 박는다(DESIGN_ADMIN §2-1). */}
         {anomalyLoadError && (
@@ -1987,6 +2025,7 @@ function AdminDailySettlementStatusSection({
               })()}
             </tbody>
           </table>
+        </div>
         </div>
       </section>
     </section>
@@ -2103,59 +2142,55 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
 
   return (
     <section className="space-y-5 animate-fade-in">
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-black text-[#2C3E50]">현금관리</h2>
-            <p className="text-xs text-gray-400 mt-1">전 지점 월말마감의 현금관리 집계와 현금지출 일람을 모아 확인합니다.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {/* 입력칸·셀렉트는 11px·h-8(DESIGN.md §6-0-1) */}
-            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold" />
-            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold min-w-40">
+      {/* [카드 한 장으로 합쳤다 — 사용자 지시 2026-08-03]
+          예전엔 위에 '제목+필터+큰 숫자 카드 3개'가 따로 있어 표가 화면 아래로 밀려 있었다.
+          숫자 세 개(건수·지출합계·차이)는 값 하나짜리라 큰 칸을 쓸 이유가 없어 **밴드 안 한 줄**로 옮기고,
+          카드를 표와 합쳤다. 차이는 0이 아닐 때만 오류색으로 짚는다
+          (배경을 rose 로 칠하면 관리자 스코프가 허니=긍정색으로 뒤집는다 — DESIGN_ADMIN §2-1 P0). */}
+      <div className="admin-sheet-card">
+        <div className="admin-band">
+          <h3 className="admin-band-title">{activeTab === "cashManagement" ? "현금관리 집계" : "현금지출 일람"}</h3>
+          {/* 필터는 제목 옆(.admin-band-filters), 실행 버튼만 오른쪽 끝(.admin-band-actions) — §4-0.
+              조회 월은 화면 해석의 전제라 연한 바닐라로 채운다. */}
+          <div className="admin-band-filters">
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} aria-label="조회 월" />
+            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} aria-label="지점 필터" className="min-w-32">
               <option value="전체">전체 지점</option>
               {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
             </select>
-            <button onClick={() => void load()} className="px-4 py-2 rounded-xl bg-[#2E6DB4] text-white text-[11px] font-black">새로고침</button>
+          </div>
+          <p className="admin-band-meta">
+            {formatNumber(cashRows.length)}건 · 현금지출 {formatNumber(summary.cashExpenseTotal)}원 · 차이{" "}
+            <b className={summary.diffTotal !== 0 ? "text-[#B3261E]" : undefined}>{formatNumber(summary.diffTotal)}원</b>
+          </p>
+          <div className="admin-band-actions">
+            {!fixedTab && (
+              <>
+                <button onClick={() => setActiveTab("cashManagement")} className={`admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer ${activeTab === "cashManagement" ? "is-active" : ""}`}>현금관리</button>
+                <button onClick={() => setActiveTab("cashExpenses")} className={`admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer ${activeTab === "cashExpenses" ? "is-active" : ""}`}>현금지출</button>
+              </>
+            )}
+            <button onClick={() => void load()} className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer">새로고침</button>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-xl bg-slate-50 p-4"><p className="text-[11px] font-bold text-slate-500">현금관리 집계</p><p className="text-2xl font-black">{cashRows.length}건</p></div>
-          <div className="rounded-xl bg-slate-50 p-4"><p className="text-[11px] font-bold text-slate-500">현금지출 합계</p><p className="text-2xl font-black">{formatNumber(summary.cashExpenseTotal)}원</p></div>
-          {/* 차이는 경고 지표 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집으므로(DESIGN_ADMIN §2-1 P0)
-              배경은 중립으로 두고, 값이 0이 아닐 때만 오류 hex 글자색으로 못 박는다. */}
-          <div className="rounded-xl bg-slate-50 p-4">
-            <p className="text-[11px] font-bold text-slate-500">현금 차이 합계</p>
-            <p className={`text-2xl font-black ${summary.diffTotal !== 0 ? "text-[#B3261E]" : ""}`}>{formatNumber(summary.diffTotal)}원</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        {!fixedTab && (
-          <div className="flex gap-2 border-b border-gray-100 px-5">
-            <button onClick={() => setActiveTab("cashManagement")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${activeTab === "cashManagement" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금관리</button>
-            <button onClick={() => setActiveTab("cashExpenses")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${activeTab === "cashExpenses" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>현금지출</button>
-          </div>
-        )}
-        <div className="overflow-x-auto">
+        <div className="admin-sheet-scroll">
           {activeTab === "cashManagement" ? (
-            /* 표 본문 12px·헤더 11px 검정·셀 py-1.5 px-2(DESIGN.md §6-0-1·§8).
+            /* 엑셀형 표 = .admin-sheet (헤더 엘리스·1px 격자·선 겹침 방지는 클래스가 처리).
                '차이' 색은 관리자 치환에 죽지 않게 hex로 못 박는다(§4-2 증감색 값). */
-            <table className="w-full min-w-[980px] text-xs">
-              <thead className="text-left text-[11px] text-[#212121] font-black"><tr><th className="py-2 px-2">마감일자</th><th className="py-2 px-2">지점</th><th className="py-2 px-2 text-right">전일현금</th><th className="py-2 px-2 text-right">현금매출</th><th className="py-2 px-2 text-right">현금지출</th><th className="py-2 px-2 text-right">현금잔액</th><th className="py-2 px-2 text-right">실사현금</th><th className="py-2 px-2 text-right">차이</th><th className="py-2 px-2">비고</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">
+            <table className="admin-sheet min-w-[980px]">
+              <thead><tr><th>마감일자</th><th>지점</th><th className="text-right">전일현금</th><th className="text-right">현금매출</th><th className="text-right">현금지출</th><th className="text-right">현금잔액</th><th className="text-right">실사현금</th><th className="text-right">차이</th><th>비고</th></tr></thead>
+              <tbody>
                 {loading ? <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : cashRows.length === 0 ? <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">현금관리 내역이 없습니다.</td></tr> : cashRows.map((row) => (
-                  <tr key={`${row.branchName}-${row.date}`}><td className="py-1.5 px-2 font-mono">{row.date}</td><td className="py-1.5 px-2 font-black">{row.branchName}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.cashSales)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.cashExpenseTotal)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="py-1.5 px-2 text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`py-1.5 px-2 text-right font-mono font-black ${row.diff ? "text-[#B3261E]" : "text-[#1F7A4D]"}`}>{formatNumber(row.diff)}</td><td className="py-1.5 px-2 text-gray-500">{row.reason || "-"}</td></tr>
+                  <tr key={`${row.branchName}-${row.date}`}><td className="font-mono">{row.date}</td><td className="font-black">{row.branchName}</td><td className="text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="text-right font-mono">{formatNumber(row.cashSales)}</td><td className="text-right font-mono">{formatNumber(row.cashExpenseTotal)}</td><td className="text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`text-right font-mono font-black ${row.diff ? "text-[#B3261E]" : "text-[#1F7A4D]"}`}>{formatNumber(row.diff)}</td><td className="text-gray-500">{row.reason || "-"}</td></tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <table className="w-full min-w-[860px] text-xs">
-              <thead className="text-left text-[11px] text-[#212121] font-black"><tr><th className="py-2 px-2">일자</th><th className="py-2 px-2">지점</th><th className="py-2 px-2">분류</th><th className="py-2 px-2">사용처</th><th className="py-2 px-2">상세</th><th className="py-2 px-2 text-right">금액</th><th className="py-2 px-2">작성자</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">
+            <table className="admin-sheet min-w-[860px]">
+              <thead><tr><th>일자</th><th>지점</th><th>분류</th><th>사용처</th><th>상세</th><th className="text-right">금액</th><th>작성자</th></tr></thead>
+              <tbody>
                 {loading ? <tr><td colSpan={7} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : expenseRows.length === 0 ? <tr><td colSpan={7} className="p-12 text-center text-gray-400 font-bold">현금지출 내역이 없습니다.</td></tr> : expenseRows.map((row) => (
-                  <tr key={row.id}><td className="py-1.5 px-2 font-mono">{row.date}</td><td className="py-1.5 px-2 font-black">{row.branchName}</td><td className="py-1.5 px-2">{row.classification}</td><td className="py-1.5 px-2">{row.usage}</td><td className="py-1.5 px-2 text-gray-500">{row.detail || "-"}</td><td className="py-1.5 px-2 text-right font-mono font-black">{formatNumber(row.amount)}</td><td className="py-1.5 px-2 text-gray-500">{row.writer || "-"}</td></tr>
+                  <tr key={row.id}><td className="font-mono">{row.date}</td><td className="font-black">{row.branchName}</td><td>{row.classification}</td><td>{row.usage}</td><td className="text-gray-500">{row.detail || "-"}</td><td className="text-right font-mono font-black">{formatNumber(row.amount)}</td><td className="text-gray-500">{row.writer || "-"}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -2396,18 +2431,18 @@ function AdminAnnualLeaveSection() {
           </div>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-[#2C3E50] tracking-tight">전 직원 연차 통합 관리</h2>
-          <p className="text-xs text-gray-400 mt-1">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다.</p>
+      {/* 제목 밴드 + 엑셀형 표 = 관리자 표준(DESIGN_ADMIN.md §4-0) */}
+      <div className="admin-sheet-card">
+        <div className="admin-band">
+          <h3 className="admin-band-title">연차 사용 등록</h3>
+          <p className="admin-band-meta">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다.</p>
+          <div className="admin-band-actions">
+            <button onClick={() => void load()} className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer">새로고침</button>
+          </div>
         </div>
-        <button onClick={() => void load()} className="px-4 py-2 bg-[#2E6DB4] text-white rounded-xl text-[11px] font-black">새로고침</button>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
-        <h3 className="font-black text-gray-800">연차 사용 등록</h3>
-        {/* 입력칸·셀렉트 11px·h-8, 버튼 11px/900 (DESIGN.md §6-0-1) */}
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+        {/* 입력칸·셀렉트 11px·h-8, 버튼 11px/900 (DESIGN.md §6-0-1).
+            카드에 안쪽 여백이 없으므로(밴드가 폭을 꽉 채워야 한다) 이 줄이 자기 여백을 갖는다. */}
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 p-4">
           <select value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setSelectedEmployeeId(""); }} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold">
             <option value="">지점 선택</option>
             {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
@@ -2423,24 +2458,28 @@ function AdminAnnualLeaveSection() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          {/* 표 본문 12px·헤더 11px 검정·셀 py-1.5 px-2(DESIGN.md §6-0-1·§8).
+      <div className="admin-sheet-card">
+        <div className="admin-band">
+          <h3 className="admin-band-title">전 직원 연차 현황</h3>
+          <p className="admin-band-meta">지점 · 직원별 부여 / 사용 / 잔여 일수</p>
+        </div>
+        <div className="admin-sheet-scroll">
+          {/* 엑셀형 표 = .admin-sheet (헤더 엘리스·1px 격자·선 겹침 방지는 클래스가 처리).
               사용일수·잔여 음수의 빨강은 관리자 치환에 죽지 않게 hex(§4-2 증감색 값)로 못 박는다. */}
-          <table className="w-full min-w-[1060px] text-xs">
-            <thead className="text-left text-[11px] text-[#212121] font-black">
+          <table className="admin-sheet min-w-[1060px]">
+            <thead>
               <tr>
-                <th className="py-2 px-2">지점</th>
-                <th className="py-2 px-2">직원</th>
-                <th className="py-2 px-2">입사일</th>
-                <th className="py-2 px-2">근속년수</th>
-                <th className="py-2 px-2 text-center">부여일수</th>
-                <th className="py-2 px-2 text-center">사용일수</th>
-                <th className="py-2 px-2 text-center">잔여일수</th>
-                <th className="py-2 px-2">사용기록</th>
+                <th>지점</th>
+                <th>직원</th>
+                <th>입사일</th>
+                <th>근속년수</th>
+                <th className="text-center">부여일수</th>
+                <th className="text-center">사용일수</th>
+                <th className="text-center">잔여일수</th>
+                <th>사용기록</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {loading ? (
                 <tr><td colSpan={8} className="py-16 text-center"><LoadingSpinner size="sm" /></td></tr>
               ) : rows.length === 0 ? (
@@ -2512,17 +2551,19 @@ function AdminModificationLogsSection({ focusSection }: { focusSection?: "logs" 
   );
 }
 
-// 세 섹션 공통 규격 — 관리자 표준(제출현황 섹션)과 같은 값으로 못 박아 셋이 어긋나지 않게 한다.
-// 카드 DESIGN.md §4 / 제목 알약 §6(텍스트만) / 컨트롤 h-8·11px §10 / 표 여백 §8.
-const MODLOG_CARD = "bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3";
-const MODLOG_TITLE = "inline-flex w-fit items-center rounded-full border border-[#212121] bg-amber-50 px-3 py-1.5 text-[11px] font-black text-gray-900";
-const MODLOG_SUB = "text-[11px] text-gray-400";
-const MODLOG_FIELD = "h-8 rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold";
-const MODLOG_REFRESH = "h-8 rounded-lg bg-[#2E6DB4] text-white px-3 text-[11px] font-black cursor-pointer";
-// 표는 카드 안에서 자체 스크롤한다 — 세 섹션을 쌓아도 제목이 한 화면에 들어오게. 헤더 고정은 index.css가 맡는다.
-const MODLOG_SCROLL = "max-h-[320px] overflow-auto rounded-lg border border-gray-100";
-const MODLOG_TH = "py-2 px-2 text-left text-[11px] font-black text-[#212121] whitespace-nowrap";
-const MODLOG_TD = "py-1.5 px-2";
+// 세 섹션 공통 규격 — 관리자 표준 부품(DESIGN_ADMIN.md §4-0)을 그대로 쓴다.
+// 값(제목 크기·헤더 색·선 굵기)을 여기서 다시 적지 않는다 — index.css 한 곳에서만 정해지게 두어야
+// 다른 탭과 어긋나지 않는다. 폭(w-28 등)처럼 이 표에만 해당하는 것만 사용처에서 덧붙인다.
+const MODLOG_CARD = "admin-sheet-card";
+const MODLOG_TITLE = "admin-band-title";
+const MODLOG_SUB = "admin-band-meta";
+// (MODLOG_FIELD·MODLOG_REFRESH 는 필터/버튼이 `.admin-band-filters` 로 넘어가면서 쓰이지 않게 되어 지웠다)
+// 표는 카드 안에서 자체 스크롤한다 — 세 섹션을 쌓아도 제목이 한 화면에 들어오게. 헤더 고정은 .admin-sheet가 맡는다.
+// 테두리는 카드가 이미 그리므로 여기서 또 그리지 않는다(선이 두 줄로 겹친다 — DESIGN.md §9-1-A).
+const MODLOG_SCROLL = "admin-sheet-scroll max-h-[320px]";
+// 헤더·본문 셀의 색·여백·선은 .admin-sheet 가 준다. 여기는 폭을 덧붙일 자리만 남긴다.
+const MODLOG_TH = "";
+const MODLOG_TD = "";
 const MODLOG_EMPTY = "py-8 text-center text-[11px] font-bold text-gray-400";
 // 삭제 버튼 — 행 높이를 키우지 않도록 h-6로 납작하게.
 // hover:bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집으므로 오류 hex로 못 박는다(DESIGN_ADMIN §2-1)
@@ -2552,9 +2593,20 @@ const modlogIsRecent = (value: unknown, cutoff: number): boolean => {
   return Number.isNaN(t) ? false : t >= cutoff;
 };
 
-// 바닐라 강조는 index.css(#modification-logs-section .admin-log-recent)가 준다
-// — tbody 줄무늬가 !important라 인라인 클래스로는 못 이긴다(DESIGN.md §8).
-const modlogRowClass = (recent: boolean) => `border-b ${recent ? "admin-log-recent" : "hover:bg-slate-50/50"}`;
+// [2026-08-03 사용자 지시] 최근 건은 **행 배경을 칠하지 않고 알약을 붙여** 표시한다.
+// 배경을 칠하면 최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌다.
+// 알약은 법인택시 이상 점검(KakaoTaxiSection)의 '최근 3일' 배지와 같은 문법으로 맞춘다.
+const modlogRowClass = () => "hover:bg-slate-50/50";
+
+/** 최근 3일 안에 올라온 건에 붙이는 배지. 날짜 칸 옆에 놓아 "언제 것인지" 옆에서 바로 읽히게 한다. */
+function ModlogRecentBadge({ recent }: { recent: boolean }) {
+  if (!recent) return null;
+  return (
+    // 값·모양은 공용 클래스 `.admin-recent-badge`(index.css, DESIGN_ADMIN §4-4)가 정한다.
+    // 날짜 글자에서 볼드를 빼고 이 알약만 볼드로 둬, 표를 훑을 때 '최근 건'만 눈에 걸리게 한다.
+    <span className="admin-recent-badge">최근 {MODLOG_RECENT_DAYS}일</span>
+  );
+}
 
 // 세 섹션 공통 필터 줄 — 지점명(드롭다운) · 월 선택 · 새로고침. 한 컴포넌트로 두어 셋이 어긋나지 않게 한다.
 // `monthRequired`(현금차이)는 월을 비울 수 없다 — 그 섹션의 월은 화면 필터가 아니라 서버 조회 조건이라,
@@ -2569,12 +2621,14 @@ function ModlogFilters({ branches, branch, onBranchChange, month, onMonthChange,
   monthRequired?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    // 필터는 제목 바로 옆에 붙는다(DESIGN_ADMIN.md §4-0). 높이·테두리·글자 크기는
+    // `.admin-band-filters` 가 정하므로 여기서 다시 적지 않는다 — 폭만 남긴다.
+    <div className="admin-band-filters">
       <select
         value={branch}
         onChange={(e) => onBranchChange(e.target.value)}
         aria-label="지점명 필터"
-        className={`${MODLOG_FIELD} w-32`}
+        className="w-32"
       >
         <option value="">전체 지점</option>
         {branches.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -2585,9 +2639,8 @@ function ModlogFilters({ branches, branch, onBranchChange, month, onMonthChange,
         onChange={(e) => onMonthChange(e.target.value)}
         aria-label="조회 월"
         title={monthRequired ? "조회할 월" : "비우면 전체 기간"}
-        className={MODLOG_FIELD}
       />
-      <button type="button" onClick={onRefresh} className={MODLOG_REFRESH}>새로고침</button>
+      <button type="button" onClick={onRefresh}>새로고침</button>
     </div>
   );
 }
@@ -2651,7 +2704,8 @@ function AdminEditLogsSection() {
     if (!isoString) return "-";
     const date = new Date(isoString);
     if (isNaN(date.getTime())) return isoString;
-    return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    // 표기는 수기 초과근무 대장과 같은 하이픈 형식으로 통일한다(2026-08-03 사용자 지시).
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   };
 
   const getChangesSummary = (log: any) => {
@@ -2715,11 +2769,9 @@ function AdminEditLogsSection() {
 
   return (
     <div id="modlog-edit-logs" className={MODLOG_CARD}>
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-        <div className="space-y-1.5">
-          <h3 className={MODLOG_TITLE}>정산 변경이력</h3>
-          <p className={MODLOG_SUB}>지점이 마감 제출 후 수정한 내역 · 총 {filteredLogs.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
-        </div>
+      <div className="admin-band">
+        <h3 className={MODLOG_TITLE}>정산 변경이력</h3>
+        <p className={MODLOG_SUB}>지점이 마감 제출 후 수정한 내역 · 총 {filteredLogs.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
         <ModlogFilters
           branches={branchOptions}
           branch={searchBranch}
@@ -2731,10 +2783,10 @@ function AdminEditLogsSection() {
       </div>
 
       <div className={MODLOG_SCROLL}>
-        <table className="w-full min-w-[720px] text-xs">
+        <table className="admin-sheet table-fixed min-w-[720px]">
           <thead>
             <tr>
-              <th className={`${MODLOG_TH} w-28`}>수정일시</th>
+              <th className={`${MODLOG_TH} w-44`}>수정일시</th>
               <th className={`${MODLOG_TH} w-24`}>지점명</th>
               <th className={`${MODLOG_TH} w-24`}>대상일</th>
               <th className={`${MODLOG_TH} w-20`}>작업자</th>
@@ -2749,14 +2801,15 @@ function AdminEditLogsSection() {
               <tr><td colSpan={6} className={MODLOG_EMPTY}>기록된 마감 수정 이력이 없습니다.</td></tr>
             ) : (
               filteredLogs.map((log) => (
-                  <tr key={log.id} className={modlogRowClass(modlogIsRecent(log.modifiedAt, recentCutoff))}>
+                  <tr key={log.id} className={modlogRowClass()}>
                     <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {formatShortDate(log.modifiedAt)}
+                      <ModlogRecentBadge recent={modlogIsRecent(log.modifiedAt, recentCutoff)} />
                     </td>
                     <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
                       {log.branchName}
                     </td>
-                    <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>
+                    <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {log.settleDate}
                     </td>
                     <td className={`${MODLOG_TD} text-[11px] font-bold text-gray-700 whitespace-nowrap`}>
@@ -2839,14 +2892,12 @@ function AdminCashDiffHistorySection() {
 
   return (
     <div id="modlog-cash-diff" className={MODLOG_CARD}>
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-        <div className="space-y-1.5">
-          <h3 className={MODLOG_TITLE}>현금차이 이력</h3>
-          {/* 요약(건수·합계)은 별도 KPI 박스 대신 부제 한 줄로 — 행 높이·세로 공간을 아낀다. */}
-          <p className={MODLOG_SUB}>
-            선택한 달의 현금 차이(실사현금 − 장부) · {rows === null ? "불러오는 중…" : `${visibleRows.length}건 · 합계 ${formatNumber(totalDiff)}원`}
-          </p>
-        </div>
+      <div className="admin-band">
+        <h3 className={MODLOG_TITLE}>현금차이 이력</h3>
+        {/* 요약(건수·합계)은 별도 KPI 박스 대신 부제 한 줄로 — 행 높이·세로 공간을 아낀다. */}
+        <p className={MODLOG_SUB}>
+          선택한 달의 현금 차이(실사현금 − 장부) · {rows === null ? "불러오는 중…" : `${visibleRows.length}건 · 합계 ${formatNumber(totalDiff)}원`}
+        </p>
         <ModlogFilters
           branches={branchOptions}
           branch={branch}
@@ -2858,17 +2909,22 @@ function AdminCashDiffHistorySection() {
         />
       </div>
 
+      {/* 카드에 안쪽 여백이 없으므로(밴드가 폭을 꽉 채워야 한다) 이 안내는 자기 여백을 갖는다.
+          오류색은 관리자 스코프가 rose 를 뒤집으므로 hex 로 못 박는다(DESIGN_ADMIN §2-1). */}
       {partialError && (
-        <p className="text-[11px] font-bold text-rose-600">일부 지점의 이력을 서버에서 불러오지 못했습니다. 아래 목록이 일부 누락됐을 수 있습니다 — 새로고침 후 다시 확인해주세요.</p>
+        <p className="px-4 pt-3 text-[11px] font-bold text-[#B3261E]">일부 지점의 이력을 서버에서 불러오지 못했습니다. 아래 목록이 일부 누락됐을 수 있습니다 — 새로고침 후 다시 확인해주세요.</p>
       )}
 
       <div className={MODLOG_SCROLL}>
-        <table className="w-full min-w-[560px] text-xs">
+        <table className="admin-sheet table-fixed min-w-[560px]">
           <thead>
             <tr>
-              <th className={`${MODLOG_TH} w-24`}>마감일자</th>
-              <th className={`${MODLOG_TH} w-28`}>지점</th>
-              <th className={`${MODLOG_TH} w-28 text-right`}>현금차이</th>
+              <th className={`${MODLOG_TH} w-44`}>마감일자</th>
+              {/* 컬럼명·폭을 아래 '수기 초과근무 대장'과 맞춘다(사용자 지시 2026-08-03).
+                  앞 컬럼 폭의 합(11+6+15=32rem)이 그 표(11+6+6+5+4=32rem)와 같아야
+                  '사유'와 '수기 입력 사유'가 같은 자리에서 시작한다. */}
+              <th className={`${MODLOG_TH} w-24`}>지점명</th>
+              <th className={`${MODLOG_TH} w-60 text-right`}>현금차이</th>
               <th className={MODLOG_TH}>사유</th>
             </tr>
           </thead>
@@ -2880,8 +2936,11 @@ function AdminCashDiffHistorySection() {
             ) : (
               visibleRows.map((r, i) => (
                 // 이 표에는 '등록 시각'이 없다(지점 마감 기록에서 그때그때 계산해 만든 행이라) → 마감일자로 최근 여부를 본다.
-                <tr key={`${r.branchName}-${r.date}-${i}`} className={modlogRowClass(modlogIsRecent(r.date, recentCutoff))}>
-                  <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>{r.date}</td>
+                <tr key={`${r.branchName}-${r.date}-${i}`} className={modlogRowClass()}>
+                  <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
+                    {r.date}
+                    <ModlogRecentBadge recent={modlogIsRecent(r.date, recentCutoff)} />
+                  </td>
                   <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>{r.branchName}</td>
                   <td className={`${MODLOG_TD} text-right font-mono font-black whitespace-nowrap ${r.cashDifference < 0 ? "text-rose-600" : "text-amber-600"}`}>
                     {r.cashDifference > 0 ? "+" : ""}{formatNumber(r.cashDifference)}원
@@ -3419,12 +3478,13 @@ function AdminMonthlyClosingStatusSection() {
   }, [modPopup?.branch, modPopup?.section, computeModPos]);
 
   return (
-    <section className="admin-monthly-closing-status-section bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-      {/* 헤더: 제목 + 전지점 매출집계 + 월 선택 + 새로고침 (컴팩트 h-8 컨트롤) */}
+    // [2026-08-03 사용자 지시] 이 탭만 흰 카드(연회색 테두리 + 라운드) 안에 통째로 들어가 있어
+    // 다른 탭과 달라 보였다. 껍데기를 걷어내고 내용만 둔다 — 카드는 안쪽 법인별 표들이 이미 갖고 있다.
+    // 제목 '제출현황' 알약도 뺐다: 페이지 맨 위 탭 이름 알약(AdminPage main)이 같은 말을 하고 있다.
+    <section className="admin-monthly-closing-status-section space-y-3">
+      {/* 헤더: 전지점 매출집계 + 월 선택 + 새로고침 (컴팩트 h-8 컨트롤) */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="space-y-1.5">
-          {/* 섹션 제목 = 바닐라 알약(지점 DESIGN.md §6, 색만 연한 관리자 바닐라). bg-amber-50 → var(--admin-vanilla) */}
-          <h2 className="inline-flex w-fit items-center rounded-full border border-[#212121] bg-amber-50 px-3 py-1.5 text-[11px] font-black text-gray-900">제출현황</h2>
           <p className="text-[11px] text-gray-400">선택한 월 기준 지점별 4개 마감(매출집계·매입매출·정직원 급여·파트타이머 급여) 상태</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -3660,11 +3720,9 @@ function AdminManualOvertimesSection() {
 
   return (
     <div id="modlog-manual-overtimes" className={MODLOG_CARD}>
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-        <div className="space-y-1.5">
-          <h3 className={MODLOG_TITLE}>수기 초과근무 대장</h3>
-          <p className={MODLOG_SUB}>지점이 수기로 등록한 초과근무 · 총 {filteredRecords.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
-        </div>
+      <div className="admin-band">
+        <h3 className={MODLOG_TITLE}>수기 초과근무 대장</h3>
+        <p className={MODLOG_SUB}>지점이 수기로 등록한 초과근무 · 총 {filteredRecords.length}건{recentCount > 0 ? ` (최근 3일 ${recentCount}건)` : ""}</p>
         <ModlogFilters
           branches={branchOptions}
           branch={searchBranch}
@@ -3676,10 +3734,10 @@ function AdminManualOvertimesSection() {
       </div>
 
       <div className={MODLOG_SCROLL}>
-        <table className="w-full min-w-[700px] text-xs">
+        <table className="admin-sheet table-fixed min-w-[700px]">
           <thead>
             <tr>
-              <th className={`${MODLOG_TH} w-28`}>등록일시</th>
+              <th className={`${MODLOG_TH} w-44`}>등록일시</th>
               <th className={`${MODLOG_TH} w-24`}>지점명</th>
               <th className={`${MODLOG_TH} w-24`}>대상일</th>
               <th className={`${MODLOG_TH} w-20`}>직원명</th>
@@ -3695,14 +3753,15 @@ function AdminManualOvertimesSection() {
               <tr><td colSpan={7} className={MODLOG_EMPTY}>수기로 등록된 초과근무 내역이 없습니다.</td></tr>
             ) : (
               filteredRecords.map((r, idx) => (
-                  <tr key={r.id || idx} className={modlogRowClass(modlogIsRecent(r.createdAt, recentCutoff))}>
+                  <tr key={r.id || idx} className={modlogRowClass()}>
                     <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {formatShortDate(r.createdAt)}
+                      <ModlogRecentBadge recent={modlogIsRecent(r.createdAt, recentCutoff)} />
                     </td>
                     <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
                       {r.branchName}
                     </td>
-                    <td className={`${MODLOG_TD} font-mono text-[11px] font-black text-blue-700 whitespace-nowrap`}>
+                    <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {r.settleDate}
                     </td>
                     <td className={`${MODLOG_TD} font-black text-gray-800 whitespace-nowrap`}>
@@ -3736,12 +3795,36 @@ function AdminManualOvertimesSection() {
 
 // 진행 상태별 select 배경 — 원래 채도의 상태색(index.css .admin-labor-status-*).
 // Tailwind 표준색은 관리자 스코프가 치환하므로 전용 클래스로 못 박는다(DESIGN.md §12).
+// 색 사다리(대기=색 없음 → 발송 완료=바닐라 → 서명 완료=허니 → 보류=검정)의 이유와
+// '대기'에 왜 색을 빼는지는 index.css 의 .admin-labor-status-* 주석에 적어 두었다.
+// [주의] '발송 대기'도 빈 문자열이 아니라 전용 클래스를 그대로 둔다 — 클래스를 빼면
+// 전역 `.admin-redesign select` 의 회색 테두리가 드러나 "색만 없는 칸"이 아니라 빈 상자가 된다.
 const LABOR_STATUS_CLASS: Record<string, string> = {
   "발송 대기": "admin-labor-status-waiting",
   "발송 완료": "admin-labor-status-sent",
   "서명 완료": "admin-labor-status-signed",
   "보류": "admin-labor-status-hold",
 };
+
+// 본문 셀의 격자·여백·세로정렬은 `.admin-sheet tbody td`(DESIGN_ADMIN.md §4-0)가 준다.
+// 이 상수는 칸마다 덧붙일 것이 생겼을 때를 위해 자리만 남겨 둔 것이다 — 값을 여기서 다시 적으면
+// 다른 표와 어긋난다(예전에 여백·테두리를 직접 적어 표마다 조금씩 달랐다).
+const LABOR_SHEET_TD = "";
+
+// 표 헤더 — 라벨과 정렬을 한곳에서 정한다. 숫자(급여)는 우측, 조작 칸은 가운데(DESIGN.md §9).
+const LABOR_SHEET_HEADERS: { label: string; align: string }[] = [
+  { label: "등록일", align: "text-left" },
+  { label: "지점명", align: "text-left" },
+  { label: "구분", align: "text-left" },
+  { label: "계약유형", align: "text-left" },
+  { label: "이름", align: "text-left" },
+  { label: "연락처", align: "text-left" },
+  { label: "입사·이동일", align: "text-left" },
+  { label: "급여", align: "text-right" },
+  { label: "요청", align: "text-center" },
+  { label: "진행 상태", align: "text-center" },
+  { label: "관리", align: "text-center" },
+];
 
 function AdminLaborContractsSection() {
   const [contracts, setContracts] = useState<any[]>([]);
@@ -3966,129 +4049,139 @@ function AdminLaborContractsSection() {
     return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   }), [contracts, searchBranch, searchName]);
 
+  // 아직 손대지 않은 건 — 표 제목에 함께 적어 "지금 처리해야 할 게 몇 건인지"를 먼저 보이게 한다.
+  const waitingCount = filteredContracts.filter((c) => (c.status || "발송 대기") === "발송 대기").length;
+  const filterOn = Boolean(searchBranch || searchName);
+
   return (
-    <div className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
-      {/* 카드 테두리는 gray 계열로 명시(§13-2) — 색 없는 `border`는 검정 치환 catch-all에서 빠질 수 있다.
-          제목은 DESIGN_ADMIN §4-1에 따라 기존 관리자 탭과 같은 평제목(알약 아님)을 유지한다. */}
-      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            {/* 제목은 텍스트만 — 아이콘 금지(DESIGN.md §6-1) */}
-            <h3 className="font-black text-gray-800 text-lg">전 지점 근로계약서 관리</h3>
-            <p className="text-[11px] text-gray-400 mt-1">지점이 근로계약서 발송을 요청한 인원 목록입니다.</p>
-            <p className="text-[11px] font-bold text-gray-500 mt-1">
-              파트타이머 양식: {templateMeta
-                ? `${templateMeta.fileName} (${Math.round(templateMeta.size / 1024)}KB · ${templateMeta.uploadedAt.slice(0, 10)} 등록)`
-                : "등록 전 — 지점에서 내려받을 수 없습니다."}
-            </p>
+    <section className="space-y-5 animate-fade-in" id="admin-labor-contracts-section">
+      {/* [2026-08-03 사용자 지시로 삭제] 상단에 있던 '파트타이머 양식' 알약 줄.
+          양식을 다루는 버튼이 아래 '발송 목록' 밴드에 이미 있어 같은 말을 두 번 하고 있었다.
+          양식이 등록됐는지 여부는 그 버튼 글자([등록] ↔ [교체])와 툴팁이 알려 준다. */}
+
+      <div className="admin-sheet-card">
+        <div className="admin-band">
+          <h3 className="admin-band-title">
+            발송 목록 — 대기 {waitingCount.toLocaleString("ko-KR")}건 / 전체 {filteredContracts.length.toLocaleString("ko-KR")}건
+            {filterOn && ` · 필터 제외 포함 전체 대기 ${contracts.filter((c) => (c.status || "발송 대기") === "발송 대기").length.toLocaleString("ko-KR")}건`}
+          </h3>
+          {/* 필터는 제목 바로 옆(§4-0). 지점 목록은 실제 등록된 값으로만 만들어
+              "고를 수 있는 게 곧 존재하는 값"이 되게 한다. */}
+          <div className="admin-band-filters">
+            <select value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} aria-label="지점 필터">
+              <option value="">지점 전체</option>
+              {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명"
+              className="w-24" aria-label="직원명 필터" />
+            {filterOn && (
+              <button onClick={() => { setSearchBranch(""); setSearchName(""); }}>필터 해제</button>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className={`px-4 py-2 rounded-xl border border-gray-200 bg-gray-50 text-[11px] font-black ${uploadingTemplate ? "opacity-40" : "cursor-pointer"}`}>
+          <div className="admin-band-actions">
+            {/* 파일 선택은 <input type="file">이라 버튼이 될 수 없다 — 칩 모양 <label>로 감싸 같은 알약으로 보이게 한다.
+                제목(양식 상태)은 위 알약 줄에 있고, 여기엔 '누르는 것'만 둔다(사용자 지시 2026-08-03). */}
+            <label
+              title={templateMeta
+                ? `현재 양식: ${templateMeta.fileName} (${Math.round(templateMeta.size / 1024)}KB · ${templateMeta.uploadedAt.slice(0, 10)} 등록)`
+                : "아직 등록된 양식이 없습니다 — 지점에서 내려받을 수 없습니다."}
+              className={`admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black inline-flex items-center ${uploadingTemplate ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
               {uploadingTemplate ? "등록 중…" : templateMeta ? "파트타이머 양식 교체" : "파트타이머 양식 등록"}
               <input type="file" className="hidden" disabled={uploadingTemplate} onChange={handleTemplateUpload} />
             </label>
-            <button onClick={() => void loadData()} className="px-4 py-2 bg-[#2E6DB4] hover:bg-[#20528B] text-white rounded-xl text-[11px] font-black cursor-pointer transition-colors">새로고침</button>
+            <button
+              onClick={() => void loadData()}
+              disabled={loading}
+              className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer disabled:opacity-50"
+            >
+              새로고침
+            </button>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
-          <select value={searchBranch} onChange={(e) => setSearchBranch(e.target.value)} className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-gray-50">
-            <option value="">지점 선택</option>
-            {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="직원명 검색" className="h-8 border border-gray-200 rounded-lg px-2 text-[11px] font-bold bg-gray-50" />
+        <div className="admin-sheet-scroll">
+          {/* 엑셀형 표 = 관리자 표준 부품 `.admin-sheet`(DESIGN_ADMIN.md §4-0).
+              헤더 색(엘리스)·격자·헤더 고정·선 겹침 방지는 전부 그 클래스가 처리한다 —
+              여기서 값을 다시 적지 않는다. 칸별 정렬만 헤더 목록이 들고 있다. */}
+          <table className="admin-sheet min-w-[920px]">
+            <thead>
+              <tr>
+                {LABOR_SHEET_HEADERS.map((h) => (
+                  <th key={h.label} className={h.align}>{h.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={11} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
+              ) : filteredContracts.length === 0 ? (
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-xs font-bold text-[#212121]/50">
+                  {filterOn ? "필터에 해당하는 발송 대상이 없습니다." : "근로계약서 등록 내역이 없습니다."}
+                </td></tr>
+              ) : filteredContracts.map((contract, idx) => (
+                <tr key={contract.id || idx}>
+                  <td className={`${LABOR_SHEET_TD} font-mono text-gray-500`}>{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
+                  <td className={`${LABOR_SHEET_TD} font-black text-[#212121]`}>{contract.branchName}</td>
+                  <td className={LABOR_SHEET_TD}>
+                    {contract.contractType === "지점이동" ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-800">지점이동</span>
+                        {contract.previousBranch && <span className="text-gray-400">← {contract.previousBranch}</span>}
+                      </span>
+                    ) : contract.contractType === "신규입사" ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-800">신규입사</span>
+                    ) : (
+                      <span className="text-gray-300">-</span>
+                    )}
+                  </td>
+                  <td className={LABOR_SHEET_TD}>
+                    {/* 계약유형(2026-07-29) — 1주/2주 단위 계약서인지, 수습 후 정규 계약서인지. 옛 레코드는 "-" */}
+                    {contract.periodType && (LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]
+                      ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">{(LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]}</span>
+                      : <span className="text-gray-300">-</span>}
+                  </td>
+                  <td className={`${LABOR_SHEET_TD} font-extrabold text-[#212121]`}>{contract.name}</td>
+                  <td className={`${LABOR_SHEET_TD} font-mono font-black`}>{contract.phone}</td>
+                  <td className={`${LABOR_SHEET_TD} font-mono text-gray-500`}>
+                    {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
+                  </td>
+                  <td className={`${LABOR_SHEET_TD} text-right font-mono font-black text-zinc-700`}>{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
+                  <td className={`${LABOR_SHEET_TD} text-center`}>
+                    {/* 삭제요청은 오류색 hex 직접 지정 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집는다(DESIGN_ADMIN §2-1 P0) */}
+                    {contract.deleteRequested
+                      ? <span className="px-2 py-1 rounded-full bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A] text-[11px] font-black">삭제요청</span>
+                      : contract.editRequestedAt
+                        ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-black">수정됨</span>
+                        : "-"}
+                  </td>
+                  <td className={`${LABOR_SHEET_TD} text-center`}>
+                    <select
+                      value={contract.status || "발송 대기"}
+                      onChange={(e) => void updateStatus(contract, e.target.value)}
+                      disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                      aria-busy={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                      title="진행 상태"
+                      className={`border rounded-lg px-2 py-1 text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed ${LABOR_STATUS_CLASS[contract.status || "발송 대기"] || ""}`}
+                    >
+                      <option>발송 대기</option>
+                      <option>발송 완료</option>
+                      <option>서명 완료</option>
+                      <option>보류</option>
+                    </select>
+                  </td>
+                  <td className={`${LABOR_SHEET_TD} text-center`}>
+                    <button
+                      onClick={() => void deleteContract(contract)}
+                      disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
+                      title={`${contract.name} 삭제`}
+                      className="px-3 py-1.5 border border-gray-200 bg-white rounded-lg text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed"
+                    >삭제</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-2xs">
-          <div className="overflow-x-auto">
-            {/* 표 본문 12px(text-xs)·헤더 11px 검정(§6-0-1) — 셀에서 개별 크기 지정 금지 */}
-            <table className="w-full min-w-[920px] text-xs">
-              <thead>
-                <tr className="text-left border-b text-[#212121] font-black text-[11px]">
-                  <th className="py-2 px-2">등록일</th>
-                  <th className="py-2 px-2">지점명</th>
-                  <th className="py-2 px-2">구분</th>
-                  <th className="py-2 px-2">계약유형</th>
-                  <th className="py-2 px-2">이름</th>
-                  <th className="py-2 px-2">연락처</th>
-                  <th className="py-2 px-2">입사·이동일</th>
-                  <th className="py-2 px-2 text-right">급여</th>
-                  <th className="py-2 px-2 text-center">요청</th>
-                  <th className="py-2 px-2 text-center">진행 상태</th>
-                  <th className="py-2 px-2 text-center">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={11} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr>
-                ) : filteredContracts.length === 0 ? (
-                  <tr><td colSpan={11} className="p-12 text-center text-gray-400 font-bold">근로계약서 등록 내역이 없습니다.</td></tr>
-                ) : filteredContracts.map((contract, idx) => (
-                  <tr key={contract.id || idx} className="border-b hover:bg-slate-50/50">
-                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">{contract.createdAt ? contract.createdAt.slice(0, 10) : "-"}</td>
-                    <td className="py-1.5 px-2 font-black text-gray-800 whitespace-nowrap">{contract.branchName}</td>
-                    <td className="py-1.5 px-2 whitespace-nowrap">
-                      {contract.contractType === "지점이동" ? (
-                        <span className="inline-flex items-center gap-1">
-                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-800">지점이동</span>
-                          {contract.previousBranch && <span className="text-gray-400">← {contract.previousBranch}</span>}
-                        </span>
-                      ) : contract.contractType === "신규입사" ? (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-800">신규입사</span>
-                      ) : (
-                        <span className="text-gray-300">-</span>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-2 whitespace-nowrap">
-                      {/* 계약유형(2026-07-29) — 1주/2주 단위 계약서인지, 수습 후 정규 계약서인지. 옛 레코드는 "-" */}
-                      {contract.periodType && (LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]
-                        ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">{(LABOR_CONTRACT_PERIOD_LABEL as Record<string, string>)[contract.periodType]}</span>
-                        : <span className="text-gray-300">-</span>}
-                    </td>
-                    <td className="py-1.5 px-2 font-extrabold text-zinc-800 whitespace-nowrap">{contract.name}</td>
-                    <td className="py-1.5 px-2 font-mono font-black whitespace-nowrap">{contract.phone}</td>
-                    <td className="py-1.5 px-2 font-mono text-gray-500 whitespace-nowrap">
-                      {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
-                    </td>
-                    <td className="py-1.5 px-2 text-right font-mono font-black text-zinc-700 whitespace-nowrap">{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
-                    <td className="py-1.5 px-2 text-center">
-                      {/* 삭제요청은 오류색 hex 직접 지정 — bg-rose-50은 관리자 스코프가 허니(긍정색)로 뒤집는다(DESIGN_ADMIN §2-1 P0) */}
-                      {contract.deleteRequested
-                        ? <span className="px-2 py-1 rounded-full bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A] text-[11px] font-black">삭제요청</span>
-                        : contract.editRequestedAt
-                          ? <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-black">수정됨</span>
-                          : "-"}
-                    </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <select
-                        value={contract.status || "발송 대기"}
-                        onChange={(e) => void updateStatus(contract, e.target.value)}
-                        disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
-                        aria-busy={pendingRows.has(`${contract.branchName}:${contract.id}`)}
-                        title="진행 상태"
-                        className={`border rounded-lg px-2 py-1 text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed ${LABOR_STATUS_CLASS[contract.status || "발송 대기"] || ""}`}
-                      >
-                        <option>발송 대기</option>
-                        <option>발송 완료</option>
-                        <option>서명 완료</option>
-                        <option>보류</option>
-                      </select>
-                    </td>
-                    <td className="py-1.5 px-2 text-center">
-                      <button
-                        onClick={() => void deleteContract(contract)}
-                        disabled={pendingRows.has(`${contract.branchName}:${contract.id}`)}
-                        title={`${contract.name} 삭제`}
-                        className="px-3 py-1.5 border border-gray-200 bg-gray-50 rounded-lg text-[11px] font-black disabled:opacity-40 disabled:cursor-not-allowed"
-                      >삭제</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-    </div>
+    </section>
   );
 }
