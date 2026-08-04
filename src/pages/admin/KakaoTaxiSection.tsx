@@ -1104,6 +1104,49 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
    * 직원 목록을 아직 못 불러왔으면(로딩 중·조회 실패) 표시하지 않는다 — 없는 것을 "인증 안 됨"으로
    * 단정하면 멀쩡히 인증한 사람까지 대기 중으로 보인다.
    */
+  /**
+   * 카카오 직원 목록이 도착했는가. 신청 목록(requests)과 직원 목록(members)은 **따로** 불러온다 —
+   * 신청은 우리 서버, 직원은 카카오 API 라 도착 시각이 몇 초씩 차이 난다.
+   */
+  const membersReady = Boolean(membersData) && !membersLoading;
+  /**
+   * 목록을 **못 받은** 상태인가(로딩 중이 아니라 실패). 둘을 뭉치면 실패했는데도 화면이
+   * "확인 중…"이라고 계속 적어, 기다리면 될 줄 알고 원인을 모른 채 방치하게 된다
+   * (코덱스 리뷰 2026-08-03 P1).
+   */
+  const membersFailed = !membersLoading && !membersData && Boolean(membersError);
+
+  /**
+   * 직원 목록이 있어야 실행할 수 있는 쓰기 동작을 막는가.
+   *
+   * [왜 막나 — 코덱스 stop-time 2026-08-03]
+   * 승인·이용재개는 **지금 그 직원이 어떤 상태인지**를 근거로 카카오에 실제 요청을 보낸다.
+   * 목록이 아직 안 온 상태에서는 화면이 '확인 중…' 이라고 적어 두고도 버튼은 눌렸다 —
+   * 이미 이용중지된 사람을 또 중지시키거나, 인증도 안 한 사람을 재개 처리할 수 있었다.
+   * 화면에 "모른다"고 적었으면 그 상태로 실행도 막아야 앞뒤가 맞는다.
+   * (반려·처리 중 해제는 직원 목록과 무관해 그대로 둔다.)
+   */
+  const memberWriteBlocked = anyWriteBusy || !membersReady;
+  const memberWriteBlockedTitle = membersFailed
+    ? "카카오T 직원 목록을 불러오지 못했습니다 — '새로고침'을 눌러 다시 받은 뒤에 처리할 수 있습니다."
+    : !membersReady
+      ? "카카오T 직원 목록을 불러오는 중입니다 — 지금 상태를 확인한 뒤에 처리할 수 있습니다."
+      : undefined;
+
+  /**
+   * 이 줄의 '상태·비고'가 직원 목록에 기대는가.
+   *
+   * [왜 필요한가 — 2026-08-03 사용자 지적]
+   * 예전에는 목록이 오기 전에도 상태 칸에 `등록됨` 같은 **확정된 라벨**을 그렸다. 그러다 목록이
+   * 도착하면 `인증 완료`·`이용중지`로 통째로 갈렸다. 화면을 열고 몇 초 뒤 표가 바뀌어 보이는 것도,
+   * 그 사이에 본 사람이 잘못된 상태를 믿게 되는 것도 여기서 나왔다
+   * (이용중지된 사람을 '등록됨'으로 보고 넘어갈 수 있었다).
+   * → 아직 모르는 것은 **모른다고 적는다.** 이 저장소의 기존 규약(불완전한 값을 정상값처럼
+   *   보여주지 않는다)과 같은 취급이다.
+   */
+  const dependsOnMembers = (r: KakaoTaxiRequest): boolean =>
+    Boolean(r.memberId) || (r.type === "register" && r.status === "approved");
+
   const registerAuthState = (request: KakaoTaxiRequest): "pending" | "done" | "refused" | "blocked" | "unknown" => {
     if (request.type !== "register" || request.status !== "approved") return "unknown";
     // 목록을 아직 못 받았으면 아무것도 단정하지 않는다.
@@ -1221,6 +1264,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     const pill = "inline-block w-fit rounded-full px-2 py-0.5 text-[10px] font-black";
     if (r.status === "pending") return null; // 왼쪽 [승인]·[반려] 버튼이 곧 '대기' 표시다
     if (r.status === "processing") return { label: "처리 중", className: `${pill} bg-[#D8DFE9] text-[#1A1A1A]` };
+    // 직원 목록이 아직 안 왔으면 **아무것도 단정하지 않는다.** 여기서 확정된 라벨을 그리면
+    // 몇 초 뒤 목록이 도착할 때 상태가 통째로 갈려, 그 사이에 본 사람이 잘못된 상태를 믿는다.
+    if (!membersReady && dependsOnMembers(r)) {
+      // 로딩 중과 실패를 구분해 적는다 — "확인 중"이라고 하면 기다리면 될 줄 알고 방치한다.
+      return membersFailed
+        ? { label: "확인 불가", className: `${pill} border border-[#C93A3A] bg-[#FDE2E2] text-[#B91C1C]` }
+        : { label: "확인 중…", className: `${pill} border border-gray-200 bg-[var(--admin-ghost)] text-[#212121]/45` };
+    }
     // **지금 이용중지된 사람이면 그것이 결론이다.** 신청 기록상 반려로 남아 있어도, 그 뒤 다른 경로로
     // 이용중지가 된 경우가 있다(이선복·김미화). 그때 '반려'라고만 적으면 아직 처리가 안 된 것으로
     // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
@@ -1238,8 +1289,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       // 둘을 '등록됨' 하나로 묶으면 왜 못 타는지 알 수 없어 손을 못 쓴다(stop-hook 지적 2026-07-31).
       if (auth === "refused") return { label: "인증 거부", className: `${pill} bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]` };
       if (auth === "blocked") return { label: "이용중지", className: `${pill} bg-[#18181B] text-white` };
-      // 남은 건 진짜 '모름'뿐 — 목록을 못 받았거나 계정 조회가 실패한 상태다.
-      return { label: "등록됨", className: `${pill} border border-gray-200 bg-[var(--admin-ghost)] text-[#212121]/70` };
+      // 남은 건 진짜 '모름'뿐 — 계정 조회가 실패했거나(일부 계정 누락) 대조할 전화번호가 없는 옛 레코드다.
+      // '등록됨' 이라고 적으면 확정된 상태처럼 읽혀, 실제로는 인증 거부·이용중지인 사람을 놓친다.
+      return { label: "확인 불가", className: `${pill} border border-gray-200 bg-[var(--admin-ghost)] text-[#212121]/70` };
     }
     // 지점변경은 처리되면 끝이다 — 상태는 승인(인증완료)/반려 둘 중 하나로만 보인다(사용자 지시 2026-07-31).
     // (반려는 위에서 이미 걸러졌으므로 여기 오는 건 승인된 건뿐이다.)
@@ -1295,8 +1347,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
 
   const requestRemark = (r: KakaoTaxiRequest): string => {
     const parts: string[] = [];
+    // 직원 목록이 오기 전에는 '지금 상태'를 알 수 없다. 그 상태에서 승인 당시 메모
+    // ("등록 완료 · 알림톡 발송")를 결론처럼 적으면, 목록이 도착하는 순간 문장이 통째로 갈린다.
+    const memberStateUnknown = !membersReady && dependsOnMembers(r);
     // 지금 이용중지 상태면 그 사실을 먼저 적는다 — 기록상 반려여도 결론은 이용중지다.
     if (r.memberId && isMemberBlockedNow(r)) parts.push("이용중지 승인됨 — 다시 쓰려면 [이용재개]");
+    // 목록이 오기 전에는 '지금 상태'를 모른다고 **먼저** 밝힌다. 등록 건뿐 아니라 지점변경·삭제 건도
+    // memberId 로 현재 상태를 다시 보므로, 여기서 막지 않으면 그 줄들만 문구가 나중에 덧붙는다.
+    else if (memberStateUnknown) parts.push(membersFailed ? "카카오T 상태 확인 불가 — 새로고침 필요" : "카카오T 상태 확인 중");
     if (r.type === "branchChange") {
       // 어디서 어디로 가는지 한눈에 보이게 **이전 지점부터** 적는다(사용자 지시 2026-07-31).
       // 신청을 올린 지점(branchName)이 곧 이전 소속이다.
@@ -1311,11 +1369,15 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       const auth = registerAuthState(r);
       // 인증까지 끝난 사람에게는 알림톡 안내를 남기지 않는다 — 할 일이 없는데 뭔가 더 해야
       // 하는 것처럼 읽힌다(사용자 지시 2026-07-31). 끝났다는 말만 남긴다.
-      if (auth === "done") parts.push("카카오 등록완료");
-      else if (auth === "refused") parts.push("직원이 카카오T 초대를 거부했습니다 — 재초대 필요");
-      else if (auth === "blocked") parts.push("이용중지 — 이용재개 필요");
-      else if (r.resultNote) parts.push(r.resultNote);
-    } else if (r.resultNote) parts.push(r.resultNote);
+      // [목록이 오기 전이면 아무것도 적지 않는다] 위에서 이미 '확인 중'을 적었고, 여기서 승인 당시
+      // 메모(resultNote)를 덧붙이면 목록이 도착할 때 그 문장이 통째로 갈린다.
+      if (!memberStateUnknown) {
+        if (auth === "done") parts.push("카카오 등록완료");
+        else if (auth === "refused") parts.push("직원이 카카오T 초대를 거부했습니다 — 재초대 필요");
+        else if (auth === "blocked") parts.push("이용중지 — 이용재개 필요");
+        else if (r.resultNote) parts.push(r.resultNote);
+      }
+    } else if (!memberStateUnknown && r.resultNote) parts.push(r.resultNote);
     if (r.processedAt) parts.push(`처리 ${formatRequestedAt(r.processedAt)}`);
     // **지점이 적어 보낸 사유는 맨 뒤에.** 앞에 두면 사람마다 길이가 제각각이라 표가 지저분해지고,
     // 정작 먼저 봐야 할 처리 결과가 뒤로 밀린다(사용자 지시 2026-07-31).
@@ -1329,7 +1391,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     // 툴팁도 비고와 같은 기준으로 적는다 — 한쪽만 옛 처리 메모를 보여주면
     // 마우스를 올렸을 때 상태 칸과 다른 말이 나온다(Codex 2026-07-31).
     let head = r.status === "rejected" ? r.rejectReason : r.resultNote;
-    if (r.status !== "rejected" && r.type === "register") {
+    // 직원 목록이 오기 전에는 승인 당시 메모("등록 완료 · 알림톡 발송")를 그대로 보여주지 않는다 —
+    // 상태 칸은 '확인 중…'인데 툴팁만 완료라고 하면, 마우스를 올린 사람이 그 말을 믿는다
+    // (비고와 같은 기준. 한쪽만 고쳐 어긋났던 것을 2026-08-03에 맞췄다).
+    if (r.status !== "rejected" && !membersReady && dependsOnMembers(r)) {
+      head = membersFailed
+        ? "카카오T 직원 목록을 불러오지 못해 지금 상태를 확인할 수 없습니다 — '새로고침'을 눌러주세요."
+        : "카카오T 인증 상태 확인 중";
+    } else if (r.status !== "rejected" && r.type === "register") {
       const auth = registerAuthState(r);
       if (auth === "refused") head = "직원이 카카오T 초대를 거부했습니다 — 재초대 필요";
       else if (auth === "blocked") head = "이용중지 상태 — 이용재개 필요";
@@ -1801,7 +1870,16 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       </div>
 
       {needsMonth && ordersError && <div className={ERROR_BANNER}>{ordersError}</div>}
+      {/* [신청 관리에도 띄운다] 예전엔 직원 관리 화면에서만 보여서, 신청 목록에서 목록 로드가 실패하면
+          상태 칸이 계속 '확인 중'으로 남고 승인 버튼만 잠긴 채 **원인을 알 길이 없었다**
+          (코덱스 리뷰 2026-08-03 P1). 신청 관리에서는 무엇이 막혔는지까지 함께 적는다. */}
       {view === "members" && membersError && <div className={ERROR_BANNER}>{membersError}</div>}
+      {view === "requests" && membersError && (
+        <div className={ERROR_BANNER}>
+          {membersError} — 카카오T 직원 목록을 받지 못해 각 줄의 <b>지금 상태</b>를 확인할 수 없고,
+          승인·이용재개는 잠겨 있습니다. 위 '새로고침'을 눌러주세요. (반려·처리 중 해제는 그대로 쓸 수 있습니다.)
+        </div>
+      )}
       {/* 계정 일부 조회 실패 — 지금 뷰가 그리는 데이터(ordersData/membersData)에 실린 값만 본다.
           로드가 아직 안 끝났거나 실패해 데이터 자체가 없으면(옛 조회의 잔재와 헷갈리지 않게) 보여주지 않는다.
           requests 뷰는 membersData 로 승인 UI를 그리므로 members 와 같은 로딩 상태로 게이트한다(F4). */}
@@ -2151,7 +2229,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                           <option key={groupOptionKey(g)} value={groupOptionKey(g)}>{`${g.name} (${accountLabel(g.account_key)})`}</option>
                         ))}
                     </select>
-                    <button onClick={() => void executeApproveRegister()} disabled={anyWriteBusy}
+                    <button onClick={() => void executeApproveRegister()} disabled={memberWriteBlocked} title={memberWriteBlockedTitle}
                       className="h-8 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white disabled:opacity-50">
                       {requestBusy ? "처리 중..." : "승인하고 카카오T에 등록"}
                     </button>
@@ -2198,7 +2276,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                       <input type="date" value={branchChangeDate} onChange={(e) => setBranchChangeDate(e.target.value)} disabled={requestBusy}
                         className="h-8 border border-gray-200 rounded-lg px-3 text-[11px] font-bold bg-white disabled:opacity-50" aria-label="적용일" />
                     </label>
-                    <button onClick={() => void executeApproveBranchChange()} disabled={anyWriteBusy}
+                    <button onClick={() => void executeApproveBranchChange()} disabled={memberWriteBlocked} title={memberWriteBlockedTitle}
                       className="h-8 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white disabled:opacity-50">
                       {requestBusy ? "처리 중..." : "지점변경 승인"}
                     </button>
@@ -2327,22 +2405,23 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                     else if (r.type === "branchChange") startBranchChangeApproval(r);
                                     else void startUpdateApproval(r);
                                   }}
-                                  disabled={anyWriteBusy}
+                                  disabled={memberWriteBlocked}
+                                  title={memberWriteBlockedTitle}
                                   className="px-3 py-1 rounded-lg text-[11px] font-black bg-[#212121] text-[var(--admin-ghost)] border border-[#212121] disabled:opacity-50">
                                   {r.type === "delete" ? "삭제 승인" : r.type === "resume" ? "이용재개 승인" : "승인"}
                                 </button>
                                 {/* 레거시 삭제요청 — 사유가 지점 이동이면 직원을 지우지 않고 소속만 옮긴다(2026-07-29) */}
                                 {r.type === "delete" && (
-                                  <button onClick={() => startBranchChangeApproval(r)} disabled={anyWriteBusy}
-                                    title="직원을 삭제하지 않고 소속 지점만 옮깁니다"
+                                  <button onClick={() => startBranchChangeApproval(r)} disabled={memberWriteBlocked}
+                                    title={memberWriteBlockedTitle ?? "직원을 삭제하지 않고 소속 지점만 옮깁니다"}
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">지점변경으로 처리</button>
                                 )}
                                 {/* 지점이 종류를 잘못 골라 올리는 일이 있다 — 퇴사자인데 '수정요청'으로 온 경우
                                     (장용혁 건, 2026-07-31). 저장된 종류를 고치는 대신 **처리 방식을 바꿔** 받는다.
                                     위 [지점변경으로 처리]와 같은 방식이라 규약이 하나로 유지된다. */}
                                 {r.type === "update" && (
-                                  <button onClick={() => void executeApproveDelete(r)} disabled={anyWriteBusy}
-                                    title="퇴사자로 보고 이용중지 처리합니다(계정·과거 이용내역은 남습니다)"
+                                  <button onClick={() => void executeApproveDelete(r)} disabled={memberWriteBlocked}
+                                    title={memberWriteBlockedTitle ?? "퇴사자로 보고 이용중지 처리합니다(계정·과거 이용내역은 남습니다)"}
                                     className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50">퇴사(이용중지)로 처리</button>
                                 )}
                                 <button onClick={() => { setRejectTarget(r); setRejectReason(""); setApproveTarget(null); setBranchChangeTarget(null); }} disabled={anyWriteBusy}
@@ -2383,9 +2462,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                                 {/* 이용중지된 사람은 직원 관리 목록에서 사라진다(카카오가 인증 완료자만 준다).
                                     그래서 거기 있는 [휴직 해제] 버튼에 손이 닿지 않는다 — 되돌릴 길이 이 줄뿐이다. */}
                                 {r.status === "approved" && r.type === "delete" && r.memberId && (
-                                  <button onClick={() => void resumeBlockedMember(r)} disabled={anyWriteBusy}
+                                  <button onClick={() => void resumeBlockedMember(r)} disabled={memberWriteBlocked}
                                     className="w-fit px-2.5 py-1 rounded-lg text-[11px] font-black bg-white border border-gray-200 disabled:opacity-50"
-                                    title="이용중지를 풀어 다시 택시를 탈 수 있게 합니다">이용재개</button>
+                                    title={memberWriteBlockedTitle ?? "이용중지를 풀어 다시 택시를 탈 수 있게 합니다"}>이용재개</button>
                                 )}
                               </span>
                             )}
