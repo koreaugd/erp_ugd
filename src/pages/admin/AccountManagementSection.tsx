@@ -9,6 +9,8 @@ import { AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { listUserProfiles, updateUserProfile, withEncodedBranchLists, type UserProfile } from "../../api/userProfile";
 import { getFirebaseLoginBranches, type LoginBranch } from "../../api/firebaseAuth";
+// 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
+import { isClosedBranch } from "./helpers/closedBranches";
 import { type PermKey } from "../branch/tabRegistry";
 import { ADMIN_TAB_KEYS, ADMIN_TAB_LABELS, ADMIN_SENSITIVE_TAB_KEYS, type AdminPermKey } from "./adminTabRegistry";
 
@@ -137,7 +139,9 @@ export function AccountManagementSection({ currentUid }: { currentUid?: string }
     try {
       const [profileList, branchList] = await Promise.all([listUserProfiles(), getFirebaseLoginBranches()]);
       setProfiles(profileList);
-      setBranches(branchList);
+      // 휴업 지점은 지점 필터 선택지에서 뺀다. **계정 자체는 감추지 않는다** —
+      // 그 지점 소속으로 가입한 사람의 권한을 여전히 관리해야 하기 때문(helpers/closedBranches.ts).
+      setBranches(branchList.filter((b) => !isClosedBranch(b.branchName)));
     } catch (e) {
       console.error("계정 목록 로드 실패:", e);
       setLoadError("계정 목록을 불러오지 못했습니다. 네트워크 확인 후 새로고침해주세요.");
