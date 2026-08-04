@@ -19,6 +19,8 @@
 // (Codex 리뷰 지적 2026-07-22: 부분합을 정상 숫자처럼 보여주면 매출이 줄어든 것으로 오해한다).
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { gasClient } from "../../api/gasClient";
+// 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
+import { getAdminBranchList } from "./helpers/closedBranches";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
 import { SalesLineChart } from "./SalesLineChart";
@@ -79,7 +81,7 @@ export function AdminSalesOverviewSection() {
     setLoading(true);
     setLoadError(false);
     try {
-      const branchList = await gasClient.getBranchList();
+      const branchList = await getAdminBranchList();
       const targets: BranchMeta[] = (Array.isArray(branchList) ? branchList : [])
         .filter((branch: any) =>
           branch?.role === "branch" && branch.branchName &&

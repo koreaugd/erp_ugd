@@ -27,6 +27,8 @@ import {
   type KakaoTaxiBranchHistoryEntry,
 } from "./helpers/kakaoTaxiBranchHistory";
 import { getKakaoTaxiOrdersShared, invalidateKakaoTaxiOrdersShared } from "./helpers/kakaoTaxiOrdersCache";
+// 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
+import { getAdminBranchList, isClosedBranch } from "./helpers/closedBranches";
 
 export type KakaoTaxiView = "orders" | "anomaly" | "members" | "requests";
 
@@ -182,7 +184,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
       .catch(() => { historyLoadFailed = true; return null; });
     try {
       const [branchList, curr, historyRaw] = await Promise.all([
-        gasClient.getBranchList(),
+        getAdminBranchList(),
         getKakaoTaxiOrdersShared(target, adminPinHash, forceRefresh),
         historyPromise,
       ]);
@@ -237,7 +239,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         gasClient.getKakaoTaxiMembers(adminPinHash, forceRefresh),
         gasClient.getKakaoTaxiGroups(adminPinHash, forceRefresh),
         // 부서 드롭다운용 ERP 지점 목록 — 실패해도 직원 목록은 보여준다(드롭다운만 비게 됨)
-        gasClient.getBranchList().catch(() => []),
+        getAdminBranchList().catch(() => []),
       ]);
       const members = membersRes.members || [];
       const groups = groupsRes.groups || [];
@@ -271,7 +273,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     setRequestsLoading(true);
     setRequestsError("");
     try {
-      const branchList = await gasClient.getBranchList();
+      const branchList = await getAdminBranchList();
       const branches = (branchList || []).filter((b) => b.role === "branch").map((b) => b.branchName).filter(Boolean);
       const failed: string[] = [];
       const results = await Promise.all(branches.map(async (branch) => {
@@ -324,8 +326,11 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   const allRows = ordersData?.current ?? [];
   // rows = 계정 필터가 적용된 정규화 결과. 아래 집계(aggregateByBranch·aggregateByMember)·이상 점검·
   // 상세 내역이 전부 이 rows 를 받으므로 계정 필터가 자동으로 반영된다.
+  // 휴업 지점은 여기(표시·집계 층)에서만 걷어낸다 — 위 allRows 는 "카카오가 보고한 건수와
+  // 수집된 건수가 맞는지" 검산에 쓰이므로 손대면 안 된다(빼는 순간 검산이 항상 불일치로 뜬다).
   const rows = useMemo(
-    () => (accountFilter === "all" ? allRows : allRows.filter((r) => r.accountKey === accountFilter)),
+    () => (accountFilter === "all" ? allRows : allRows.filter((r) => r.accountKey === accountFilter))
+      .filter((r) => !isClosedBranch(r.branchName)),
     [allRows, accountFilter]
   );
   // 지금 뷰가 실제로 그리고 있는 데이터의 accountErrors 만 뽑는다 — 이용내역/이상 점검은 ordersData,

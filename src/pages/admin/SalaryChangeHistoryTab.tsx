@@ -10,6 +10,8 @@ import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
 import { addMonthsToMonthInputValue } from "../branch/helpers/formatters";
 import { diffSalaryMonths, sortChanges, summarize, type ChangeKind, type SalaryChange, type SalaryRow } from "./helpers/salaryDiff";
+// 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
+import { getAdminBranchList } from "./helpers/closedBranches";
 
 const KIND_LABEL: Record<ChangeKind, string> = {
   raise: "인상", cut: "인하", new: "신규", noPrevRecord: "지난달 기록 없음", left: "퇴사(추정)",
@@ -48,7 +50,7 @@ export function SalaryChangeHistoryTab() {
     setError("");
     try {
       const prevMonth = addMonthsToMonthInputValue(target, -1);
-      const branchList = await gasClient.getBranchList();
+      const branchList = await getAdminBranchList();
       const branches = (branchList || []).filter((b: any) => b.role === "branch").map((b: any) => b.branchName).filter(Boolean);
 
       const failed: string[] = [];
