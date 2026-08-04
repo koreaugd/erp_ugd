@@ -1031,6 +1031,84 @@ input[type=number] {
   gap: 6px;
 }
 
+/* 엑셀형 표 **본문 칸의 입력칸은 보이지 않게** — 셀에는 데이터만 나온다 (사용자 지시 2026-08-04, DESIGN.md §9-0).
+   [왜 필요한가] 전역 `.admin-redesign input/select`(위 §)가 배경·테두리·18px 라운드를 !important 로 강제한다.
+   표 밖에서는 그게 맞지만 엑셀형 표 안에서는 칸마다 흰 상자가 둥둥 떠서 격자가 사라지고 "엑셀"로 안 읽힌다.
+   지점 스코프가 같은 문제를 겪고 세운 규칙이 `DESIGN.md` §10 함정 1(입력칸 투명화)이며, 여기서는 그 관리자판이다.
+
+   [범위 — 반드시 opt-in] `.admin-sheet` 전체에 걸면 안 된다. **계정 관리 표도 `.admin-sheet` 인데
+   tbody 의 역할·상태 `<select>` 가 배경색으로 권한을 구분한다** — 전역으로 투명화하면 그 구분이 통째로
+   사라진다(Codex 지적 2026-08-04). 그래서 데이터만 보여야 하는 표가 `.admin-sheet-data-only` 를 직접 붙인다.
+   [범위 2] `tbody` 로 좁힌다 — thead 의 머리글 입력칸까지 투명해지면 안 된다(§10 원문 주의).
+   [이기는 법] 클래스 3개(`.admin-redesign .admin-sheet.admin-sheet-data-only tbody input`)가
+   전역 `.admin-redesign input`(1개)보다 구체적이라 !important 끼리도 이긴다. */
+.admin-redesign .admin-sheet-data-only tbody :where(input, select, textarea) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 2px !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* [중요] 입력칸에는 hover·focus 로도 상자를 그리지 않는다 — 누르는 순간 사각 상자가 뜨면
+   "데이터만 보이는 표"가 깨진다(사용자 지시 2026-08-04). 발주관리·급여대장 시트와 같은 방식으로
+   **강조는 감싸는 칸(td)이 맡는다.** 입력칸은 끝까지 투명하다. */
+.admin-redesign .admin-sheet-data-only tbody :where(input, select, textarea):hover,
+.admin-redesign .admin-sheet-data-only tbody :where(input, select, textarea):focus {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* 지금 고치는 칸만 엘리스로 옅게 채워 짚어 준다(막 방식 — DESIGN.md §9-3과 같은 문법). */
+.admin-redesign .admin-sheet-data-only tbody td:focus-within {
+  background: rgba(216, 223, 233, 0.55) !important;
+}
+
+/* 날짜 칸의 달력 아이콘은 평소엔 숨긴다 — 칸마다 아이콘이 떠 있으면 '데이터만'이 깨진다.
+   칸에 손이 닿으면 나타나 날짜 선택기를 열 수 있다. */
+.admin-redesign .admin-sheet-data-only tbody input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+.admin-redesign .admin-sheet-data-only tbody input[type="date"]:hover::-webkit-calendar-picker-indicator,
+.admin-redesign .admin-sheet-data-only tbody input[type="date"]:focus::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+/* 숫자 칸의 스피너(위아래 화살표)도 숨긴다 — 표에서는 값만 보여야 한다. */
+.admin-redesign .admin-sheet-data-only tbody input[type="number"]::-webkit-outer-spin-button,
+.admin-redesign .admin-sheet-data-only tbody input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.admin-redesign .admin-sheet-data-only tbody input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* 지점 화면 연차 현황표도 같은 규칙(셀에는 데이터만) — DESIGN.md §10 함정 1의 표준 배선.
+   [범위를 표 하나로 좁히는 이유] `.branch-sheet` 전체에 걸면 주류재고·발주·매입매출·급여대장 등
+   이미 각자 배선을 갖춘 시트까지 한꺼번에 바뀐다. 지시받은 표만 고친다. */
+#annual-leave-status-sheet tbody :where(input, select) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 2px !important;
+}
+#annual-leave-status-sheet tbody :where(input, select):hover,
+#annual-leave-status-sheet tbody :where(input, select):focus {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+#annual-leave-status-sheet tbody td:focus-within {
+  background: rgba(216, 223, 233, 0.55) !important;
+}
+
 /* 필터 칸 덩치 = 예전 알약 제목과 같게(11px · 높이 28px · 999px 알약 · 1px 검정).
    밴드 안에서 제목과 필터가 한 줄로 균일하게 보이게 하려는 것이다.
    [!important 인 이유] 전역 `.admin-redesign input/select` 가 테두리 색과 18px 라운드를

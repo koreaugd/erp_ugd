@@ -52,13 +52,19 @@ export const MAX_EXPENSE_ROWS = 50;
 // ExpenseGrid(variant)와 DailySettleTab의 현금 쪽 padExpenseRows 호출이 이 값을 넘긴다.
 export const CASH_DEFAULT_CLASSIFICATION: ExpenseRow["classification"] = "소모품등 기타";
 
-// 기본 사용처는 중립값 "그외기타" — 현금지출 사용처에서 쿠팡/네이버를 빼도(현금엔 안 맞음)
-// 기본값이 목록에 없어 빈 칸으로 보이는 일이 없게 한다. 카드는 필요 시 쿠팡/네이버를 직접 고른다.
+// 기본 사용처는 두 시트가 다르다(사용자 지시 2026-08-04).
+// · 카드지출 → "쿠팡" (실제로 가장 많이 쓰는 곳이라 매번 고르지 않게 한다)
+// · 현금지출 → "그외기타" (현금 사용처 목록에는 쿠팡/네이버가 없다 — 온라인 결제라 카드 전용이다.
+//   여기에 쿠팡을 기본값으로 두면 목록에 없는 값이 들어가 칸이 비어 보인다.)
+export const CARD_DEFAULT_USAGE: ExpenseRow["usage"] = "쿠팡";
+export const CASH_DEFAULT_USAGE: ExpenseRow["usage"] = "그외기타";
+
 export const createEmptyExpenseRow = (
-  classification: ExpenseRow["classification"] = "식재료"
+  classification: ExpenseRow["classification"] = "식재료",
+  usage: ExpenseRow["usage"] = CARD_DEFAULT_USAGE
 ): ExpenseRow => ({
   classification,
-  usage: "그외기타",
+  usage,
   detail: "",
   amount: ""
 });
@@ -101,10 +107,12 @@ export const isExpenseRowBlank = (row: ExpenseRow): boolean =>
  */
 export const padExpenseRows = (
   rows: unknown,
-  defaultClassification?: ExpenseRow["classification"]
+  defaultClassification?: ExpenseRow["classification"],
+  defaultUsage?: ExpenseRow["usage"]
 ): ExpenseRow[] => {
   const source = Array.isArray(rows) ? (rows as ExpenseRow[]) : [];
-  const next = source.map((row) => ({ ...createEmptyExpenseRow(defaultClassification), ...row }));
-  while (next.length < MIN_EXPENSE_ROWS) next.push(createEmptyExpenseRow(defaultClassification));
+  const blank = () => createEmptyExpenseRow(defaultClassification, defaultUsage);
+  const next = source.map((row) => ({ ...blank(), ...row }));
+  while (next.length < MIN_EXPENSE_ROWS) next.push(blank());
   return next;
 };

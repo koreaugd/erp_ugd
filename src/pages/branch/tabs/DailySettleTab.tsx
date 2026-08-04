@@ -12,7 +12,7 @@ import { formatNumber } from "../../../utils/formatNumber";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { ExpenseGrid } from "../components/ExpenseGrid";
-import { CASH_DEFAULT_CLASSIFICATION, getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
+import { CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE, getExpenseRowProblem, isExpenseRowFilled, isExpenseRowIncomplete, padExpenseRows } from "../helpers/expenseRows";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 import { createDailySettleValidationTargets, createEmployeeFromStaffRow, createStaffAddDraft, employeeNameKey, getAddReasonChoiceClass, getDailyStaffValidationKey, isSampleEmployee, needsOvertimeReason, normalizeRosterEmployee, parseStaffAddReasonChoice, shouldSkipDailyRosterRegistration, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
@@ -146,7 +146,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 
   // Expenses — 시트처럼 빈 행을 미리 깔아두고, 마지막 행을 채우면 아래로 자동 증식한다.
   // 현금지출 새 행 기본 분류 = "소모품등 기타"(사용자 지시 2026-08-04). 카드는 기본값("식재료") 그대로.
-  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
+  const [cashExpenses, setCashExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
   const [cardExpenses, setCardExpenses] = useState<ExpenseRow[]>(() => padExpenseRows([]));
 
   // Personnel List states
@@ -231,7 +231,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       setStaffMemo(draft.staffMemo || "");
       setReviewMemo(draft.reviewMemo || "");
       setOtherMemo(draft.otherMemo || "");
-      setCashExpenses(padExpenseRows(draft.cashExpenses, CASH_DEFAULT_CLASSIFICATION));
+      setCashExpenses(padExpenseRows(draft.cashExpenses, CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
       setCardExpenses(padExpenseRows(draft.cardExpenses));
       setStaffRows(Array.isArray(draft.staffRows) ? draft.staffRows : []);
       return true;
@@ -587,7 +587,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           if (metadataParsed) {
             // Restore from perfect JSON metadata
             setStaffRows(isHeadOffice ? distributeHeadOfficeOvertime(metadataParsed.staffRows || []) : metadataParsed.staffRows || []);
-            setCashExpenses(padExpenseRows(metadataParsed.cashExpenses, CASH_DEFAULT_CLASSIFICATION));
+            setCashExpenses(padExpenseRows(metadataParsed.cashExpenses, CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
             setCardExpenses(padExpenseRows(metadataParsed.cardExpenses));
             setCashBalance(metadataParsed.cashBalance !== undefined ? String(metadataParsed.cashBalance) : "");
             setNaverReviewCount(metadataParsed.naverReviewCount !== undefined ? String(metadataParsed.naverReviewCount) : "");
@@ -624,7 +624,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                 };
               });
 
-            setCashExpenses(padExpenseRows(savedCashExps, CASH_DEFAULT_CLASSIFICATION));
+            setCashExpenses(padExpenseRows(savedCashExps, CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
             setCardExpenses(padExpenseRows(savedCardExps));
 
              // Map staff from fallback
@@ -690,7 +690,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setDeliverySales("");
           setNaverReviewCount("");
           setExistingRecordHadNaverReview(false);
-          setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
+          setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
           setCardExpenses(padExpenseRows([]));
           setMemo("");
           setCashBalance("");
@@ -1322,8 +1322,14 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         }
         localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(mergedRoster));
         if (needsRemoteSave) {
-          await gasClient.saveBranchOwnRoster(branchName, mergedRoster);
+          const result = await gasClient.saveBranchOwnRoster(branchName, mergedRoster);
           localStorage.removeItem(staffListPendingStorageKey(branchName));
+          // 다른 지점으로 옮겨진 사람이 근무자 목록에 이름으로 남아 자동 등록되려다 서버에서 제외된 경우,
+          // 로컬 저장본을 서버 결과로 맞춘다 — 안 그러면 이 기기에만 남는 유령이 된다(Codex 지적 2026-08-04).
+          if (result.rejected?.length) {
+            localStorage.setItem(staffListStorageKey(branchName), JSON.stringify(result.employees || []));
+            console.warn("[일일마감] 이동·삭제된 직원이 명부 자동 등록에서 제외되었습니다.", result.rejected.map((item: any) => item?.name));
+          }
         }
       } catch (e) {
         console.error("Local roster automatic registration failed:", e);
@@ -1424,7 +1430,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     setDeliverySales("");
     setNaverReviewCount("");
     setExistingRecordHadNaverReview(false);
-    setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION));
+    setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE));
     setCardExpenses(padExpenseRows([]));
     setMemo("");
     setCashBalance("");
@@ -2048,7 +2054,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
                   }
                   setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
                   originalSubmittedByRef.current = { name: "", uid: "" };
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION)); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
+                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE)); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
                   triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
                 }}
                 id="daily-settle-reset-button"

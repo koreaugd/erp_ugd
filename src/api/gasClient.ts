@@ -610,9 +610,37 @@ export const gasClient = {
     return await firebaseGetBranchOwnRosterFromServer(branchName);
   },
 
-  async saveBranchOwnRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[] }> {
+  // rejected = 되살아남 방지 가드에 걸려 저장에서 제외된 직원. 비어 있지 않으면 호출부는
+  // 화면·localStorage 를 서버가 돌려준 employees 로 맞춰야 한다(안 맞추면 이 기기에만 남는 유령이 생긴다).
+  async saveBranchOwnRoster(branchName: string, employees: RosterEmployee[]): Promise<{ success: boolean; employees: RosterEmployee[]; rejected: RosterEmployee[] }> {
     const { firebaseSaveBranchOwnRoster } = await loadFirebaseDirect();
     const result = await firebaseSaveBranchOwnRoster(branchName, employees);
+    clearReadCache();
+    return result;
+  },
+
+  // 지점 명부를 트랜잭션으로 읽고-고치고-쓴다. 연차관리 지점이동/행삭제 전용 —
+  // 미리 읽어둔 명부 위에 저장하면 동시에 저장한 다른 기기의 직원 추가/수정이 유실된다.
+  // mutate가 null을 반환하면 아무것도 쓰지 않는다. mutate는 순수 함수여야 한다(재시도 시 여러 번 호출).
+  // 직원을 명부에서 빼고 '방금 나감' 표시를 남긴다 — 다른 화면의 낡은 통째 저장이 그 직원을 되살리는 것을 막는다.
+  async removeFromBranchOwnRoster(branchName: string, employeeId: string): Promise<{ changed: boolean }> {
+    const { firebaseRemoveFromBranchOwnRoster } = await loadFirebaseDirect();
+    const result = await firebaseRemoveFromBranchOwnRoster(branchName, employeeId);
+    clearReadCache();
+    return result;
+  },
+
+  // 직원을 명부에 넣고 그 사람의 '나감' 표시를 푼다(정식 합류).
+  async addToBranchOwnRoster(branchName: string, employee: RosterEmployee): Promise<{ changed: boolean }> {
+    const { firebaseAddToBranchOwnRoster } = await loadFirebaseDirect();
+    const result = await firebaseAddToBranchOwnRoster(branchName, employee);
+    clearReadCache();
+    return result;
+  },
+
+  async mutateBranchOwnRoster(branchName: string, mutate: (employees: RosterEmployee[]) => RosterEmployee[] | null): Promise<{ changed: boolean; employees: RosterEmployee[] }> {
+    const { firebaseMutateBranchOwnRoster } = await loadFirebaseDirect();
+    const result = await firebaseMutateBranchOwnRoster(branchName, mutate);
     clearReadCache();
     return result;
   },
@@ -631,6 +659,16 @@ export const gasClient = {
   async saveSharedData(dataKey: string, value: unknown): Promise<{ success: boolean }> {
     const { firebaseSaveSharedData } = await loadFirebaseDirect();
     const result = await firebaseSaveSharedData(dataKey, value);
+    clearReadCache();
+    return result;
+  },
+
+  // 공유데이터를 트랜잭션으로 읽고-고치고-쓴다(요일 슬롯 백업 포함). "현재 값 기준 일부 수정" 저장 전용 —
+  // 읽어둔 값 위에 saveSharedData 하면 그 사이 다른 기기의 저장분이 통째로 사라진다.
+  // mutate가 null을 반환하면 아무것도 쓰지 않는다. mutate는 순수 함수여야 한다(재시도 시 여러 번 호출).
+  async mutateSharedData<T = unknown>(dataKey: string, mutate: (current: T | null) => T | null): Promise<{ changed: boolean }> {
+    const { firebaseMutateSharedData } = await loadFirebaseDirect();
+    const result = await firebaseMutateSharedData(dataKey, mutate as (current: unknown) => unknown | null);
     clearReadCache();
     return result;
   },

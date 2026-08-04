@@ -208,7 +208,7 @@ export default function BranchConfirmPage() {
 
   // Loaded if selectedBranch is present
   return (
-    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={user.role === "admin"} allowedTabs={user.allowedTabs} loginType={user.loginType} />
+    <ActiveWorkspace branch={selectedBranch} logout={logout} selectBranch={selectBranch} activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={user.role === "admin"} userRole={user.role} allowedBranches={user.allowedBranches} allowedTabs={user.allowedTabs} loginType={user.loginType} />
   );
 }
 
@@ -222,11 +222,15 @@ interface WorkspaceProps {
   activeTab: BranchDailyTab;
   setActiveTab: (tab: BranchDailyTab) => void;
   isAdmin: boolean;
+  /** 계정 역할 — 연차관리처럼 '지점관리자 이상만 작성' 인 화면이 이 값으로 갈린다(2026-08-04 사용자 지시). */
+  userRole: string;
+  /** 이 계정이 다룰 수 있는 지점. 연차관리 지점이동의 **보낼 수 있는 곳**을 이 목록으로 제한한다. */
+  allowedBranches: string[] | "all";
   allowedTabs: string[] | "all";
   loginType: "personal" | "pin";
 }
 
-function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin, allowedTabs, loginType }: WorkspaceProps) {
+function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin, userRole, allowedBranches, allowedTabs, loginType }: WorkspaceProps) {
   const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
   const isHeadOfficeBranch = activeBranchName === "본사";
@@ -741,7 +745,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                 {activeTab === "roster" && <RosterTab branchName={activeBranchName} />}
                 {activeTab === "officeWorkLog" && <OfficeWorkLogTab branchName={activeBranchName} />}
                 {activeTab === "overtimeLog" && <OvertimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
-                {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
+                {activeTab === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} canWrite={userRole === "admin" || userRole === "branchAdmin"} moveTargets={userRole === "admin" ? "all" : allowedBranches} />}
                 {activeTab === "partTimeLog" && <PartTimeLogTab branchName={activeBranchName} isAdmin={isAdmin} />}
               </motion.div>
             </AnimatePresence>
@@ -755,7 +759,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
             />
           )}
 
-          {contentAllowed && mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} />}
+          {contentAllowed && mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} canWrite={userRole === "admin" || userRole === "branchAdmin"} moveTargets={userRole === "admin" ? "all" : allowedBranches} />}
 
           {contentAllowed && mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
 

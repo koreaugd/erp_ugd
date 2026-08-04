@@ -11,6 +11,8 @@ import { formatNumber } from "../../../utils/formatNumber";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import {
   CASH_DEFAULT_CLASSIFICATION,
+  CASH_DEFAULT_USAGE,
+  CARD_DEFAULT_USAGE,
   CASH_USAGES,
   EXPENSE_CLASSIFICATIONS,
   EXPENSE_USAGES,
@@ -82,9 +84,12 @@ export function ExpenseGrid({
   const style = VARIANT_STYLE[variant];
   const errorRows = new Set(errorRowIndexes);
 
-  // 현금지출의 새 행 기본 분류는 "소모품등 기타"(사용자 지시 2026-08-04) — 카드는 종전대로 "식재료".
+  // 새 행 기본값은 시트마다 다르다(사용자 지시 2026-08-04).
+  // · 현금 → 분류 "소모품등 기타" / 사용처 "그외기타"(현금 목록엔 쿠팡·네이버가 없다)
+  // · 카드 → 분류 "식재료"(종전) / 사용처 "쿠팡"
   const defaultClassification = variant === "cash" ? CASH_DEFAULT_CLASSIFICATION : undefined;
-  const newEmptyRow = () => createEmptyExpenseRow(defaultClassification);
+  const defaultUsage = variant === "cash" ? CASH_DEFAULT_USAGE : CARD_DEFAULT_USAGE;
+  const newEmptyRow = () => createEmptyExpenseRow(defaultClassification, defaultUsage);
 
   // 현금지출 사용처에서는 쿠팡·네이버를 뺀다 — 온라인 결제라 카드에서만 쓰는 항목이다.
   const usageOptions = variant === "cash" ? CASH_USAGES : EXPENSE_USAGES;
@@ -149,7 +154,7 @@ export function ExpenseGrid({
   };
 
   const removeRow = (rowIndex: number) => {
-    onRowsChange((prev) => padExpenseRows(prev.filter((_, i) => i !== rowIndex), defaultClassification));
+    onRowsChange((prev) => padExpenseRows(prev.filter((_, i) => i !== rowIndex), defaultClassification, defaultUsage));
   };
 
 
