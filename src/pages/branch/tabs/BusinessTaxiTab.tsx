@@ -23,15 +23,18 @@ import { KAKAO_BRANCH_ALIASES } from "../../admin/helpers/kakaoTaxi";
 // 오류/반려 표시는 DESIGN.md §11 오류색 hex 를 직접 쓴다(rose 계열은 스코프 치환으로 뒤집힐 수 있음).
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
 
-// 상태 알약. 지점 화면 색 규칙(DESIGN.md)을 따른다 —
-// 완료·긍정은 honey(#CFDECA), 주의·미확인은 vanilla(#EFF0A3), 처리 중은 alice(#D8DFE9).
+// 상태 알약. 지점 화면 색 규칙(DESIGN.md §11)을 따른다 —
+// 완료·긍정은 honey, 주의·미확인은 vanilla, 처리 중은 alice.
+// [P0] 상태 칩은 **옛 진한 값을 hex 로 박는다** — 토큰(var(--branch-*))을 참조하면 팔레트 개정
+// (2026-08-04, 토큰이 연한 값으로 바뀜)에 딸려가 연한 바탕과 구분이 사라진다(실제 발생, Codex 지적).
+// 상태 칩은 §2-1 "원래 채도 유지" 대상이라 팔레트 개정에서 의도적으로 제외한다.
 // 반려만 오류색을 쓴다(이 화면의 ERROR_BANNER 와 같은 계열).
 const STATUS_PILL = "inline-block w-fit rounded-full px-2 py-0.5 text-[11px] font-black";
 const STATUS_CHIP: Record<string, string> = {
-  waiting: `${STATUS_PILL} bg-[var(--branch-vanilla)] text-[#212121]`,
-  done: `${STATUS_PILL} bg-[var(--branch-honey)] text-[#212121]`,
+  waiting: `${STATUS_PILL} bg-[#EFF0A3] text-[#212121]`,
+  done: `${STATUS_PILL} bg-[#CFDECA] text-[#212121]`,
   rejected: `${STATUS_PILL} bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]`,
-  processing: `${STATUS_PILL} bg-[var(--branch-alice)] text-[#212121]`,
+  processing: `${STATUS_PILL} bg-[#D8DFE9] text-[#212121]`,
   // 판단할 근거가 없을 때. 좋다·나쁘다를 말하지 않는 중립 회색이라 오해를 만들지 않는다.
   unknown: `${STATUS_PILL} border border-gray-200 bg-[var(--branch-ghost)] text-[#212121]/70`,
 };
@@ -609,8 +612,13 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   return (
     <div className="space-y-6">
       {/* ---------- 이용신청 ---------- */}
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <h3 className="branch-pill-title">비즈니스택시 이용신청</h3>
+      {/* 제목 밴드 = 지점 표준(index.css `.branch-band*`) — 2026-08-03 사용자 지시.
+          카드에 padding 을 주지 않는다(밴드가 폭을 꽉 채워야 한다) — 본문이 자기 여백을 갖는다. */}
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">비즈니스택시 이용신청</h3>
+        </div>
+        <div className="p-4 space-y-4">
         <p className="text-[11px] font-bold text-[#212121]/60">
           직원을 등록하면 <b>바로 카카오T 비즈니스에 등록</b>되고 직원 휴대폰으로 <b>인증 알림톡</b>이 발송됩니다(관리자 승인 없이 즉시 처리).
           직원이 카카오T 앱에서 인증을 마치면 아래 '등록된 인원'에 표시됩니다. 그룹(지점)은 지점명으로 자동 지정됩니다.
@@ -629,34 +637,39 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           className="h-8 rounded-lg bg-slate-800 px-3 text-[11px] font-black text-white disabled:opacity-50">
           {saving ? "등록 중..." : "등록하고 인증 알림톡 보내기"}
         </button>
+        </div>
       </section>
 
       {/* ---------- 우리 지점 등록 인원 ---------- */}
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h3 className="branch-pill-title">등록된 인원 ({branchName})</h3>
-          <button onClick={() => void load(true)} disabled={loading}
-            className="h-8 rounded-lg border border-gray-200 bg-white px-3 text-[11px] font-black text-[#212121] disabled:opacity-50">새로고침</button>
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">등록된 인원 ({branchName})</h3>
+          <div className="branch-band-actions">
+            <button onClick={() => void load(true)} disabled={loading}
+              className="h-8 rounded-full border border-[#212121] bg-white px-3.5 text-[11px] font-black text-[#212121] cursor-pointer disabled:opacity-50">새로고침</button>
+          </div>
         </div>
-        {membersError && <div className={ERROR_BANNER}>{membersError}</div>}
+        {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다(관리자와 같은 모양).
+            표 아닌 블록(오류 배너·로딩)만 자기 여백(mx-4)을 갖는다. */}
+        {membersError && <div className={`mx-4 my-3 ${ERROR_BANNER}`}>{membersError}</div>}
         {loading && members === null && !membersError && <div className="py-10 text-center"><LoadingSpinner size="md" /></div>}
         {members !== null && (
           <>
-            <div className="overflow-x-auto rounded-2xl border border-gray-100">
-              <table className="w-full text-xs whitespace-nowrap">
+            <div className="branch-sheet-scroll">
+              <table className="branch-sheet">
                 {/* 입력 칸은 '요청' 오른쪽에 컬럼으로 세운다(사용자 지시 2026-07-29) —
                     종류를 고른 뒤 오른쪽으로 이어서 적는 순서가 되고, 행끼리 칸이 세로로 맞는다. */}
                 <thead><tr className="text-left">
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이름</th>
+                  <th>이름</th>
                   {/* 부서(지점) — 이용내역이 어느 지점으로 잡히는지가 이 값으로 정해진다.
                       지점명과 다르게 적혀 있으면 그 사람 이용이 엉뚱한 곳으로 집계되므로 눈으로 확인할 수 있게 둔다. */}
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">부서(지점)</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">요청</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">옮겨간 지점</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이동일</th>
-                  <th className="px-3 py-2 text-[11px] font-black text-[#212121]">사유</th>
+                  <th>부서(지점)</th>
+                  <th>휴대전화</th>
+                  <th>상태</th>
+                  <th>요청</th>
+                  <th>옮겨간 지점</th>
+                  <th>이동일</th>
+                  <th>사유</th>
                 </tr></thead>
                 <tbody>
                   {members.map((m) => {
@@ -766,18 +779,19 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           누가 현역인지 알 수 없다(사용자 지시 2026-07-31). 대신 여기 따로 모아,
           복귀했을 때 **이용재개를 신청할 통로**를 만든다(지점은 스스로 풀 수 없다). */}
       {blockedMembers.length > 0 && (
-        <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-          <h3 className="branch-pill-title">이용중지 인원 — {blockedMembers.length}명</h3>
-          <p className="text-[11px] font-bold text-[#212121]/60">
-            퇴사·휴직 등으로 이용이 중지된 인원입니다. 복귀했다면 다시 등록하지 말고 아래에서 이용재개를 신청해주세요.
-          </p>
-          <div className="overflow-x-auto rounded-2xl border border-gray-100">
-            <table className="w-full text-xs whitespace-nowrap">
+        <section className="branch-sheet-card">
+          <div className="branch-band">
+            <h3 className="branch-band-title">이용중지 인원 — {blockedMembers.length}명</h3>
+            <p className="branch-band-meta">퇴사·휴직 등으로 이용이 중지된 인원입니다. 복귀했다면 다시 등록하지 말고 아래에서 이용재개를 신청해주세요.</p>
+          </div>
+          {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다. */}
+          <div className="branch-sheet-scroll">
+            <table className="branch-sheet">
               <thead><tr className="text-left">
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">이름</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">휴대전화</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">부서(지점)</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">요청</th>
+                <th>이름</th>
+                <th>휴대전화</th>
+                <th>부서(지점)</th>
+                <th>요청</th>
               </tr></thead>
               <tbody>
                 {blockedMembers.map((m) => {
@@ -809,18 +823,21 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
       )}
 
       {/* ---------- 신청 현황 ---------- */}
-      <section className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-        <h3 className="branch-pill-title">신청 현황{pendingCount ? ` — 대기 ${pendingCount}건` : ""}</h3>
-        {requestsError && <div className={ERROR_BANNER}>{requestsError}</div>}
+      <section className="branch-sheet-card">
+        <div className="branch-band">
+          <h3 className="branch-band-title">신청 현황{pendingCount ? ` — 대기 ${pendingCount}건` : ""}</h3>
+        </div>
+        {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다. */}
+        {requestsError && <div className={`mx-4 my-3 ${ERROR_BANNER}`}>{requestsError}</div>}
         {requests !== null && (
-          <div className="overflow-x-auto rounded-2xl border border-gray-100">
-            <table className="w-full text-xs whitespace-nowrap">
+          <div className="branch-sheet-scroll">
+            <table className="branch-sheet">
               <thead><tr className="text-left">
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">신청일</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">종류</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">대상</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">상태</th>
-                <th className="px-3 py-2 text-[11px] font-black text-[#212121]">비고</th>
+                <th>신청일</th>
+                <th>종류</th>
+                <th>대상</th>
+                <th>상태</th>
+                <th>비고</th>
               </tr></thead>
               <tbody>
                 {requests.map((r) => (

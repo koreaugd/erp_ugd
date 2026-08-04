@@ -159,7 +159,7 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
               {/* 말풍선 꼬리 — below=위, above=아래, right=왼쪽을 가리킨다. below/above 가로 위치는 arrowX(measure), right는 CSS 세로 중앙. */}
               {spot.placement === "below" && (
                 <div
-                  className="absolute w-3 h-3 bg-[#EFF0A3] border-l-2 border-t-2 border-rose-600 rotate-45"
+                  className="absolute w-3 h-3 bg-[#F4F2CC] border-l-2 border-t-2 border-rose-600 rotate-45"
                   style={{ top: -8, left: spot.arrowX }}
                 />
               )}
@@ -176,7 +176,7 @@ export function GuideCallouts({ open, steps, onClose }: { open: boolean; steps: 
                   style={{ left: -8, top: "50%" }}
                 />
               )}
-              <div className="relative flex justify-between items-center gap-2 px-3.5 py-2 bg-[#EFF0A3] border-b-2 border-rose-600 rounded-t-xl">
+              <div className="relative flex justify-between items-center gap-2 px-3.5 py-2 bg-[#F4F2CC] border-b-2 border-rose-600 rounded-t-xl">
                 <strong className="text-[12px] font-black text-zinc-900">{step.title}</strong>
                 <button
                   onClick={() => setDismissed((prev) => [...prev, spot.id])}

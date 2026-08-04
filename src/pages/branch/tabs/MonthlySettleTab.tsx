@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/MonthlySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AlertTriangle, BookOpen, CheckCircle2, Pencil, Trash2, X } from "lucide-react";
+import { AlertTriangle, BookOpen, Check, CheckCircle2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch } from "../../../utils/salaryAccess";
@@ -16,6 +16,7 @@ import { MonthlyCashExpensesSubTab } from "./MonthlyCashExpensesSubTab";
 import { MonthlyCashManagementSubTab } from "./MonthlyCashManagementSubTab";
 import { MonthlyCardExpensesSubTab } from "./MonthlyCardExpensesSubTab";
 import { SalesSummarySection, isSalesSummaryDataInvalid, loadSalesSummaryForClose } from "./SalesSummarySection";
+import { SheetKeyHint } from "../../../components/SheetKeyHint";
 
 // 섹션별 독립 마감: 정직원 급여대장 / 매입매출(거래처) / 매출집계 / 파트타이머 급여대장
 type CloseSection = "purchase" | "salary" | "salesSummary" | "partTimeSalary";
@@ -141,6 +142,13 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   // monthly_closings 저장 직렬화 큐: 연속 마감의 read-modify-write가 겹치지 않도록 한다.
   const closeWriteChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // 매입집계 '매입 업체 추가' — 버튼은 밴드(부모)에, 행 추가 동작은 자식 탭에 있어 ref 로 잇는다(2026-08-04).
+  const purchaseAddRowRef = useRef<(() => void) | null>(null);
+  // 정직원 급여대장 '직원 추가' — 같은 패턴(2026-08-04).
+  const fulltimeAddRowRef = useRef<(() => void) | null>(null);
+  // 초과근무 누적 참고 박스는 버튼을 눌렀을 때만 펼친다(2026-08-04).
+  const [showOtSummary, setShowOtSummary] = useState(false);
 
   const saveSectionClose = useCallback(async (section: CloseSection, status: "confirmed" | "editing" | "pending", reason = "", opts: { restore?: boolean; resetConfirm?: boolean; cancelEdit?: boolean } = {}) => {
     const now = new Date().toISOString();
@@ -598,33 +606,89 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     );
   };
 
+  // 결산월 선택기. 종전에는 현금관리·현금지출·카드지출 위에 "결산월 선택:" 한 줄이 따로 떠 있어
+  // 표 카드와 따로 노는 덩어리가 됐다. 이제 각 탭의 제목 밴드 안 필터 자리에 넣는다(DESIGN.md §6-3).
+  // 모양(28px·11px·알약·흰 바탕)은 `.branch-band-filters` 가 !important 로 강제하므로 여기서 적지 않는다.
+  const renderMonthPicker = () => (
+    <div className="branch-band-filters">
+      <input
+        type="month"
+        value={selectedMonth}
+        onChange={(e) => setSelectedMonth(e.target.value)}
+        aria-label="결산월 선택"
+        title="결산월 선택"
+      />
+    </div>
+  );
+
   // 월말마감 헤더(제목 pill + 결산월 선택 + 마감버튼 + 제출상태). 카드 안/밖 어디서든 재사용.
   const renderPortalHeader = () => (
-    <div className="space-y-3">
-      {/* 위쪽 기준선 정렬(items-start) — md:items-center로 두면 왼쪽 설명문이 짧거나 비었을 때
-          제목 필이 오른쪽 2줄(결산월+제출상태)의 세로 중앙으로 내려앉아 결산월 선택과 어긋나 보인다. */}
-      <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-      <div className="space-y-2">
+    <>
+      {/* 제목 밴드 = 지점 표준(index.css `.branch-band*`, 관리자 §4-0 과 같은 문법 — 2026-08-03 사용자 지시).
+          예전엔 왼쪽 알약 제목과 오른쪽 2줄(결산월·제출상태)이 서로 다른 세로선에 걸려 어긋나 보였다.
+          이제 한 줄 안에서 제목 → 결산월(필터) → 설명 → 제출상태·마감버튼 순으로 자리가 고정된다. */}
+      <div className="branch-band">
         {/* 매입매출 탭에서는 위쪽 '매출집계'와 짝이 되도록 '매입집계'로, 정직원급여 탭에서는 탭 이름 그대로 부른다. */}
-        <div className="inline-flex items-center px-3.5 py-1.5 rounded-full border border-zinc-900 bg-[#EFF0A3] text-zinc-900 text-[13px] font-black leading-none">
+        <h3 className="branch-band-title">
           {activeSubTab === "purchaseSales" ? "매입집계" : "정직원 급여대장"}
-        </div>
-        <p className="text-[10px] text-gray-400 font-bold max-w-md">
-          {adminSettings.monthlyReportDesc}
-        </p>
-      </div>
-
-      {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") && (
-        <div className="flex flex-col items-end gap-2 w-full md:w-auto self-end md:self-auto">
-          <div className="flex flex-wrap items-center gap-3 justify-end">
-            <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
+        </h3>
+        {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") && (
+          <div className="branch-band-filters">
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              style={{ color: adminSettings.monthlyAccentColor }}
-              className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
+              aria-label="결산월 선택"
+              title="결산월 선택"
             />
+            {/* 업체/직원 추가·자동저장 — 월 필터 오른쪽(사용자 지시 2026-08-04).
+                버튼 모양(월 필터와 같은 흰 알약)은 `.branch-band-filters` CSS 가 자동으로 입힌다.
+                동작은 자식 탭 것이라 ref 로 건네받는다(밴드는 부모가, 표는 자식이 그리므로). */}
+            {activeSubTab === "purchaseSales" && (
+              <button
+                type="button"
+                onClick={() => purchaseAddRowRef.current?.()}
+                disabled={getSectionStatus("purchase") === "confirmed"}
+                className="flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-3.5 h-3.5" /> 매입 업체 추가
+              </button>
+            )}
+            {/* 정직원용 버튼은 급여 잠금(역할 권한 + 비밀번호)이 풀린 동안만 그린다 — 밴드는 게이트
+                **밖**이라, 잠긴 채 노출하면 게이트를 우회해 급여 행을 만드는 통로가 된다(Codex P0 2026-08-04).
+                표 자체가 게이트 뒤라 잠기면 버튼이 가리키는 대상도 없다. */}
+            {activeSubTab === "fullTimeSalary" && canReadSalaryBranch(user, branchName) && salaryUnlocked && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => fulltimeAddRowRef.current?.()}
+                  disabled={getSectionStatus("salary") === "confirmed"}
+                  className="flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-3.5 h-3.5" /> 직원 추가
+                </button>
+                {/* 초과근무 참고는 상시 노출 대신 버튼 토글 — 눌린 상태 색은 aria-pressed CSS 가 준다.
+                    바탕은 표 머리글과 같은 엘리스(band-filter-accent) — 입력 버튼이 아니라 '보기' 버튼임을 가른다. */}
+                <button
+                  type="button"
+                  aria-pressed={showOtSummary}
+                  onClick={() => setShowOtSummary((v) => !v)}
+                  className="band-filter-accent"
+                >
+                  초과근무 확인
+                </button>
+              </>
+            )}
+            <span className={`p-1 px-3.5 rounded-lg text-[11px] font-black flex items-center gap-1 ${getSectionStatus(activeSubTab === "fullTimeSalary" ? "salary" : "purchase") === "confirmed" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>
+              <Check className="w-3.5 h-3.5" /> {getSectionStatus(activeSubTab === "fullTimeSalary" ? "salary" : "purchase") === "confirmed" ? "확정 잠금" : "자동저장"}
+            </span>
+          </div>
+        )}
+        <p className="branch-band-meta">{adminSettings.monthlyReportDesc}</p>
+        {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") && (
+          <div className="branch-band-actions">
+            <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
+            {statusPill(activeSubTab === "fullTimeSalary" ? "salary" : "purchase")}
             {/* '이력 갱신' 버튼은 없앴다 — 탭을 열 때와 결산월을 바꿀 때 자동으로 다시 불러오고,
                 지출·현금관리 탭에서 수정·삭제하면 그쪽에서 refreshHistory를 부른다. 손으로 누를 일이 없다. */}
             {/* 급여 마감 컨트롤은 급여대장 표와 달리 헤더에 있어 SalaryAccessGate로 감싸이지 않는다.
@@ -633,15 +697,9 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             {activeSubTab === "fullTimeSalary" && canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("salary")}
             {activeSubTab === "purchaseSales" && renderCloseControls("purchase")}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
-            {statusPill(activeSubTab === "fullTimeSalary" ? "salary" : "purchase")}
-          </div>
-        </div>
-      )}
+        )}
       </div>
-      {renderReasonBox(activeSubTab === "fullTimeSalary" ? "salary" : "purchase")}
-    </div>
+    </>
   );
 
   return (
@@ -675,7 +733,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
               aria-pressed={guideOpen}
               title={loading ? "화면을 불러오는 중입니다" : undefined}
               className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                guideOpen ? "bg-zinc-900 text-[#EFF0A3]" : "bg-[#EFF0A3] text-zinc-900 hover:brightness-95"
+                guideOpen ? "bg-zinc-900 text-[#F4F2CC]" : "bg-[#F4F2CC] text-zinc-900 hover:brightness-95"
               }`}
             >
               <BookOpen className="w-3.5 h-3.5" /> {guideOpen ? "작성방법 닫기" : "작성방법 보기"}
@@ -707,10 +765,21 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       )}
 
       {(activeSubTab === "purchaseSales" || activeSubTab === "fullTimeSalary") ? (
-        /* 월말마감: 헤더 + 내용(거래처/급여대장)을 한 카드로 묶음 (구분선 없음) */
-        /* 여백은 위쪽 매출집계 카드(p-6)와 같아야 두 카드의 제목 pill이 같은 세로선에 선다. */
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-5">
+        /* 월말마감: 제목 밴드 + 내용(거래처/급여대장)을 한 표준 카드로 묶음(DESIGN.md §6-3).
+           카드에 padding 을 주지 않는다 — 표 머리글이 밴드(또는 밴드 연장 줄)에 **바로 붙어야**
+           관리자 화면과 같은 모양이 된다(사용자 지시 2026-08-04). 예전 p-4 래퍼가 표를 카드 안
+           떠 있는 상자로 보이게 한 원인이었다. 사유 상자·스피너 같은 표 아닌 내용만 자기 여백을 갖는다. */
+        /* 키 이동 칩은 제목 밴드 상단선에 걸친다(사용자 지시 2026-08-04). 카드는 overflow:hidden 이라
+           카드 안에서 위로 내밀면 잘린다 — 카드 **밖** relative 래퍼를 기준으로 띄워야 한다. */
+        <div className="relative">
+          <SheetKeyHint />
+          <div className="branch-sheet-card">
           {renderPortalHeader()}
+          {(() => {
+            // reasonBox 가 없을 때 빈 여백 div 를 남기면 밴드-표 붙임이 깨진다 — 있을 때만 감싼다.
+            const rb = renderReasonBox(activeSubTab === "fullTimeSalary" ? "salary" : "purchase");
+            return rb ? <div className="px-4 pt-4">{rb}</div> : null;
+          })()}
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center space-y-3">
               <LoadingSpinner size="lg" />
@@ -719,11 +788,12 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           ) : activeSubTab === "fullTimeSalary" ? (
             // 역할 권한 → 비밀번호 두 관문을 통과해야 표가 마운트된다(설계서 §15.4).
             <SalaryAccessGate branchName={branchName} title="정직원 급여대장 - 보안 잠금" guideAnchor="fulltime-salary-table">
-              <MonthlyFullTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} isLocked={getSectionStatus("salary") === "confirmed"} />
+              <MonthlyFullTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} isLocked={getSectionStatus("salary") === "confirmed"} registerAddRow={(fn) => { fulltimeAddRowRef.current = fn; }} showOtSummary={showOtSummary} />
             </SalaryAccessGate>
           ) : (
-            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} isLocked={getSectionStatus("purchase") === "confirmed"} />
+            <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} isLocked={getSectionStatus("purchase") === "confirmed"} registerAddRow={(fn) => { purchaseAddRowRef.current = fn; }} />
           )}
+          </div>
         </div>
       ) : (
         <>
@@ -741,71 +811,44 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
                   종전에는 매입매출·정직원급여 헤더에만 있어서, 이 세 탭은 지난달을 볼 방법이 없었다.
                   (그 헤더는 '매입집계/정직원 급여대장' 제목과 마감 버튼이 함께 있어 여기서는 못 쓴다 —
                   선택기만 같은 모양으로 따로 둔다. 값은 같은 selectedMonth 라 탭을 옮겨도 유지된다.) */}
-              {(activeSubTab === "cashExpenses" || activeSubTab === "cashManagement" || activeSubTab === "cardExpenses") && (
-                <div className="flex flex-wrap items-center justify-end gap-3">
-                  <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
-                  {/* [주의] 모서리 클래스(rounded-*)는 여기서 쓰지 않는다 — 지점 화면 전역 규칙
-                      `.branch-redesign input/select/textarea { border-radius: 18px !important }`
-                      (index.css)가 이겨서 **렌더에 반영되지 않는다**(DESIGN.md §9-1 함정 1).
-                      적어 두면 바뀐 줄 알고 넘어가게 된다. 지점 입력칸은 18px 이 공통 모양이므로
-                      ID 특이성으로 억지로 이기지 않는다 — 그러면 이 칸만 다른 화면이 된다. */}
-                  <input
-                    type="month"
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    aria-label="결산월 선택"
-                    style={{ color: adminSettings.monthlyAccentColor }}
-                    className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
-                  />
-                </div>
-              )}
               {activeSubTab === "partTimeSalary" && (
                 <>
-                  {/* 결산월 선택 + 파트타이머 마감 컨트롤(제출/수정/취소) + 제출상태 — 정직원급여 헤더와 같은 구성(사용자 지시 2026-08-01).
-                      종전에는 이 탭에 월 선택이 없어 지난달 급여대장을 볼 방법이 없었다.
-                      마감 버튼은 정직원 헤더와 같은 이중 방어 — 역할·지점 권한 + 비밀번호 해제를 모두 통과해야 보인다
-                      (각 핸들러의 fail-closed 가드와 별개로, 잠긴 채 마감을 눌러 급여를 읽고 쓰는 우회를 막는다).
-                      월 선택기 자체는 가드 밖에 둔다 — 급여 내용을 드러내지 않고, 표는 어차피 SalaryAccessGate 뒤에 있다. */}
-                  <div className="flex flex-col items-end gap-2">
-                    <div className="flex flex-wrap items-center gap-3 justify-end">
-                      <span className="text-xs font-black text-gray-500 whitespace-nowrap">결산월 선택:</span>
-                      {/* 모서리 클래스는 쓰지 않는다 — 지점 전역 input 18px 규칙이 이긴다(위 세 탭 선택기와 동일, DESIGN.md §9-1). */}
-                      <input
-                        type="month"
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(e.target.value)}
-                        aria-label="결산월 선택"
-                        style={{ color: adminSettings.monthlyAccentColor }}
-                        className="h-8 px-2 bg-zinc-50 hover:bg-zinc-100/50 border border-gray-200 text-[11px] font-bold shadow-inner focus:outline-none cursor-pointer"
-                      />
-                      {canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("partTimeSalary")}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
-                      {statusPill("partTimeSalary")}
-                    </div>
-                  </div>
                   {renderReasonBox("partTimeSalary")}
                   {/* 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28). */}
                   <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
+                    {/* 결산월 선택 + 제출상태 + 마감 컨트롤(제출/수정/취소)은 급여대장 카드의 **제목 밴드 안**에 넣는다.
+                        종전에는 카드 위에 옛 회색 입력칸 한 줄이 따로 떠 있어, 밴드로 옮긴 다른 월말 탭들과 혼자 달라 보였다
+                        (DESIGN.md §6-3 — 카드 밖에 뜬 필터 줄은 밴드 필터 자리로 넣는다).
+                        마감 버튼은 정직원 헤더와 같은 이중 방어 — 역할·지점 권한 + 비밀번호 해제를 모두 통과해야 보인다
+                        (각 핸들러의 fail-closed 가드와 별개로, 잠긴 채 마감을 눌러 급여를 읽고 쓰는 우회를 막는다).
+                        [바뀐 점] 월 선택기와 제출상태가 이제 가드 **안**에 있어 잠금 해제 뒤에 보인다 —
+                        어차피 이 탭에서 볼 것은 표뿐이고, 마감 여부는 월말업무 제출현황에서도 확인된다. */}
                     <MonthlyPartTimeSalarySubTab
                       branchName={branchName}
                       selectedMonth={selectedMonth}
                       history={history}
                       triggerToast={triggerToast}
                       isLocked={getSectionStatus("partTimeSalary") === "confirmed" || partTimeSubmitting}
+                      monthPicker={renderMonthPicker()}
+                      bandActions={
+                        <>
+                          <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
+                          {statusPill("partTimeSalary")}
+                          {canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("partTimeSalary")}
+                        </>
+                      }
                     />
                   </SalaryAccessGate>
                 </>
               )}
               {activeSubTab === "cashExpenses" && (
-                <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} />
+                <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} monthPicker={renderMonthPicker()} />
               )}
               {activeSubTab === "cashManagement" && (
-                <MonthlyCashManagementSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} />
+                <MonthlyCashManagementSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={fetchHistory} monthPicker={renderMonthPicker()} />
               )}
               {activeSubTab === "cardExpenses" && (
-                <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} />
+                <MonthlyCardExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} monthPicker={renderMonthPicker()} />
               )}
             </div>
           )}
