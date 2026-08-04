@@ -23,6 +23,8 @@ import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTa
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, ADMIN_TAB_LABELS, type AdminPermKey } from "./admin/adminTabRegistry";
+// 휴업 지점은 관리자 화면에서 감춘다(기록은 지우지 않는다) — 목록·이유는 helpers/closedBranches.ts
+import { getAdminBranchList, isClosedBranch } from "./admin/helpers/closedBranches";
 import {
   Users, CheckCircle2, AlertTriangle,
   Calendar,
@@ -179,7 +181,7 @@ export default function AdminPage() {
       setLoading(true);
       const [list, branches] = await Promise.all([
         gasClient.getDailyList(selectedDate, user.pinHash),
-        gasClient.getBranchList().catch(() => [])
+        getAdminBranchList().catch(() => [])
       ]);
       // 이 응답을 기다리는 사이 더 최신 요청(예: 다른 날짜 선택)이 시작됐다면 무시합니다.
       if (dailyListRequestRef.current !== requestId) return;
@@ -232,7 +234,7 @@ export default function AdminPage() {
     try {
       setAnomalyLoading(true);
       setAnomalyLoadError(false);
-      const branches = await gasClient.getBranchList();
+      const branches = await getAdminBranchList();
       const targets = (Array.isArray(branches) ? branches : []).filter((branch: any) => branch?.role === "branch" && branch.branchName);
       const collected = await Promise.all(targets.map(async (branch) => {
         const cached = anomalyCacheRef.current.get(branch.branchName);
@@ -364,7 +366,7 @@ export default function AdminPage() {
         (async () => {
           const count = isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
             ? await (async () => {
-                const branches = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+                const branches = (await getAdminBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
                 const lists = await Promise.all(branches.map((b: any) =>
                   gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(kakaoTaxiRequestsKey(b.branchName))
                 ));
@@ -398,7 +400,7 @@ export default function AdminPage() {
                 // 공유 캐시 경유(2026-07-29) — 여기서 받은 결과를 법인택시 > 이용내역이 재사용해
                 // 대시보드를 본 직후의 이용내역 클릭이 즉시 뜬다(카카오 재조회 생략).
                 getKakaoTaxiOrdersShared(currentMonth, user?.pinHash || ""),
-                gasClient.getBranchList(),
+                getAdminBranchList(),
                 // 지점 변경 이력 — 이상 점검 탭과 같은 이용일 기준 지점 판정을 쓴다(2026-07-29).
                 // 이력 없이 세면 지점을 옮긴 직원의 미매핑/지점 판정이 탭과 어긋난다. 실패는 아래에서 null 처리.
                 gasClient.getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY)
@@ -515,7 +517,9 @@ export default function AdminPage() {
 
   // 필터 통과한 최종 데이터 목록
   const filteredList = useMemo(() => {
-    return dailyList.filter(item => {
+    // 휴업 지점은 이 목록에도 들어오지 않게 한다 — 지점 목록이 아니라 마감 기록에서 온 행이라
+    // 위 getAdminBranchList 필터가 닿지 않는다(helpers/closedBranches.ts).
+    return dailyList.filter(item => !isClosedBranch(item.branchName)).filter(item => {
       if (selectedBrand === "전체") return true;
       return item.brand === selectedBrand;
     });
@@ -1415,7 +1419,7 @@ function AdminNoticeManager() {
   const load = useCallback(async () => {
     const [saved, branchList] = await Promise.all([
       gasClient.getSharedData<any[]>(noticeStorageKey).catch(() => []),
-      gasClient.getBranchList().catch(() => [])
+      getAdminBranchList().catch(() => [])
     ]);
     setNotices(Array.isArray(saved) ? saved : []);
     setBranches(Array.isArray(branchList) ? branchList : []);
@@ -1708,7 +1712,7 @@ function AdminMonthlyMissingDaysPanel({ month, className, labelClass, valueClass
     setLoadError(false);
     (async () => {
       try {
-        const branchList = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+        const branchList = (await getAdminBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
         const [y, m] = month.split("-").map(Number);
         if (!y || !m) { if (!cancelled) setRows([]); return; }
         const daysInMonth = new Date(y, m, 0).getDate();
@@ -2068,7 +2072,7 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const branchList = await gasClient.getBranchList();
+      const branchList = await getAdminBranchList();
       const activeBranches = (Array.isArray(branchList) ? branchList : []).filter((branch: any) => isMonthlyWorkBranch(branch) && branch.branchName);
       setBranches(activeBranches);
       const targets = selectedBranch === "전체"
@@ -2255,7 +2259,7 @@ function AdminAnnualLeaveSection() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const branchList = await gasClient.getBranchList();
+      const branchList = await getAdminBranchList();
       setBranches(branchList || []);
       const packed = await Promise.all((branchList || []).map(async (branch: any) => {
         const branchName = branch.branchName;
@@ -2851,7 +2855,7 @@ function AdminCashDiffHistorySection() {
     setRows(null);
     setPartialError(false);
     try {
-      const branchList = (await gasClient.getBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
+      const branchList = (await getAdminBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
       let anyFail = false;
       const perBranch = await Promise.all(branchList.map(async (b: any) => {
         // 읽기 실패는 '차이 없음'과 구분한다(fail-closed): null이면 배너로 '일부 누락'을 알린다.
@@ -3029,7 +3033,7 @@ function AdminMonthlyClosingStatusSection() {
     try {
       setLoading(true);
       const [branchList, monthlyRecords] = await Promise.all([
-        gasClient.getBranchList(),
+        getAdminBranchList(),
         gasClient.getSharedData<any[]>("monthly_closings")
       ]);
       setBranches((branchList || []).filter(isMonthlyWorkBranch));
@@ -3253,7 +3257,7 @@ function AdminMonthlyClosingStatusSection() {
     const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
     try {
       const XLSX = await import("xlsx");
-      const allBranches = branches.length ? branches : (await gasClient.getBranchList()).filter(isMonthlyWorkBranch);
+      const allBranches = branches.length ? branches : (await getAdminBranchList()).filter(isMonthlyWorkBranch);
       // 법인별 배치(confirmedOnly): 정직원급여 통합과 동일 기준 — '확정(제출)'한 지점만 내보낸다.
       // 확정 상태는 서버에서 '신선하게' 읽어 fail-closed로 거른다. 화면 캐시(records)로만 거르면 방금 다른 기기에서
       // '수정중/미제출'로 바뀐 지점을 못 걸러, 미확정 매출집계가 최종본처럼 섞여 나갈 수 있다.
@@ -3357,7 +3361,7 @@ function AdminMonthlyClosingStatusSection() {
   // 정직원급여 통합 다운로드(법인/전지점 공용). branchFilter로 대상 지점을 좁히고, label로 파일명/안내문을 정한다.
   const downloadFullTimeSalary = async (branchFilter: (name: string) => boolean, label: string) => {
     try {
-      const branchList = branches.length ? branches : (await gasClient.getBranchList()).filter(isMonthlyWorkBranch);
+      const branchList = branches.length ? branches : (await getAdminBranchList()).filter(isMonthlyWorkBranch);
       // '확정(제출)'한 지점만 포함한다 — 지점별 다운로드 버튼과 같은 기준. 미제출·수정중 지점(예: 한남점)이 섞여 나가지 않게 한다.
       // 확정 판정은 화면 캐시(records)가 아니라 '서버에서 신선하게' 읽는다: 관리자가 새로고침 전이면
       // 방금 다른 기기에서 '수정중/미제출'로 바뀐 지점을 못 걸러 잘못된 통합본이 나갈 수 있다(fail-closed — 못 읽으면 취소).

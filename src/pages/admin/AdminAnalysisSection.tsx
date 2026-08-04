@@ -13,6 +13,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { gasClient } from "../../api/gasClient";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
+// 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
+import { isClosedBranch } from "./helpers/closedBranches";
 import { SalesLineChart, formatCompactWon } from "./SalesLineChart";
 import { PnlScatterChart } from "./PnlScatterChart";
 import { PnlComboChart, PnlHBarChart } from "./PnlBarCharts";
@@ -276,8 +278,14 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
   // [선택한 달 기준] 전 기간에 한 번이라도 나온 지점을 전부 뿌리면, 그 달에 없는 지점(개점 전·폐점 후)까지
   // 고를 수 있어 "데이터가 없습니다"만 뜬다(2026-07-23 사용자 지적 — 대골뼈국은 2026-04 한 달치뿐).
   // 그 달에 행이 있는 지점만 세운다. 달을 바꾸면 목록이 그 달 것으로 갈리고, 선택도 아래 branch 에서 보정된다.
+  // [휴업 지점은 '지점 선택'에서만 뺀다 — 사용자 결정 2026-08-03]
+  // 요약표·순위표·전사 합계에서는 빼지 않는다. 그쪽은 04 db파일을 셀 단위로 재현한 값이라
+  // 한 지점을 덜어내면 **과거 달의 총매출·소계가 원본 엑셀과 달라진다**(결산 검증에 쓰는 숫자다).
+  // 앞으로 그 지점 행은 db파일에 안 들어오므로, 고를 수 있는 목록에서만 감추면 충분하다.
   const branchNames = useMemo(
-    () => Array.from(new Set<string>(curRows.filter((r) => r.지점 !== HQ_NAME).map((r) => r.지점))).sort((a, b) => a.localeCompare(b, "ko")),
+    () => Array.from(new Set<string>(
+      curRows.filter((r) => r.지점 !== HQ_NAME && !isClosedBranch(r.지점)).map((r) => r.지점)
+    )).sort((a, b) => a.localeCompare(b, "ko")),
     [curRows]
   );
   const prevRows = useMemo(() => branchRowsOf(rows, prevMonthOf(month)), [rows, month]);
@@ -304,9 +312,15 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
   const maxProductivity = useMemo(() => Math.max(1e-9, ...curRows.map((r) => productivityOf(r) ?? 0)), [curRows]);
 
   // 지점 탭에서 쓸 지점 — 아직 안 골랐거나 데이터에서 사라졌으면 그 달 매출 1위 지점으로.
+  // [기본값도 반드시 '고를 수 있는 목록(branchNames)' 안에서 고른다]
+  // curRows 에는 휴업 지점·본사 행이 그대로 남아 있다(요약표·합계는 원본 그대로 둬야 하므로).
+  // 거기서 1위를 뽑으면 **드롭다운에 없는 지점이 화면에 떠 버린다** — 감췄다고 생각한 지점이
+  // 기본값으로 되살아나는 셈이다(코덱스 stop-time 2026-08-03).
   const branch = useMemo(() => {
     if (branchPick && branchNames.includes(branchPick)) return branchPick;
-    const top = [...curRows].sort((a, b) => b.총매출 - a.총매출)[0];
+    const top = curRows
+      .filter((r) => branchNames.includes(r.지점))
+      .sort((a, b) => b.총매출 - a.총매출)[0];
     return top?.지점 || branchNames[0] || "";
   }, [branchPick, branchNames, curRows]);
 
