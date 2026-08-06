@@ -109,13 +109,18 @@ function renderHqLine(line: HqStatementLine) {
  * 결산월 드롭다운 — 줄의 **맨 왼쪽**에 둔다(사용자 지시 2026-08-03).
  * "지금 몇 월을 보고 있나"는 화면 해석의 전제라, 오른쪽 끝 도구 묶음에 섞이면 눈에 안 들어온다.
  * 칩 모양·색은 `.admin-band-filters`(흰 바탕)가 정한다 — 여기서 다시 칠하지 않는다.
+ *
+ * 목록은 **최신월이 맨 위**다(사용자 지시 2026-08-06). 실제로 보는 건 거의 언제나 최근 달인데
+ * 오름차순이면 매달 스크롤을 더 내려야 했다. 원본 `months`(오름차순)는 업로드 안내의 기간 표시
+ * (`months[0] ~ 마지막`)와 기본 선택월(`마지막`)이 그대로 쓰므로, 뒤집기는 **표시 직전에만** 한다.
  */
 function AnalysisMonthPicker({ month, months, onChange }: { month: string; months: string[]; onChange: (v: string) => void }) {
   if (months.length === 0) return null;
+  const descending = [...months].reverse();
   return (
     <div className="admin-band-filters">
       <select value={month} onChange={(e) => onChange(e.target.value)} aria-label="결산월 선택">
-        {months.map((m) => <option key={m} value={m}>{m}</option>)}
+        {descending.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
     </div>
   );
