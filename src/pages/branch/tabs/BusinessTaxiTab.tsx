@@ -3,7 +3,7 @@
 // 우리 지점 등록 인원 확인, 인원 수정/삭제 요청(사유 필수), 내 신청 현황을 다룬다.
 // 지점은 카카오를 직접 건드리지 않는다 — 신청만 남기고, 관리자가 법인택시 > 신청 관리에서
 // 승인해야 실제 카카오 등록/삭제가 실행된다(설계서 blueprint-지점-비즈니스택시-신청.md).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gasClient } from "../../../api/gasClient";
 import type { KakaoTaxiMember, KakaoTaxiPhoneCheck } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
@@ -19,6 +19,8 @@ import {
   createBranchHistoryEntry, isKakaoWriteDefinitelyNotExecuted,
 } from "../../admin/helpers/kakaoTaxiBranchHistory";
 import { KAKAO_BRANCH_ALIASES } from "../../admin/helpers/kakaoTaxi";
+// 등록 인원 조회는 이 화면에서 가장 느린 조회다 — 세션 내 공유 캐시로 탭 재진입을 즉시 만든다.
+import { getBranchMembersShared, peekBranchMembers } from "../helpers/kakaoTaxiBranchMembersCache";
 
 // 오류/반려 표시는 DESIGN.md §11 오류색 hex 를 직접 쓴다(rose 계열은 스코프 치환으로 뒤집힐 수 있음).
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
@@ -80,7 +82,13 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   const [requestsError, setRequestsError] = useState("");
   // **서버가 준 그대로**(이용중지 포함). 화면 목록에서는 이용중지를 빼지만, 신청 현황의 상태를
   // 판정할 때는 "목록에 없다(=인증 전)"와 "이용중지됐다"를 갈라야 하므로 원본이 필요하다.
-  const [allMembers, setAllMembers] = useState<KakaoTaxiMember[] | null>(null);
+  // 초기값을 공유 캐시에서 **동기로** 꺼낸다 — 탭을 다시 열었을 때 스피너 없이 바로 표가 뜨고,
+  // 아래 신청 현황의 상태 칸도 처음부터 확정값으로 그려진다(뒤늦게 바뀌지 않는다).
+  const [cachedOnMount] = useState(() => peekBranchMembers(branchName, pinHash));
+  const [allMembers, setAllMembers] = useState<KakaoTaxiMember[] | null>(cachedOnMount?.members ?? null);
+  // 지금 화면의 목록이 **묵은 것**인가(캐시 TTL 이 지나 재조회가 따라붙는 중). 표는 빈 화면보다
+  // 낫기에 그대로 보여주되, 이 값으로 판정하는 신청 현황의 상태는 확정하지 않는다(Codex 2026-08-06).
+  const [membersStale, setMembersStale] = useState(!!cachedOnMount?.stale);
   const [membersError, setMembersError] = useState("");
   // 이용 중지(휴직)된 인원은 지점 화면 목록에 보여주지 않는다(사용자 지시 2026-07-31) —
   // 퇴사 처리한 사람이 목록에 남아 있으면 아직 쓰는 사람으로 오해한다.
@@ -123,9 +131,17 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     return () => { alive = false; };
   }, [branchName]);
 
+  /* 몇 번째 조회인가. **가장 최근 조회만 화면에 쓴다.**
+     '새로고침'은 조회 중에 못 누르지만(버튼 disabled), 등록·전입 성공 뒤의 강제 재조회는
+     그 게이트를 지나지 않는다 — 먼저 떠난 느린 조회가 나중에 도착해 방금 받은 최신 목록을
+     옛 값으로 되돌릴 수 있다(Codex 2026-08-06). 번호가 뒤처진 조회는 결과를 버린다. */
+  const loadSeq = useRef(0);
+
   // forceRefresh=true 는 '새로고침' 버튼 전용 — 백엔드 캐시를 우회해 카카오에서 실시간으로
   // 인원을 다시 읽는다. 직원이 방금 카카오T 인증을 마쳐 목록에 아직 안 뜰 때 즉시 반영하기 위함.
   const load = useCallback(async (forceRefresh?: boolean) => {
+    const seq = ++loadSeq.current;
+    const isCurrent = () => loadSeq.current === seq;
     setLoading(true);
     setRequestsError("");
     setMembersError("");
@@ -136,21 +152,30 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     // 이제 각자 끝나는 대로 화면에 올린다 — 신청 현황이 먼저 뜨고 인원 목록이 뒤따른다.
     const requestsTask = gasClient.getSharedDataFromServer<KakaoTaxiRequest[]>(requestsKey)
       .then((value) => {
+        if (!isCurrent()) return;
         setRequests(Array.isArray(value) ? sortRequests(value) : []);
       })
       .catch((error) => {
         console.error("비즈니스택시 신청 현황 로드 실패:", error);
+        if (!isCurrent()) return;
         setRequests(null);
         setRequestsError("신청 현황을 불러오지 못했습니다. 네트워크 확인 후 새로고침해주세요.");
       });
-    const memResult = await gasClient.getKakaoTaxiBranchMembers(branchName, pinHash, forceRefresh)
+    // 공유 캐시를 거친다 — 탭을 다시 열면 진행 중이거나 방금 끝난 조회를 그대로 쓴다.
+    // '새로고침'(forceRefresh)은 캐시를 지나쳐 카카오에서 실시간으로 받고 캐시를 갱신한다.
+    const memResult = await getBranchMembersShared(branchName, pinHash, forceRefresh)
       .then((value) => ({ status: "fulfilled" as const, value }))
       .catch((reason) => ({ status: "rejected" as const, reason }));
+    // 더 새로운 조회가 이미 돌고 있으면 이 결과는 버린다 — 화면(로딩 표시 포함)은 그쪽이 책임진다.
+    if (!isCurrent()) return;
     if (memResult.status === "fulfilled") {
       setAllMembers(memResult.value || []);
+      setMembersStale(false);   // 방금 받은 값이다 — 이제 신청 현황 상태를 확정해도 된다
     } else {
       console.error("비즈니스택시 등록 인원 로드 실패:", memResult.reason);
+      // 실패하면 묵은 목록도 버린다 — 남겨 두면 "언제 것인지 모르는 표"가 오류 배너 위에 남는다.
       setAllMembers(null);
+      setMembersStale(false);
       const raw = String((memResult.reason as any)?.message || "");
       // "지점 인증에 실패" 의 원인은 하나가 아니다 — 열어 둔 화면의 인증값이 옛 것이거나,
       // 지점설정에 그 지점 행이 없거나(개발서버는 db_simulation.json 을 보므로 운영에만 있는
@@ -166,6 +191,7 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     // 등록 인원만 끝났다고 버튼을 살리면, 아직 오가는 중인 신청 현황 요청 위에 새 요청이 겹쳐
     // 늦게 도착한 옛 응답이 최신 목록을 덮을 수 있다(Codex 2026-07-31).
     await requestsTask;
+    if (!isCurrent()) return;   // 뒤늦게 끝난 옛 조회가 진행 중인 새 조회의 로딩을 풀지 않게
     setLoading(false);
   }, [requestsKey, branchName, pinHash]);
 
@@ -311,8 +337,9 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     }
 
     setRegName(""); setRegPhone(""); setRegMemo("");
-    const refreshed = await gasClient.getKakaoTaxiBranchMembers(branchName, pinHash, true).catch(() => null);
-    if (refreshed) setAllMembers(refreshed);
+    // forceRefresh — 캐시를 지나쳐 실시간으로 받고, 그 결과가 공유 캐시를 덮는다(묵은 목록 방지).
+    const refreshed = await getBranchMembersShared(branchName, pinHash, true).catch(() => null);
+    if (refreshed) { setAllMembers(refreshed); setMembersStale(false); }
     await load();
     const who = result.name || check.name || "직원";
     // **전입은 소속만 옮길 뿐 이용중지를 풀지 않는다.**
@@ -358,7 +385,12 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     // 실패하는데, 실패했다고 등록을 못 하게 하면 멀쩡한 신규 등록까지 통째로 멈춘다.
     // 그래서 아직 오는 중일 때만 기다리게 하고, 실패했으면 사정을 알린 뒤 진행 여부를 묻는다
     // (중복 등록은 백엔드가 따로 막으므로 최악이라도 이 기능을 만들기 전과 같다).
-    if (allMembers === null) {
+    //
+    // **묵은 캐시(membersStale)도 '없는 것'으로 친다**(Codex 2026-08-06). 화면 표시는 묵은
+    // 목록이라도 보여 주는 게 낫지만, 여기서는 그 목록을 근거로 "이용재개를 신청하세요" /
+    // "그냥 등록하세요"를 갈라 **사람에게 시킬 일을 정한다** — 근거가 묵으면 시키는 일이 틀린다.
+    // 재조회는 이미 오는 중이니 잠깐 기다리게 하는 것으로 충분하다.
+    if (allMembers === null || (membersStale && loading)) {
       if (!membersError) {
         window.alert("등록 인원 목록을 불러오는 중입니다. 잠시 후 다시 눌러주세요.");
         return;
@@ -514,6 +546,30 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     !!r.memberId && allMembers !== null && allMembers.some((m) =>
       m.id === r.memberId && m.status === "blocked" && (!r.accountKey || m.account_key === r.accountKey));
 
+  /* ── 등록 인원이 아직 오는 중일 때의 처리 ─────────────────────────────────────────
+     신청 현황(1.4초)이 등록 인원(2.7~7.7초)보다 먼저 도착하는데, 각 줄의 상태·비고는
+     **등록 인원 목록을 봐야** 정해진다. 종전에는 목록이 없는 동안에도 그냥 판정해 버려서,
+     삭제요청은 '처리 완료', 등록은 '등록 상태를 확인하지 못했습니다 — 새로고침해주세요'로
+     찍혔다가 목록이 도착하면 '이용중지'·'카카오 등록완료'로 통째로 뒤집혔다
+     (사용자 지적 2026-08-06). 잘못된 값을 잠깐 보여주는 것은 늦게 보여주는 것보다 나쁘다 —
+     그 사이에 읽고 판단해 버리기 때문이다.
+
+     그래서 목록을 기다리는 동안에는 **판정하지 않고 '확인 중'으로 둔다.**
+     단, 목록과 무관하게 결론이 이미 정해진 줄(대상 인원이 없는 반려·대기 건)은 그대로 즉시
+     보여준다 — 그 줄까지 '확인 중'으로 덮으면 안 바뀔 값이 괜히 한 번 더 바뀐다.
+
+     **묵은 캐시(membersStale)도 같이 막는다.** 캐시에서 꺼낸 옛 목록은 표를 그리기에는 충분해도
+     (빈 화면보다 낫다) 그 사이 관리자가 이용중지·이용재개를 처리했을 수 있어, 그것으로 상태를
+     확정하면 결국 같은 문제가 된다(Codex 2026-08-06). 재조회가 도착하면 그때 확정한다. */
+  const membersPending = (allMembers === null || membersStale) && loading;
+
+  /** 이 줄의 결론이 등록 인원 목록에 따라 달라질 수 있는가. */
+  const needsMembers = (r: KakaoTaxiRequest): boolean =>
+    // 대상 인원이 있으면 그 사이 이용중지됐을 수 있다(어떤 상태로 저장돼 있든 그것이 결론이 된다).
+    !!r.memberId
+    // 승인된 등록 건은 전화번호로 목록을 뒤져 인증 여부를 가린다.
+    || (r.type === "register" && r.status === "approved");
+
   /**
    * 이용재개 신청 — 이용중지된 사람이 복귀했을 때.
    *
@@ -535,6 +591,8 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
   };
 
   const requestStatusChip = (r: KakaoTaxiRequest): { label: string; className: string } => {
+    // 등록 인원 목록을 봐야 정해지는 줄인데 아직 안 왔으면 판정을 미룬다(위 membersPending 주석).
+    if (membersPending && needsMembers(r)) return { label: "확인 중", className: STATUS_CHIP.processing };
     // **지금 이용중지된 사람이면 그것이 결론이다.** 기록상 반려로 남아 있어도 그 뒤 다른 경로로
     // 이용중지가 된 경우가 있다(이선복·김미화). '반려'라고만 적으면 아직 처리가 안 된 것으로
     // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
@@ -584,6 +642,8 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
    * 이용중지되면 사실과 어긋난다 — 그래서 지금 상태를 먼저 본다.
    */
   const requestRemark = (r: KakaoTaxiRequest): string => {
+    // 상태 칩과 **같은 시점에** 미룬다 — 한쪽만 미루면 '확인 중' 옆에 확정된 말이 붙는다.
+    if (membersPending && needsMembers(r)) return "등록 인원 목록을 확인하는 중입니다…";
     if (isMemberBlockedNow(r)) return "이용중지 승인됨 — 다시 쓰려면 관리자에게 이용재개를 신청해주세요";
     if (r.status === "rejected" && r.rejectReason) return `반려 사유: ${r.rejectReason}`;
     if (r.status === "approved" && r.type === "register") {
@@ -652,6 +712,13 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
         {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다(관리자와 같은 모양).
             표 아닌 블록(오류 배너·로딩)만 자기 여백(mx-4)을 갖는다. */}
         {membersError && <div className={`mx-4 my-3 ${ERROR_BANNER}`}>{membersError}</div>}
+        {/* 캐시에서 꺼낸 옛 목록을 보여주는 동안에는 그 사실을 밝힌다 — 표는 있는데 지금 것인지
+            아닌지 모르면, 방금 바뀐 인원을 두고 "아직 반영이 안 됐나" 하고 헤매게 된다. */}
+        {membersStale && loading && !membersError && (
+          <p className="mx-4 my-2 text-[11px] font-bold text-[#212121]/60">
+            이전에 받아 둔 목록입니다 — 최신 목록을 불러오는 중입니다…
+          </p>
+        )}
         {loading && members === null && !membersError && <div className="py-10 text-center"><LoadingSpinner size="md" /></div>}
         {members !== null && (
           <>
@@ -774,54 +841,6 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
         )}
       </section>
 
-      {/* ---------- 이용중지 인원 ----------
-          위 '등록된 인원'에는 일부러 넣지 않는다 — 지금 택시를 탈 수 있는 사람 목록이 흐려지면
-          누가 현역인지 알 수 없다(사용자 지시 2026-07-31). 대신 여기 따로 모아,
-          복귀했을 때 **이용재개를 신청할 통로**를 만든다(지점은 스스로 풀 수 없다). */}
-      {blockedMembers.length > 0 && (
-        <section className="branch-sheet-card">
-          <div className="branch-band">
-            <h3 className="branch-band-title">이용중지 인원 — {blockedMembers.length}명</h3>
-            <p className="branch-band-meta">퇴사·휴직 등으로 이용이 중지된 인원입니다. 복귀했다면 다시 등록하지 말고 아래에서 이용재개를 신청해주세요.</p>
-          </div>
-          {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다. */}
-          <div className="branch-sheet-scroll">
-            <table className="branch-sheet">
-              <thead><tr className="text-left">
-                <th>이름</th>
-                <th>휴대전화</th>
-                <th>부서(지점)</th>
-                <th>요청</th>
-              </tr></thead>
-              <tbody>
-                {blockedMembers.map((m) => {
-                  const openResume = (requests || []).some(
-                    (r) => r.type === "resume" && r.memberId === m.id && (r.status === "pending" || r.status === "processing")
-                  );
-                  return (
-                    <tr key={m.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2 font-bold text-[#212121]">{m.name}</td>
-                      <td className="px-3 py-2">{m.mobile_phone}</td>
-                      <td className="px-3 py-2">{m.department || "-"}</td>
-                      <td className="px-3 py-2">
-                        {openResume ? (
-                          <span className={STATUS_CHIP.waiting}>이용재개 신청됨 — 관리자 확인 대기</span>
-                        ) : (
-                          <button onClick={() => void submitResumeRequest(m)} disabled={saving}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-[#212121] text-white disabled:opacity-50">
-                            이용재개 신청
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
       {/* ---------- 신청 현황 ---------- */}
       <section className="branch-sheet-card">
         <div className="branch-band">
@@ -866,6 +885,56 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
           </div>
         )}
       </section>
+
+      {/* ---------- 이용중지 인원 (맨 아래) ----------
+          위 '등록된 인원'에는 일부러 넣지 않는다 — 지금 택시를 탈 수 있는 사람 목록이 흐려지면
+          누가 현역인지 알 수 없다(사용자 지시 2026-07-31). 대신 여기 따로 모아,
+          복귀했을 때 **이용재개를 신청할 통로**를 만든다(지점은 스스로 풀 수 없다).
+          [2026-08-06] 화면 맨 아래로 내렸다(사용자 지시) — 매일 보는 것은 현역 인원과 신청 현황이고,
+          이용중지자는 복귀라는 드문 일이 있을 때만 찾는다. 위에 있으면 자주 보는 표를 밀어낸다. */}
+      {blockedMembers.length > 0 && (
+        <section className="branch-sheet-card">
+          <div className="branch-band">
+            <h3 className="branch-band-title">이용중지 인원 — {blockedMembers.length}명</h3>
+            <p className="branch-band-meta">퇴사·휴직 등으로 이용이 중지된 인원입니다. 복귀했다면 다시 등록하지 말고 아래에서 이용재개를 신청해주세요.</p>
+          </div>
+          {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다. */}
+          <div className="branch-sheet-scroll">
+            <table className="branch-sheet">
+              <thead><tr className="text-left">
+                <th>이름</th>
+                <th>휴대전화</th>
+                <th>부서(지점)</th>
+                <th>요청</th>
+              </tr></thead>
+              <tbody>
+                {blockedMembers.map((m) => {
+                  const openResume = (requests || []).some(
+                    (r) => r.type === "resume" && r.memberId === m.id && (r.status === "pending" || r.status === "processing")
+                  );
+                  return (
+                    <tr key={m.id} className="border-t border-gray-100">
+                      <td className="px-3 py-2 font-bold text-[#212121]">{m.name}</td>
+                      <td className="px-3 py-2">{m.mobile_phone}</td>
+                      <td className="px-3 py-2">{m.department || "-"}</td>
+                      <td className="px-3 py-2">
+                        {openResume ? (
+                          <span className={STATUS_CHIP.waiting}>이용재개 신청됨 — 관리자 확인 대기</span>
+                        ) : (
+                          <button onClick={() => void submitResumeRequest(m)} disabled={saving}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-[#212121] text-white disabled:opacity-50">
+                            이용재개 신청
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
