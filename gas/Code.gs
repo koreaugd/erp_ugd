@@ -1695,25 +1695,171 @@ function kakaoTaxiMembersCacheKey(accountKey) {
   return KAKAO_MEMBERS_CACHE_KEY + "_" + accountKey;
 }
 
+var KAKAO_MEMBERS_PATH = "/external/v2/members/connected";
+
+/**
+ * 계정별 인원 목록을 **한 번에** 받는다(2026-08-06 사용자 지시 — 지점 '등록된 인원' 체감속도).
+ *
+ * 종전에는 kakaoTaxiCollect 가 계정을 for 문으로 돌며 각 계정의 1페이지를 **순차로** 물었다.
+ * 카카오 왕복 한 번이 1~3초라, 계정이 둘이면 그 시간이 그대로 두 배가 된다. 지점 화면은
+ * 이 조회 하나를 기다리느라 가장 오래 비어 있었다(실측 첫 조회 7.7초).
+ * 여기서는 각 계정의 1페이지 요청을 UrlFetchApp.fetchAll 로 묶어 한 번에 보낸다 —
+ * 계정이 몇 개든 왕복은 한 번이다. 페이지가 더 있으면 그 나머지도 전 계정 것을 모아 한 번 더 보낸다.
+ *
+ * **규약은 순차판과 같게 유지한다**(이게 이 함수의 어려운 부분이다):
+ *  · 한 계정이 실패해도 나머지는 살리고, 실패는 accountErrors 로 올린다(조용한 인원 누락 금지).
+ *  · 한 계정의 페이지가 하나라도 실패하면 **그 계정은 통째로 실패**다 — 일부만 받은 목록을
+ *    정상 자료처럼 돌려주면 그 계정 직원이 통째로 사라진 것처럼 보인다.
+ *  · fetchAll 묶음 자체가 터지면(네트워크 단절 등) 계정별 순차 조회로 되돌아간다 —
+ *    그래야 "어느 계정이 문제인지"를 여전히 가려낼 수 있다.
+ *
+ * @param accounts 카카오에 물어야 하는 계정들(캐시로 해결된 계정은 빼고 넘긴다)
+ * @param errors   실패한 계정을 담을 배열(호출부와 공유)
+ * @return {Object} { <accountKey>: 인원배열 } — 실패한 계정 키는 아예 없다
+ */
+function kakaoTaxiFetchMembersParallel(accounts, errors) {
+  const pageQuery = function (page) { return "per=100&page=" + page; };
+  var out = {};
+  var failed = {};
+  var fail = function (acc, e) {
+    if (failed[acc.key]) return;          // 같은 계정을 두 번 적지 않는다(페이지가 여럿 실패한 경우)
+    failed[acc.key] = true;
+    delete out[acc.key];
+    errors.push({ key: acc.key, label: acc.label, message: String((e && e.message) || e) });
+  };
+
+  // ① 각 계정의 1페이지 — 한 번의 fetchAll 로.
+  var firstReqs = [];
+  for (var i = 0; i < accounts.length; i++) {
+    firstReqs.push(kakaoTaxiBuildRequest(accounts[i].key, "GET", KAKAO_MEMBERS_PATH, pageQuery(1), null));
+  }
+  var firstRes = null;
+  try { firstRes = UrlFetchApp.fetchAll(firstReqs); } catch (e) { firstRes = null; }
+  if (!firstRes) {
+    // 묶음 전송 자체가 실패 — 계정별로 하나씩 다시 물어 어느 계정이 문제인지 가른다(순차판과 동일).
+    for (var s = 0; s < accounts.length; s++) {
+      try {
+        out[accounts[s].key] = kakaoTaxiFetchAllPages(accounts[s].key, KAKAO_MEMBERS_PATH, "", "members").items;
+      } catch (e2) {
+        fail(accounts[s], e2);
+      }
+    }
+    return out;
+  }
+
+  var more = [];   // 2페이지 이후로 더 받아야 할 것들 { acc, page }
+  for (var a = 0; a < accounts.length; a++) {
+    var acc = accounts[a];
+    try {
+      var parsed = kakaoTaxiParseResponse(firstRes[a]);
+      var batch = (parsed && parsed.members) || [];
+      // count 는 카카오가 보고한 총 건수. 없으면 받은 만큼이 전부라고 본다(순차판과 같은 기준).
+      var reported = (parsed && typeof parsed.count === "number") ? parsed.count : batch.length;
+      out[acc.key] = batch.slice();
+      var totalPages = Math.min(50, Math.ceil(reported / 100));
+      if (batch.length >= 100 && totalPages > 1) {
+        for (var p = 2; p <= totalPages; p++) more.push({ acc: acc, page: p });
+      }
+    } catch (e3) {
+      fail(acc, e3);
+    }
+  }
+
+  // ② 남은 페이지 — 계정을 가리지 않고 전부 모아 한 번에.
+  if (more.length) {
+    var moreReqs = [];
+    for (var m = 0; m < more.length; m++) {
+      moreReqs.push(kakaoTaxiBuildRequest(more[m].acc.key, "GET", KAKAO_MEMBERS_PATH, pageQuery(more[m].page), null));
+    }
+    var moreRes = null;
+    try { moreRes = UrlFetchApp.fetchAll(moreReqs); } catch (e4) { moreRes = null; }
+    if (!moreRes) {
+      // 묶음 전송 자체가 터졌다 — 응답이 없으니 **어느 계정 때문인지 알 수 없다.**
+      // 여기서 관련 계정을 전부 실패로 적으면, 성한 계정까지 같이 죽는다(Codex 2026-08-06).
+      // 관련 계정만 하나씩 처음부터 다시 받아, 진짜 실패한 계정만 가려낸다(순차판과 같은 결과).
+      var retried = {};
+      for (var f = 0; f < more.length; f++) {
+        var late = more[f].acc;
+        if (failed[late.key] || retried[late.key]) continue;
+        retried[late.key] = true;
+        try {
+          // 1페이지부터 통째로 다시 받는다 — 이미 받아 둔 1페이지와 섞어 짜맞추지 않는다(누락·중복 방지).
+          out[late.key] = kakaoTaxiFetchAllPages(late.key, KAKAO_MEMBERS_PATH, "", "members").items;
+        } catch (e6) {
+          fail(late, e6);
+        }
+      }
+    } else {
+      for (var r = 0; r < more.length; r++) {
+        var target = more[r].acc;
+        if (failed[target.key]) continue;
+        try {
+          var parsedMore = kakaoTaxiParseResponse(moreRes[r]);
+          var batchMore = (parsedMore && parsedMore.members) || [];
+          for (var j = 0; j < batchMore.length; j++) out[target.key].push(batchMore[j]);
+        } catch (e5) {
+          fail(target, e5);
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function getKakaoTaxiMembers(forceRefresh) {
   var cache = null;
   try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
-  const collected = kakaoTaxiCollect(function (acc) {
-    const key = kakaoTaxiMembersCacheKey(acc.key);
+  const accounts = kakaoTaxiAccounts();   // 계정이 하나도 없으면 여기서 던진다(종전과 같음)
+  var byAccount = {};
+  var errors = [];
+
+  // ① 캐시로 해결되는 계정을 먼저 걷어낸다 — 카카오에 물을 계정만 남긴다.
+  var pending = [];
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    var cached = null;
     if (cache && !forceRefresh) {
-      var cached = cache.get(key);
-      if (cached) {
-        try { return JSON.parse(cached); } catch (e) { /* 손상 시 재조회 */ }
+      var raw = null;
+      try { raw = cache.get(kakaoTaxiMembersCacheKey(acc.key)); } catch (e) { raw = null; }
+      // 손상됐거나 모양이 어긋난 캐시는 없는 것으로 본다(그대로 통과시키면 그 계정이 조용히 빈다).
+      if (raw) { try { var p = JSON.parse(raw); if (Array.isArray(p)) cached = p; } catch (e) {} }
+    }
+    if (cached) byAccount[acc.key] = cached;
+    else pending.push(acc);
+  }
+
+  // ② 남은 계정은 한 번의 왕복으로 병렬 수집.
+  if (pending.length) {
+    var fetched = kakaoTaxiFetchMembersParallel(pending, errors);
+    for (var k = 0; k < pending.length; k++) {
+      var key = pending[k].key;
+      var list = fetched[key];
+      if (!list) continue;   // 실패한 계정 — errors 에 이미 들어갔다
+      // 캐시 값은 최대 100KB — 인원이 많아 초과하면 put 이 던지므로, 캐싱 실패는 무시하고 그대로 쓴다.
+      if (cache) {
+        try { cache.put(kakaoTaxiMembersCacheKey(key), JSON.stringify(list), KAKAO_MEMBERS_CACHE_TTL); } catch (e) {}
       }
+      byAccount[key] = list;
     }
-    const res = kakaoTaxiFetchAllPages(acc.key, "/external/v2/members/connected", "", "members");
-    // 캐시 값은 최대 100KB — 인원이 많아 초과하면 put 이 던지므로, 캐싱 실패는 무시하고 그대로 반환.
-    if (cache) {
-      try { cache.put(key, JSON.stringify(res.items), KAKAO_MEMBERS_CACHE_TTL); } catch (e) {}
+  }
+
+  // ③ **계정 등록 순서대로** 합친다 — 캐시로 먼저 풀린 계정이 앞으로 튀어나오지 않게(화면 순서 유지).
+  //    account_key 주입은 순차판(kakaoTaxiCollect)이 하던 일 — 화면의 계정 컬럼·memberKey 의 근거다.
+  var items = [];
+  for (var n = 0; n < accounts.length; n++) {
+    var list2 = byAccount[accounts[n].key];
+    if (!list2) continue;
+    for (var q = 0; q < list2.length; q++) {
+      list2[q].account_key = accounts[n].key;
+      items.push(list2[q]);
     }
-    return res.items;
-  });
-  return { count: collected.items.length, members: collected.items, accountErrors: collected.accountErrors };
+  }
+
+  // 전부 실패했을 때만 던진다 — 일부 성공은 accountErrors 로 알리고 나머지를 살린다(순차판과 동일).
+  if (errors.length && errors.length === accounts.length) {
+    throw new Error("카카오T 조회에 실패했습니다: " + errors[0].message);
+  }
+  return { count: items.length, members: items, accountErrors: errors };
 }
 
 // 검증은 정규화(숫자만 남긴 전화·공백 제거한 그룹id) 이후 값으로 한다 — raw 값만 보면
@@ -1762,7 +1908,23 @@ function getKakaoTaxiBranchMembers(pinHash, branchName, forceRefresh) {
     throw denied;
   }
   if (!setting) throw denied;
-  const all = getKakaoTaxiMembers(forceRefresh).members || [];
+  // **계정이 하나라도 실패했으면 목록을 주지 않고 던진다(fail-closed, Codex 2026-08-06).**
+  // 이 액션의 반환은 인원 배열 하나뿐이라 "일부 계정이 빠졌다"를 알릴 자리가 없다. 그대로 주면
+  // 지점 화면은 그 목록을 확정본으로 믿고 — 이제 프론트 캐시에 담아 두기까지 한다 — 사람이
+  // 통째로 빠진 목록을 보고 "아직 인증을 안 했나" 하며 재등록을 반복하게 된다.
+  // 지점 인원의 소속 판정 기준은 계정이 아니라 **부서(department)** 라서(관리자가 다른 계정에
+  // 등록해 둔 우리 지점 직원도 여기 잡힌다), 우리 지점 계정만 성공했다고 안심할 수도 없다.
+  // 던지면 화면이 오류 배너를 띄우고 프론트 캐시도 실패는 담지 않는다 — 새로고침으로 회복된다.
+  // (같은 기능의 checkKakaoTaxiPhone 도 계정 실패 시 던지는 fail-closed 다 — 규약을 맞춘다.)
+  const collected = getKakaoTaxiMembers(forceRefresh);
+  const accountErrors = collected.accountErrors || [];
+  if (accountErrors.length) {
+    throw new Error(
+      "카카오T " + (accountErrors[0].label || accountErrors[0].key) + " 조회에 실패해 등록 인원을 확인할 수 없습니다: "
+      + accountErrors[0].message
+    );
+  }
+  const all = collected.members || [];
   return all.filter(function (m) {
     const dept = String((m && m.department) || "").trim();
     if (!dept) return false;

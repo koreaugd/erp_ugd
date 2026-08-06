@@ -374,17 +374,22 @@ async function kakaoTaxiCollect<T extends Record<string, unknown>>(
   const accounts = kakaoTaxiAccounts();
   const items: T[] = [];
   const accountErrors: Array<{ key: string; label: string; message: string }> = [];
-  for (const acc of accounts) {
-    try {
-      const got = await collect(acc);
-      for (const row of got) {
+  // [성능] 계정을 하나씩 기다리면 카카오 왕복(1~3초)이 계정 수만큼 그대로 쌓인다 — 한꺼번에 보낸다.
+  // allSettled 라 한 계정이 실패해도 나머지는 그대로 살아 accountErrors 규약이 유지된다.
+  // 합치는 순서는 **계정 등록 순서**로 되돌린다 — 먼저 끝난 계정이 앞으로 튀어나오면 화면 순서가
+  // 조회할 때마다 달라진다(gas/Code.gs getKakaoTaxiMembers 와 같은 규약).
+  const settled = await Promise.allSettled(accounts.map((acc) => collect(acc)));
+  accounts.forEach((acc, i) => {
+    const result = settled[i];
+    if (result.status === "fulfilled") {
+      for (const row of result.value) {
         (row as Record<string, unknown>).account_key = acc.key;
         items.push(row);
       }
-    } catch (e) {
-      accountErrors.push({ key: acc.key, label: acc.label, message: String((e as Error)?.message || e) });
+    } else {
+      accountErrors.push({ key: acc.key, label: acc.label, message: String((result.reason as Error)?.message || result.reason) });
     }
-  }
+  });
   if (accountErrors.length === accounts.length) {
     throw new Error(`카카오T 조회에 실패했습니다: ${accountErrors[0].message}`);
   }
@@ -554,7 +559,17 @@ async function kakaoTaxiBranchMembers(db: LocalDB, pinHash: unknown, branchName:
   if (!pinHash || !branchName) throw denied;
   const setting = verifyLocalBranchPinOrAdmin(db, pinHash, branchName);
   if (!setting) throw denied;
-  const all = (await kakaoTaxiMembers()).members || [];
+  // 계정이 하나라도 실패하면 던진다(fail-closed) — gas/Code.gs getKakaoTaxiBranchMembers 와 같은 규약.
+  // 반환이 인원 배열 하나뿐이라 "일부 계정이 빠졌다"를 알릴 자리가 없고, 지점 화면은 받은 목록을
+  // 확정본으로 믿는다(프론트 캐시에도 담긴다). 로컬만 관대하면 이 실패 모드를 여기서 못 잡는다.
+  const collected = await kakaoTaxiMembers();
+  const accountErrors = collected.accountErrors || [];
+  if (accountErrors.length) {
+    throw new Error(
+      `카카오T ${accountErrors[0].label || accountErrors[0].key} 조회에 실패해 등록 인원을 확인할 수 없습니다: ${accountErrors[0].message}`
+    );
+  }
+  const all = collected.members || [];
   return all.filter((m: any) => {
     const dept = String(m?.department || "").trim();
     if (!dept) return false;
