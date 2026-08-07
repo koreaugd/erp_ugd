@@ -252,7 +252,7 @@ export async function firebaseDeleteEditLog(logId: string) {
   return { success: true };
 }
 
-export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string, modifiedByUid?: string) {
+export async function firebaseUpdateDaily(recordId: string, masterData: Partial<MasterDaily>, expenses?: ExpenseDetail[], staff?: StaffRecord[], modifiedBy?: string, modifiedByUid?: string, reason?: string) {
   const detail = await firebaseGetDailyDetail(recordId);
   const now = new Date().toISOString();
 
@@ -298,6 +298,91 @@ export async function firebaseUpdateDaily(recordId: string, masterData: Partial<
       modifiedAt: now,
       modifiedBy: modifiedBy || "",
       modifiedByUid: modifiedByUid || "",
+      // 지점이 지출 행을 지울 때 적는 사유(카드결제 취소·반품 등). 관리자 화면 변경이력에 그대로 보인다.
+      reason: reason || "",
+      before: beforeState,
+      after: afterState
+    });
+  } catch (err) {
+    console.warn("Failed to write edit log to Firebase:", err);
+    editLogFailed = true;
+  }
+
+  return { success: true, editLogFailed };
+}
+
+/**
+ * daily_settles 문서를 Firestore **트랜잭션**으로 읽고-고치고-쓴다.
+ *
+ * 종전 firebaseUpdateDaily는 "먼저 읽은 스냅샷을 고쳐 setDoc으로 통째 덮어쓰기"라,
+ * 두 기기가 같은 날 기록을 동시에 고치면(지출 A·B를 각자 삭제 등) 나중 저장이 먼저 저장을
+ * 되살려 한쪽 변경이 조용히 유실됐다(Codex P0 2026-08-08). 트랜잭션은 경합 시 mutate를
+ * 최신 문서로 다시 실행하므로 유실이 없다.
+ *
+ * mutate는 **순수 함수**여야 한다 — 경합하면 여러 번 호출된다. 대상 행이 이미 바뀌었으면
+ * mutate가 throw해서(예: STALE_METAINDEX) 저장 없이 중단시킨다.
+ */
+export async function firebaseUpdateDailyAtomic(
+  recordId: string,
+  mutate: (detail: { master: MasterDaily; expenses: ExpenseDetail[]; staff: StaffRecord[] }) => { master: any; expenses: any[]; staff: any[] },
+  modifiedBy?: string,
+  modifiedByUid?: string,
+  reason?: string
+) {
+  await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부돼 수정이 유실될 수 있다 — 기다렸다 저장한다.
+  const db = getDirectDb();
+  const ref = doc(db, "daily_settles", recordId);
+  const now = new Date().toISOString();
+  // 커밋된 마지막 시도의 전/후 상태 — 트랜잭션 밖 edit_logs 기록에 쓴다.
+  let beforeState: any = null;
+  let afterState: any = null;
+  let committedMaster: any = null;
+  await runTransaction(db, async (txn) => {
+    const snap = await txn.get(ref);
+    if (!snap.exists()) throw new Error("해당 마감 데이터를 찾을 수 없습니다.");
+    const data: any = snap.data();
+    const detail = { master: toMaster(data.master), expenses: data.expenses || [], staff: data.staff || [] };
+    const next = mutate(detail);
+    // 거짓 작성자 금지(설계서 §7) — 실제 값이 없으면 대체 문구 대신 빈 문자열로 남긴다.
+    const master = { ...next.master, modifiedAt: now, modifiedBy: modifiedBy || "", modifiedByUid: modifiedByUid || "" };
+    master.totalSales = Number(master.cashSales || 0) + Number(master.cardSales || 0) + Number(master.transferSales || 0) + Number(master.deliverySales || 0);
+    beforeState = {
+      cashSales: Number(detail.master?.cashSales || 0),
+      cardSales: Number(detail.master?.cardSales || 0),
+      transferSales: Number(detail.master?.transferSales || 0),
+      deliverySales: Number(detail.master?.deliverySales || 0),
+      memo: detail.master?.memo || "",
+      expenses: detail.expenses,
+      staff: detail.staff
+    };
+    afterState = {
+      cashSales: Number(master.cashSales || 0),
+      cardSales: Number(master.cardSales || 0),
+      transferSales: Number(master.transferSales || 0),
+      deliverySales: Number(master.deliverySales || 0),
+      memo: master.memo || "",
+      expenses: next.expenses,
+      staff: next.staff
+    };
+    committedMaster = master;
+    txn.set(ref, { recordId, master, expenses: next.expenses, staff: next.staff, updatedAt: now });
+  });
+
+  // 본문 저장은 이미 끝났다 — 이력 기록 실패로 저장 자체를 막지 않는다(설계서 §7).
+  // 실패를 그냥 삼키면 "수정됐는데 이력만 없는" 상태를 아무도 모르므로 플래그로 반환한다.
+  let editLogFailed = false;
+  try {
+    const logId = `${recordId}-${Date.now()}`;
+    await setDoc(doc(db, "edit_logs", logId), {
+      id: logId,
+      recordId,
+      branchName: committedMaster.branchName,
+      settleDate: committedMaster.settleDate,
+      modifiedAt: now,
+      modifiedBy: modifiedBy || "",
+      modifiedByUid: modifiedByUid || "",
+      // 지점이 지출 행을 지울 때 적는 사유(카드결제 취소·반품 등). 관리자 변경이력에 그대로 보인다.
+      reason: reason || "",
       before: beforeState,
       after: afterState
     });

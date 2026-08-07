@@ -315,13 +315,12 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
       createdAt: new Date().toISOString()
     };
 
-    // 수기 등록·삭제는 같은 문서(manual_parttime:<지점>)의 목록 전체를 덮어쓴다.
-    // 그래서 둘이 동시에 날아가면 늦게 끝난 쪽이 상대의 결과를 지운다 —
-    // 방금 등록한 기록이 사라지거나, 지운 기록이 되살아난다. saving으로 한 번에 하나씩만 보낸다.
+    // 같은 문서(manual_parttime:<지점>)를 두 저장이 겹쳐 쓰면 늦게 끝난 쪽이 상대 결과를 지운다.
+    // 같은 화면 안에서는 saving으로 직렬화하고, **다른 기기와의 경쟁은 트랜잭션(mutateSharedData)**이
+    // 막는다 — 종전 "읽고-통째저장"은 기기 간 동시 등록·삭제에서 유실됐다(Codex 지적 2026-08-08).
     setSaving(true);
     try {
-      const previous = (await gasClient.getSharedData<any[]>(key)) || [];
-      await gasClient.saveSharedData(key, [newRecord, ...previous]);
+      await gasClient.mutateSharedData<any[]>(key, (current) => [newRecord, ...(Array.isArray(current) ? current : [])]);
       setManualName("");
       setManualHours("9");
       setManualClockIn("09:00");
@@ -498,8 +497,9 @@ export function PartTimeLogTab({ branchName, isAdmin = false }: { branchName: st
     try {
       if (row.manual) {
         const key = `manual_parttime:${branchName}`;
-        const previous = (await gasClient.getSharedData<any[]>(key)) || [];
-        await gasClient.saveSharedData(key, previous.filter((item) => item.id !== row.id));
+        // 트랜잭션으로 그 항목만 지운다 — 읽고-통째저장은 다른 기기의 동시 등록을 지운다(Codex 2026-08-08).
+        await gasClient.mutateSharedData<any[]>(key, (current) =>
+          (Array.isArray(current) ? current : []).filter((item) => item.id !== row.id));
       } else {
         await updateDailyMetadata(row.recordId, (metadata, detail) => {
           const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];

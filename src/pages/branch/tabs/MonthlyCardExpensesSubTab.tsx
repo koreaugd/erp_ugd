@@ -130,9 +130,10 @@ export function MonthlyCardExpensesSubTab({
       return;
     }
     const patch = { amount, usage: fields.usage.trim(), classification: fields.classification.trim(), detail: fields.detail.trim() };
+    let saved: { success: boolean; editLogFailed?: boolean } | undefined;
     try {
       // 지점이 고치면 이력에 지점명을 남긴다 — 안 넘기면 "관리자가 고침"으로 거짓 기록된다.
-      await updateDailyMetadata(item.recordId, (metadata) => {
+      saved = await updateDailyMetadata(item.recordId, (metadata) => {
         const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
         const current = cardExpenses[item.metaIndex];
         // 로드 이후 다른 사람이 이 기록의 앞 지출을 삭제하면 인덱스가 밀려 다른 행을 덮어쓸 수 있다.
@@ -160,6 +161,10 @@ export function MonthlyCardExpensesSubTab({
       }
       return;
     }
+    // 본문은 저장됐는데 이력 기록만 실패 — 조용히 삼키면 아무도 모른다(Codex 지적 2026-08-07, 삭제와 같은 기준).
+    if (saved?.editLogFailed) {
+      alert("수정은 저장됐습니다. 다만 수정이력 기록에 실패했으니 본사에 알려 주세요.");
+    }
     // 저장 성공 → 그 행만 즉시 반영하고 모달을 닫는다. 전체 히스토리 재조회는 백그라운드로.
     setItems((prev) => prev.map((row) =>
       row.recordId === item.recordId && row.metaIndex === item.metaIndex ? { ...row, ...patch } : row
@@ -169,12 +174,57 @@ export function MonthlyCardExpensesSubTab({
   };
 
   const handleDeleteCardExpense = async (item: any) => {
-    if (!item.recordId || !window.confirm(`${item.date} 카드지출 ${formatNumber(item.amount)}원을 삭제할까요?`)) return;
-    await updateDailyMetadata(item.recordId, (metadata) => {
-      const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
-      cardExpenses.splice(item.metaIndex, 1);
-      return { metadata: { ...metadata, cardExpenses } };
-    }, actor);
+    if (!item.recordId) return;
+    // 지점은 사유 필수(카드결제 취소·반품 대응, 사용자 승인 2026-08-07) — 수정이력에 그대로 남아
+    // 본사가 "왜 지웠는지"를 이력에서 바로 본다. 관리자는 종전대로 확인창만.
+    let reason: string | undefined;
+    if (!isAdmin) {
+      const input = window.prompt(
+        `${item.date} 카드지출 ${formatNumber(item.amount)}원을 삭제합니다.\n삭제 사유를 입력해 주세요. (예: 카드결제 취소, 반품)`
+      );
+      if (input === null) return;
+      reason = input.trim();
+      if (!reason) {
+        alert("삭제 사유를 입력해야 삭제할 수 있습니다.");
+        return;
+      }
+    } else if (!window.confirm(`${item.date} 카드지출 ${formatNumber(item.amount)}원을 삭제할까요?`)) {
+      return;
+    }
+    let saved: { success: boolean; editLogFailed?: boolean } | undefined;
+    try {
+      saved = await updateDailyMetadata(item.recordId, (metadata) => {
+        const cardExpenses = Array.isArray(metadata.cardExpenses) ? [...metadata.cardExpenses] : [];
+        const current = cardExpenses[item.metaIndex];
+        // 수정과 같은 가드: 로드 이후 앞 행이 지워지면 인덱스가 밀려 **다른 행을 지울 수 있다.**
+        // 네 값(금액·상세·사용처·분류)이 로드 당시와 같을 때만 같은 행으로 보고 지운다.
+        if (
+          !current ||
+          Number(current.amount) !== item.amount ||
+          String(current.detail || "") !== String(item.detail || "") ||
+          String(current.usage || "공란") !== String(item.usage) ||
+          String(current.classification || "미분류") !== String(item.classification)
+        ) {
+          throw new Error("STALE_METAINDEX");
+        }
+        cardExpenses.splice(item.metaIndex, 1);
+        return { metadata: { ...metadata, cardExpenses } };
+      }, actor, { reason });
+    } catch (err) {
+      console.error("카드지출 삭제 실패", err);
+      if (err instanceof Error && err.message === "STALE_METAINDEX") {
+        alert("그 사이 목록이 바뀌어 삭제를 취소했습니다. 새로고침 후 다시 시도해 주세요.");
+      } else {
+        alert("삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+      void refreshHistory?.();
+      return;
+    }
+    // 본문 삭제는 끝났는데 이력(사유) 기록만 실패한 경우 — 조용히 삼키면 "왜 지웠는지"가
+    // 아무 데도 안 남는다. 사유 기록이 이 기능의 전제이므로 반드시 알린다(Codex 지적 2026-08-07).
+    if (saved?.editLogFailed) {
+      alert("삭제는 완료됐습니다. 다만 수정이력(사유) 기록에 실패했으니 본사에 알려 주세요.");
+    }
     await refreshHistory?.();
   };
 
@@ -309,7 +359,8 @@ export function MonthlyCardExpensesSubTab({
                   <td className="py-2 px-2.5">
                     <div className="flex justify-center gap-1">
                       <button onClick={() => void handleEditCardExpense(it)} className="px-2 py-1 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 text-[10px] font-black">수정</button>
-                      {isAdmin && <button onClick={() => void handleDeleteCardExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>}
+                      {/* 삭제는 지점에도 개방(2026-08-07) — 카드결제 취소·반품 시 지점이 스스로 지운다. 지점은 사유 필수. */}
+                      <button onClick={() => void handleDeleteCardExpense(it)} className="px-2 py-1 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 text-[10px] font-black">삭제</button>
                     </div>
                   </td>
                 </tr>

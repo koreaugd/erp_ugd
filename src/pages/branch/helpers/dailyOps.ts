@@ -15,23 +15,23 @@ import { splitDailyMemoMetadata, joinDailyMemoMetadata } from "./memoMetadata";
 export const updateDailyMetadata = async (
   recordId: string,
   updater: (metadata: any, detail: DailySettleDetail) => { metadata: any; staff?: any[]; expenses?: any[]; masterPatch?: any } | void,
-  actor: { name: string; uid?: string }
+  actor: { name: string; uid?: string },
+  // reason: 이 수정/삭제의 사유(예: 카드결제 취소·반품). 수정이력(edit_logs)에 함께 남는다.
+  options?: { reason?: string }
 ) => {
-  const detail = await gasClient.getDailyDetail(recordId);
-  const { visibleMemo, metadata } = splitDailyMemoMetadata(detail.master?.memo);
-  const result = updater(metadata, detail) || { metadata };
-  const nextMetadata = result.metadata || metadata;
-  const masterPatch = {
-    ...detail.master,
-    ...(result.masterPatch || {}),
-    memo: joinDailyMemoMetadata(visibleMemo, nextMetadata)
-  };
-  return await gasClient.updateDaily(
-    recordId,
-    masterPatch,
-    result.expenses || detail.expenses,
-    result.staff || detail.staff,
-    actor.name,
-    actor.uid
-  );
+  // Firestore 트랜잭션으로 읽고-고치고-쓴다(Codex P0 2026-08-08).
+  // 종전에는 먼저 읽은 스냅샷을 고쳐 통째로 덮어써서, 두 기기가 같은 날 기록을 동시에 고치면
+  // (지출 A·B를 각자 삭제 등) 나중 저장이 먼저 저장을 되살렸다. 이제 경합하면 updater가
+  // 최신 문서로 다시 실행된다 — 그래서 updater는 순수해야 한다(이 파일을 쓰는 모든 탭이 그렇다).
+  return await gasClient.updateDailyAtomic(recordId, (detail) => {
+    const { visibleMemo, metadata } = splitDailyMemoMetadata(detail.master?.memo);
+    const result = updater(metadata, detail) || { metadata };
+    const nextMetadata = result.metadata || metadata;
+    const master = {
+      ...detail.master,
+      ...(result.masterPatch || {}),
+      memo: joinDailyMemoMetadata(visibleMemo, nextMetadata)
+    };
+    return { master, expenses: result.expenses || detail.expenses, staff: result.staff || detail.staff };
+  }, actor.name, actor.uid, options?.reason);
 };

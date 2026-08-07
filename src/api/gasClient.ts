@@ -368,13 +368,41 @@ export const gasClient = {
     expenses?: ExpenseDetail[],
     staff?: StaffRecord[],
     modifiedBy?: string,
-    modifiedByUid?: string
+    modifiedByUid?: string,
+    reason?: string
   ): Promise<{ success: boolean; editLogFailed?: boolean }> {
     const { firebaseUpdateDaily } = await loadFirebaseDirect();
-    const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy, modifiedByUid);
+    const result = await firebaseUpdateDaily(recordId, masterData, expenses, staff, modifiedBy, modifiedByUid, reason);
     clearReadCache();
     if (result && result.success !== false) {
       // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화
+      try {
+        const freshDetail = await this.getDailyDetail(recordId);
+        await tryDirectBackup("settle", recordId, freshDetail);
+      } catch (err) {
+        console.warn("[Firebase Mirror Update Warn] Failed to fetch updated detail to backup:", err);
+      }
+    }
+    return result;
+  },
+
+  /**
+   * 트랜잭션 판 updateDaily — 월말 지출/근무 탭들처럼 "기존 문서의 일부만 고치는" 경로 전용.
+   * 읽기-수정-쓰기가 원자적이라 두 기기가 같은 기록을 동시에 고쳐도 유실이 없다(Codex P0 2026-08-08).
+   * mutate는 순수해야 한다(경합 시 여러 번 실행됨).
+   */
+  async updateDailyAtomic(
+    recordId: string,
+    mutate: (detail: { master: MasterDaily; expenses: ExpenseDetail[]; staff: StaffRecord[] }) => { master: any; expenses: any[]; staff: any[] },
+    modifiedBy?: string,
+    modifiedByUid?: string,
+    reason?: string
+  ): Promise<{ success: boolean; editLogFailed?: boolean }> {
+    const { firebaseUpdateDailyAtomic } = await loadFirebaseDirect();
+    const result = await firebaseUpdateDailyAtomic(recordId, mutate, modifiedBy, modifiedByUid, reason);
+    clearReadCache();
+    if (result && result.success !== false) {
+      // 상세 데이터 조회를 거쳐 최신 전체본 획득 후 실시간 백업 거동 동정화(updateDaily와 같은 절차)
       try {
         const freshDetail = await this.getDailyDetail(recordId);
         await tryDirectBackup("settle", recordId, freshDetail);
