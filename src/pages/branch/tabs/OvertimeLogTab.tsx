@@ -92,8 +92,12 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
         item.autoOvertime !== 0
       ));
 
+      // 성공 여부를 돌려준다 — 저장 실패 후 복구 재조회가 또 실패하면 호출부가 화면을 되돌려야 한다.
+      // (파트타이머 일지와 같은 규칙. 조용히 삼키면 저장 안 된 수정이 화면에 남는다, Codex P1 2026-08-08)
+      return true;
     } catch (e) {
       console.error("Overtime database read error:", e);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -147,10 +151,22 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       );
       if (!ok) return;
     }
-    const key = `manual_overtime:${branchName}`;
-    const previous = (await gasClient.getSharedData<any[]>(key)) || [];
-    await gasClient.saveSharedData(key, [{ id: `manual-${Date.now()}`, staffName: manualName.trim(), settleDate: manualDate, overtime: hours, reason: manualReason.trim(), createdAt: new Date().toISOString() }, ...previous]);
-    setManualName(""); setManualHours(""); setManualReason(""); await loadData();
+    // 수기 등록도 saving 임계구역에 넣는다 — 등록이 진행되는 동안 표 수정/삭제가 시작되면,
+    // 그쪽 실패 복원 스냅샷이 방금 등록된 행을 화면에서 지운다(Codex P1 2026-08-08 4R).
+    if (saving) return;
+    setSaving(true);
+    try {
+      const key = `manual_overtime:${branchName}`;
+      // 새 항목은 mutate 밖에서 만든다 — 트랜잭션이 경합으로 재시도되면 mutate가 다시 불리는데,
+      // 안에서 만들면 id(Date.now())가 시도마다 달라진다.
+      const entry = { id: `manual-${Date.now()}`, staffName: manualName.trim(), settleDate: manualDate, overtime: hours, reason: manualReason.trim(), createdAt: new Date().toISOString() };
+      // "읽고-덧붙여-통째 저장"이 아니라 트랜잭션으로 덧붙인다 — 종전 방식은 두 기기가 동시에
+      // 등록하면 나중 저장이 먼저 등록을 지웠다(cross-device lost update, Codex 지적 2026-08-08).
+      await gasClient.mutateSharedData<any[]>(key, (current) => [entry, ...(Array.isArray(current) ? current : [])]);
+      setManualName(""); setManualHours(""); setManualReason(""); await loadData();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEditOvertimeRow = (row: any) => {
@@ -176,15 +192,24 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
       alert("초과근무 시간이 0이 아니면 사유가 필요합니다.");
       return;
     }
+    // 다른 저장(수기 등록 등)이 진행 중이면 시작하지 않는다 — 겹치면 실패 복원 스냅샷이
+    // 그쪽 결과를 되돌릴 수 있다(Codex P1 2026-08-08 4R).
+    if (saving) {
+      alert("다른 저장이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
     // 낙관적 반영: 모달을 즉시 닫고 표의 값을 바로 갱신 → 저장 완료까지 기다리지 않아도 화면이 반응합니다.
+    // 저장도 복구 재조회도 실패하면 이 스냅샷으로 되돌린다(아래 catch 참고, 파트타이머 일지와 같은 규칙).
+    const snapshot = records;
     setEditOvertime(null);
     setRecords((prev) => prev.map((item) => item === row ? { ...item, overtime: hours, overtimeReason: reason } : item));
     setSaving(true);
     try {
       if (row.manual) {
         const key = `manual_overtime:${branchName}`;
-        const saved = (await gasClient.getSharedData<any[]>(key)) || [];
-        await gasClient.saveSharedData(key, saved.map((item) => item.id === row.id ? { ...item, overtime: hours, reason } : item));
+        // 트랜잭션으로 그 항목만 고친다 — 읽고-통째저장은 다른 기기의 동시 등록/삭제를 지운다(Codex 2026-08-08).
+        await gasClient.mutateSharedData<any[]>(key, (current) =>
+          (Array.isArray(current) ? current : []).map((item) => item.id === row.id ? { ...item, overtime: hours, reason } : item));
       } else if (row.recordId) {
         await updateDailyMetadata(row.recordId, (metadata, detail) => {
           const staffRows = Array.isArray(metadata.staffRows) ? metadata.staffRows : [];
@@ -200,23 +225,34 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
     } catch (e) {
       console.error("초과근무 수정 실패:", e);
       alert("수정 중 오류가 발생했습니다. 새로고침 후 다시 시도해 주세요.");
-      await loadData(true, { silent: true });
+      // 서버에서 다시 읽어 화면을 진짜 값으로 맞춘다. 그것마저 실패하면(인터넷 끊김 등)
+      // 저장 안 된 수정이 화면에 남으므로 고치기 전 스냅샷으로 되돌린다(Codex P1 2026-08-08).
+      const reloaded = await loadData(true, { silent: true });
+      if (!reloaded) setRecords(snapshot);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteOvertimeRow = async (row: any) => {
+    // 수정과 같은 진입 가드 — 다른 저장이 진행 중이면 겹치지 않게 막는다(Codex P1 2026-08-08 4R).
+    if (saving) {
+      alert("다른 저장이 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
     if (!window.confirm(`${row.staffName}님의 ${row.settleDate} 초과근무 기록을 삭제할까요?`)) return;
     // 낙관적 반영: 저장을 기다리지 않고 화면에서 즉시 제거 → 반응 속도 개선.
-    // 실패 시엔 로컬 스냅샷을 되돌리지 않고 서버에서 다시 불러와 정합성을 맞춥니다(요청 겹침 롤백 사고 방지).
+    // 실패 시엔 서버에서 다시 불러와 정합성을 맞춥니다(요청 겹침 롤백 사고 방지).
+    // 다시 읽는 것마저 실패했을 때만 이 스냅샷으로 되돌립니다(파트타이머 일지와 같은 규칙).
+    const snapshot = records;
     setRecords((prev) => prev.filter((item) => item !== row));
     setSaving(true);
     try {
       if (row.manual) {
         const key = `manual_overtime:${branchName}`;
-        const saved = (await gasClient.getSharedData<any[]>(key)) || [];
-        await gasClient.saveSharedData(key, saved.filter((item) => item.id !== row.id));
+        // 트랜잭션으로 그 항목만 지운다 — 읽고-통째저장은 다른 기기의 동시 등록/수정을 지운다(Codex 2026-08-08).
+        await gasClient.mutateSharedData<any[]>(key, (current) =>
+          (Array.isArray(current) ? current : []).filter((item) => item.id !== row.id));
       } else if (row.recordId) {
         // 조기퇴근/초과시간은 출퇴근 시각에서 다시 계산되므로 0으로 덮는 것만으로는 되살아납니다.
         // 삭제 당시 값을 overtimeCleared에 남기고 사유를 비워, 같은 값이 재계산되고 사유가 없으면 계속 숨기도록 표시합니다.
@@ -234,7 +270,10 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
     } catch (e) {
       console.error("초과근무 삭제 실패:", e);
       alert("삭제 중 오류가 발생했습니다. 목록을 다시 불러옵니다.");
-      await loadData(true, { silent: true });
+      // 재조회마저 실패하면 지우기 전 화면으로 되돌린다 — 저장 안 된 삭제가 화면에 남으면
+      // 지워진 줄 알고 넘어간다(Codex P1 2026-08-08).
+      const reloaded = await loadData(true, { silent: true });
+      if (!reloaded) setRecords(snapshot);
     } finally {
       setSaving(false);
     }
@@ -263,7 +302,9 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
         <div className="branch-band">
           <h3 className="branch-band-title">초과 근무 내역</h3>
           <div className="branch-band-filters">
-            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} aria-label="조회 월" />
+            {/* 저장 중에는 월 변경·재조회를 잠근다 — 저장 실패 시 스냅샷 복원이 그 사이 바뀐
+                월/목록 위에 덮이면 엉뚱한 달에 옛 기록이 뜬다(Codex P1 2026-08-08). */}
+            <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} aria-label="조회 월" disabled={saving} />
             <input
               type="search"
               value={nameFilter}
@@ -274,7 +315,8 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
             />
             <button
               onClick={() => void loadData(true)}
-              className="flex items-center gap-1"
+              disabled={saving}
+              className="flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw className="w-3 h-3" /> 새로고침
             </button>
@@ -316,7 +358,9 @@ export function OvertimeLogTab({ branchName, isAdmin = false }: { branchName: st
             )}
           </div>
           <input value={manualReason} onChange={(e) => setManualReason(e.target.value)} placeholder="수기 입력 사유 (필수)" className="grow min-w-36 px-2 py-1 border rounded text-xs" />
-          <button onClick={() => void saveManualOvertime()} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold">등록</button>
+          {/* 표 수정/삭제 저장 중에는 수기 등록도 잠근다 — 등록이 끼어들면 실패 복원 스냅샷이
+              방금 등록된 행을 화면에서 지워버린다(Codex P1 2026-08-08). */}
+          <button onClick={() => void saveManualOvertime()} disabled={saving} className="px-3 py-1 bg-[#2E6DB4] text-white rounded text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed">등록</button>
         </div>
         )}
 

@@ -12,6 +12,7 @@ import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
 import { calcAutoGrantDays, toEntryDateInputValue, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX, ANNUAL_LEAVE_USED_ADJUST_PREFIX, LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX } from "../utils/annualLeavePolicy";
 import { moveAnnualLeaveEmployee, deleteAnnualLeaveEmployee } from "./branch/helpers/annualLeaveOps";
+import { splitDailyMemoMetadata } from "./branch/helpers/memoMetadata";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AccountManagementSection } from "./admin/AccountManagementSection";
@@ -3121,13 +3122,49 @@ function AdminEditLogsSection() {
       if (diff) changes.push(`근무 시간/직원 내역 수정됨`);
     }
 
-    if (changes.length === 0) {
-      return <span className="text-[11px] text-gray-400">변경 사항 없음 (또는 기타 설정 변경)</span>;
-    }
+    // 카드·현금지출은 memo 안 METADATA에 저장된다 — 위 expenses(레거시 지출 목록) 비교로는 잡히지 않아,
+    // 지점이 취소·반품으로 행을 지워도 "변경 사항 없음"으로 떴다(2026-08-07). 화면 표기와 같은 기준
+    // (금액 1원 이상 행만)으로 건수·합계를 비교해 요약한다.
+    const expenseMeta = (memo: unknown) => {
+      const { metadata } = splitDailyMemoMetadata(typeof memo === "string" ? memo : "");
+      const roll = (list: any) => {
+        const rows = Array.isArray(list) ? list.filter((exp: any) => (Number(exp?.amount) || 0) > 0) : [];
+        return {
+          count: rows.length,
+          sum: rows.reduce((acc: number, exp: any) => acc + (Number(exp.amount) || 0), 0),
+          // 내용 비교는 고정 순서 튜플로 — 객체를 그대로 stringify하면 저장 경로에 따라
+          // key 순서·금액 표기("30000" vs 30000)만 달라도 "내역 수정됨" 노이즈가 뜬다(Codex P2).
+          raw: JSON.stringify(rows.map((exp: any) => [Number(exp?.amount) || 0, String(exp?.usage || ""), String(exp?.classification || ""), String(exp?.detail || "")]))
+        };
+      };
+      return { card: roll(metadata?.cardExpenses), cash: roll(metadata?.cashExpenses) };
+    };
+    const beforeExpMeta = expenseMeta(before.memo);
+    const afterExpMeta = expenseMeta(after.memo);
+    const pushExpenseMetaDiff = (label: string, b: { count: number; sum: number; raw: string }, a: { count: number; sum: number; raw: string }) => {
+      if (b.count !== a.count || b.sum !== a.sum) {
+        changes.push(`${label}: ${b.count}건 ${formatNumber(b.sum)}원 ➔ ${a.count}건 ${formatNumber(a.sum)}원`);
+      } else if (b.raw !== a.raw) {
+        // 건수·합계는 그대로인데 내용이 다르다 — 사용처·분류·상세만 고친 경우.
+        changes.push(`${label} 내역 수정됨`);
+      }
+    };
+    pushExpenseMetaDiff("카드지출", beforeExpMeta.card, afterExpMeta.card);
+    pushExpenseMetaDiff("현금지출", beforeExpMeta.cash, afterExpMeta.cash);
 
-    // 세로 불릿 목록 대신 한 줄로 이어 붙여 행 높이를 낮춘다(항목이 많으면 줄바꿈).
-    const text = changes.join("  ·  ");
-    return <span className="text-[11px] font-bold text-gray-700" title={text}>{text}</span>;
+    // 지점이 지출 행을 지울 때 적은 사유(카드결제 취소·반품 등). 변경 요약 앞에 세워 바로 보이게 한다.
+    const reason = String(log.reason || "").trim();
+    const body = changes.length === 0
+      ? <span className="text-[11px] text-gray-400">변경 사항 없음 (또는 기타 설정 변경)</span>
+      // 세로 불릿 목록 대신 한 줄로 이어 붙여 행 높이를 낮춘다(항목이 많으면 줄바꿈).
+      : <span className="text-[11px] font-bold text-gray-700" title={changes.join("  ·  ")}>{changes.join("  ·  ")}</span>;
+    if (!reason) return body;
+    return (
+      <div className="space-y-0.5">
+        <p className="text-[11px] font-black text-gray-900">사유: {reason}</p>
+        {body}
+      </div>
+    );
   };
 
   const recentCutoff = modlogRecentCutoff();
@@ -4055,9 +4092,10 @@ function AdminManualOvertimesSection() {
     if (!window.confirm(`${record.branchName} ${record.staffName || ""} ${record.settleDate || ""} 수기 초과근무 내역을 삭제할까요?`)) return;
     try {
       const key = `manual_overtime:${record.branchName}`;
-      const previous = await gasClient.getSharedData<any[]>(key);
-      const next = (previous || []).filter((item: any) => item.id !== record.id);
-      await gasClient.saveSharedData(key, next);
+      // 트랜잭션으로 그 항목만 지운다 — 읽고-통째저장은 지점 기기가 동시에 등록한 새 수기 기록을
+      // 오래된 스냅샷으로 덮어 지운다(cross-device lost update, Codex 지적 2026-08-08 6R).
+      await gasClient.mutateSharedData<any[]>(key, (current) =>
+        (Array.isArray(current) ? current : []).filter((item: any) => item.id !== record.id));
       await loadData();
     } catch (error) {
       console.error("수기 초과근무 삭제 실패:", error);
