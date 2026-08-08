@@ -109,8 +109,10 @@ export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnom
     if (reasons.length) flagged.push({ row, reasons });
   }
   // 사유별로 묶고, 묶음 안에서는 최근 이용이 위로 온다(사용자 지시 2026-07-28).
-  // [대표 사유] 한 건에 사유가 여럿이면 TAXI_ANOMALY_REASON_ORDER 상 첫 사유의 묶음에 넣는다.
-  // 사유마다 건을 복제하면 화면의 '점검 대상 N건'이 실제보다 부풀어 보인다.
+  // [반환 순서] 한 건에 사유가 여럿이면 TAXI_ANOMALY_REASON_ORDER 상 첫 사유 자리에 놓는다.
+  // 이건 목록 전체의 기본 순서일 뿐이고, **화면의 사유별 카드 분배는 groupFlaggedByReason 이
+  // 따로 한다**(2026-08-09부터 겹친 건은 카드마다 다시 나온다). 여기서 건을 복제하지는 않으므로
+  // 이 배열의 길이는 언제나 '점검 대상 총 건수'다 — 대시보드 카운트가 이 값을 쓴다.
   // [Codex P2] 목록에 없는 사유는 indexOf 가 -1 이라 그냥 쓰면 모든 사유보다 위로 튄다.
   // 규칙을 새로 추가하고 TAXI_ANOMALY_REASON_ORDER 갱신을 잊었을 때 조용히 순서가 뒤집히지
   // 않도록, 모르는 사유는 맨 뒤로 보낸다.
@@ -122,15 +124,44 @@ export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnom
     const rankA = reasonRank(a.reasons[0]);
     const rankB = reasonRank(b.reasons[0]);
     if (rankA !== rankB) return rankA - rankB;
-    // timeText 는 "YYYY-MM-DD HH:mm:ss" 고정 형식이라 문자열 비교가 곧 시간 비교다.
-    // 시각을 모르는 건(빈 값)은 묶음 맨 뒤로 — 최신인 척 위로 올라오면 안 된다.
-    const ta = a.row.timeText || "";
-    const tb = b.row.timeText || "";
-    if (!ta || !tb) return (ta ? 0 : 1) - (tb ? 0 : 1);
-    if (ta !== tb) return tb < ta ? -1 : 1;
-    // 같은 시각이면 금액 큰 순 — 정렬이 실행마다 흔들리지 않게 순서를 확정한다.
-    return b.row.amount - a.row.amount;
+    return compareRecentFirst(a, b);
   });
+}
+
+/** 최근 이용이 위로. 시각 불명은 맨 뒤(최신인 척 올라오면 안 된다), 같은 시각이면 금액 큰 순. */
+function compareRecentFirst(a: FlaggedTaxiOrder, b: FlaggedTaxiOrder): number {
+  // timeText 는 "YYYY-MM-DD HH:mm:ss" 고정 형식이라 문자열 비교가 곧 시간 비교다.
+  const ta = a.row.timeText || "";
+  const tb = b.row.timeText || "";
+  if (!ta || !tb) return (ta ? 0 : 1) - (tb ? 0 : 1);
+  if (ta !== tb) return tb < ta ? -1 : 1;
+  // 같은 시각이면 금액 큰 순 — 정렬이 실행마다 흔들리지 않게 순서를 확정한다.
+  return b.row.amount - a.row.amount;
+}
+
+/**
+ * 화면의 사유별 카드(고액 · 낮 시간대 · 지점 미매핑) 분배.
+ *
+ * [2026-08-09 사용자 지시] 한 건에 사유가 여럿이면 **해당하는 카드에 모두** 넣는다.
+ * 그전에는 대표 사유(reasons[0]) 카드에만 넣어서, 우선순위가 높은 고액이 낮 시간대를 흡수했다 —
+ * 3만원 넘는 낮 시간대 이용(예: 08-08 17:11 44,800원)이 '낮 시간대 이용' 카드에서 통째로 빠져
+ * "낮에 탄 건이 있는데 안 잡힌다"로 보였다. 낮 시간대 카드에는 3만원 미만 건만 남던 셈이다.
+ *
+ * [건수 주의] 그래서 **카드 건수의 합 > 점검 대상 총 건수**가 될 수 있다(의도된 중복).
+ * 총 건수가 필요한 곳(대시보드 알림 등)은 반드시 flagTaxiOrders 의 배열 길이를 쓸 것.
+ *
+ * 카드 안 정렬은 최신순으로 다시 잡는다 — flagged 전체 순서는 대표 사유 묶음 순이라, 그대로 쓰면
+ * 카드 안에서 '겹친 건이 먼저, 단독 건이 나중'처럼 시간과 무관한 순서가 된다.
+ */
+export function groupFlaggedByReason(flagged: FlaggedTaxiOrder[]): Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> {
+  const groups: Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> = { highFare: [], daytime: [], unmapped: [] };
+  for (const f of flagged) {
+    for (const reason of f.reasons) {
+      if (groups[reason]) groups[reason].push(f);
+    }
+  }
+  for (const reason of TAXI_ANOMALY_REASON_ORDER) groups[reason].sort(compareRecentFirst);
+  return groups;
 }
 
 /**

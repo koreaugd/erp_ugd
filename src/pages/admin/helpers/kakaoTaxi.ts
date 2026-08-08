@@ -174,6 +174,32 @@ export function normalizeKakaoTaxiOrders(
   });
 }
 
+/**
+ * 건 하나를 가리키는 안정 키 — `계정|주문id`. 계정이 다르면 카카오가 매긴 주문 id 가 우연히 겹칠 수
+ * 있으므로(계정별 채번) 계정까지 묶는다 — normalizeKakaoTaxiOrders 의 중복 제거와 같은 규칙이다.
+ *
+ * 대시보드의 '새 점검 대상' 판정이 이 키로 확인 여부를 기억한다. 그래서 두 성질이 필요하다.
+ *   ① **같은 건이면 조회할 때마다 같은 값**(랜덤·순번·조회시각 금지) — 아니면 확인해 둔 건이 매번 새 건으로 뜬다.
+ *   ② **다른 건이면 다른 값** — 겹치면 한쪽을 '이미 확인함'으로 착각해 조용히 숨긴다(Codex 6R).
+ *
+ * id 가 없는 건(정규화가 버리지 않고 남기는 방어 경로)은 ②를 위해 이용 자체를 특정하는 원본 필드를
+ * 최대한 넓게 붙인다. 여기 쓰는 값은 모두 **그 이용에 고정된 값**이어야 한다 —
+ * 부서·그룹처럼 나중에 카카오에서 바뀌는 필드를 넣으면 ①이 깨진다(퇴사자 부서 null 사례).
+ */
+export function taxiOrderKey(row: NormalizedTaxiOrder): string {
+  const id = String(row.order.id || "");
+  if (id) return `${row.accountKey}|${id}`;
+  const o = row.order;
+  const parts = [
+    row.timeText, o.call_time, String(o.member_id || ""),
+    o.departure_point, o.arrival_point, o.car_number, o.taxi_company_name,
+    o.vertical_code, String(Number(o.service_fare) || 0), String(Number(o.toll) || 0),
+  ].map((v) => String(v || ""));
+  // 구분자로 이어 붙이지 않고 JSON 배열로 만든다 — 값 안에 구분자가 들어 있어도 경계가 뭉개지지 않는다.
+  // (파이프를 다른 글자로 치환하는 방식은 `A|B` 와 `A/B` 가 같은 키가 돼 ②를 깬다, Codex 7R)
+  return `${row.accountKey}|noid|${JSON.stringify(parts)}`;
+}
+
 export interface BranchTotal { branchName: string; count: number; amount: number; unmapped: boolean }
 export interface MemberTotal { memberKey: string; name: string; branchName: string; count: number; amount: number }
 
