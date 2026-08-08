@@ -19,7 +19,7 @@ import { AccountManagementSection } from "./admin/AccountManagementSection";
 import { listUserProfiles } from "../api/userProfile";
 import { KakaoTaxiSection, type KakaoTaxiView } from "./admin/KakaoTaxiSection";
 import { kakaoTaxiRequestsKey, type KakaoTaxiRequest } from "./admin/helpers/kakaoTaxiRequests";
-import { normalizeKakaoTaxiOrders } from "./admin/helpers/kakaoTaxi";
+import { normalizeKakaoTaxiOrders, taxiOrderKey } from "./admin/helpers/kakaoTaxi";
 import { KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, type KakaoTaxiBranchHistoryEntry } from "./admin/helpers/kakaoTaxiBranchHistory";
 import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
@@ -125,6 +125,10 @@ export default function AdminPage() {
   // 아래에 두고, sectionAllowed 렌더 가드가 그 사이 첫 프레임의 무단 접근을 막는다.
   const allowedAdminTabs = user?.allowedAdminTabs ?? "all";
   const [adminSection, setAdminSection] = useState<AdminPermKey>(() => firstAllowedAdminKey(user?.allowedAdminTabs ?? "all"));
+  // 지금 보고 있는 화면 — 비동기 작업이 끝난 뒤 "아직 대시보드에 있는가"를 물을 때 쓴다.
+  // 저장이 끝났다고 사용자가 이미 옮겨 간 화면을 멋대로 바꾸면 안 된다(Codex 3R).
+  const adminSectionRef = useRef(adminSection);
+  useEffect(() => { adminSectionRef.current = adminSection; }, [adminSection]);
   const adminSectionCorrectedRef = useRef(false);
   useEffect(() => {
     if (adminSectionCorrectedRef.current) return;
@@ -156,10 +160,19 @@ export default function AdminPage() {
   // 항목마다 따로 도착해 따로 반영되므로(loadDashboardAlerts) 부분 갱신이 가능한 형태여야 한다.
   const [dashboardAlerts, setDashboardAlerts] = useState<DashboardAlerts>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
+  // 법인택시 '새 점검 대상' 확인 기록의 저장 상태. 저장 실패를 조용히 삼키면 이 노트북에서만
+  // 알림이 사라져 다른 노트북과 어긋난다(P0-2).
+  // [화면 이동 순서, Codex 2R] 배너와 재시도 버튼이 대시보드 안에 있으므로 **저장이 끝난 뒤에** 탭을 옮긴다.
+  // 먼저 옮기면 실패해도 사용자가 떠난 화면 뒤에 안내가 숨어 재시도할 방법이 없다.
+  const [taxiAnomalyAck, setTaxiAnomalyAck] = useState<{ saving: boolean; error: string }>({ saving: false, error: "" });
   // 비동기 응답이 뒤섞여 화면에 이전 요청 결과가 남는 것을 막기 위한 최신 요청 표식입니다.
   const dailyListRequestRef = useRef(0);
   const anomalyRequestRef = useRef(0);
   const dashboardAlertsRequestRef = useRef(0);
+  // 법인택시 점검 대상의 '건 키'(taxiOrderKey) 전체 — 이번 달 조회 결과 그대로다.
+  // 대시보드 배지를 누를 때 이 목록을 '확인함'으로 통째로 기록해, 다음 조회에서 여기 없는 건만
+  // 신규로 센다. 렌더와 무관하고 클릭 시점의 최신값이어야 하므로 state 가 아니라 ref 로 둔다.
+  const taxiAnomalyKeysRef = useRef<string[]>([]);
   // 지점별 일일마감 이력 캐시(이상치 표) — 날짜를 바꿔도 다시 읽지 않게. 실패는 캐시하지 않는다.
   const anomalyCacheRef = useRef(new Map<string, { records: any[]; at: number }>());
   const detailRequestRef = useRef(0);
@@ -387,12 +400,13 @@ export default function AdminPage() {
             : 0;
           apply({ laborContractsPending: count });
         })(),
-        // 법인택시 이상 점검 대상 수 — '법인택시 > 이상 점검' 탭과 완전히 같은 계산(정규화 → 규칙 판정)을
+        // 법인택시 이상 점검 대상 — '법인택시 > 이상 점검' 탭과 완전히 같은 계산(정규화 → 규칙 판정)을
         // 이번 달 데이터로 여기서 재현한다. 두 곳(여기·KakaoTaxiSection)이 규칙을 따로 들고 있으면 언젠가
         // 어긋나므로, 항상 helpers/kakaoTaxi·kakaoTaxiAnomaly 의 같은 순수 함수를 그대로 불러 쓴다.
+        // 건수가 아니라 **건 키 목록**을 만든다 — 대시보드는 '아직 확인 안 한 건'만 세기 때문이다(아래 참고).
         // 이 항목이 가장 느리다(카카오 왕복) — 다른 항목을 붙잡지 않도록 따로 떼어 두었다.
         (async () => {
-          const [taxiAnomalyCount, taxiAnomalyAck] = await Promise.all([
+          const [taxiAnomalyKeys, taxiAnomalyAck] = await Promise.all([
             isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
           ? (async () => {
               // toISOString()은 UTC 라 KST 월초 오전에 전월로 열리는 함정이 있다 — 로컬 기준으로 만든다
@@ -425,26 +439,43 @@ export default function AdminPage() {
                 branchNames,
                 buildBranchHistoryMap(Array.isArray(historyRaw.value) ? historyRaw.value : [])
               );
-              return flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS).length;
+              return flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS).map((f) => taxiOrderKey(f.row));
             })().catch(() => null)
-              : Promise.resolve(0),
+              : Promise.resolve([] as string[]),
             // 점검대상 '확인' 기록 — 크로스디바이스 규약(P0): 어느 노트북에서 확인했든 같아야 하므로
             // localStorage 가 아니라 공유데이터로 읽는다. 조회 실패는 '미확인'으로 취급(알림은 보이는 쪽이 안전).
-            gasClient.getSharedDataFromServer<{ month?: string; count?: number }>("admin_taxi_anomaly_ack").catch(() => null),
+            gasClient.getSharedDataFromServer<{ month?: string; count?: number; seen?: string[] }>("admin_taxi_anomaly_ack").catch(() => null),
           ]);
-          // 점검 대상 '확인' 처리(2026-07-29 사용자 요청): 배지를 눌러 확인한 시점의 (달, 건수)를 공유데이터에
-          // 기억해, 같은 달에 건수가 늘지 않는 한 다시 띄우지 않는다. 새 점검 대상이 생기면(건수 증가) 다시 뜬다.
-          // 조회 실패(null)는 그대로 둔다 — 실패를 '확인됨'으로 가리면 안 된다.
+          // 점검 대상 '확인' 처리: 배지를 눌러 확인한 시점의 **건 키 목록**을 공유데이터에 기억해,
+          // 다음 조회에서 그 목록에 없는 건(=새로 생긴 건)만 센다(사용자 지시 2026-08-09).
+          //
+          // [왜 건수 비교를 버렸나] 예전에는 (달, 건수)만 기억해 "건수가 늘면 다시 띄우기"였다. 두 가지가 틀렸다 —
+          //   ① 늘어난 순간 **전체 건수**(예: 24건)를 보여줘 새로 볼 게 3건인데 24건으로 읽혔다.
+          //   ② 미매핑을 채워 3건이 줄고 새 이상이 2건 생기면 총합이 안 늘어 새 건이 조용히 묻혔다(미탐).
+          // 건 단위로 기억하면 둘 다 사라진다.
+          //
+          // [달이 바뀌면] seen 을 비운 것으로 본다 — 이 계산은 이번 달 건만 다루므로 지난달 목록은 의미가 없다.
+          // [옛 형식 호환] seen 없이 count 만 있는 옛 기록은 '아무것도 확인 안 함'으로 취급한다. 한 번 전체가
+          // 다시 뜨지만, 다음 클릭에 새 형식으로 바뀐다 — 확인됨으로 가려 새 건을 놓치는 것보다 안전하다.
           const nowForDismiss = new Date();
           const anomalyMonthKey = `${nowForDismiss.getFullYear()}-${String(nowForDismiss.getMonth() + 1).padStart(2, "0")}`;
           const ackMonth = String(taxiAnomalyAck?.month || "");
-          const ackCount = Number(taxiAnomalyAck?.count);
+          const seenKeys = new Set(
+            ackMonth === anomalyMonthKey && Array.isArray(taxiAnomalyAck?.seen)
+              ? taxiAnomalyAck!.seen!.map((k) => String(k))
+              : []
+          );
+          // [세대 확인, Codex 4R] 배지 숫자(apply)와 클릭 시 기록할 키 목록(ref)은 **같은 조회 결과**여야 한다.
+          // apply 는 늦게 끝난 옛 요청을 버리는데 ref 만 그냥 덮으면, 화면엔 최신 건수가 떠 있는데
+          // 클릭은 옛 목록을 저장한다 — 지금 보이는 새 건이 '확인함'에서 빠지거나 엉뚱한 건이 들어간다.
+          // apply 와 똑같은 조건으로 막는다.
+          if (gen !== dashboardAlertsRequestRef.current) return;
+          // 조회 실패(null)는 그대로 둔다 — 실패를 '확인됨'으로 가리면 안 된다.
+          taxiAnomalyKeysRef.current = taxiAnomalyKeys || [];
           apply({
-            taxiAnomalies: taxiAnomalyCount === null
+            taxiAnomalies: taxiAnomalyKeys === null
               ? null
-              : (ackMonth === anomalyMonthKey && Number.isFinite(ackCount) && taxiAnomalyCount <= ackCount)
-                ? 0
-                : taxiAnomalyCount,
+              : taxiAnomalyKeys.filter((k) => !seenKeys.has(k)).length,
           });
         })(),
       ]);
@@ -476,18 +507,92 @@ export default function AdminPage() {
       return;
     }
     if (target === "taxiAnomalies") {
-      // 확인 처리(2026-07-29): 이 달·이 건수는 다시 알리지 않는다. 새 점검 대상이 생겨 건수가 늘면 다시 뜬다.
+      // 확인 처리: 지금 점검 대상인 **건 전부**를 '확인함'으로 기록한다. 다음 조회에서는 이 목록에 없는
+      // 건(=새로 생긴 건)만 배지에 뜬다(사용자 지시 2026-08-09 — 전체 건수가 아니라 신규 건수만).
       // 크로스디바이스 규약(P0)에 따라 공유데이터에 기록 — 어느 노트북에서 확인했든 같은 상태여야 한다.
       const now = new Date();
       const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const count = dashboardAlerts.taxiAnomalies;
-      if (typeof count === "number" && count > 0) {
-        void gasClient.saveSharedData("admin_taxi_anomaly_ack", { month: monthKey, count, at: new Date().toISOString() })
-          .catch((e) => console.error("점검대상 확인 기록 실패(다음 방문에 알림이 다시 뜰 수 있음):", e));
+      const seen = taxiAnomalyKeysRef.current;
+      // 기록할 게 없으면(이미 0건) 곧바로 이동만 한다.
+      if (typeof count !== "number" || count <= 0) {
+        setAdminSection("kakaoTaxi");
+        setKakaoTaxiTab("anomaly");
+        return;
       }
-      setDashboardAlerts((current) => ({ ...current, taxiAnomalies: current.taxiAnomalies === null ? null : 0 }));
-      setAdminSection("kakaoTaxi");
-      setKakaoTaxiTab("anomaly");
+      if (taxiAnomalyAck.saving) return;   // 연타로 트랜잭션이 겹치지 않게
+      // 저장하는 사이 '새로고침'이 돌면 목록이 바뀐다 — 지금 목록으로 저장한 결과를 그때도 그대로
+      // 반영하면 새로 들어온 건까지 덮어 버린다. 클릭 시점의 조회 세대를 들고 있다가 아래에서 비교한다(Codex 5R).
+      const genAtClick = dashboardAlertsRequestRef.current;
+      setTaxiAnomalyAck({ saving: true, error: "" });
+      const at = new Date().toISOString();   // 트랜잭션 updater 안에서 시각을 만들지 않는다(재시도 시 값이 흔들림)
+      void (async () => {
+        try {
+          // [경쟁, Codex 2026-08-09] 스냅샷 통째 쓰기(saveSharedData) 금지 —
+          // 다른 노트북이 먼저 확인한 건이 내 옛 목록에 덮여 지워지고, 그 건이 모든 기기에서 다시
+          // '새 건'으로 뜬다. 트랜잭션으로 같은 달 기록과 **합집합**을 만든다.
+          // 달이 다르면(월 넘어감) 지난달 목록은 버린다 — 이 계산은 이번 달 건만 다룬다. 그래서 무한 증식하지 않는다.
+          const write = gasClient.mutateSharedData<{ month?: string; seen?: string[]; count?: number; at?: string }>(
+            "admin_taxi_anomaly_ack",
+            (current) => {
+              const sameMonth = String(current?.month || "") === monthKey;
+              const merged = new Set<string>(
+                sameMonth && Array.isArray(current?.seen) ? current!.seen!.map((k) => String(k)) : []
+              );
+              for (const key of seen) merged.add(key);
+              const list = [...merged];
+              // [옛 형식 필드(count)를 일부러 쓰지 않는다, Codex 4R] 배포 직후 열려 있는 옛 번들은
+              // `현재 건수 <= 기록된 count` 면 알림을 숨긴다. seen 은 이 달 확인분이 계속 쌓여 실제 점검 건수보다
+              // 커지므로, count 를 남기면 옛 번들이 한 달 내내 새 건까지 숨긴다(이번에 없애려던 바로 그 미탐).
+              // 필드를 빼면 옛 번들은 Number(undefined)=NaN 으로 판정에 실패해 **전체를 그냥 보여준다**(안전한 방향).
+              return { month: monthKey, seen: list, at };
+            }
+          );
+          // 오프라인이면 Firestore 쓰기가 끝나지 않을 수 있다 — 버튼이 '확인 중…'에 갇히지 않게 시한을 둔다.
+          // 시한이 지난 뒤 저장이 뒤늦게 성공해도 문제없다: 위 합집합 갱신은 여러 번 해도 결과가 같다(멱등).
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              write,
+              new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("확인 기록 저장 시간 초과")), 12000); }),
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);   // 먼저 끝났으면 남은 타이머를 정리한다
+          }
+          setTaxiAnomalyAck({ saving: false, error: "" });
+          if (dashboardAlertsRequestRef.current === genAtClick) {
+            // 저장한 목록 = 지금 화면의 목록이므로 배지를 그대로 비운다.
+            setDashboardAlerts((current) => ({ ...current, taxiAnomalies: current.taxiAnomalies === null ? null : 0 }));
+          } else {
+            // [늦은 저장 vs 새 조회, Codex 5R] 저장하는 사이 조회가 다시 돌아 목록이 바뀌었다.
+            // 방금 저장한 건 **옛 목록**이라 0으로 지우면 그 사이 들어온 새 건까지 이 노트북에서만 사라져
+            // 다른 노트북과 어긋난다(P0-2). 방금 쓴 기록을 반영해 서버 기준으로 다시 계산한다.
+            // (mutateSharedData 가 읽기 캐시를 비우므로 곧바로 새 기록이 읽힌다.)
+            void loadDashboardAlerts();
+          }
+          // [늦은 성공, Codex 3R] 저장을 기다리는 사이 사용자가 다른 알림·사이드바로 옮겨 갔을 수 있다.
+          // 그때 화면을 이상 점검 탭으로 끌고 가면 보고 있던 것을 빼앗는 꼴이라, 대시보드에 그대로 있을 때만 옮긴다.
+          // (확인 기록 자체는 이미 저장됐고 배지도 지워졌으니, 나중에 직접 들어가도 상태는 같다.)
+          if (adminSectionRef.current === "dashboard") {
+            setAdminSection("kakaoTaxi");
+            setKakaoTaxiTab("anomaly");
+          }
+        } catch (e) {
+          // [실패 가시화, Codex 2026-08-09] 배지를 0으로 만들지도, 탭을 옮기지도 않는다 —
+          // 이 노트북에서만 '확인함'이 되면 다른 노트북과 어긋나고(P0-2), 화면을 떠나면 재시도 버튼이 사라진다.
+          // 대시보드에 그대로 남아 배너를 보고 같은 버튼을 다시 누를 수 있게 한다.
+          //
+          // [기다리는 사이 다른 화면으로 갔다면] 배너는 대시보드 안에 있으니 그 순간엔 안 보인다. 그래도
+          // **잃는 것은 없다** — 기록이 안 올라갔으므로 이 건들은 모든 노트북에서 계속 '새 점검 대상'으로 남고,
+          // 배지와 이 배너는 대시보드로 돌아오는 즉시 다시 보인다(실패 방향이 '알림이 더 뜨는' 쪽이라 안전).
+          // 억지로 대시보드로 되돌리면 보고 있던 화면을 빼앗게 되므로 그렇게 하지 않는다.
+          console.error("점검대상 확인 기록 실패:", e);
+          setTaxiAnomalyAck({
+            saving: false,
+            error: "확인 기록을 저장하지 못했습니다. '법인택시 새 점검 대상' 버튼을 다시 눌러주세요. (저장될 때까지 이상 점검 탭으로 넘어가지 않습니다)",
+          });
+        }
+      })();
       return;
     }
     if (target === "laborContracts") {
@@ -977,6 +1082,7 @@ export default function AdminPage() {
                   pendingDailyCount={stats.pending}
                   alerts={dashboardAlerts}
                   loading={dashboardAlertsLoading}
+                  taxiAnomalyAck={taxiAnomalyAck}
                   onRefresh={() => void loadDashboardAlerts()}
                   onOpen={handleDashboardAlertClick}
                 />
@@ -1590,12 +1696,15 @@ function AdminDashboardAlertHub({
   pendingDailyCount,
   alerts,
   loading,
+  taxiAnomalyAck,
   onRefresh,
   onOpen
 }: {
   pendingDailyCount: number;
   alerts: { editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null };
   loading: boolean;
+  /** 법인택시 '확인 처리'의 저장 상태 — 실패를 조용히 삼키지 않고 이 화면에서 재시도하게 한다(P0-2) */
+  taxiAnomalyAck: { saving: boolean; error: string };
   onRefresh: () => void;
   onOpen: (target: "dailyPending" | "editLogs" | "manualOvertimes" | "accounts" | "taxiRequests" | "laborContracts" | "taxiAnomalies") => void;
 }) {
@@ -1673,8 +1782,10 @@ function AdminDashboardAlertHub({
               빨강으로 남고, 아래 '조회 실패' 오류 배너(#FDE2E2/#B91C1C)와 헷갈린다. 빨강은 이 허브에서
               오류 전용이다. 버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
           {(alerts.taxiAnomalies ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiAnomalies")} disabled={loading} className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClass}`}>
-              법인택시 점검 대상: {alerts.taxiAnomalies}건
+            <button onClick={() => onOpen("taxiAnomalies")} disabled={loading || taxiAnomalyAck.saving}
+              className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${loading || taxiAnomalyAck.saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-95"}`}>
+              {/* 확인 기록이 클라우드에 저장된 뒤에야 탭으로 넘어간다 — 그동안은 눌린 상태를 보여준다 */}
+              법인택시 새 점검 대상: {alerts.taxiAnomalies}건{taxiAnomalyAck.saving ? " — 확인 기록 저장 중…" : ""}
             </button>
           )}
           {(alerts.laborContractsPending ?? 0) > 0 && (
@@ -1692,6 +1803,13 @@ function AdminDashboardAlertHub({
       {failedCounts.length > 0 && (
         <div className="rounded-xl border border-[#C93A3A] bg-[#FDE2E2] p-3 text-[11px] font-black text-[#B91C1C]">
           {failedCounts.join(" · ")} 건수를 불러오지 못했습니다. '새로고침'을 누르거나 해당 탭에서 직접 확인해 주세요.
+        </div>
+      )}
+      {/* '확인 처리'가 클라우드에 안 올라간 경우 — 위 조회 실패와 같은 오류 색을 쓴다.
+          이 노트북에서만 알림이 사라지면 다른 노트북과 어긋나므로(P0-2) 배지는 그대로 두고 여기서 알린다. */}
+      {taxiAnomalyAck.error && (
+        <div className="rounded-xl border border-[#C93A3A] bg-[#FDE2E2] p-3 text-[11px] font-black text-[#B91C1C]">
+          {taxiAnomalyAck.error}
         </div>
       )}
     </section>

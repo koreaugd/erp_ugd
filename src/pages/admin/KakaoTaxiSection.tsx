@@ -11,12 +11,13 @@ import { formatNumber } from "../../utils/formatNumber";
 import { addMonthsToMonthInputValue } from "../branch/helpers/formatters";
 import {
   accountLabel, aggregateByBranch, aggregateByMember, buildOrdersExcelRows, KAKAO_BRANCH_ALIASES,
-  kakaoTaxiAccountForBranch, memberAmountMap, normalizeKakaoTaxiOrders, shortTimeText, verifyBranchTotals, verticalLabel,
+  kakaoTaxiAccountForBranch, memberAmountMap, normalizeKakaoTaxiOrders, shortTimeText, taxiOrderKey,
+  verifyBranchTotals, verticalLabel,
   type NormalizedTaxiOrder,
 } from "./helpers/kakaoTaxi";
 import {
-  DEFAULT_TAXI_THRESHOLDS, detectMemberSurges, excludeLogisticsOrders, flagTaxiOrders,
-  type FlaggedTaxiOrder, type TaxiAnomalyReason,
+  DEFAULT_TAXI_THRESHOLDS, detectMemberSurges, excludeLogisticsOrders, flagTaxiOrders, groupFlaggedByReason,
+  type FlaggedTaxiOrder,
 } from "./helpers/kakaoTaxiAnomaly";
 import {
   kakaoTaxiRequestsKey, normalizePhone, REQUEST_TYPE_LABEL, sortRequests, type KakaoTaxiRequest,
@@ -377,19 +378,12 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   );
   const thresholds = useMemo(() => ({ ...DEFAULT_TAXI_THRESHOLDS, highFare }), [highFare]);
   const flagged = useMemo(() => flagTaxiOrders(rows, thresholds), [rows, thresholds]);
-  // [사유별 분리] 단일 '점검 대상 건' 표를 대표 사유 3개(고액·낮 시간대·지점 미매핑) 카드로 나눈다
+  // [사유별 분리] 단일 '점검 대상 건' 표를 사유 3개(고액·낮 시간대·지점 미매핑) 카드로 나눈다
   // (사용자 지시 2026-07-29) — 고액·낮 시간대는 '지출 행태 점검'이고 지점 미매핑은 '데이터 정비'라
   // 봐야 할 목적이 다르다. 한 표에 섞여 있으면 매번 눈으로 걸러내야 했다.
-  // flagged 는 이미 대표 사유(reasons[0])로 묶이고 묶음 안에서 최신순이라 여기서는 나누기만 한다
-  // — 정렬·대표 사유 판정은 kakaoTaxiAnomaly.ts 한 곳에만 둔다.
-  const flaggedByReason = useMemo(() => {
-    const groups: Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> = { highFare: [], daytime: [], unmapped: [] };
-    for (const f of flagged) {
-      const primary = f.reasons[0];
-      if (primary && groups[primary]) groups[primary].push(f);
-    }
-    return groups;
-  }, [flagged]);
+  // 겹친 사유는 카드마다 다시 나온다(사용자 지시 2026-08-09) — 분배·정렬 규칙은 전부
+  // kakaoTaxiAnomaly.ts 한 곳에만 둔다. 카드 건수의 합은 점검 대상 총 건수보다 클 수 있다.
+  const flaggedByReason = useMemo(() => groupFlaggedByReason(flagged), [flagged]);
   // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 짚어 준다.
   // [2026-08-03] 행 배경 칠하기는 걷어냈다 — 최근 표시는 **알약만** 쓴다(DESIGN_ADMIN §4-4).
   // 최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌다.
@@ -401,8 +395,9 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   }, [ordersData?.month]);   // 조회를 다시 하면 기준일도 갱신
   const isRecentOrder = (timeText: string) => String(timeText || "").slice(0, 10) >= recentSinceDate;
   // 사유별 카드 3개가 컬럼·스타일을 어긋남 없이 공유하도록 표 한 벌만 두고 사유마다 호출한다.
-  // '겹친 사유' 칸은 삭제했다(사용자 지시 2026-07-29) — 카드 제목이 이미 대표 사유라 뱃지 칸이
-  // 자리만 차지했다. 겹친 사유가 궁금하면 해당 사유의 카드에서 같은 건이 다시 보인다.
+  // '겹친 사유' 칸은 삭제했다(사용자 지시 2026-07-29) — 카드 제목이 이미 그 카드의 사유라 뱃지 칸이
+  // 자리만 차지했다. 겹친 사유는 해당 사유의 카드에 같은 건이 다시 나오므로 칸 없이도 드러난다
+  // (2026-08-09 이전에는 대표 사유 카드에만 넣어서 실제로는 다시 나오지 않았다 — groupFlaggedByReason 참고).
   const renderAnomalyCard = (
     title: string,
     list: FlaggedTaxiOrder[],
@@ -426,8 +421,10 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             <th className="px-4 py-2 text-[11px] font-black text-[#212121] text-right">금액</th>
           </tr></thead>
           <tbody>
-            {list.map(({ row }, i) => (
-              <tr key={row.order.id || `noid-${i}`}
+            {/* key 는 `계정|주문id`(taxiOrderKey) — 계정이 다르면 카카오 주문 id 가 겹칠 수 있어(계정별 채번)
+                id 만 쓰면 서로 다른 두 건이 같은 key 가 돼 React 가 행을 잘못 재사용한다 */}
+            {list.map(({ row }) => (
+              <tr key={taxiOrderKey(row)}
                 className="border-t border-gray-100">
                 {/* 표시만 축약(MM-DD HH:mm) — '최근 3일' 판정(isRecentOrder)과 정렬은 원본 timeText 그대로다 */}
                 <td className="px-2 py-2" title={row.timeText}>
@@ -2151,6 +2148,8 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
             </label>
             <span className="text-[#212121]/60">급증 기준: 전월 대비 {DEFAULT_TAXI_THRESHOLDS.surgeRatio}배 이상이면서 +{formatNumber(DEFAULT_TAXI_THRESHOLDS.surgeMinIncrease)}원 이상</span>
             <span className="text-[#212121]/60">낮 시간대: {String(DEFAULT_TAXI_THRESHOLDS.dayStartHour).padStart(2, "0")}시~{DEFAULT_TAXI_THRESHOLDS.dayEndHour}시 (심야 퇴근 택시는 정상 패턴으로 봄)</span>
+            {/* 겹친 사유를 카드마다 노출하므로(2026-08-09) 카드 건수의 합이 총 건수보다 클 수 있다 — 오해 방지 */}
+            <span className="text-[#212121]/60">사유가 겹치는 건은 해당 카드에 모두 나옵니다 (카드 건수의 합 ≠ 점검 대상 총 건수)</span>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">

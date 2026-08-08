@@ -13,10 +13,12 @@ import {
   verticalLabel,
   KAKAO_ACCOUNT_BY_BRANCH,
   kakaoTaxiAccountForBranch,
+  taxiOrderKey,
   type NormalizedTaxiOrder,
 } from "../src/pages/admin/helpers/kakaoTaxi";
 import {
-  flagTaxiOrders, isAnomalyExempt, detectMemberSurges, excludeLogisticsOrders, DEFAULT_TAXI_THRESHOLDS,
+  flagTaxiOrders, isAnomalyExempt, detectMemberSurges, excludeLogisticsOrders, groupFlaggedByReason,
+  DEFAULT_TAXI_THRESHOLDS,
 } from "../src/pages/admin/helpers/kakaoTaxiAnomaly";
 import type { KakaoTaxiOrder } from "../src/api/gasClient";
 
@@ -242,6 +244,74 @@ console.log("[13] 이용사유(use_code)·구분 라벨·일시 축약");
   check("엑셀에 이용사유 컬럼", excel[0]["이용사유"] === "거래처 미팅", String(excel[0]["이용사유"]));
   check("결측은 빈 문자열", excel[1]["이용사유"] === "", JSON.stringify(excel[1]["이용사유"]));
   check("엑셀 이용일시는 축약하지 않는다", excel[0]["이용일시"] === "2026-07-01 12:00:00", excel[0]["이용일시"]);
+}
+
+console.log("[14] 사유가 겹친 건은 사유별 카드에 모두 나온다(사용자 지시 2026-08-09)");
+{
+  // 화면에서 실제로 보고된 상황 그대로 — 3만원 넘는 낮 시간대 이용(08-08 17:11 44,800원).
+  // 예전에는 대표 사유(고액)가 낮 시간대를 흡수해 '낮 시간대 이용' 카드에서 통째로 빠졌다.
+  const rows = normalizeKakaoTaxiOrders([
+    order({ id: "g1", member_department: "사카바단단", service_fare: 44800, departure_time: "2026-07-08 17:11:00" }),
+    // 낮 시간대 + 미매핑(고액은 아님) — 카드 두 곳에 나와야 한다
+    order({ id: "g2", member_department: "", group_name: "기본그룹", member_id: "NOMAPG",
+      service_fare: 5000, departure_time: "2026-07-09 10:00:00" }),
+    // 낮 시간대 단독 — 카드 안 정렬(최신순)이 대표 사유 순서에 오염되지 않는지 본다
+    order({ id: "g3", member_department: "사카바단단", service_fare: 1000, departure_time: "2026-07-10 09:00:00" }),
+  ], ERP_BRANCHES);
+  const flagged = flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS);
+  const groups = groupFlaggedByReason(flagged);
+  const ids = (list: typeof flagged) => list.map((f) => f.row.order.id).join(",");
+  check("고액 카드에 g1", ids(groups.highFare) === "g1", ids(groups.highFare));
+  check("고액이어도 낮 시간대 카드에 다시 나온다", groups.daytime.some((f) => f.row.order.id === "g1"), ids(groups.daytime));
+  // 겹친 g1(고액 우선)이 시간과 무관하게 맨 위로 튀면 안 된다 — 카드 안은 순수 최신순이다.
+  check("낮 시간대 카드는 최신순", ids(groups.daytime) === "g3,g2,g1", ids(groups.daytime));
+  check("미매핑 카드에 g2", ids(groups.unmapped) === "g2", ids(groups.unmapped));
+  // 카드 합(5)은 총 건수(3)보다 크다 — 의도된 중복. 총 건수가 필요한 곳은 flagTaxiOrders 길이를 쓴다.
+  const cardSum = groups.highFare.length + groups.daytime.length + groups.unmapped.length;
+  check("카드 합 > 총 건수(의도된 중복)", cardSum === 5 && flagged.length === 3, `카드합 ${cardSum} / 총 ${flagged.length}`);
+}
+
+console.log("[15] 건 키(taxiOrderKey) — 대시보드 '새 점검 대상' 판정의 기준");
+{
+  const rows = normalizeKakaoTaxiOrders([
+    order({ id: "same-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
+    order({ id: "same-id", account_key: "acct2", member_department: "사카바단단", service_fare: 2000 }),
+  ], ERP_BRANCHES);
+  check("키 형식은 `계정|id`", taxiOrderKey(rows[0]) === "acct1|same-id", taxiOrderKey(rows[0]));
+  check("계정이 다르면 키도 다르다", taxiOrderKey(rows[0]) !== taxiOrderKey(rows[1]),
+    `${taxiOrderKey(rows[0])} / ${taxiOrderKey(rows[1])}`);
+  // 같은 건이면 몇 번을 다시 조회해도 같은 키여야 한다 — 아니면 확인해 둔 건이 매번 '새 건'으로 뜬다.
+  const again = normalizeKakaoTaxiOrders([
+    order({ id: "same-id", account_key: "acct1", member_department: "대물섬 한남점", service_fare: 1000 }),
+  ], ERP_BRANCHES);
+  check("다시 조회해도 같은 키", taxiOrderKey(again[0]) === taxiOrderKey(rows[0]), taxiOrderKey(again[0]));
+  // id 가 없는 건도 안정적인 대체 키를 갖는다(순번·랜덤 금지 — 매 조회마다 새 건이 된다).
+  const noidOf = (patch: Partial<KakaoTaxiOrder> = {}) => normalizeKakaoTaxiOrders([
+    order({ id: "", member_id: "M9", member_department: "사카바단단", service_fare: 7000,
+      departure_time: "2026-07-11 12:00:00", departure_point: "본사", arrival_point: "집",
+      car_number: "12가3456", taxi_company_name: "가나운수", toll: 0, ...patch }),
+  ], ERP_BRANCHES)[0];
+  check("id 없는 건도 값이 안 흔들린다", taxiOrderKey(noidOf()) === taxiOrderKey(noidOf()), taxiOrderKey(noidOf()));
+  // [Codex 6R] 서로 다른 건이 같은 키가 되면 한쪽이 '이미 확인함'으로 조용히 숨는다.
+  // 원본 필드 하나만 달라도 키가 갈려야 한다.
+  const distinct: Array<[string, Partial<KakaoTaxiOrder>]> = [
+    ["도착지", { arrival_point: "다른 곳" }],
+    ["출발지", { departure_point: "다른 곳" }],
+    ["차량번호", { car_number: "99하9999" }],
+    ["택시회사", { taxi_company_name: "다른운수" }],
+    ["톨비", { toll: 1200 }],
+    ["요금", { service_fare: 7500 }],
+    ["구분", { vertical_code: "driver" }],
+    ["호출시각", { call_time: "2026-07-11 11:58:00" }],
+    // 값 안에 구분자(|)가 들어 있어도 경계가 뭉개지면 안 된다 — 아래 두 건은 서로도, 기준 건과도 달라야 한다.
+    ["구분자 포함 도착지", { arrival_point: "A|B" }],
+    ["구분자 치환형 도착지", { arrival_point: "A/B" }],
+  ];
+  for (const [label, patch] of distinct) {
+    check(`id 없는 건 — ${label} 차이가 키에 반영된다`, taxiOrderKey(noidOf(patch)) !== taxiOrderKey(noidOf()));
+  }
+  check("id 없는 건 — `A|B` 와 `A/B` 는 서로 다른 키",
+    taxiOrderKey(noidOf({ arrival_point: "A|B" })) !== taxiOrderKey(noidOf({ arrival_point: "A/B" })));
 }
 
 if (failed) { console.error(`\n실패 ${failed}건`); process.exit(1); }
