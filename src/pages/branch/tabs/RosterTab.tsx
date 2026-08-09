@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { gasClient } from "../../../api/gasClient";
 import type { Employee, EmployeeEditableField, SalaryChangeChoice, StaffAddDraft, StaffAddReasonChoice } from "../types";
 import { formatMobilePhone, formatResidentNumber, residentBirthKey, toPhoneTail8 } from "../helpers/formatters";
-import { applyEmployeeEditableField, createStaffAddDraft, getAddReasonChoiceClass, getSalaryChoiceClass, getSameNameWarning, isSampleEmployee, parseSalaryChangeChoice, parseSalaryChangeStatus, parseStaffAddReasonChoice, readLocalStaffAddDrafts, readLocalStaffList, staffAddDraftStorageKey, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
+import { applyEmployeeEditableField, createStaffAddDraft, getAddReasonChoiceClass, getSalaryChoiceClass, getSameNameWarning, isSampleEmployee, parseSalaryChangeChoice, parseSalaryChangeStatus, parseStaffAddReason, parseStaffAddReasonChoice, readLocalStaffAddDrafts, readLocalStaffList, staffAddDraftStorageKey, staffListPendingStorageKey, staffListStorageKey } from "../helpers/staffHelpers";
 
 export function RosterTab({ branchName }: { branchName: string }) {
   const initialEmployees = useMemo(() => readLocalStaffList(branchName), [branchName]);
@@ -31,6 +31,9 @@ export function RosterTab({ branchName }: { branchName: string }) {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [editingEmployeeDraft, setEditingEmployeeDraft] = useState<Employee | null>(null);
   const [editingSensitiveFields, setEditingSensitiveFields] = useState({ phone: false, salaryChanged: false });
+  // 이번 수정 중 추가사유가 **원래 값을 한 번이라도 벗어났는지**. 최종 값만 보면 신규입사→기존직원→신규입사
+  // 왕복을 알아챌 수 없어, 화면에 보인 적 없는 옛 전화번호가 되살아난다(saveEmployeeEdit 참고).
+  const [addReasonLeftOriginal, setAddReasonLeftOriginal] = useState(false);
 
   // Deletion Modal States
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -241,17 +244,25 @@ export function RosterTab({ branchName }: { branchName: string }) {
     setEditingEmployeeId(employee.id);
     setEditingEmployeeDraft({ ...employee, phone: "", salaryChanged: undefined });
     setEditingSensitiveFields({ phone: false, salaryChanged: false });
+    setAddReasonLeftOriginal(false);
   };
 
   const cancelEmployeeEdit = () => {
     setEditingEmployeeId(null);
     setEditingEmployeeDraft(null);
     setEditingSensitiveFields({ phone: false, salaryChanged: false });
+    setAddReasonLeftOriginal(false);
   };
 
   const updateEmployeeEditDraft = (field: EmployeeEditableField, value: string) => {
     if (field === "phone") setEditingSensitiveFields((current) => ({ ...current, phone: true }));
     if (field === "salaryChanged") setEditingSensitiveFields((current) => ({ ...current, salaryChanged: true }));
+    if (field === "addReason") {
+      // 원래 값과 다른 사유를 한 번이라도 고르면 기억해 둔다. 같은 값을 다시 고른 것뿐이면(제자리) 켜지 않는다 —
+      // 아무것도 안 바꾼 조작 때문에 전화번호 재입력을 강요하면 정당한 수정이 막힌다.
+      const originalAddReason = employees.find((employee) => employee.id === editingEmployeeId)?.addReason || "";
+      if (parseStaffAddReasonChoice(value) !== originalAddReason) setAddReasonLeftOriginal(true);
+    }
     setEditingEmployeeDraft((current) => current ? applyEmployeeEditableField(current, field, value) : current);
   };
 
@@ -263,8 +274,24 @@ export function RosterTab({ branchName }: { branchName: string }) {
       name: editingEmployeeDraft.name.trim(),
       residentNumber: formatResidentNumber(editingEmployeeDraft.residentNumber || "")
     };
-    if (originalEmployee?.addReason === normalizedDraft.addReason && normalizedDraft.addReason === "신규입사" && !editingSensitiveFields.phone) {
-      normalizedDraft.phone = originalEmployee.phone || "";
+    // 수정 화면은 전화번호를 가린 채 시작한다(startEmployeeEdit이 phone을 비운다).
+    // 그래서 초안의 빈 전화번호는 "지웠다"가 아니라 "안 건드렸다"는 뜻이다 — 직접 건드리지 않았으면 원래 값을 되살린다.
+    //
+    // 예전에는 '신규입사 → 신규입사'일 때만 되살렸다. 그런데 추가사유를 필수로 막은 뒤로는,
+    // 추가사유가 비어 있던 옛 직원을 보정하려고 사유를 고르는 순간 applyEmployeeEditableField가
+    // phone을 지워버려(기존직원·지점이동·기타) **정당한 보정이 기존 전화번호를 날리는** 회귀가 생겼다(Codex 2R).
+    //
+    // 다만 **사유가 바뀌어 신규입사가 되는 경우에는 되살리지 않는다.** 신규입사의 전화번호는 근로계약서 신원 키라서
+    // (대시보드가 '이름|뒤 8자리'로 신청 여부를 맞춘다), 화면에 보인 적 없는 옛 번호가 아래 8자리 검사를 통과해 저장되면
+    // 옛 계약 기록과 매칭되어 '근로계약서 신청 필요'가 잘못 사라진다(Codex 4R). 그때는 새로 입력받아야 한다.
+    //
+    // 최종 값만 비교하면 부족하다: 한 번의 수정 안에서 신규입사→기존직원→신규입사로 왕복하면 최종 값이 원래와 같아져
+    // 검사를 그냥 통과한다(Codex 5R). 그래서 **사유가 원래 값을 벗어난 적이 있는지**(addReasonLeftOriginal)도 함께 본다.
+    // 사유가 신규입사 그대로이고 손대지 않은 채 이름 등만 고치는 흔한 경우는 여전히 복원 대상이다.
+    const keepsSameAddReason = originalEmployee?.addReason === normalizedDraft.addReason;
+    const mustRetypePhone = normalizedDraft.addReason === "신규입사" && (!keepsSameAddReason || addReasonLeftOriginal);
+    if (!editingSensitiveFields.phone && !mustRetypePhone && !String(normalizedDraft.phone || "").trim()) {
+      normalizedDraft.phone = originalEmployee?.phone || "";
     }
     if (originalEmployee?.addReason === normalizedDraft.addReason && normalizedDraft.addReason === "지점이동" && !editingSensitiveFields.salaryChanged) {
       normalizedDraft.salaryChanged = originalEmployee.salaryChanged;
@@ -279,6 +306,14 @@ export function RosterTab({ branchName }: { branchName: string }) {
     }
     if (!normalizedDraft.name) {
       alert("이름을 꼭 기입해 주세요.");
+      return;
+    }
+    // 추가사유는 근로계약서 신청 대상을 가려내는 **유일한** 기준이다(대시보드 '근로계약서 신청 필요').
+    // 새로 등록하는 경로는 이미 필수로 막고 있는데(같은 화면의 추가 폼, 일일마감 근무자 추가) 수정 저장만 뚫려 있어서,
+    // 여기서 비운 채 저장하면 그 직원이 대시보드 알림에서 통째로 사라졌다(Codex 지적 2026-08-09).
+    // 원래 비어 있던 옛 직원도 이 화면을 거치면 한 번은 고르게 된다 — 그게 목적이다.
+    if (!parseStaffAddReason(String(normalizedDraft.addReason || ""))) {
+      alert(`${normalizedDraft.name} 님의 추가사유를 선택해 주세요.`);
       return;
     }
     saveEmployees(employees.map((employee) => employee.id === normalizedDraft.id ? normalizedDraft : employee));
