@@ -5,15 +5,22 @@
 //   - 미결 확인사항과 관리자 공지를 컴팩트하게 줄여 상단 2열로, 그 아래 일주일 매출 막대그래프와 매출 달력.
 //   - '신규입사 필수정보 확인 필요'를 없애고, 신규입사자 중 **근로계약서 신청이 아직 안 된 인원**을 보여준다.
 //     (필수정보가 비었는지보다, 실제로 해야 할 일이 무엇인지가 지점에 필요한 정보다.)
+//
+// 2026-08-09 개편(사용자 지시): 미결 확인사항을 딱 두 가지로 줄인다.
+//   - 인사 쪽은 '근로계약서 신청 필요' 하나만 남긴다. 추가사유 미선택·지점이동 필수정보·기타 사유 내용·동명이인
+//     네 항목은 지웠다. 지점이 매일 보는 칸이라 실제로 손을 움직여야 하는 일만 남긴다는 뜻이다.
+//   - 마감은 '어제 하루'가 아니라 **이번 달 1일부터 어제까지** 훑어 빠진 날짜를 모두 보여준다.
+//     어제만 보면 그 전에 빠뜨린 날이 영영 안 보였다.
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { gasClient } from "../../../api/gasClient";
 import type { LaborContract, MasterDaily } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { formatNumber } from "../../../utils/formatNumber";
-import { residentBirthKey, toPhoneTail8 } from "../helpers/formatters";
-import { parseStaffAddReason, parseSalaryChangeStatus } from "../helpers/staffHelpers";
+import { toPhoneTail8 } from "../helpers/formatters";
+import { parseStaffAddReason } from "../helpers/staffHelpers";
 
-type Issue = { type: string; message: string; level: "warn" | "danger" | "info"; names?: string[] };
+// names 는 사람 이름일 수도 날짜일 수도 있어 세는 단위를 항목이 정한다(기본 "명").
+type Issue = { type: string; message: string; level: "warn" | "danger" | "info"; names?: string[]; unit?: string };
 
 /** 하루 총매출. totalSales가 비어 있는 옛 기록은 항목 합으로 계산한다. */
 const masterTotal = (row: MasterDaily) =>
@@ -73,10 +80,28 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
         return (await gasClient.getSharedData<LaborContract[]>(`labor_contracts_${branchName}`).catch(() => null)) || [];
       };
 
-      const [savedNotices, roster, today, savedNoticeChecks, contracts, salesHistory] = await Promise.all([
+      // 마감 제출 여부를 확인할 날짜 — 이번 달 1일부터 **어제까지**.
+      // 오늘은 아직 마감 전이라 늘 비어 있으므로 뺀다. 오늘이 1일이면 어제가 지난달이라 확인할 날이 없다.
+      const monthPrefix = toDateStr(new Date()).slice(0, 7);
+      const yesterdayStr = getDateStr(-1);
+      const closeDates = yesterdayStr.startsWith(`${monthPrefix}-`)
+        ? Array.from({ length: Number(yesterdayStr.slice(8)) }, (_, index) => `${monthPrefix}-${String(index + 1).padStart(2, "0")}`)
+        : [];
+
+      const [savedNotices, roster, closeStatus, savedNoticeChecks, contracts, salesHistory] = await Promise.all([
         gasClient.getSharedData<any[]>("admin_notices").catch(() => []),
         gasClient.getBranchOwnRoster(branchName).catch(() => []),
-        gasClient.getDailyFormBootstrap(branchName, getDateStr(-1)).catch(() => null),
+        // 조회 실패를 '전부 제출됨'으로 접으면 안 된다 — 밀린 마감이 있는데 화면이 조용해진다.
+        // 매출 그래프와 같은 규칙으로 성공 여부를 함께 들고 온다.
+        closeDates.length === 0
+          ? Promise.resolve({ ok: true as const, rows: [] as MasterDaily[] })
+          : gasClient.getDailyMastersByDates(branchName, closeDates).then(
+              (rows) => ({ ok: true as const, rows }),
+              (error) => {
+                console.warn("마감 제출 현황 조회 실패:", error);
+                return { ok: false as const, rows: [] as MasterDaily[] };
+              }
+            ),
         gasClient.getSharedData<Record<string, { name: string; checkedAt: string }>>(noticeCheckKey).catch(() => ({})),
         readContracts(),
         // 그래프에 쓸 7일치만 문서 ID로 콕 집어 읽는다 — 지점 전체 히스토리를 훑지 않는다.
@@ -96,8 +121,23 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
       setHistoryFailed(!salesHistory.ok);
 
       const nextIssues: Issue[] = [];
-      if (!today?.exists) {
-        nextIssues.push({ type: "전일마감", message: `${getDateStr(-1)} 일일마감 미제출`, level: "info" });
+      // 이번 달 1일~어제 중 마감 기록이 없는 날. 조회가 실패했으면 '빠진 날 없음'으로 접지 않고 그 사실을 띄운다.
+      if (!closeStatus.ok) {
+        nextIssues.push({ type: "일일마감", message: "제출 현황을 불러오지 못했습니다 (새로고침해 주세요)", level: "info" });
+      } else if (closeDates.length > 0) {
+        const submitted = new Set(
+          (closeStatus.rows || []).map((row) => String(row?.settleDate || "")).filter(Boolean)
+        );
+        const missingCloseDates = closeDates.filter((date) => !submitted.has(date));
+        if (missingCloseDates.length > 0) {
+          nextIssues.push({
+            type: "일일마감",
+            message: `${Number(monthPrefix.slice(5))}월 미제출`,
+            names: missingCloseDates.map((date) => date.slice(5)),
+            unit: "일",
+            level: "info"
+          });
+        }
       }
 
       // 근로계약서를 이미 신청한 사람 — 이름+전화 뒤 8자리로 맞춘다.
@@ -124,74 +164,29 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
         if (name) rosterNameCounts.set(name, (rosterNameCounts.get(name) || 0) + 1);
       });
 
-      const missingAddReason: string[] = [];
       const contractNeeded: string[] = [];
-      const incompleteTransfers: string[] = [];
-      const incompleteOtherReasons: string[] = [];
       (roster || []).forEach((employee: any) => {
         const name = String(employee.name || "").trim();
         if (!name) return;
-        const addReason = parseStaffAddReason(String(employee.addReason || ""));
-        if (!addReason) {
-          missingAddReason.push(name);
-          return;
-        }
-        if (addReason === "신규입사") {
-          const tail = toPhoneTail8(String(employee.phone || ""));
-          // 이름이 명부에도 신청목록에도 하나뿐일 때만 이름 매칭을 믿는다.
-          // 전화가 없는 동명이인은 어느 쪽도 확정할 수 없으므로 '신청 필요'로 남긴다 —
-          // 잘못 띄우는 쪽이, 근로계약서가 영영 안 만들어지는 쪽보다 낫다.
-          const nameIsUnique = (rosterNameCounts.get(name) || 0) <= 1 && (contractNameCounts.get(name) || 0) <= 1;
-          const registered = (tail !== "" && contractKeys.has(`${name}|${tail}`))
-            || (nameIsUnique && contractNames.has(name));
-          if (!registered) contractNeeded.push(name);
-        }
-        if (addReason === "지점이동") {
-          const residentBirth = residentBirthKey(employee.residentNumber);
-          const effectiveDate = String(employee.transferDate || employee.entryDate || "");
-          const salaryChanged = parseSalaryChangeStatus(String(employee.salaryChanged || ""));
-          if (!residentBirth || !effectiveDate || !salaryChanged) incompleteTransfers.push(name);
-        }
-        if (addReason === "기타" && !String(employee.addReasonMemo || "").trim()) {
-          incompleteOtherReasons.push(name);
-        }
+        // 추가사유가 '신규입사'인 사람만 신청 대상이다.
+        // 추가사유가 비어 있으면 신규입사인지 알 수 없어 그냥 넘어간다 — 2026-08-09 이전에는 이 경우를
+        // '추가사유 선택 필요'로 따로 띄웠지만, 사용자 지시로 그 항목을 없앴다(직원현황에서 직접 확인).
+        if (parseStaffAddReason(String(employee.addReason || "")) !== "신규입사") return;
+        // 근로계약서 신청은 정직원만 한다 — 파트타이머는 지점이 양식을 내려받아 직접 작성한다(사용자 지시 2026-08-08).
+        // division이 빈 옛 데이터는 계속 띄운다: 정직원인데 안 뜨는 쪽이 더 위험하다.
+        // Firestore 명부는 정규화 없이 그대로 오므로(firebaseGetBranchOwnRoster) 공백 섞인 표기도 걸러지게 trim 후 비교한다(Codex 지적).
+        if (String(employee.division || "").trim() === "파트타이머") return;
+        const tail = toPhoneTail8(String(employee.phone || ""));
+        // 이름이 명부에도 신청목록에도 하나뿐일 때만 이름 매칭을 믿는다.
+        // 전화가 없는 동명이인은 어느 쪽도 확정할 수 없으므로 '신청 필요'로 남긴다 —
+        // 잘못 띄우는 쪽이, 근로계약서가 영영 안 만들어지는 쪽보다 낫다.
+        const nameIsUnique = (rosterNameCounts.get(name) || 0) <= 1 && (contractNameCounts.get(name) || 0) <= 1;
+        const registered = (tail !== "" && contractKeys.has(`${name}|${tail}`))
+          || (nameIsUnique && contractNames.has(name));
+        if (!registered) contractNeeded.push(name);
       });
-      if (missingAddReason.length > 0) {
-        nextIssues.push({ type: "직원현황", message: "추가사유 선택 필요", names: missingAddReason, level: "warn" });
-      }
       if (contractNeeded.length > 0) {
         nextIssues.push({ type: "근로계약서", message: "근로계약서 신청 필요", names: contractNeeded, level: "warn" });
-      }
-      if (incompleteTransfers.length > 0) {
-        nextIssues.push({ type: "근로계약 후보", message: "지점이동 필수정보 확인 필요", names: incompleteTransfers, level: "warn" });
-      }
-      if (incompleteOtherReasons.length > 0) {
-        nextIssues.push({ type: "근로계약 후보", message: "기타 사유 내용 입력 필요", names: incompleteOtherReasons, level: "warn" });
-      }
-
-      const byName = new Map<string, any[]>();
-      (roster || []).forEach((employee: any) => {
-        const name = String(employee.name || "").trim();
-        if (!name) return;
-        byName.set(name, [...(byName.get(name) || []), employee]);
-      });
-      const duplicateNames: string[] = [];
-      let hasMissingResidentDuplicate = false;
-      byName.forEach((group, name) => {
-        if (group.length < 2) return;
-        const birthKeys = group.map((employee) => residentBirthKey(employee.residentNumber));
-        if (birthKeys.some((key) => !key)) hasMissingResidentDuplicate = true;
-        duplicateNames.push(name);
-      });
-      if (duplicateNames.length > 0) {
-        nextIssues.push({
-          type: "동명이인 확인",
-          message: hasMissingResidentDuplicate
-            ? "동명이인/동일인 확인 필요 (주민등록번호 미입력 포함)"
-            : "동명이인/동일인 확인 필요",
-          names: duplicateNames,
-          level: "danger"
-        });
       }
 
       setIssues(nextIssues);
@@ -337,7 +332,7 @@ export function BranchDashboardTab({ branchName }: { branchName: string }) {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="branch-dash-chip">{issue.type}</span>
                       <span className="text-[11px] font-black">{issue.message}</span>
-                      {names.length > 0 && <span className="text-[11px] font-bold opacity-60">{names.length}명</span>}
+                      {names.length > 0 && <span className="text-[11px] font-bold opacity-60">{names.length}{issue.unit || "명"}</span>}
                       {shown.map((name) => (
                         <span key={name} className="branch-dash-name">{name}</span>
                       ))}
