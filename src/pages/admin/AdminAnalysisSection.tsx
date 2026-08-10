@@ -10,6 +10,7 @@
 // 매월 갱신: 'db파일 업로드'(브라우저 파싱 → shared_data/analysis_pnl_db). 초기 적재는 scripts/seed-analysis-pnl.mjs.
 // 산식 출처는 helpers/pnlDb.ts 머리주석(parse_db.py 그대로). 전사 합산·순위는 본사 행 제외(이중계상 방지).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Download } from "lucide-react";
 import { gasClient } from "../../api/gasClient";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import { formatNumber } from "../../utils/formatNumber";
@@ -26,6 +27,8 @@ import {
   buildHqOverview, hqFiguresOf,
   type PnlDbPayload, type PnlDbRow, type SummaryCol, type SummaryTone, type HqStatementLine,
 } from "./helpers/pnlDb";
+// 손익계산서 표를 05 에이전트의 지점별 손익계산서 PNG 와 같은 모양으로 내려받는다(helpers/pnlDetailImage.ts).
+import { pnlDetailFileName, renderPnlDetailPng } from "./helpers/pnlDetailImage";
 
 export type AnalysisView = "summary" | "charts" | "branch";
 
@@ -332,6 +335,41 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
   const branchRow = branch ? rowOf(rows, branch, month) : null;
   const branchPrevRow = branch ? rowOf(rows, branch, prevMonthOf(month)) : null;
   const statement = useMemo(() => (branchRow ? buildStatement(branchRow, branchPrevRow) : []), [branchRow, branchPrevRow]);
+
+  // ── 손익계산서 이미지 저장 ──
+  // 화면 표를 그대로 캡처하지 않고 05 형태로 새로 그린다(이유는 helpers/pnlDetailImage.ts 머리주석).
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  // 버튼 비활성화만으로는 빠른 더블클릭을 못 막는다 — setImageBusy 는 다음 렌더에야 반영돼
+  // 두 번째 클릭이 아직 false 인 imageBusy 를 보고 통과한다(같은 이미지가 두 장 저장된다).
+  // 동기적으로 즉시 바뀌는 ref 로 잠근다.
+  const imageLock = useRef(false);
+
+  const handleSaveStatementImage = async () => {
+    if (!branchRow || imageLock.current) return;
+    imageLock.current = true;
+    setImageBusy(true);
+    setImageError(null);
+    let url: string | null = null;
+    try {
+      const blob = await renderPnlDetailPng({ branch, month, current: branchRow, previous: branchPrevRow });
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = pnlDetailFileName(branch, month);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error("손익계산서 이미지 저장 실패:", error);
+      setImageError(error instanceof Error ? error.message : "이미지를 만들지 못했습니다.");
+    } finally {
+      // 내려받기가 시작되기 전에 URL 을 풀면 브라우저가 저장을 취소한다 — 넉넉히 뒤에 푼다.
+      if (url) { const done = url; setTimeout(() => URL.revokeObjectURL(done), 10_000); }
+      imageLock.current = false;
+      setImageBusy(false);
+    }
+  };
 
   const money = (v: number) => `${formatNumber(v)}원`;
   const percentValue = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -878,8 +916,24 @@ export function AdminAnalysisSection({ view }: { view: AnalysisView }) {
                 │  단점: 카드 안에 제목 양식이 두 가지(밴드+알약) 섞인다.
                 └──────────────────────────────────────────────────────────────────── */}
             <section className="admin-sales-overview-section admin-sheet-card">
-              <div className="admin-band"><h3 className="admin-band-title">손익계산서</h3></div>
+              {/* 실행 버튼은 밴드 오른쪽 끝(.admin-band-actions) — 제목 자체에는 아무것도 붙이지 않는다(§4-0). */}
+              <div className="admin-band">
+                <h3 className="admin-band-title">손익계산서</h3>
+                <div className="admin-band-actions">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveStatementImage()}
+                    disabled={imageBusy}
+                    title="05 대시보드의 지점별 손익계산서와 같은 모양의 PNG 로 저장합니다"
+                    className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" /> {imageBusy ? "저장 중…" : "이미지 저장"}
+                  </button>
+                </div>
+              </div>
               <div className="p-5 space-y-4">
+              {/* 관리자 스코프는 text-rose-* 를 검정으로 죽이므로 오류 색은 hex 로 못 박는다(DESIGN_ADMIN §2-1). */}
+              {imageError && <p className="text-[11px] font-black text-[#B91C1C]">{imageError}</p>}
               <table className="w-full admin-hq-statement">
                 <thead>
                   <tr>
