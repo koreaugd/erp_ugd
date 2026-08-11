@@ -32,6 +32,19 @@ export const CHECK_SECTION_NAV: Record<CheckSection, string> = {
  *  정직원 급여대장(salary)은 25일 작성이라 말일 확인과 시점이 달라 제외한다. */
 export const GATED_CLOSE_SECTIONS = ["purchase", "salesSummary", "partTimeSalary"] as const;
 
+/**
+ * 게이트가 **실제로 요구하는** 확인 섹션. `CHECK_SECTIONS` 전체가 아니다.
+ *
+ * 여기엔 **확인 버튼이 화면에 실제로 배포된 섹션만** 넣는다. 요구만 해 놓고 누를 화면이 없으면
+ * 그 지점은 말일 마감 3종이 **영구히 막힌다** — 게이트가 fail-closed 라 우회 통로도 없다
+ * (Codex 지적 2026-08-11: 확인 컨트롤 없이 게이트만 배포된 커밋).
+ *
+ * 연차관리 확인 버튼은 연차 인원출처 개편(별건 작업)과 한 덩어리라 이 커밋에 들어오지 못했다.
+ * **그 화면이 배포되는 커밋에서 여기에 "annualLeave" 를 더할 것.** 그때까지 연차는 화면에서
+ * 확인 버튼이 보이더라도(그 작업 브랜치에서는 보인다) 마감을 막지는 않는다.
+ */
+export const GATE_REQUIRED_SECTIONS: readonly CheckSection[] = ["businessTaxi"];
+
 export type CheckCloseStatus = "confirmed" | "pending";
 
 export interface CheckCloseRecord {
@@ -143,7 +156,9 @@ export async function findMissingCheckSections(
   // null = 문서 없음(아직 아무 마감도 없음, 정상) → 전부 미확인.
   // 값이 있는데 배열이 아니면 형식 손상이라 확인 여부를 단정할 수 없다 → 중단(assertCloseRecordList 가 throw).
   const list = assertCloseRecordList(await gasClient.getSharedDataFromServer<any[]>(SHARED_KEY));
-  return CHECK_SECTIONS.filter(
+  // CHECK_SECTIONS 가 아니라 GATE_REQUIRED_SECTIONS 를 돈다 — 누를 화면이 없는 섹션을 요구하면
+  // 지점이 마감을 영원히 못 한다(위 상수 주석).
+  return GATE_REQUIRED_SECTIONS.filter(
     (section) => latestCheckRecord(list, branchName, month, section)?.status !== "confirmed"
   );
 }
