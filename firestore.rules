@@ -129,6 +129,18 @@ service cloud.firestore {
         || dataKey.matches('^part_time_profiles(:|%3A).*');
     }
 
+    // 통합보고서(분석 > 통합보고서) 문서인지 판별 — 03 에이전트의 손익계산서 통합 엑셀을 통째로 담는다.
+    // 키 형식: pnl_report_pack:{YYMM} / pnl_report_pack_index
+    // (shared_data 문서 ID는 encodeURIComponent 되어 저장되므로 ':'는 '%3A'로 인코딩된다. 두 형태를 모두 본다.)
+    //
+    // [왜 canAccessWork() 로 두면 안 되는가] shared_data 의 기본 권한은 canAccessWork() 라
+    // **로그인한 모든 지점 계정이 읽는다.** 이 문서에는 전 지점 손익 + 급여 명단 + 통장 전체 거래내역이
+    // 들어 있어, 그대로 두면 지점 계정 하나로 회사 재무가 통째로 열린다(사용자 지적 2026-08-11).
+    // 주민번호·계좌는 업로드 단계에서 이미 가려서 저장하지만(helpers/reportPack.ts), 그것과 별개로 막는다.
+    function isReportPackKey(dataKey) {
+      return dataKey.matches('^pnl_report_pack(:|%3A|_index).*');
+    }
+
     // 급여대장 키에서 지점명 조각을 꺼낸다.
     // 주의: shared_data 문서 ID는 encodeURIComponent 된 값이라 한글 지점명이 '%EB%82%A8...' 형태다.
     // 규칙에는 URL 디코딩이 없으므로 원문과 비교할 수 없다 —
@@ -193,14 +205,19 @@ service cloud.firestore {
       // 지점 세션이 이 문서를 쓰면 관리자 대시보드 알림을 마음대로 꺼버릴 수 있다(Codex 지적).
       allow read, write: if canAccessWork()
         && (!isSalaryKey(dataKey) || canReadSalary(dataKey))
+        && (!isReportPackKey(dataKey) || isAdmin() || isPersonalAdmin())
         && (dataKey != "admin_taxi_anomaly_ack" || isAdmin() || isPersonalAdmin());
     }
 
     // 백업 문서 ID는 '{인코딩된 dataKey}--{timestamp}' 형식이라 급여대장 백업도 같은 함수로 판별된다
     // (isSalaryKey/salaryBranchOf가 '%3A' 기준으로 지점 조각을 그대로 꺼낸다).
     // 여기를 막지 않으면 급여대장 이전 값이 백업으로 복사되어 권한 없는 계정이 급여·주민번호·계좌를 그대로 읽는다(Codex 지적 2026-07-27).
+    // 통합보고서도 같은 이유로 여기서 막는다 — firebaseSaveSharedData 는 저장할 때마다
+    // '{인코딩된 키}--slot{요일}' 사본을 만든다. 본문만 막고 여기를 열어 두면 백업으로 그대로 샌다.
     match /shared_data_backups/{backupId} {
-      allow read, write: if canAccessWork() && (!isSalaryKey(backupId) || canReadSalary(backupId));
+      allow read, write: if canAccessWork()
+        && (!isSalaryKey(backupId) || canReadSalary(backupId))
+        && (!isReportPackKey(backupId) || isAdmin() || isPersonalAdmin());
     }
 
     match /edit_logs/{logId} {

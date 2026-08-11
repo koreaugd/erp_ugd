@@ -1394,6 +1394,206 @@ input[type=number] {
     inset 0 -1px 0 0 var(--admin-black);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   통합보고서 (분석 > 통합보고서) — 엑셀 시트를 서식 그대로 보고 고치는 격자
+   ══════════════════════════════════════════════════════════════════════════
+   손익 요약표(.admin-summary-table)와 목적이 다르다. 저쪽은 "우리가 만든 표"라 ERP 색·글자로
+   그리지만, 여기는 **원본 엑셀의 재현**이다. 그래서 배경·글자색·볼드·정렬·테두리는 셀마다
+   인라인 스타일이 정하고(ReportGrid.tsx `styleOf`), 이 파일은 **틀**만 잡는다.
+
+   [주의] `.admin-analysis-uniform`(전부 11px !important)을 이 화면에 씌우지 않는다.
+   인라인 style 은 !important 를 이기지 못해 엑셀의 글자 크기가 전부 뭉개진다.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── 시트 탭 — 엑셀의 시트 탭을 표 머리글 **위**에 일렬로(사용자 지시 2026-08-11) ──
+   17개라 줄바꿈하지 않고 가로로 민다. 줄이 접히면 표가 그만큼 아래로 밀린다. */
+.admin-redesign .report-sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: color-mix(in srgb, var(--admin-alice) 40%, #ffffff);
+  border-bottom: 1px solid var(--admin-black);
+  scrollbar-width: thin;
+}
+.admin-redesign .report-sheet-tabs button {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(33, 33, 33, 0.62);
+  background: transparent;
+  border: 0;
+  /* 탭 사이 칸막이. 오른쪽에만 그어 선이 겹치지 않게 한다(§9-1-A). */
+  border-right: 1px solid rgba(33, 33, 33, 0.14);
+  border-radius: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.admin-redesign .report-sheet-tabs button:hover { background: color-mix(in srgb, var(--admin-vanilla) 45%, transparent); }
+/* 고른 탭 = 흰 바탕 + 검정 볼드 + 아래쪽 강조선. 엑셀에서 "지금 이 시트"가 튀어나와 보이는 것과 같은 문법. */
+.admin-redesign .report-sheet-tabs button.is-active {
+  background: #ffffff;
+  color: var(--admin-black);
+  font-weight: 900;
+  box-shadow: inset 0 -3px 0 0 #1A3C6E;
+}
+
+/* ── 격자 ──
+   [가로 스크롤] 열 너비를 엑셀의 실제 폭(px)으로 못 박고 table-layout:fixed 를 쓴다(ReportGrid.tsx).
+   폭을 내용에 맡기면 빈 열이 쪼그라들어 표가 화면보다 좁아지고, 그러면 **스크롤이 아예 생기지 않아**
+   오른쪽 열을 볼 방법이 없다(2026-08-11 사용자 지적). 여기서 width 를 다시 정하지 말 것. */
+.admin-redesign .report-grid-scroll {
+  overflow: auto;
+  max-height: 72vh;
+  background: #ffffff;
+}
+/* 격자에 키보드 초점이 있을 때 파란 테두리를 두르지 않는다 — 커서 칸이 이미 자기 테두리로 위치를 알린다. */
+.admin-redesign .report-grid-scroll:focus { outline: none; }
+.admin-redesign .report-grid-scroll:focus-visible { outline: 2px solid #1A3C6E; outline-offset: -2px; }
+
+.admin-redesign .report-grid {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  color: var(--admin-black);
+  background: #ffffff;
+}
+
+/* 열 문자(A·B·C) 머리글 — 관리자 표준 엘리스(DESIGN_ADMIN §4-0).
+   고정 칸이라 선은 border 가 아니라 inset 그림자로 그린다 — 크롬이 sticky 칸의 border 를
+   스크롤 중에 그리다 빠뜨린다(DESIGN.md §9). 방향은 오른쪽·아래만(§9-1-A). */
+.admin-redesign .report-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 22px;
+  padding: 2px 4px;
+  background: var(--admin-alice);
+  border: 0;
+  box-shadow:
+    inset -1px 0 0 0 rgba(33, 33, 33, 0.35),
+    inset 0 -1px 0 0 var(--admin-black);
+  color: #212121;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+}
+/* 커서가 있는 열의 머리글을 짚어 준다(엑셀과 같은 표시). */
+.admin-redesign .report-grid thead th.is-active {
+  background: var(--admin-vanilla);
+}
+/* 행번호 ✕ 열문자가 만나는 모서리 — 위·왼쪽 두 방향 모두 고정이라 한 층 더 위로 올린다(§9-1-B). */
+.admin-redesign .report-grid thead th.report-grid-corner {
+  left: 0;
+  z-index: 40;
+  box-shadow:
+    inset -1px 0 0 0 rgba(33, 33, 33, 0.55),
+    inset 0 -1px 0 0 var(--admin-black);
+}
+
+/* 본문 칸 — 배경·글자·정렬·테두리는 **인라인 스타일**이 정한다(엑셀 서식 재현).
+   여기서는 여백·자르기·기본 정렬만 잡는다.
+   [행 높이 고정] line-height 를 1.15 로 묶어 둔다. 가상 스크롤이 각 행의 높이를 **미리 계산**해
+   스크롤 위치를 정하므로, 글자에 따라 행이 들쭉날쭉해지면 스크롤 막대가 실제와 어긋난다. */
+.admin-redesign .report-grid tbody td {
+  padding: 1px 4px;
+  vertical-align: middle;
+  overflow: hidden;
+  line-height: 1.15;
+  background: #ffffff;
+}
+
+/* ── 열 너비·행 높이 끌어 조절 (엑셀과 같은 동작) ──
+   손잡이는 머리글 칸(열)·행 번호 칸(행) 안쪽 모서리에 깐다. 두 칸 모두 sticky(=위치 지정 요소)라
+   그대로 absolute 기준이 된다. 본문 칸에는 `overflow:hidden` 이 걸려 있으므로 손잡이를 칸 **안쪽**에
+   두어야 잘리지 않는다(바깥으로 내밀면 보이지 않는다). */
+.admin-redesign .report-grid .report-col-resizer,
+.admin-redesign .report-grid .report-row-resizer {
+  position: absolute;
+  z-index: 2;
+  /* 평소엔 보이지 않는다 — 격자에 선이 하나 더 있는 것처럼 보이면 안 된다. */
+  background: transparent;
+  touch-action: none; /* 태블릿에서 끌 때 화면이 같이 스크롤되지 않게 */
+}
+.admin-redesign .report-grid .report-col-resizer {
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.admin-redesign .report-grid .report-row-resizer {
+  left: 0;
+  bottom: 0;
+  height: 5px;
+  width: 100%;
+  cursor: row-resize;
+}
+/* 손을 올리면 어디를 끄는지 파란 선으로 알린다. */
+.admin-redesign .report-grid .report-col-resizer:hover { background: #1A3C6E; }
+.admin-redesign .report-grid .report-row-resizer:hover { background: #1A3C6E; }
+/* 끄는 동안에는 커서가 표 밖으로 나가도 모양이 유지되고, 글자가 선택되지 않게 막는다. */
+body.report-resizing-col, body.report-resizing-col * { cursor: col-resize !important; user-select: none !important; }
+body.report-resizing-row, body.report-resizing-row * { cursor: row-resize !important; user-select: none !important; }
+
+/* 가상 스크롤의 빈 자리 — 안 그린 행들의 높이를 대신 차지한다. 격자선·여백을 갖지 않아야
+   표 위아래에 유령 줄이 보이지 않는다. */
+.admin-redesign .report-grid tbody tr.report-grid-spacer > td {
+  padding: 0;
+  border: 0;
+  background: #ffffff;
+}
+/* 값이 칸보다 길면 잘라 낸다. 엑셀처럼 옆 칸으로 흘려보내지는 않는다 —
+   그러면 오른쪽 칸의 값과 겹쳐 무엇이 어느 칸의 값인지 알 수 없게 된다. */
+.admin-redesign .report-grid tbody td .report-grid-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 행 번호 — 왼쪽 고정. 고정 칸이라 오른쪽 선을 그림자로 그린다.
+   `position: sticky` 라 안에 둔 높이 조절 손잡이의 absolute 기준이 되어 준다. */
+.admin-redesign .report-grid tbody td.report-grid-rownum {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: var(--admin-alice);
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(33, 33, 33, 0.55);
+  box-shadow:
+    inset -1px 0 0 0 rgba(33, 33, 33, 0.55),
+    inset 0 -1px 0 0 rgba(33, 33, 33, 0.10);
+}
+
+/* 편집 중인 칸의 입력 — **끝까지 투명**하다(DESIGN.md §9-0).
+   전역 `.admin-redesign input` 이 배경·테두리·18px 라운드를 !important 로 씌우므로
+   클래스 두 개(.admin-redesign .report-grid-input)로는 못 이긴다 — 여기서도 !important 로 되받는다. */
+.admin-redesign .report-grid input.report-grid-input,
+.admin-redesign .report-grid input.report-grid-input:hover,
+.admin-redesign .report-grid input.report-grid-input:focus {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: #FFFDE7 !important;   /* 지금 고치는 칸임을 아주 옅은 노랑으로만 알린다 */
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  font-size: inherit !important;
+  font-weight: inherit;
+  color: var(--admin-black) !important;
+  font-family: inherit;
+}
+
 /* ── 본사 종합 탭 (05 본사 대시보드 PNG 재현) ── */
 .admin-hq-kpi-grid {
   display: grid;

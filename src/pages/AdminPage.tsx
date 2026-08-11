@@ -10,8 +10,10 @@ import ConfirmModal from "../components/ConfirmModal";
 import MyAccountModal from "../components/MyAccountModal";
 import NumberInput from "../components/NumberInput";
 import { formatNumber } from "../utils/formatNumber";
-import { calcAutoGrantDays, toEntryDateInputValue, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX, ANNUAL_LEAVE_USED_ADJUST_PREFIX, LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX } from "../utils/annualLeavePolicy";
-import { moveAnnualLeaveEmployee, deleteAnnualLeaveEmployee } from "./branch/helpers/annualLeaveOps";
+import { calcAutoGrantDays, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX, ANNUAL_LEAVE_USED_ADJUST_PREFIX, LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX } from "../utils/annualLeavePolicy";
+// 연차 대상자는 **정직원 급여대장**에서 뽑는다(2026-08-11 전환). 조회 규칙은 이 헬퍼 한 곳에만 둔다 —
+// 지점 연차관리 탭과 규칙이 갈라지면 두 화면의 인원이 달라진다.
+import { loadAnnualLeaveRoster, toAnnualLeaveMembers, fullTimeSalaryKey, findStrandedLeaveOwners, describeStrandedOwners } from "./branch/helpers/annualLeaveRoster";
 import { splitDailyMemoMetadata } from "./branch/helpers/memoMetadata";
 import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
@@ -25,6 +27,7 @@ import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
+import { AdminReportPackTab } from "./admin/AdminReportPackTab";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, ADMIN_TAB_LABELS, type AdminPermKey } from "./admin/adminTabRegistry";
 // 휴업 지점은 관리자 화면에서 감춘다(기록은 지우지 않는다) — 목록·이유는 helpers/closedBranches.ts
 import { getAdminBranchList, isClosedBranch } from "./admin/helpers/closedBranches";
@@ -49,6 +52,26 @@ type DashboardAlerts = {
   latestEditLogAt: string;
   latestManualOvertimeAt: string;
 };
+
+/** 분석 섹션의 하위탭. 사이드바·모바일 탭 줄·제목 매핑이 모두 아래 ANALYSIS_SUB_TABS 하나를 본다. */
+type AnalysisTabId = "summary" | "charts" | "branch" | "report";
+
+/**
+ * 분석 하위탭 목록 — **한 곳에서만 정의한다.**
+ * 예전에는 사이드바와 모바일 탭 줄이 같은 배열을 각자 적고 있어, 탭을 하나 늘릴 때 한쪽만 고치면
+ * 데스크톱에는 보이고 모바일에는 안 보이는 어긋남이 난다.
+ *
+ * `report`(통합보고서)는 주민번호·계좌가 든 03 에이전트 원본을 다룬다. AdminPage 자체가
+ * `role === "admin"`(총괄관리자)만 들어올 수 있고(:826 렌더 가드), 문서도 firestore.rules 의
+ * isReportPackKey() 로 총괄관리자만 읽게 막혀 있어 화면·서버 판정이 일치한다.
+ */
+// 차례는 사용자 지시(2026-08-11): 통합보고서 → 손익 종합 → 지점 손익계산서 → 손익 차트.
+const ANALYSIS_SUB_TABS: { id: AnalysisTabId; label: string }[] = [
+  { id: "report", label: "통합보고서" },
+  { id: "summary", label: "손익 종합" },
+  { id: "branch", label: "지점 손익계산서" },
+  { id: "charts", label: "손익 차트" },
+];
 
 export default function AdminPage() {
   const { user, logout } = useAuthContext();
@@ -151,7 +174,7 @@ export default function AdminPage() {
   // 맨 위 섹션(현금차이)을 건너뛰고 화면이 아래로 튄다.
   const [dailyLogsFocus, setDailyLogsFocus] = useState<"logs" | "manualOvertimes" | null>(null);
   const [monthlyClosingTab, setMonthlyClosingTab] = useState<"status" | "cashManagement" | "cashExpenses">("status");
-  const [analysisTab, setAnalysisTab] = useState<"summary" | "charts" | "branch">("summary");
+  const [analysisTab, setAnalysisTab] = useState<AnalysisTabId>("summary");
   const [kakaoTaxiTab, setKakaoTaxiTab] = useState<KakaoTaxiView>("orders");
   // 내 정보 모달(2026-07-29) — 개인 계정만. 이름·연락처·비밀번호 자가 수정.
   const [myAccountOpen, setMyAccountOpen] = useState(false);
@@ -836,8 +859,7 @@ export default function AdminPage() {
         : monthlyClosingTab === "cashExpenses" ? "현금지출" : "제출현황";
     }
     if (adminSection === "analysis") {
-      return analysisTab === "charts" ? "손익 차트"
-        : analysisTab === "branch" ? "지점 손익계산서" : "손익 종합";
+      return ANALYSIS_SUB_TABS.find((t) => t.id === analysisTab)?.label || "손익 종합";
     }
     if (adminSection === "kakaoTaxi") {
       return kakaoTaxiTab === "anomaly" ? "법인택시 · 이상 점검"
@@ -928,12 +950,12 @@ export default function AdminPage() {
           })}
 
           <p className="ugd-nav-group">분석</p>
-          {[{ id: "summary", label: "손익 종합" }, { id: "charts", label: "손익 차트" }, { id: "branch", label: "지점 손익계산서" }].map((sub) => {
+          {ANALYSIS_SUB_TABS.map((sub) => {
             const subActive = adminSection === "analysis" && analysisTab === sub.id;
             return (
               <button
                 key={sub.id}
-                onClick={() => { setAdminSection("analysis"); setAnalysisTab(sub.id as "summary" | "charts" | "branch"); }}
+                onClick={() => { setAdminSection("analysis"); setAnalysisTab(sub.id); }}
                 aria-current={subActive ? "page" : undefined}
                 className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "analysis") ? " opacity-50" : ""}`}
               >
@@ -1100,14 +1122,18 @@ export default function AdminPage() {
             <section className="space-y-5 animate-fade-in">
               {/* 모바일은 사이드바가 없어 여기서 하위탭을 고른다(전일정산·월말 탭과 같은 패턴). */}
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
-                {[{ id: "summary", label: "손익 종합" }, { id: "charts", label: "손익 차트" }, { id: "branch", label: "지점 손익계산서" }].map((sub) => (
-                  <button key={sub.id} onClick={() => setAnalysisTab(sub.id as "summary" | "charts" | "branch")}
+                {ANALYSIS_SUB_TABS.map((sub) => (
+                  <button key={sub.id} onClick={() => setAnalysisTab(sub.id)}
                     className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${analysisTab === sub.id ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>
                     {sub.label}
                   </button>
                 ))}
               </div>
-              <AdminAnalysisSection view={analysisTab} />
+              {/* 통합보고서는 원본 엑셀을 격자 그대로 보는 별도 화면이라 AdminAnalysisSection(손익DB 기반) 과
+                  데이터 원천이 다르다 — 같은 컴포넌트에 얹지 않고 갈라 둔다. */}
+              {analysisTab === "report"
+                ? <AdminReportPackTab uploadedBy={user?.name || "관리자"} />
+                : <AdminAnalysisSection view={analysisTab} />}
             </section>
           )}
 
@@ -2338,10 +2364,14 @@ function AdminAnnualLeaveSection() {
   const [selectedBranch, setSelectedBranch] = useState("");
   // 전 직원 연차 현황 표 전용 지점 필터. 기본값 ""(선택) = 전체 지점 표시. 위 등록 폼의 지점 선택과는 별개다.
   const [statusBranch, setStatusBranch] = useState("");
-  // 이동·삭제·명부수정이 도는 동안의 잠금 키("지점:직원id"). 연타로 같은 직원이 두 번 처리되는 것을 막는다.
-  const [busyEmployee, setBusyEmployee] = useState<string | null>(null);
+  // 지점별로 인원을 어느 달 급여대장에서 가져왔는지. 표에 표시한다 — 지점마다 다를 수 있고(당월 미작성 시
+  // 직전 달로 후퇴), 안 보여주면 "새로 뽑은 사람이 왜 안 보이나"를 알 길이 없다.
+  const [sourceMonthByBranch, setSourceMonthByBranch] = useState<Record<string, string | null>>({});
   // 조회가 일부라도 실패한 지점 — 그 지점 행은 저장을 잠근다(불완전한 화면값으로 서버를 덮어쓰지 않기 위해).
   const [lockedBranches, setLockedBranches] = useState<Set<string>>(new Set());
+  // 조회가 **통째로** 실패했다(지점 목록조회 실패 등). 이때는 지점별 잠금 목록 자체가 갱신되지 않으므로
+  // 전 지점을 잠근다 — 안 그러면 낡은 화면값으로 저장이 통과한다.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
@@ -2384,29 +2414,44 @@ function AdminAnnualLeaveSection() {
     const seq = ++loadSeqRef.current;
     try {
       setLoading(true);
+      setLoadFailed(false);
       const branchList = await getAdminBranchList();
       const packed = await Promise.all((branchList || []).map(async (branch: any) => {
         const branchName = branch.branchName;
         // [fail-closed] 조회 실패를 `.catch(()=>{})` 로 삼키면 **"값 없음"과 구분되지 않는다.**
         // 그 상태에서 부여/사용 칸을 스치기만 해도(자동값과 같아 보이므로) 서버의 진짜 수동값이 지워진다
         // (Codex 지적 2026-08-04). 실패한 지점은 표시만 하고 **저장을 잠근다.**
+        // **전부 서버 전용**(...FromServer) — 캐시 폴백은 실패를 '값 없음'처럼 보이게 만든다.
+        // 그 상태에서 부여/사용 칸을 스치면 화면의 묵은 값이 서버의 진짜 값을 덮는다(아래 fail-closed 주석).
+        // getSharedData 도 내부적으로 서버를 먼저 읽으므로 요청 수는 그대로다 — 폴백만 없앤 것이다.
         const settled = await Promise.allSettled([
-          gasClient.getBranchOwnRoster(branchName),
-          gasClient.getSharedData<any[]>(`annual_leave:${branchName}`),
-          gasClient.getSharedData<Record<string, number>>(`${ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX}${branchName}`),
-          gasClient.getSharedData<Record<string, number>>(`${LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX}${branchName}`),
-          gasClient.getSharedData<Record<string, number>>(`${ANNUAL_LEAVE_USED_ADJUST_PREFIX}${branchName}`)
+          loadAnnualLeaveRoster(branchName),
+          gasClient.getSharedDataFromServer<any[]>(`annual_leave:${branchName}`),
+          gasClient.getSharedDataFromServer<Record<string, number>>(`${ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX}${branchName}`),
+          gasClient.getSharedDataFromServer<Record<string, number>>(`${LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX}${branchName}`),
+          gasClient.getSharedDataFromServer<Record<string, number>>(`${ANNUAL_LEAVE_USED_ADJUST_PREFIX}${branchName}`)
         ]);
-        const failed = settled.some((item) => item.status === "rejected");
-        if (failed) console.warn(`[연차관리] ${branchName} 데이터를 일부 불러오지 못해 저장을 잠급니다.`, settled);
         const value = <T,>(index: number, fallback: T): T => settled[index].status === "fulfilled" ? ((settled[index] as PromiseFulfilledResult<any>).value ?? fallback) : fallback;
-        const roster = value<any[]>(0, []);
+        // loadAnnualLeaveRoster 는 throw 하지 않고 failed 플래그로 알린다 — 그것도 실패로 함께 센다.
+        const roster = value<{ sourceMonth: string | null; members: any[]; failed: boolean }>(0, { sourceMonth: null, members: [], failed: true });
+        const failed = settled.some((item) => item.status === "rejected") || roster.failed;
+        if (failed) console.warn(`[연차관리] ${branchName} 데이터를 일부 불러오지 못해 저장을 잠급니다.`, settled);
         const entries = value<any[]>(1, []);
         return {
           branchName,
           brand: branch.brand,
           failed,
-          employees: (roster || []).filter((employee: any) => employee.division === "정직원").map((employee: any) => ({ ...employee, branchName, brand: branch.brand })),
+          sourceMonth: roster.sourceMonth,
+          // id = 연차 데이터의 열쇠(employeeId). 급여대장에 있는 사람은 항상 값이 있다(§4.3).
+          // rowId 는 React key 전용 — 급여대장 행 id 라 달마다 바뀔 수 있어 저장에 쓰면 안 된다.
+          employees: roster.members.map((member: any) => ({
+            id: member.employeeId,
+            rowId: member.rowId,
+            name: member.name,
+            entryDate: member.entryDate,
+            branchName,
+            brand: branch.brand,
+          })),
           entries: Array.isArray(entries) ? entries : [],
           // 옛 키의 진짜 예외값(15가 아닌 값)은 살려서 합친다 — 새 키가 우선(annualLeavePolicy 주석 참고)
           grants: mergeLegacyGrantOverrides(value<Record<string, number>>(3, {}), value<Record<string, number>>(2, {})),
@@ -2419,8 +2464,17 @@ function AdminAnnualLeaveSection() {
       setEntriesByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.entries])));
       setGrantsByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.grants])));
       setUsedAdjustByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.usedAdjust])));
+      setSourceMonthByBranch(Object.fromEntries(packed.map((item) => [item.branchName, item.sourceMonth])));
       setLockedBranches(new Set(packed.filter((item) => item.failed).map((item) => item.branchName)));
       if (!selectedBranch && packed[0]) setSelectedBranch(packed[0].branchName);
+    } catch (err) {
+      // [반드시 잡는다] 지점 목록 조회(getAdminBranchList)가 실패하면 아래 setLockedBranches 까지 못 간다.
+      // catch 가 없으면 **lockedBranches 가 이전 값(대개 비어 있음) 그대로** 남아, 화면에는 낡은 인원이
+      // 떠 있는데 저장은 열려 있는 상태가 된다 — 잠금이 뚫린다(Codex 지적 2026-08-11).
+      // 실패했다는 사실을 전역 플래그로 남겨 blockedByLoadFailure 가 전 지점을 막게 한다.
+      if (seq !== loadSeqRef.current) return;
+      console.error("[연차관리] 데이터를 불러오지 못했습니다.", err);
+      setLoadFailed(true);
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
@@ -2437,6 +2491,10 @@ function AdminAnnualLeaveSection() {
   // 저장은 트랜잭션(mutateSharedData) — 통째 저장하면 다른 기기가 같은 지점의 다른 직원을 고친 값이 지워진다.
   // 조회가 덜 된 지점은 저장 금지 — 화면의 빈 값이 서버의 진짜 값을 지우는 것을 막는다.
   const blockedByLoadFailure = (branchName: string) => {
+    if (loadFailed) {
+      alert("연차 데이터를 불러오지 못해 저장이 잠겼습니다.\n새로고침 후 다시 시도해주세요.");
+      return true;
+    }
     if (!lockedBranches.has(branchName)) return false;
     alert(`[${branchName}] 연차 데이터를 완전히 불러오지 못해 저장이 잠겼습니다.\n새로고침 후 다시 시도해주세요. (그대로 저장하면 기존 값이 지워질 수 있습니다)`);
     return true;
@@ -2528,79 +2586,16 @@ function AdminAnnualLeaveSection() {
     }
   };
 
-  // 지점 이동 — 명부와 연차 데이터가 함께 옮겨진다(annualLeaveOps 공용 로직).
-  // busyEmployee: 이동/삭제/명부수정이 도는 동안 같은 직원에 대한 두 번째 실행을 막는다.
-  // 확인창을 연타하거나 드롭다운을 빠르게 두 번 바꾸면 같은 직원이 두 지점으로 복사될 수 있다(Codex 지적).
-  const moveEmployee = async (employee: any, toBranch: string) => {
-    if (!toBranch || toBranch === employee.branchName) return;
-    // 보내는 쪽·받는 쪽 어느 한쪽이라도 덜 불러왔으면 이동 금지 — 옮기는 도중 값이 사라질 수 있다.
-    if (blockedByLoadFailure(employee.branchName) || blockedByLoadFailure(toBranch)) return;
-    if (busyEmployee) { alert("이전 작업이 끝난 뒤 다시 시도해주세요."); return; }
-    if (!window.confirm(`[${employee.name}] 님을 ${employee.branchName} → ${toBranch} 지점으로 이동할까요?\n연차 사용기록·부여/사용 수정값도 함께 이동합니다.`)) return;
-    setBusyEmployee(`${employee.branchName}:${employee.id}`);
-    try {
-      // 이 섹션은 관리자(총괄) 화면 전용이라 이동 대상에 제한이 없다.
-      const result = await moveAnnualLeaveEmployee(employee.branchName, toBranch, employee.id, "all");
-      alert(result.message);
-    } catch (err) {
-      console.error("지점이동 실패", err);
-      alert("지점이동에 실패했습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
-    } finally {
-      setBusyEmployee(null);
-    }
-    // 위 등록 폼이 방금 옮긴 직원을 가리킨 채 남지 않게 비운다(옛 지점에 고아 기록이 생기는 것을 막는다).
-    if (selectedEmployeeId === employee.id) setSelectedEmployeeId("");
-    void load();
-  };
-
-  // 행 삭제(퇴사 처리) — 명부에서만 뺀다. 연차 사용기록 데이터는 지우지 않아 되살릴 수 있다.
-  const removeEmployee = async (employee: any) => {
-    if (blockedByLoadFailure(employee.branchName)) return;
-    if (busyEmployee) { alert("이전 작업이 끝난 뒤 다시 시도해주세요."); return; }
-    if (!window.confirm(`[${employee.name}] 님을 ${employee.branchName} 명부에서 삭제할까요?\n직원현황·급여대장 등 다른 화면에서도 함께 빠집니다.\n(연차 사용기록은 지우지 않아 되살리면 다시 이어집니다)`)) return;
-    setBusyEmployee(`${employee.branchName}:${employee.id}`);
-    try {
-      const result = await deleteAnnualLeaveEmployee(employee.branchName, employee.id);
-      alert(result.message);
-    } catch (err) {
-      console.error("행 삭제 실패", err);
-      alert("삭제에 실패했습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
-    } finally {
-      setBusyEmployee(null);
-    }
-    if (selectedEmployeeId === employee.id) setSelectedEmployeeId(""); // 위 이동과 같은 이유
-    void load();
-  };
-
-  // 이름·입사일 수정은 지점 명부(branch_own_rosters) 원본에 반영한다 — 급여대장 등 다른 화면과 한 몸이어야 하므로.
-  // 저장은 **트랜잭션**(mutateBranchOwnRoster). 서버본을 읽어 통째로 되쓰면, 그 사이 지점 직원현황 탭에서
-  // 직원을 추가·수정한 내용이 통째로 사라진다(Codex 지적 2026-08-04).
-  const commitRosterField = async (branchName: string, employeeId: string, field: "name" | "entryDate", value: string) => {
-    const current = employees.find((item) => item.branchName === branchName && item.id === employeeId);
-    if (!current || String(current[field] || "") === value) return;
-    if (blockedByLoadFailure(branchName)) { void load(); return; }
-    if (busyEmployee) { alert("이전 작업이 끝난 뒤 다시 시도해주세요."); void load(); return; }
-    setBusyEmployee(`${branchName}:${employeeId}`);
-    try {
-      // mutate는 순수 함수로 둔다(트랜잭션 재시도 때 여러 번 불린다) — 결과는 changed로만 판정한다.
-      const { changed } = await gasClient.mutateBranchOwnRoster(branchName, (roster) =>
-        roster.some((item: any) => item.id === employeeId)
-          ? roster.map((item: any) => item.id === employeeId ? { ...item, [field]: value } : item)
-          : null);
-      if (!changed) {
-        alert("지점 명부에서 해당 직원을 찾지 못했습니다. 새로고침 후 다시 시도해주세요.");
-        void load();
-        return;
-      }
-      setEmployees((prev) => prev.map((item) => item.branchName === branchName && item.id === employeeId ? { ...item, [field]: value } : item));
-    } catch (err) {
-      console.error("명부 수정 저장 실패", err);
-      alert("수정 내용을 저장하지 못했습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
-      void load();
-    } finally {
-      setBusyEmployee(null);
-    }
-  };
+  // [제거됨 2026-08-11] 지점 이동 / 행 삭제(퇴사) / 이름·입사일 수정.
+  //
+  // 인원의 주인이 지점 명부(branch_own_rosters)에서 **정직원 급여대장**으로 넘어갔다. 이 화면이 명부를
+  // 계속 고치면 급여대장과 어긋난 상태가 생긴다 — 여기서 지점을 옮겨도 새 지점 급여대장에는 그 사람이
+  // 없어 연차관리 표에 나타나지 않고, 여기서 이름을 고쳐도 급여대장의 이름은 그대로다.
+  // 그래서 인원을 고치는 일은 **월말마감 > 정직원 급여대장 한 곳에서만** 한다.
+  //   · 퇴사    → 급여대장에서 행을 빼면 다음 달부터 이 표에서도 빠진다(연차 기록은 지우지 않는다)
+  //   · 지점이동 → 옛 지점 급여대장에서 빼고 새 지점 급여대장에 넣는다
+  //   · 이름·입사일 → 급여대장 행에서 고친다
+  // 연차 사용기록(annual_leave:{지점})의 지점 간 이관 도구는 후속 과제다(설계서 §9).
 
   const saveLeaveUse = async () => {
     if (blockedByLoadFailure(selectedBranch)) return;
@@ -2610,19 +2605,29 @@ function AdminAnnualLeaveSection() {
       alert("직원, 기간, 사용 사유를 모두 확인해주세요.");
       return;
     }
-    // 화면의 명부는 낡을 수 있다(다른 노트북이 방금 옮겼을 수 있다) — **서버 기준**으로 한 번 더 확인한다.
-    // 이걸 건너뛰면 옛 지점에 아무 행에도 안 보이는 고아 기록이 남는다(Codex 지적 2026-08-04).
+    // 화면 목록은 낡을 수 있다(다른 노트북이 방금 급여대장에서 행을 뺐을 수 있다) —
+    // **서버 기준**으로 한 번 더 확인한다. 건너뛰면 아무 행에도 안 보이는 고아 기록이 남는다.
+    // 판정은 화면 목록과 **같은 변환 함수**(toAnnualLeaveMembers)를 쓴다 — 규칙이 갈라지면
+    // "목록엔 있는데 등록은 거부"가 생긴다. 조회 실패도 저장 금지(fail-closed).
+    const sourceMonth = sourceMonthByBranch[selectedBranch];
+    if (!sourceMonth) {
+      alert("이 지점의 정직원 급여대장을 찾지 못해 등록할 수 없습니다.");
+      return;
+    }
     try {
-      const fresh = await gasClient.getBranchOwnRosterFromServer(selectedBranch);
-      if (!(fresh || []).some((item: any) => item.id === employee.id && item.division === "정직원")) {
-        alert("선택한 직원이 이 지점 명부에 없습니다(다른 기기에서 이동·삭제되었을 수 있습니다). 목록을 새로 불러옵니다.");
+      const [freshRows, freshRoster] = await Promise.all([
+        gasClient.getSharedDataFromServer<any[]>(fullTimeSalaryKey(selectedBranch, sourceMonth)),
+        gasClient.getBranchOwnRosterFromServer(selectedBranch).catch(() => [] as any[]),
+      ]);
+      if (!toAnnualLeaveMembers(freshRows, freshRoster).some((member) => member.employeeId === employee.id)) {
+        alert("선택한 직원이 급여대장에 없습니다(다른 기기에서 빠졌을 수 있습니다). 목록을 새로 불러옵니다.");
         setSelectedEmployeeId("");
         void load();
         return;
       }
     } catch (err) {
-      console.error("명부 확인 실패", err);
-      alert("직원 명부를 확인하지 못해 등록을 멈췄습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
+      console.error("급여대장 확인 실패", err);
+      alert("급여대장을 확인하지 못해 등록을 멈췄습니다. 네트워크 상태 확인 후 다시 시도해주세요.");
       return;
     }
     const key = `annual_leave:${selectedBranch}`;
@@ -2650,8 +2655,12 @@ function AdminAnnualLeaveSection() {
     }
   };
 
+  // [잠금] 사용기록 수정·삭제·일부삭제도 **화면에 뜬 기록을 근거로** 서버를 고친다.
+  // 조회가 실패해 화면이 낡았으면 그 낡은 내용으로 서버의 최신 기록을 덮어쓰거나 지우게 되므로,
+  // 부여/사용일수 저장과 똑같이 막아야 한다(Codex 지적 2026-08-11).
   const saveEditedLeave = async () => {
     if (!editLeave) return;
+    if (blockedByLoadFailure(editLeave.branchName)) return;
     const key = `annual_leave:${editLeave.branchName}`;
     const entryId = editLeave.entry.id;
     const patch = {
@@ -2684,6 +2693,7 @@ function AdminAnnualLeaveSection() {
   };
 
   const deleteLeaveEntry = async (branchName: string, entryId: string) => {
+    if (blockedByLoadFailure(branchName)) return;
     if (!window.confirm("선택한 연차 사용기록을 삭제할까요?")) return;
     const key = `annual_leave:${branchName}`;
     try {
@@ -2702,6 +2712,7 @@ function AdminAnnualLeaveSection() {
 
   const deleteLeavePartialRange = async () => {
     if (!partialDeleteLeave) return;
+    if (blockedByLoadFailure(partialDeleteLeave.branchName)) return;
     const { branchName, entry, startDate: deleteStart, endDate: deleteEnd } = partialDeleteLeave;
     const entryStart = entry.startDate || entry.date;
     const entryEnd = entry.endDate || entryStart;
@@ -2758,6 +2769,49 @@ function AdminAnnualLeaveSection() {
     return { employee, logs, logsSum, usedAdjust, used, autoGrant, override, grant, remain: grant - used };
   });
 
+  // 기준월 안내 한 줄. 14지점을 전부 나열하면 읽히지 않으므로, 가장 많은 지점이 쓰는 달을 대표로 적고
+  // 그와 다른 달을 쓰는 지점만 이름으로 짚는다. 지점 필터가 걸려 있으면 그 지점만 본다.
+  const sourceMonthNote = (() => {
+    const names = branches
+      .map((branch: any) => String(branch.branchName || ""))
+      .filter((name: string) => name && (!statusBranch || name === statusBranch));
+    if (!names.length) return "";
+    const byMonth = new Map<string, string[]>();
+    const missing: string[] = [];
+    names.forEach((name: string) => {
+      if (!(name in sourceMonthByBranch)) return; // 아직 못 불러온 지점 — 단정하지 않는다
+      const month = sourceMonthByBranch[name];
+      if (month) byMonth.set(month, [...(byMonth.get(month) || []), name]);
+      else missing.push(name);
+    });
+    if (!byMonth.size && !missing.length) return "";
+    const groups = [...byMonth.entries()].sort((a, b) => b[1].length - a[1].length || b[0].localeCompare(a[0]));
+    const parts = groups.map(([month, list], index) =>
+      index === 0 && !statusBranch && list.length > 1
+        ? `${month} 정직원 급여대장 기준 (${list.length}개 지점)`
+        : `${month}: ${list.join("·")}`);
+    if (missing.length) parts.push(`최근 3개월간 급여대장 없음: ${missing.join("·")}`);
+    return parts.join(" · ");
+  })();
+
+  // 급여대장 인원과 연결되지 않은 연차 기록 — 지점을 옮겼거나 급여대장에서 빠진 직원의 것이다.
+  // 지점이동 기능이 사라진 뒤로 이 상태가 **조용히** 생긴다: 옮겨 간 지점에서는 사용 0일로 보여
+  // 이미 쓴 연차를 다시 쓰게 된다. 지우지도 옮기지도 않고 **보이게만** 한다(설계서 §9의 이관 도구 전까지).
+  // 인원을 못 불러온 지점(급여대장 없음·조회 실패)은 제외한다 — 그 지점 기록이 전부 떠 보인다.
+  const strandedBranches = branches
+    .map((branch: any) => String(branch.branchName || ""))
+    .filter((name: string) => name && sourceMonthByBranch[name] && !lockedBranches.has(name))
+    .map((name: string) => ({
+      branchName: name,
+      owners: findStrandedLeaveOwners(
+        entriesByBranch[name],
+        employees
+          .filter((employee) => employee.branchName === name)
+          .map((employee) => ({ employeeId: employee.id, name: employee.name, entryDate: employee.entryDate, rowId: employee.rowId }))
+      ),
+    }))
+    .filter((item) => item.owners.length > 0);
+
   return (
     <section className="space-y-6">
       {editLeave && (
@@ -2804,18 +2858,38 @@ function AdminAnnualLeaveSection() {
           </div>
         </div>
       )}
+      {/* 조회가 통째로 실패 — 화면에 낡은 값이 남아 있을 수 있으므로 전 지점 저장이 잠긴 상태다. */}
+      {loadFailed && (
+        <div className="bg-[#FDE2E2] border border-[#C93A3A] text-[#B91C1C] text-xs font-bold rounded-xl p-3 flex items-center justify-between gap-3">
+          <span>연차 데이터를 불러오지 못했습니다. 화면의 값이 최신이 아닐 수 있어 <b className="font-black">전 지점 저장이 잠겼습니다.</b></span>
+          <button onClick={() => void load()} className="shrink-0 rounded-full bg-[#212121] text-[#F6F5FA] px-4 py-1.5 text-[11px] font-black cursor-pointer">다시 시도</button>
+        </div>
+      )}
       {/* 조회 실패 경고 — 저장이 잠겼다는 사실이 눈에 보여야 한다. 오류색은 관리자 색 치환에 죽지 않게 hex(§2-1). */}
-      {lockedBranches.size > 0 && (
+      {!loadFailed && lockedBranches.size > 0 && (
         <div className="bg-[#FDE2E2] border border-[#C93A3A] text-[#B91C1C] text-xs font-bold rounded-xl p-3 flex items-center justify-between gap-3">
           <span>{[...lockedBranches].join(", ")} 지점의 연차 데이터를 완전히 불러오지 못했습니다. 해당 지점은 저장이 잠겼습니다(기존 값 덮어쓰기 방지).</span>
           <button onClick={() => void load()} className="shrink-0 rounded-full bg-[#212121] text-[#F6F5FA] px-4 py-1.5 text-[11px] font-black cursor-pointer">다시 시도</button>
+        </div>
+      )}
+      {/* 남겨진 연차 기록 알림 — 오류가 아니라 '사람이 판단할 일'이라 주의색(경고)으로 낮춘다.
+          관리자 스코프는 rose/amber 유틸리티를 뒤집으므로 hex 로 못 박는다(DESIGN_ADMIN §2-1 P0). */}
+      {!loading && strandedBranches.length > 0 && (
+        <div className="rounded-xl border border-[#E0B33A] bg-[#FDF3C7] p-3 text-xs font-bold text-[#8A6100] space-y-1">
+          <p>급여대장 인원과 연결되지 않은 연차 기록이 있습니다. 지점을 옮겼거나 급여대장에서 빠진 직원의 기록입니다 — <b className="font-black">지워지지 않았고</b>, 그 사람이 급여대장에 다시 오르면 이어집니다.</p>
+          {strandedBranches.map((item) => (
+            <p key={item.branchName} className="font-normal">
+              <b className="font-black">{item.branchName}</b> · {describeStrandedOwners(item.owners)}
+            </p>
+          ))}
+          <p className="font-normal">지점을 옮긴 경우라면 옮겨 간 지점 화면에는 <b className="font-black">사용 0일</b>로 보입니다. 그대로 두면 이미 쓴 연차를 다시 쓰게 되니 확인해 주세요.</p>
         </div>
       )}
       {/* 제목 밴드 + 엑셀형 표 = 관리자 표준(DESIGN_ADMIN.md §4-0) */}
       <div className="admin-sheet-card">
         <div className="admin-band">
           <h3 className="admin-band-title">연차 사용 등록</h3>
-          <p className="admin-band-meta">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다.</p>
+          <p className="admin-band-meta">각 지점 정직원의 연차 부여일수, 사용 기간, 사용기록, 잔여일수를 한 화면에서 관리합니다. 인원은 각 지점의 정직원 급여대장에서 가져옵니다.</p>
           <div className="admin-band-actions">
             <button onClick={() => void load()} className="admin-period-chip h-8 px-3.5 rounded-full text-[11px] font-black cursor-pointer">새로고침</button>
           </div>
@@ -2848,8 +2922,13 @@ function AdminAnnualLeaveSection() {
               {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
             </select>
           </div>
-          <p className="admin-band-meta">부여일수 자동계산: 1년 미만 0일(급여 포함 지급) · 만 1년부터 연말까지 월 1일 · 다음 해 1월 1일부터 15일(3년 이상 매 2년 1일 가산, 최대 25일) — 지점·이름·입사일·부여·사용일수는 표에서 바로 수정됩니다</p>
+          <p className="admin-band-meta">부여일수 자동계산: 1년 미만 0일(급여 포함 지급) · 만 1년부터 연말까지 월 1일 · 다음 해 1월 1일부터 15일(3년 이상 매 2년 1일 가산, 최대 25일) — 부여·사용일수만 표에서 수정합니다. 지점·이름·입사일은 월말마감 &gt; 정직원 급여대장에서 고칩니다</p>
         </div>
+        {/* 어느 달 급여대장에서 인원을 가져왔는지. 지점마다 다를 수 있다(당월 미작성 시 직전 달로 후퇴) —
+            안 보여주면 "새로 뽑은 사람이 왜 안 보이나"를 알 길이 없다. */}
+        {!loading && sourceMonthNote && (
+          <div className="px-4 pt-3 text-[11px] font-bold text-gray-500">{sourceMonthNote}</div>
+        )}
         <div className="admin-sheet-scroll">
           {/* 엑셀형 표 = .admin-sheet (헤더 엘리스·1px 격자·선 겹침 방지는 클래스가 처리).
               칸 너비는 colgroup으로 데이터 크기에 맞춰 못 박는다 — 사용기록만 남는 폭을 다 갖는다.
@@ -2883,66 +2962,14 @@ function AdminAnnualLeaveSection() {
               {loading ? (
                 <tr><td colSpan={8} className="py-16 text-center"><LoadingSpinner size="sm" /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="py-16 text-center text-gray-400 font-bold">표시할 정직원 데이터가 없습니다.</td></tr>
+                <tr><td colSpan={8} className="py-16 text-center text-gray-400 font-bold">표시할 정직원이 없습니다. 인원은 각 지점의 월말마감 &gt; 정직원 급여대장에서 가져옵니다.</td></tr>
               ) : rows.map(({ employee, logsSum, logs, usedAdjust, used, autoGrant, override, grant, remain }) => (
                 <tr key={`${employee.branchName}-${employee.id}`} className="hover:bg-slate-50/60">
-                  {/* 지점 = 드롭다운. 다른 지점을 고르면 확인 후 명부·연차 데이터가 함께 이동한다.
-                      제어 컴포넌트라 확인 취소 시 값이 저절로 제자리로 돌아온다. */}
-                  <td className="py-1 px-1.5">
-                    <select
-                      value={employee.branchName}
-                      onChange={(e) => void moveEmployee(employee, e.target.value)}
-                      disabled={busyEmployee === `${employee.branchName}:${employee.id}`}
-                      className="w-full text-[11px] font-bold text-gray-600 cursor-pointer disabled:opacity-50"
-                    >
-                      {!branches.some((branch) => branch.branchName === employee.branchName) && (
-                        <option value={employee.branchName}>{employee.branchName}</option>
-                      )}
-                      {branches.map((branch) => <option key={branch.branchName} value={branch.branchName}>{branch.branchName}</option>)}
-                    </select>
-                  </td>
-                  {/* 이름은 한글 조합(IME) 중 리렌더가 끼면 글자가 깨지므로 비제어(defaultValue)+blur 저장.
-                      key에 저장된 값을 넣어 외부 갱신 시에만 다시 그린다(입력 중에는 그대로). */}
-                  {/* 이름 + 행삭제 X — 주류재고 시트와 같은 문법(늘 보이고 Tab으로도 닿는다).
-                      hover 로만 보이게 숨기면 태블릿에서 지울 방법이 사라진다. */}
-                  <td className="py-1 px-1.5">
-                    <div className="flex items-center gap-1">
-                      <input
-                        key={`name-${employee.branchName}-${employee.id}-${employee.name}`}
-                        defaultValue={employee.name}
-                        onBlur={(e) => {
-                          const next = e.target.value.trim();
-                          if (!next) { alert("이름은 비울 수 없습니다."); e.target.value = employee.name; return; }
-                          if (next !== employee.name) void commitRosterField(employee.branchName, employee.id, "name", next);
-                        }}
-                        className="min-w-0 flex-1 text-[11px] font-black text-gray-800"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void removeEmployee(employee)}
-                        disabled={busyEmployee === `${employee.branchName}:${employee.id}`}
-                        aria-label={`${employee.name} 명부에서 삭제`}
-                        title={`${employee.name} 명부에서 삭제(퇴사 처리)`}
-                        className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-[#FDE2E2] hover:text-[#B3261E] focus:text-[#B3261E] focus:outline-none disabled:opacity-40 cursor-pointer"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                  <td className="py-1 px-1.5">
-                    <input
-                      type="date"
-                      key={`entry-${employee.branchName}-${employee.id}-${employee.entryDate || ""}`}
-                      defaultValue={toEntryDateInputValue(employee.entryDate)}
-                      onBlur={(e) => {
-                        const next = e.target.value;
-                        // 비우면 부여일수 자동계산이 통째로 깨진다 — 비우기는 되돌린다.
-                        if (!next) { e.target.value = toEntryDateInputValue(employee.entryDate); return; }
-                        if (next !== String(employee.entryDate || "")) void commitRosterField(employee.branchName, employee.id, "entryDate", next);
-                      }}
-                      className="w-full text-[11px] font-mono font-bold text-gray-700"
-                    />
-                  </td>
+                  {/* 지점·이름·입사일은 **읽기 전용**이다(2026-08-11). 인원의 주인이 급여대장으로 넘어가
+                      여기서 고치면 급여대장과 어긋난다 — 수정은 월말마감 > 정직원 급여대장에서 한다. */}
+                  <td className="py-1 px-1.5"><span className="text-[11px] font-bold text-gray-600">{employee.branchName}</span></td>
+                  <td className="py-1 px-1.5"><span className="block truncate text-[11px] font-black text-gray-800">{employee.name}</span></td>
+                  <td className="py-1 px-1.5 text-[11px] font-mono font-bold text-gray-700">{employee.entryDate || "-"}</td>
                   <td className="py-1 px-1.5 text-center font-bold text-gray-600 whitespace-nowrap">{formatTenureText(employee.entryDate)}</td>
                   {/* 셀에는 값만 둔다(엑셀형 — 사용자 지시 2026-08-04). '수동값·보정'은 두 번째 줄로 적으면
                       행 높이가 들쭉날쭉해지므로 값 옆 작은 표시 + 툴팁으로 옮겼다. */}
@@ -2995,8 +3022,9 @@ function AdminAnnualLeaveSection() {
                             {/* 버튼은 11px/900(§6-0-1). 색만으로 의미를 나누지 않게 글자 라벨이 주,
                                 색은 치환에 안 죽는 hex로 보조(§10·DESIGN_ADMIN §2-1). */}
                             <span className="flex gap-1">
-                              <button onClick={() => setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } })} className="text-[11px] font-black text-[#2E6DB4]">수정</button>
-                              <button onClick={() => setPartialDeleteLeave({ branchName: employee.branchName, entry, startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "" })} className="text-[11px] font-black text-[#B45309]">일부삭제</button>
+                              {/* 창을 열기 전에도 막는다 — 다 채워 넣고 저장에서 거절당하면 헛수고다(저장 쪽 가드는 그대로 둔다). */}
+                              <button onClick={() => { if (blockedByLoadFailure(employee.branchName)) return; setEditLeave({ branchName: employee.branchName, entry, fields: { startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "", days: String(entry.days || 0), reason: entry.reason || "" } }); }} className="text-[11px] font-black text-[#2E6DB4]">수정</button>
+                              <button onClick={() => { if (blockedByLoadFailure(employee.branchName)) return; setPartialDeleteLeave({ branchName: employee.branchName, entry, startDate: entry.startDate || entry.date || "", endDate: entry.endDate || entry.startDate || entry.date || "" }); }} className="text-[11px] font-black text-[#B45309]">일부삭제</button>
                               <button onClick={() => void deleteLeaveEntry(employee.branchName, entry.id)} className="text-[11px] font-black text-[#B3261E]">삭제</button>
                             </span>
                           </div>

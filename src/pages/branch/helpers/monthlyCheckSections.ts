@@ -39,11 +39,14 @@ export const GATED_CLOSE_SECTIONS = ["purchase", "salesSummary", "partTimeSalary
  * 그 지점은 말일 마감 3종이 **영구히 막힌다** — 게이트가 fail-closed 라 우회 통로도 없다
  * (Codex 지적 2026-08-11: 확인 컨트롤 없이 게이트만 배포된 커밋).
  *
- * 연차관리 확인 버튼은 연차 인원출처 개편(별건 작업)과 한 덩어리라 이 커밋에 들어오지 못했다.
- * **그 화면이 배포되는 커밋에서 여기에 "annualLeave" 를 더할 것.** 그때까지 연차는 화면에서
- * 확인 버튼이 보이더라도(그 작업 브랜치에서는 보인다) 마감을 막지는 않는다.
+ * [2026-08-11 연차 추가] 연차관리 확인 버튼(`AnnualLeaveTab` 의 MonthlyCheckAction)이
+ * 연차 인원출처 개편과 함께 이 배포에 들어왔다 — 그래서 예고대로 "annualLeave" 를 켠다.
+ *
+ * **다음에 확인 섹션을 늘릴 때도 같은 순서를 지킬 것:**
+ *   ① 그 화면에 확인 버튼을 먼저 배포한다 → ② 그 다음에(또는 같은 배포에) 여기에 더한다.
+ * 순서를 뒤집으면 누를 데가 없는 조건을 요구하게 되어 전 지점 말일 마감이 잠긴다.
  */
-export const GATE_REQUIRED_SECTIONS: readonly CheckSection[] = ["businessTaxi"];
+export const GATE_REQUIRED_SECTIONS: readonly CheckSection[] = ["businessTaxi", "annualLeave"];
 
 export type CheckCloseStatus = "confirmed" | "pending";
 
