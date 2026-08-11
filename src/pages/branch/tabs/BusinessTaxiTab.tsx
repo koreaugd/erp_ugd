@@ -21,6 +21,8 @@ import {
 import { KAKAO_BRANCH_ALIASES } from "../../admin/helpers/kakaoTaxi";
 // 등록 인원 조회는 이 화면에서 가장 느린 조회다 — 세션 내 공유 캐시로 탭 재진입을 즉시 만든다.
 import { getBranchMembersShared, peekBranchMembers } from "../helpers/kakaoTaxiBranchMembersCache";
+// 월말 확인 컨트롤 — '등록된 인원'을 눈으로 확인했다는 기록을 남긴다(월말마감의 선행조건).
+import { MonthlyCheckAction } from "../components/MonthlyCheckAction";
 
 // 오류/반려 표시는 DESIGN.md §11 오류색 hex 를 직접 쓴다(rose 계열은 스코프 치환으로 뒤집힐 수 있음).
 const ERROR_BANNER = "border rounded-xl px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C]";
@@ -704,9 +706,23 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
       <section className="branch-sheet-card">
         <div className="branch-band">
           <h3 className="branch-band-title">등록된 인원 ({branchName})</h3>
+          {/* 새로고침 옆에 월말 확인 컨트롤을 같은 슬롯으로 붙인다 — 슬롯을 따로 두면 줄이 갈라진다.
+              지점은 아래 표를 눈으로 보고 [마감제출]을 누른다(자동 대조 없음, 사용자 지시 2026-08-11). */}
           <div className="branch-band-actions">
             <button onClick={() => void load(true)} disabled={loading}
               className="h-8 rounded-full border border-[#212121] bg-white px-3.5 text-[11px] font-black text-[#212121] cursor-pointer disabled:opacity-50">새로고침</button>
+            {/* 표가 안 떴거나 묵은 목록이면 마감제출을 막는다 — 못 본 명단을 '확인했다'로 확정하면
+                월말마감이 열려 버려 확인 절차가 통째로 형식이 된다(Codex 지적 2026-08-11). */}
+            <MonthlyCheckAction
+              branchName={branchName}
+              section="businessTaxi"
+              blockedReason={
+                membersError ? "등록 인원 조회 실패 — 확인 불가"
+                : allMembers === null ? "등록 인원 불러오는 중"
+                : membersStale ? "묵은 목록 — 새로고침 후 제출"
+                : undefined
+              }
+            />
           </div>
         </div>
         {/* [2026-08-04] p-4 래퍼 제거 — 표 머리글이 밴드에 바로 붙는다(관리자와 같은 모양).
