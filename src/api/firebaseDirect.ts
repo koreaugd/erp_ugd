@@ -742,7 +742,7 @@ export async function firebaseAppendSharedArrayItem(
 export async function firebaseMutateSharedData(
   dataKey: string,
   mutate: (current: unknown) => unknown | null
-): Promise<{ changed: boolean }> {
+): Promise<{ changed: boolean; value: unknown }> {
   await waitForFirebaseUser(); // 인증 복원 전 쓰기는 거부된다 — 준비될 때까지 기다렸다 저장한다.
   const db = getDirectDb();
   const encodedKey = encodeURIComponent(dataKey);
@@ -753,7 +753,10 @@ export async function firebaseMutateSharedData(
     const snapshot = await tx.get(recordRef);
     const current = snapshot.exists() ? snapshot.data().value ?? null : null;
     const next = mutate(current);
-    if (next === null || next === undefined) return { changed: false };
+    // 바꾸지 않았어도 **트랜잭션이 실제로 본 값**을 돌려준다(firebaseMutateBranchOwnRoster 와 같은 규약).
+    // 호출부가 커밋 결과로 화면을 갱신하려면 이 값이 필요하다 — mutate 안에서 바깥 변수에 적어 두면
+    // 재시도 때 값이 어긋난다.
+    if (next === null || next === undefined) return { changed: false, value: current };
     if (snapshot.exists()) {
       tx.set(doc(db, "shared_data_backups", `${encodedKey}--slot${now.getDay()}`), {
         dataKey,
@@ -763,7 +766,7 @@ export async function firebaseMutateSharedData(
       });
     }
     tx.set(recordRef, { value: next, updatedAt: nowIso });
-    return { changed: true };
+    return { changed: true, value: next };
   });
 }
 
