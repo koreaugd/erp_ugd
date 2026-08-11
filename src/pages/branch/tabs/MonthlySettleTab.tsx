@@ -16,6 +16,9 @@ import { MonthlyCashExpensesSubTab } from "./MonthlyCashExpensesSubTab";
 import { MonthlyCashManagementSubTab } from "./MonthlyCashManagementSubTab";
 import { MonthlyCardExpensesSubTab } from "./MonthlyCardExpensesSubTab";
 import { SalesSummarySection, isSalesSummaryDataInvalid, loadSalesSummaryForClose } from "./SalesSummarySection";
+// 비즈니스택시·연차관리 '확인 마감'이 이 화면의 선행조건이다. 섹션 이름은 저 헬퍼가 단일 출처 —
+// 여기에 문자열을 따로 적으면 한쪽만 고쳤을 때 게이트가 조용히 빠진다.
+import { GATED_CLOSE_SECTIONS, assertCloseRecordList, findMissingCheckSections, missingCheckMessage, type CheckSection } from "../helpers/monthlyCheckSections";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 
 // 섹션별 독립 마감: 정직원 급여대장 / 매입매출(거래처) / 매출집계 / 파트타이머 급여대장
@@ -78,6 +81,8 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monthlyCloseRecords, setMonthlyCloseRecords] = useState<any[]>([]);
+  // 마감 상태 문서를 못 읽었거나 형식이 손상됐을 때의 사유. 비어 있지 않으면 마감 조작을 잠근다.
+  const [closeStatusError, setCloseStatusError] = useState("");
   const [purchaseResetToken, setPurchaseResetToken] = useState(0);
   // 파트타이머 마감제출이 진행 중인 동안 표를 잠그는 플래그(아래 isLocked에 합산).
   // flush가 검증을 마친 뒤 확정 저장이 끝나기 전에 들어온 편집은 '검증을 통과한 적 없는 값'인데,
@@ -118,12 +123,26 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   const fetchMonthlyCloseStatus = useCallback(async () => {
     try {
-      const records = await gasClient.getSharedData<any[]>("monthly_closings");
-      setMonthlyCloseRecords(Array.isArray(records) ? records : []);
+      // 손상된 문서를 []로 삼키지 않는다 — 그러면 모든 섹션이 '미제출'처럼 보여서 지점이 제출·수정·취소를
+      // 계속 시도하고, 실제 원인(문서 손상)은 아무 데도 안 뜬다. 제출은 게이트가 막지만 그 이유를 알 수 없다.
+      const records = assertCloseRecordList(await gasClient.getSharedData<any[]>("monthly_closings"));
+      setMonthlyCloseRecords(records);
+      setCloseStatusError("");
     } catch (error) {
       console.warn("월말마감 상태를 불러오지 못했습니다.", error);
+      // 상태를 모른다는 사실을 화면에 남기고 마감 조작을 잠근다(fail-closed).
+      setCloseStatusError((error as any)?.message || "월말마감 상태를 불러오지 못했습니다. 새로고침 후에도 계속되면 본사 관리자에게 문의해주세요.");
     }
   }, []);
+
+  // 마감 상태를 못 읽었으면 어떤 마감 조작도 시키지 않는다 — 무엇이 확정인지 모르는 채 누르면
+  // 사유 없는 재확정·엉뚱한 초기화가 될 수 있다. 실제 쓰기는 트랜잭션이 다시 막지만,
+  // 여기서 먼저 이유를 알려 주는 편이 "저장 실패"만 반복해서 보는 것보다 낫다.
+  const blockedByCloseStatus = useCallback(() => {
+    if (!closeStatusError) return false;
+    window.alert(`${closeStatusError}\n\n마감 상태를 확인할 수 없어 작업을 중단했습니다.`);
+    return true;
+  }, [closeStatusError]);
 
   // 섹션별 마감 상태 조회 (section 없는 과거 레코드는 purchase로 간주하여 하위호환)
   const getSectionStatus = useCallback((section: CloseSection): "confirmed" | "editing" | "pending" | null => {
@@ -209,44 +228,59 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     // 서버 반영(read-modify-write)을 직렬화한다: 같은 기기에서 여러 섹션을 연속 마감할 때
     // 각 저장이 직전 저장의 결과를 읽은 뒤 병합하도록 하여 서로의 섹션 레코드를 덮어쓰지 않게 한다.
     const run = async () => {
-      // '최종 쓰기 시점'의 서버 진실을 읽는다(캐시 아님) — handleEdit 판단 이후 다른 기기가 확정했을 수 있어(경쟁),
-      // 여기서 확정 여부를 다시 판정해야 사유 없는 재수정 이벤트가 남지 않는다. 실패 시 throw → 저장은 fail-closed로 중단.
-      const previous = await gasClient.getSharedDataFromServer<any[]>("monthly_closings");
-      // null = 문서 없음(기록이 아직 없음, 정상) → []. 값이 있는데 배열이 아니면(형식 손상) 재수정 여부를 단정할 수 없어 중단(fail-closed).
-      if (previous != null && !Array.isArray(previous)) {
-        throw new Error("마감 상태 형식이 올바르지 않습니다. 다시 시도해주세요.");
-      }
-      const list = Array.isArray(previous) ? previous : [];
-      // 표식·이력은 서버 값을 최우선으로 유지한다 — 로컬이 스테일이어도 '확정 후 수정' 사실/이력을 잃지 않는다.
-      const prevServer = latest(list);
-      // 서버 기준 판정도 직전 status로(confirmedAt 아님) — 취소된 미제출 섹션의 찌꺼기 confirmedAt에 무해.
-      // 재오픈(확정→editing)은 사유를 받지 않는다(제출 때 받음). 재확정(editing→confirmed, 확정후수정)일 때만 사유 이벤트를 남긴다.
-      const serverReopen = status === "editing" && prevServer?.status === "confirmed" && !restore;
-      const serverReconfirm = status === "confirmed" && prevServer?.status === "editing" && !!prevServer?.editedAfterConfirm && !restore && !cancelEdit;
-      // 최종 판정상 '확정본을 수정 후 재확정'인데 사유가 없으면(인라인 사유칸 우회/경쟁) 사유 없는 확정을 남기지 않는다 —
-      // 저장을 중단하고 재입력을 요구한다(fail-closed). 정상 경로는 handleConfirm이 인라인 사유칸을 먼저 검증한다.
-      if (serverReconfirm && !(reason || "").trim()) {
-        throw new Error("확정된 마감을 수정했습니다. 수정 사유를 입력해야 마감제출할 수 있습니다.");
-      }
-      const serverEvents = Array.isArray(prevServer?.editEvents) ? prevServer.editEvents : [];
-      // 서버 기준 '확정 계보'(confirmed↔editing) 여부 — 표식·이력을 이 안에서만 이어받는다. 롤백(restore)은 계보를 우회해 복원.
-      const serverInLineage = restore || prevServer?.status === "confirmed" || prevServer?.status === "editing";
-      const carryServerEvents = serverInLineage ? serverEvents : [];
-      // 초기화(취소)면 비운 상태 그대로 기록한다 — 서버의 옛 확정후수정 표식/이력을 되살리지 않는다.
-      const merged = resetConfirm ? { ...nextRecord } : {
-        ...nextRecord,
-        // confirmedAt도 '서버 기준'으로 맞춘다 — 다른 기기가 취소(초기화)해 서버에서 지워졌으면 로컬 stale 값으로 되살리지 않는다.
-        // (표식/이력은 서버 기준인데 confirmedAt만 로컬이면 'editing + 옛 confirmedAt + 표식 없음' 불일치가 남는다.)
-        confirmedAt: status === "confirmed" ? now : (prevServer?.confirmedAt || ""),
-        // 표식은 서버 기준 계보 안에서만 유지: 재오픈·재확정=true / 그 외(마감수정 취소 포함)=계보 값 유지.
-        // (마감수정 취소는 표식을 지우지 않는다 — 편집 중 자동저장 변경을 되돌리지 못하므로 '확정 후 열림'을 남겨 감사한다.)
-        editedAfterConfirm: (serverReopen || serverReconfirm) ? true
-          : !!(serverInLineage && prevServer?.editedAfterConfirm),
-        editEvents: serverReconfirm ? [...carryServerEvents, reasonEvent].slice(-20) : carryServerEvents,
-      };
-      const next = [merged, ...list.filter((r) => !matches(r))];
-      await gasClient.saveSharedData("monthly_closings", next);
-      setMonthlyCloseRecords(next);
+      // 판정과 쓰기를 **한 트랜잭션 안에서** 한다(2026-08-11). 두 가지를 동시에 해결한다.
+      //
+      // (1) 유실 방지: monthly_closings 는 전 지점·전 섹션이 함께 쓰는 문서 하나라, 미리 읽어둔 값 위에
+      //     통째로 저장하면 그 사이 다른 기기가 올린 레코드가 사라진다. 특히 비즈니스택시·연차관리
+      //     '확인' 레코드가 날아가면 그 지점은 다음 마감이 막히는데 확인 화면에는 '확정'으로 보여
+      //     원인을 찾을 수 없다. 이 섹션 레코드만 갈아끼우고 나머지는 트랜잭션이 본 값을 그대로 보존한다.
+      //
+      // (2) 스테일 판정 방지: 재확정 여부·사유 요구·계보·표식을 트랜잭션 **밖** 스냅샷으로 정하면,
+      //     읽은 뒤 커밋 전에 다른 기기가 이 섹션을 바꿨을 때 낡은 판정이 그대로 커밋된다.
+      //     예) 이쪽이 '미제출→확정'으로 읽은 사이 다른 기기가 확정 후 수정을 시작하면,
+      //     사유 없는 확정이 되고 쌓여 있던 수정 이력까지 지워진다 — 사유 게이트가 통째로 우회된다.
+      //     트랜잭션은 커밋될 스냅샷으로 다시 실행되므로(경합 시 재시도), 판정이 항상 커밋될 값과 같다.
+      //
+      // updater 는 순수하다: current 말고는 바깥에서 이미 확정된 값(now·reason·status·opts·nextRecord)만 읽는다.
+      // 커밋 결과는 **반환값**으로 받는다 — 바깥 변수에 담아 두면 재시도 때 값이 어긋난다(gasClient 주석).
+      const { value: committed } = await gasClient.mutateSharedData<any[]>("monthly_closings", (current) => {
+        // null = 문서 없음(기록이 아직 없음, 정상) → []. 값이 있는데 배열이 아니면(형식 손상)
+        // 재수정 여부를 단정할 수 없어 중단(fail-closed). throw 는 트랜잭션을 취소시킨다.
+        if (current != null && !Array.isArray(current)) {
+          throw new Error("마감 상태 형식이 올바르지 않습니다. 다시 시도해주세요.");
+        }
+        const list = Array.isArray(current) ? current : [];
+        // 표식·이력은 서버 값을 최우선으로 유지한다 — 로컬이 스테일이어도 '확정 후 수정' 사실/이력을 잃지 않는다.
+        const prevServer = latest(list);
+        // 서버 기준 판정도 직전 status로(confirmedAt 아님) — 취소된 미제출 섹션의 찌꺼기 confirmedAt에 무해.
+        // 재오픈(확정→editing)은 사유를 받지 않는다(제출 때 받음). 재확정(editing→confirmed, 확정후수정)일 때만 사유 이벤트를 남긴다.
+        const serverReopen = status === "editing" && prevServer?.status === "confirmed" && !restore;
+        const serverReconfirm = status === "confirmed" && prevServer?.status === "editing" && !!prevServer?.editedAfterConfirm && !restore && !cancelEdit;
+        // 최종 판정상 '확정본을 수정 후 재확정'인데 사유가 없으면(인라인 사유칸 우회/경쟁) 사유 없는 확정을 남기지 않는다 —
+        // 저장을 중단하고 재입력을 요구한다(fail-closed). 정상 경로는 handleConfirm이 인라인 사유칸을 먼저 검증한다.
+        if (serverReconfirm && !(reason || "").trim()) {
+          throw new Error("확정된 마감을 수정했습니다. 수정 사유를 입력해야 마감제출할 수 있습니다.");
+        }
+        const serverEvents = Array.isArray(prevServer?.editEvents) ? prevServer.editEvents : [];
+        // 서버 기준 '확정 계보'(confirmed↔editing) 여부 — 표식·이력을 이 안에서만 이어받는다. 롤백(restore)은 계보를 우회해 복원.
+        const serverInLineage = restore || prevServer?.status === "confirmed" || prevServer?.status === "editing";
+        const carryServerEvents = serverInLineage ? serverEvents : [];
+        // 초기화(취소)면 비운 상태 그대로 기록한다 — 서버의 옛 확정후수정 표식/이력을 되살리지 않는다.
+        const merged = resetConfirm ? { ...nextRecord } : {
+          ...nextRecord,
+          // confirmedAt도 '서버 기준'으로 맞춘다 — 다른 기기가 취소(초기화)해 서버에서 지워졌으면 로컬 stale 값으로 되살리지 않는다.
+          // (표식/이력은 서버 기준인데 confirmedAt만 로컬이면 'editing + 옛 confirmedAt + 표식 없음' 불일치가 남는다.)
+          confirmedAt: status === "confirmed" ? now : (prevServer?.confirmedAt || ""),
+          // 표식은 서버 기준 계보 안에서만 유지: 재오픈·재확정=true / 그 외(마감수정 취소 포함)=계보 값 유지.
+          // (마감수정 취소는 표식을 지우지 않는다 — 편집 중 자동저장 변경을 되돌리지 못하므로 '확정 후 열림'을 남겨 감사한다.)
+          editedAfterConfirm: (serverReopen || serverReconfirm) ? true
+            : !!(serverInLineage && prevServer?.editedAfterConfirm),
+          editEvents: serverReconfirm ? [...carryServerEvents, reasonEvent].slice(-20) : carryServerEvents,
+        };
+        return [merged, ...list.filter((r: any) => !matches(r))];
+      });
+      // 커밋된 목록으로 화면을 맞춘다. 다른 섹션·지점의 최신 변경까지 함께 반영된다.
+      if (Array.isArray(committed)) setMonthlyCloseRecords(committed);
     };
     const chained = closeWriteChainRef.current.then(run, run);
     closeWriteChainRef.current = chained.catch(() => {}); // 체인이 에러로 끊기지 않도록 흡수
@@ -297,6 +331,34 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     : "매출집계";
 
   const runConfirm = useCallback(async (section: CloseSection) => {
+    if (blockedByCloseStatus()) return;
+    // [선행조건 게이트] 비즈니스택시·연차관리를 지점이 눈으로 확인했는가.
+    // 말일에 제출하는 3종(매입매출·매출집계·파트타이머)에만 건다 — 매입매출 하나에만 걸면
+    // 매출집계를 먼저 눌러 우회할 수 있다. 정직원 급여대장(salary)은 25일 작성이라 제외.
+    // 다른 검증(매출집계 정합성·급여대장 flush)보다 **먼저** 둔다: 어차피 막힐 제출이면
+    // 서버 왕복과 급여 쓰기를 먼저 시킬 이유가 없다.
+    if ((GATED_CLOSE_SECTIONS as readonly string[]).includes(section)) {
+      // 안내는 하단 토스트가 아니라 **팝업**으로 띄운다(사용자 지시 2026-08-11) —
+      // 토스트는 화면 아래에서 잠깐 떴다 사라져서, 마감 버튼만 보고 있던 지점은 못 보고
+      // "왜 제출이 안 되지" 하며 다시 누른다. 여기는 눌러서 닫아야 하는 안내여야 한다.
+      let missing: CheckSection[];
+      try {
+        missing = await findMissingCheckSections(branchName, selectedMonth);
+      } catch (error) {
+        // fail-closed — '확인했는지 알 수 없음'을 '확인함'으로 흘리면 게이트가 있으나 마나다.
+        console.error("월말 확인 상태 조회 실패:", error);
+        window.alert(
+          `${sectionLabel(section)} 마감을 중단했습니다.\n\n` +
+          `비즈니스택시·연차관리 확인 상태를 서버에서 읽지 못했습니다.\n` +
+          `네트워크 상태를 확인한 뒤 다시 시도해주세요.`
+        );
+        return;
+      }
+      if (missing.length > 0) {
+        window.alert(`${sectionLabel(section)} 마감을 제출할 수 없습니다.\n\n${missingCheckMessage(selectedMonth, missing)}`);
+        return;
+      }
+    }
     // 매출집계 제출 시에만 매출집계 정합성/영속화를 검증한다(다른 섹션 마감과 무관).
     if (section === "salesSummary") {
       const summaryCheck = await loadSalesSummaryForClose(branchName, selectedMonth);
@@ -386,7 +448,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 저장에 실패했습니다.", "error");
     }
-  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts, user]);
+  }, [branchName, carryMonthlyPurchasesToNextMonth, saveSectionClose, selectedMonth, triggerToast, getSectionRecord, editReasonDrafts, user, blockedByCloseStatus]);
 
   // 파트타이머 제출은 진행 중 잠금(partTimeSubmitting)으로 감싼다 — 차단/실패/성공 어느 경로로 끝나도
   // finally 가 반드시 푼다. 다른 섹션은 종전과 동일하게 그대로 실행한다.
@@ -401,6 +463,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   }, [runConfirm]);
 
   const handleEdit = useCallback(async (section: CloseSection) => {
+    if (blockedByCloseStatus()) return;
     // 급여 섹션(정직원·파트타이머)의 마감상태 변경도 열람 권한 + 비밀번호 해제가 있어야 한다 — 낡은 화면/세션으로 재개·취소하는 우회 차단(fail-closed).
     if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
       triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
@@ -420,7 +483,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 수정 상태 저장에 실패했습니다.", "error");
     }
-  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName]);
+  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName, blockedByCloseStatus]);
 
   const resetMonthlyPurchaseAmounts = useCallback(async () => {
     let purchaseRows: any[] = [];
@@ -450,6 +513,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   }, [branchName, selectedMonth]);
 
   const handleCancel = useCallback(async (section: CloseSection) => {
+    if (blockedByCloseStatus()) return;
     // 급여 섹션(정직원·파트타이머) 마감취소도 열람 권한 + 비밀번호 해제 필요(handleEdit와 동일한 fail-closed 가드).
     if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
       triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
@@ -500,9 +564,10 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 취소에 실패했습니다.", "error");
     }
-  }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast, user, branchName]);
+  }, [getSectionStatus, resetMonthlyPurchaseAmounts, saveSectionClose, selectedMonth, triggerToast, user, branchName, blockedByCloseStatus]);
 
   const handleCancelEdit = useCallback(async (section: CloseSection) => {
+    if (blockedByCloseStatus()) return;
     // 급여 섹션(정직원·파트타이머) '수정취소'도 열람 권한 + 비밀번호 해제 필요(handleEdit/handleCancel와 동일한 fail-closed 가드).
     if (isSalaryCloseSection(section) && !canReadSalaryBranch(user, branchName)) {
       triggerToast(`${sectionLabel(section)} 열람 권한이 없습니다. 본사 관리자에게 문의해주세요.`, "error");
@@ -522,7 +587,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
       console.error(error);
       triggerToast(error?.message || "마감 수정 취소에 실패했습니다.", "error");
     }
-  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName]);
+  }, [saveSectionClose, selectedMonth, triggerToast, user, branchName, blockedByCloseStatus]);
 
   useEffect(() => {
     fetchHistory();
@@ -534,6 +599,16 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   // 선택한 월/섹션의 제출상태 칩
   const statusPill = (section: CloseSection) => {
+    // 상태를 못 읽었으면 '미제출'이라고 단정하지 않는다 — 확정해 둔 섹션이 미제출로 보이면
+    // 지점은 다시 제출하려 들고, 실제 원인(조회 실패·문서 손상)은 어디에도 안 뜬다.
+    // 오류색은 hex 로 못 박는다 — rose-* 는 지점 스코프에서 치환돼 경고가 평범한 안내로 보인다.
+    if (closeStatusError) {
+      return (
+        <span className="monthly-close-status-pill rounded-lg px-2.5 py-1 text-xs font-black bg-[#FDE2E2] text-[#B91C1C] border border-[#C93A3A]">
+          상태 확인 불가
+        </span>
+      );
+    }
     const status = getSectionStatus(section);
     return (
       <span className={`monthly-close-status-pill rounded-lg px-2.5 py-1 text-xs font-black ${
@@ -704,6 +779,20 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
 
   return (
     <div className="space-y-6 animate-fade-in" id="monthly-settle-tab-root">
+      {/* 마감 상태 문서를 못 읽었다 — 화면의 '미제출'을 믿으면 안 되는 상태라 맨 위에 못 박아 알린다.
+          오류색은 hex 직접 지정(rose-* 는 지점 스코프에서 치환돼 경고가 평범한 안내로 보인다). */}
+      {closeStatusError && (
+        <div className="rounded-2xl border px-4 py-3 text-xs font-bold bg-[#FDE2E2] border-[#C93A3A] text-[#B91C1C] flex items-center justify-between gap-3">
+          <span>{closeStatusError} — 마감 상태를 확인할 수 없어 제출·수정·취소가 잠겼습니다.</span>
+          <button
+            type="button" onClick={() => void fetchMonthlyCloseStatus()}
+            className="shrink-0 rounded-full bg-[#212121] text-[#F6F5FA] px-4 py-1.5 text-[11px] font-black cursor-pointer"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
       {/* Toast Alert overlay */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-fade-in">

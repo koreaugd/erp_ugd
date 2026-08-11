@@ -694,11 +694,14 @@ export const gasClient = {
   // 공유데이터를 트랜잭션으로 읽고-고치고-쓴다(요일 슬롯 백업 포함). "현재 값 기준 일부 수정" 저장 전용 —
   // 읽어둔 값 위에 saveSharedData 하면 그 사이 다른 기기의 저장분이 통째로 사라진다.
   // mutate가 null을 반환하면 아무것도 쓰지 않는다. mutate는 순수 함수여야 한다(재시도 시 여러 번 호출).
-  async mutateSharedData<T = unknown>(dataKey: string, mutate: (current: T | null) => T | null): Promise<{ changed: boolean }> {
+  //
+  // value = 트랜잭션이 커밋한 값(안 바꿨으면 트랜잭션이 본 현재 값). 커밋 결과로 화면을 갱신할 때 쓴다 —
+  // mutate 안에서 바깥 변수에 담아 두면 재시도 때 값이 어긋나므로 반드시 이 반환값을 쓸 것.
+  async mutateSharedData<T = unknown>(dataKey: string, mutate: (current: T | null) => T | null): Promise<{ changed: boolean; value: T | null }> {
     const { firebaseMutateSharedData } = await loadFirebaseDirect();
     const result = await firebaseMutateSharedData(dataKey, mutate as (current: unknown) => unknown | null);
     clearReadCache();
-    return result;
+    return result as { changed: boolean; value: T | null };
   },
 
   // 자가복구 전용: 서버에 문서가 없을 때만 원자적으로 만든다(트랜잭션 create-only).
