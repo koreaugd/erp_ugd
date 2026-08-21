@@ -11,6 +11,7 @@ import { gasClient } from "../../../api/gasClient";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch, salaryAccessDenialMessage } from "../../../utils/salaryAccess";
+import { IS_DEMO } from "../../../demo";
 
 // 잠금 해제 상태(모듈 전역). 정직원·파트타이머가 같은 비밀번호를 쓰므로 해제도 함께 본다 —
 // 한 번 푼 뒤 두 탭을 오갈 때 비밀번호를 두 번 묻지 않기 위해서다.
@@ -161,7 +162,9 @@ export function SalaryAccessGate({
       .then((remote) => {
         const pc = remote && typeof remote === "object" ? String(remote.fullTimeSalaryPasscode ?? "").trim() : "";
         // 빈값 또는 과거 하드코딩 기본값("1234")은 '설정 안 됨'으로 간주 → 레거시 서버 값이 유효하게 남지 않도록 거부.
-        if (pc !== "" && pc !== "1234") {
+        // 단 시연용 인스턴스는 레거시 서버 값이 존재할 수 없고(새 프로젝트 시드) 체험 번호를 전부 1234로
+        // 통일하라는 지시(2026-08-20)라 "1234"도 유효한 설정값으로 인정한다.
+        if (pc !== "" && (IS_DEMO || pc !== "1234")) {
           setPasscode(pc);
           setPassStatus("ready");
         } else {

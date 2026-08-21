@@ -26,3 +26,6 @@ firestore-backups/
 
 # clasp 로컬 설정 — 스크립트 ID는 GAS URL 과 같은 성격이라 저장소에 두지 않는다
 .clasp.json
+
+# firebase CLI 가 배포할 때 만드는 로컬 캐시(업로드한 파일 목록). 저장소에 둘 이유가 없다.
+.firebase/
