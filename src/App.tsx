@@ -6,6 +6,7 @@ import { AppSessionGuard } from "./components/AppSessionGuard";
 import { installChunkReloadGuard } from "./utils/chunkReload";
 // @ts-ignore — 이 프로젝트에는 @types/react가 없어 클래스 컴포넌트를 .tsx로 쓸 수 없다(ChunkErrorBoundary.jsx 주석 참고).
 import { ChunkErrorBoundary } from "./components/ChunkErrorBoundary.jsx";
+import { IS_DEMO } from "./demo";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const BranchConfirmPage = lazy(() => import("./pages/BranchConfirmPage"));
@@ -29,6 +30,12 @@ installChunkReloadGuard();
 export default function App() {
   return (
     <AuthProvider>
+      {/* 시연용 빌드에서만 나타나는 상단 띠. 운영 빌드에서는 IS_DEMO가 리터럴 false로 치환되어 통째로 제거된다. */}
+      {IS_DEMO && (
+        <div className="w-full bg-amber-400 text-black text-center text-xs font-black py-1.5 px-3">
+          시연용 인스턴스 — 화면의 모든 데이터는 가상입니다
+        </div>
+      )}
       {/* 새 배포 갈아끼우기 + 유휴 자동 로그아웃. 화면을 그리지 않고 뒤에서 지킨다. */}
       <AppSessionGuard />
       <HashRouter>

@@ -25,6 +25,7 @@ import { normalizeKakaoTaxiOrders, taxiOrderKey } from "./admin/helpers/kakaoTax
 import { KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, type KakaoTaxiBranchHistoryEntry } from "./admin/helpers/kakaoTaxiBranchHistory";
 import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
+import { IS_DEMO } from "../demo";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { AdminReportPackTab } from "./admin/AdminReportPackTab";
@@ -146,6 +147,10 @@ export default function AdminPage() {
   // 관리자 화면 탭 권한(2026-07-25 신설). user가 아직 없는 첫 렌더에서는 undefined→"all" 취급이라
   // 기존과 동일하게 "dashboard"로 시작한다. user가 늦게 채워지는 경우를 대비해 마운트 1회 보정 effect를
   // 아래에 두고, sectionAllowed 렌더 가드가 그 사이 첫 프레임의 무단 접근을 막는다.
+  // [2026-08-21] 데모에서도 법인택시를 연다 — GAS 대신 demoGas 가 가상 데이터로 응답한다.
+  // (그 전에는 섹션을 숨기면서 권한 목록에서도 빼야 했다: 안 빼면 firstAllowedAdminKey 가
+  //  kakaoTaxi 를 첫 화면으로 골라 빈 화면에 착지했다 — Codex P1, 2026-08-20.
+  //  다시 숨기게 되면 그 필터를 되살릴 것.)
   const allowedAdminTabs = user?.allowedAdminTabs ?? "all";
   const [adminSection, setAdminSection] = useState<AdminPermKey>(() => firstAllowedAdminKey(user?.allowedAdminTabs ?? "all"));
   // 지금 보고 있는 화면 — 비동기 작업이 끝난 뒤 "아직 대시보드에 있는가"를 물을 때 쓴다.

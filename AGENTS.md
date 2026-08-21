@@ -85,6 +85,17 @@
 - 배포 후에는 실제 웹앱 URL과 GAS 응답을 확인한다.
 - 배포된 `VITE_GAS_URL`만 사용한다. 기기별 `custom_gas_url` 값으로 공통 백엔드를 덮어쓰지 않는다.
 
+### 시연용(데모) 인스턴스
+
+운영과 완전히 분리된 시연용 배포가 있다. 설계서: `02. 재무 회계/blueprint-ugd-erp-demo-instance.md`.
+
+- **구조**: `vite build --mode demo`(= `npm run build:demo`)로 빌드하면 ① `firebase-applet-config.demo.json`(별도 데모 Firebase 프로젝트)으로 설정이 통째로 바뀌고 ② `__IS_DEMO__` 리터럴 치환으로 데모 배너·데모 계정 안내가 켜지며 ③ GAS 호출(`gasClient` `callApi`)이 fetch 전에 차단되고 ④ 법인택시/비즈니스택시 탭이 숨는다.
+- **[P0 불변식] 데모 빌드는 운영 Firebase·운영 GAS(구글시트)에 절대 닿으면 안 되고, 운영 빌드에는 데모 코드가 0바이트도 들어가면 안 된다.** 데모 관련 코드를 고쳤으면 반드시 `npm run check:demo-bundle`을 다시 돌려 통과를 확인한다(양방향 번들 문자열 검사).
+- **데모 배포**: `npm run build:demo` → `firebase deploy --config firebase.demo.json --project <데모 프로젝트ID>`. GitHub Pages(운영)와 무관하며, 운영 배포 절차에 아무 영향이 없다.
+- **데모 데이터 리셋**: `scripts/demo/seed_demo.mjs --reset` (가상 데이터 기준선으로 전체 재시드). 데이터 원본은 `02. 재무 회계/output/demo_data/`.
+- 데모 Firestore 규칙 배포는 `firebase.demo.json`에 database가 명시돼 있어야 실제로 올라간다(`--only firestore:rules` 단독의 무동작 함정).
+- 시드용 서비스계정 키는 저장소·OneDrive 밖(`C:\Users\yulte\secrets\`)에 둔다. 커밋 금지.
+
 ### 카카오T 비즈니스 2계정
 - 계정 #1(기존)과 계정 #2가 있다. 계정 #2 = 사카바단단·8번대물집 인원 전용.
 - 자격증명은 GAS 스크립트 속성(`KAKAO_T_CORP_ID_2`/`KAKAO_T_SECRET_2`)·로컬 `.env` 에만. 저장소 금지.
