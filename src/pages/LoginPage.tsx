@@ -8,6 +8,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import GateStep from "./login/GateStep";
 import OnboardingStep from "./login/OnboardingStep";
 import ApprovalPendingStep from "./login/ApprovalPendingStep";
+import { IS_DEMO } from "../demo";
 
 // PIN 단독 로그인은 2026-07-29 사용자 지시로 폐지 — 개인 계정(구글/이메일)으로만 로그인한다.
 // PIN 은 로그인 후의 게이트(GateStep)에서만 쓰인다. 백엔드의 PIN 검증 로직은 게이트가 계속 쓰므로 유지.
@@ -132,9 +133,35 @@ export default function LoginPage() {
           <GateStep profile={pendingGate.profile} />
         ) : (
           <div className="space-y-4" id="personal-login-section">
+            {/* 시연용 빌드에서만: 방문자가 계정을 몰라 막히지 않도록 데모 계정을 화면에 안내한다.
+                (가상 데이터 전용 계정 — 비밀 아님. 운영 빌드에서는 IS_DEMO 리터럴 치환으로 제거된다.) */}
+            {IS_DEMO && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-zinc-800 space-y-2">
+                <p className="font-black">체험용 계정으로 로그인하세요</p>
+                {/* [2026-08-21] 값마다 이름을 붙여 세로로 쌓는다.
+                    원래는 "관리자: 메일 / 비번 / PIN" 한 줄이었는데(사용자 지시 2026-08-20 — 줄바꿈되면
+                    어디까지가 비밀번호인지 읽기 어렵다), **폭 390px 휴대폰에서 337px 짜리 줄이 316px 만
+                    보여 PIN 끝자리가 잘렸다**(가로 스크롤은 되지만 잘린 줄 모른다). 값마다 이름이 붙어 있으면
+                    줄이 나뉘어도 무엇이 비밀번호인지 헷갈리지 않으므로, 한 줄 규칙의 목적은 그대로 지켜진다. */}
+                {[
+                  { role: "관리자", email: "demo-admin@ugd-erp.example" },
+                  { role: "지점", email: "demo-branch@ugd-erp.example" },
+                ].map((acct) => (
+                  <div key={acct.role} className="rounded-lg bg-white/70 px-2.5 py-2 space-y-0.5">
+                    <p className="font-black">{acct.role}</p>
+                    <p className="break-all">이메일 {acct.email}</p>
+                    <p>비밀번호 12341234 · PIN 1234</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* [2026-08-21 사용자 지시] 시연용 빌드에서는 이 버튼을 **보이되 눌러도 아무 일이 없게** 둔다.
+                방문자가 자기 구글 계정으로 들어오면 가입 승인 대기 화면에 갇혀 시연이 거기서 끝난다.
+                버튼을 없애지 않는 이유는 화면 구성을 운영과 같게 보여주기 위해서다. 모양은 그대로 두고
+                동작만 뗀다(disabled 로 흐리게 만들면 "고장난 화면"으로 보인다). */}
             <button
               type="button"
-              onClick={() => void loginWithGoogle()}
+              onClick={IS_DEMO ? undefined : () => void loginWithGoogle()}
               disabled={busy}
               className="flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-300 bg-white px-4 py-4 text-sm font-bold text-zinc-800 hover:bg-zinc-50"
               id="btn-google-login"
@@ -209,14 +236,27 @@ export default function LoginPage() {
               </button>
             </form>
             <div className="flex justify-between text-xs font-bold text-zinc-500">
+              {/* [2026-08-21] 구글 버튼과 같은 이유로 시연용 빌드에서는 눌러도 아무 일이 없다.
+                  방문자가 자기 이메일로 가입하면 구글과 똑같이 **승인 대기 화면에 갇혀** 시연이 끝난다
+                  (Codex 정지게이트 지적 — 구글만 막고 이 링크를 열어 두면 막다른 길이 그대로 남는다).
+                  모양은 운영과 같게 두고 동작만 뗀다. */}
               <button
                 type="button"
                 className="underline underline-offset-4"
-                onClick={() => switchEmailForm(emailForm === "signup" ? "signin" : "signup")}
+                onClick={IS_DEMO ? undefined : () => switchEmailForm(emailForm === "signup" ? "signin" : "signup")}
               >
                 {emailForm === "signup" ? "로그인으로 돌아가기" : "이메일로 가입하기"}
               </button>
-              <button type="button" className="underline underline-offset-4" onClick={() => switchEmailForm("reset")}>
+              {/* [2026-08-21] 이것도 시연용에서는 동작을 뗀다. 두 가지 이유가 있다.
+                  ① 체험 계정의 비밀번호는 위 안내상자에 그대로 적혀 있어 쓸 일이 없다.
+                  ② **여기를 열어 두면 방문자가 갇힌다** — 재설정 화면에서 로그인으로 돌아가는 버튼이
+                     바로 위의 '이메일로 가입하기' 버튼인데, 그 버튼을 막았기 때문에 새로고침 말고는
+                     빠져나올 길이 없다. 셋을 함께 막아야 앞뒤가 맞는다. */}
+              <button
+                type="button"
+                className="underline underline-offset-4"
+                onClick={IS_DEMO ? undefined : () => switchEmailForm("reset")}
+              >
                 비밀번호 찾기
               </button>
             </div>

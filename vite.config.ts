@@ -5,7 +5,7 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
   const appVersion = process.env.GITHUB_SHA || (() => {
     try {
       return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
@@ -14,12 +14,31 @@ export default defineConfig(() => {
     }
   })();
 
+  // 시연용 빌드(`vite build --mode demo`)에서만 true.
+  // __IS_DEMO__가 리터럴로 치환되어야 운영 빌드에서 데모 분기가 죽은코드 제거로 사라진다
+  // (scripts/demo/check_prod_bundle.mjs가 양쪽 번들을 기계 검사한다).
+  const isDemo = mode === 'demo';
+
   return {
     base: './',
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
+      __IS_DEMO__: JSON.stringify(isDemo),
     },
     plugins: [
+      // 데모 빌드에서는 Firebase 설정 JSON을 데모 프로젝트 것으로 통째로 바꿔치기한다.
+      // 소스 4곳이 같은 상대경로로 import하므로 여기(resolve 단계) 한 곳만 바꾸면 전부 적용된다.
+      // endsWith 비교라 데모 설정 파일 자신(...demo.json)은 다시 매칭되지 않는다.
+      isDemo && {
+        name: 'ugd-demo-config-swap',
+        enforce: 'pre' as const,
+        resolveId(source: string) {
+          if (source.endsWith('firebase-applet-config.json')) {
+            return path.resolve(__dirname, 'firebase-applet-config.demo.json');
+          }
+          return null;
+        },
+      },
       {
         name: 'ugd-app-version',
         buildStart() {

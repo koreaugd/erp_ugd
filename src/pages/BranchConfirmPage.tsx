@@ -12,6 +12,7 @@ import { ensureLatestAppVersion } from "../utils/appVersion";
 import { cleanNumeric } from "./branch/helpers/formatters";
 import type { BranchDailyTab } from "./branch/types";
 import { BRANCH_TAB_REGISTRY, isTabAllowed, firstAllowedKey, permKeyForState, type PermKey } from "./branch/tabRegistry";
+import { IS_DEMO } from "../demo";
 // **탭은 열 때 받는다.**
 // 예전에는 12개 탭을 전부 정적으로 들여와, 대시보드 하나를 보려고 모든 탭 코드를
 // 내려받아야 화면이 떴다(지점 화면 묶음 444KB / 압축 115KB). 매장 태블릿·약한 회선에서
@@ -230,7 +231,11 @@ interface WorkspaceProps {
   loginType: "personal" | "pin";
 }
 
-function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin, userRole, allowedBranches, allowedTabs, loginType }: WorkspaceProps) {
+function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab, isAdmin, userRole, allowedBranches, allowedTabs: allowedTabsProp, loginType }: WorkspaceProps) {
+  // [2026-08-21] 데모에서도 비즈니스택시를 열어 둔다 — GAS 대신 demoGas 가 가상 데이터로 응답한다.
+  // (다시 숨기게 되면 권한 목록에서도 businessTaxi 를 빼야 한다 — 안 빼면 firstAllowedKey 가
+  //  택시를 첫 탭으로 골라 빈 화면에 착지한다. Codex P1, 2026-08-20.)
+  const allowedTabs = allowedTabsProp;
   const navigate = useNavigate();
   const activeBranchName = branch?.branchName || "";
   const isHeadOfficeBranch = activeBranchName === "본사";
@@ -462,7 +467,9 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
     // MonthlySettleTab 등이 여전히 읽는 값이므로 여기서 지우면 화면 문구가 초기화된다.
     const updated = {
       ...adminSettings,
-      fullTimeSalaryPasscode: formFullTimeSalaryPasscode.trim() === "1234" ? "" : formFullTimeSalaryPasscode.trim(),
+      // "1234"는 과거 하드코딩 기본값이라 빈값으로 정규화한다. 단 데모 빌드는 체험 번호가 1234로
+      // 통일돼 있어(SalaryAccessGate의 IS_DEMO 예외와 짝) 정규화하면 저장할 때마다 잠금번호가 날아간다.
+      fullTimeSalaryPasscode: !IS_DEMO && formFullTimeSalaryPasscode.trim() === "1234" ? "" : formFullTimeSalaryPasscode.trim(),
     };
     localStorage.setItem("erp_admin_settings", JSON.stringify(updated));
     setAdminSettings(updated);
@@ -615,13 +622,13 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
           </button>
           {/* 순서: 근로계약서 → 비즈니스택시 → 연차관리 (사용자 지시 2026-07-24) */}
           <button
-            type="button"
-            onClick={() => navigateTo("businessTaxi")}
-            aria-current={mainCategory === "businessTaxi" ? "page" : undefined}
-            className={`ugd-nav-item shrink-0${mainCategory === "businessTaxi" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "businessTaxi") ? " opacity-50" : ""}`}
-          >
-            <span>비즈니스택시</span>
-          </button>
+              type="button"
+              onClick={() => navigateTo("businessTaxi")}
+              aria-current={mainCategory === "businessTaxi" ? "page" : undefined}
+              className={`ugd-nav-item shrink-0${mainCategory === "businessTaxi" ? " is-active" : ""}${!isTabAllowed(allowedTabs, "businessTaxi") ? " opacity-50" : ""}`}
+            >
+              <span>비즈니스택시</span>
+            </button>
           <button
             type="button"
             onClick={() => navigateTo("annualLeave")}

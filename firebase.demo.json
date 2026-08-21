@@ -1,0 +1,14 @@
+{
+  "_comment": "시연용 프로젝트 배포 설정. 사용법: firebase deploy --config firebase.demo.json --project <데모 프로젝트ID> [--only hosting|firestore]. 규칙 배포는 database 명시가 필수(--only firestore:rules 단독은 조용히 아무것도 안 올리는 함정 있음).",
+  "hosting": {
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "server.cjs", "server.cjs.map"],
+    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+  },
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    }
+  ]
+}

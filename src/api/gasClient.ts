@@ -1,6 +1,7 @@
 // src/api/gasClient.ts
 
 import { isMissingChunkError, reloadForMissingChunk } from "../utils/chunkReload";
+import { IS_DEMO } from "../demo";
 
 /**
  * 파이어베이스 통신 코드는 미리 받아두지 않고, 저장·조회·제출하는 순간에 받아온다.
@@ -179,6 +180,15 @@ export interface DailyListRow {
 
 // REST actions helper
 async function callApi(action: string, params: Record<string, any> = {}): Promise<any> {
+  // 시연용 인스턴스는 GAS(구글시트) 백엔드가 없다. 여기서 갈라 놓지 않으면 운영 GAS를 호출할 수 있으므로
+  // fetch에 도달하기 전에 **반드시** 되돌아간다(fail-closed).
+  //   · 법인택시 action → demoGas 가 미리 심어 둔 가상 데이터로 응답한다(네트워크 요청 없음)
+  //   · 그 밖의 action → demoGas 가 그대로 던진다(지점관리·verifyPin 등은 데모에 백엔드가 없다)
+  // 동적 import 라서 운영 빌드에서는 이 분기와 demoGas 모듈이 통째로 사라진다(check_prod_bundle.mjs 검사).
+  if (IS_DEMO) {
+    const { demoCallApi } = await import("./demoGas");
+    return await demoCallApi(action, params);
+  }
   try {
     // 모든 기기가 동일한 백엔드를 사용하도록 배포 시 주입된 URL만 사용합니다.
     // 이전 기기에 남아 있는 custom_gas_url은 구버전 웹앱을 호출할 수 있어 무시합니다.
