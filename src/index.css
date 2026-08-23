@@ -5085,3 +5085,26 @@ html body .branch-redesign.branch-redesign #liquor-inventory-tab thead tr:nth-ch
   color: #212121;
   font-weight: 900;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   시연용 인스턴스 상단 띠(#demo-banner) 보정 — `html.is-demo` 일 때만 걸린다.
+   운영에서는 이 클래스가 절대 붙지 않으므로 아래 규칙은 존재하지 않는 것과 같다(App.tsx).
+
+   띠는 sticky 라 제자리를 차지하지만, **화면 높이에 붙어 있는 요소**(지점 사이드바의
+   sticky top-0 / h-screen, 관리자 모바일 드로어의 fixed inset-y-0)는 뷰포트 기준이라
+   띠 아래가 아니라 화면 맨 위에서 시작한다. 그대로 두면 사이드바 윗부분이 띠에 가린다.
+   ────────────────────────────────────────────────────────────────────── */
+html.is-demo {
+  /* 아래는 **띠가 그려지기 전 한 순간만 쓰이는 예비값**이다. 실제 값은 App.tsx 가 띠를 실측해
+     덮어쓴다(ResizeObserver 로 폭 변화도 따라간다) — 여기 숫자를 믿고 맞추려 하지 말 것. */
+  --demo-banner-h: 28px;
+}
+/* 지점 화면 사이드바 — 붙는 기준점을 띠 아래로 내리고, 그만큼 키를 줄인다 */
+html.is-demo .branch-redesign > aside {
+  top: var(--demo-banner-h);
+  height: calc(100vh - var(--demo-banner-h));
+}
+/* 관리자 모바일 드로어 — 열렸을 때만 fixed 다. 띠 아래에서 시작하게 한다 */
+html.is-demo #sidebar.fixed {
+  top: var(--demo-banner-h);
+}
