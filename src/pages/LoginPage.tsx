@@ -143,14 +143,17 @@ export default function LoginPage() {
                     어디까지가 비밀번호인지 읽기 어렵다), **폭 390px 휴대폰에서 337px 짜리 줄이 316px 만
                     보여 PIN 끝자리가 잘렸다**(가로 스크롤은 되지만 잘린 줄 모른다). 값마다 이름이 붙어 있으면
                     줄이 나뉘어도 무엇이 비밀번호인지 헷갈리지 않으므로, 한 줄 규칙의 목적은 그대로 지켜진다. */}
+                {/* [2026-08-24] 외울 번호를 하나로 — 비밀번호·PIN·급여잠금 전부 123456.
+                    "1234"로 하고 싶었으나 Firebase 가 6자 미만 비밀번호를 거부한다(실측 확인).
+                    이 값은 scripts/demo/generate_fake_data.mjs 의 상수와 **짝**이다 — 한쪽만 고치면 로그인이 막힌다. */}
                 {[
-                  { role: "관리자", email: "demo-admin@ugd-erp.example" },
-                  { role: "지점", email: "demo-branch@ugd-erp.example" },
+                  { role: "관리자", email: "admin@demo.com" },
+                  { role: "지점", email: "branch@demo.com" },
                 ].map((acct) => (
                   <div key={acct.role} className="rounded-lg bg-white/70 px-2.5 py-2 space-y-0.5">
                     <p className="font-black">{acct.role}</p>
                     <p className="break-all">이메일 {acct.email}</p>
-                    <p>비밀번호 12341234 · PIN 1234</p>
+                    <p>비밀번호 · PIN 모두 123456</p>
                   </div>
                 ))}
               </div>

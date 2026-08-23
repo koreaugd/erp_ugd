@@ -43,13 +43,23 @@ const randint = (min, max) => min + Math.floor(rand() * (max - min + 1));
 const won = (n) => Math.round(n / 100) * 100;
 
 // ── 가상 회사 정의 ────────────────────────────────────────────────────────
-// 체험 번호 통일(사용자 지시 2026-08-20): PIN·급여잠금 전부 1234.
-// 비밀번호도 1234를 원했으나 Firebase 최소 6자 제한이 있어 "1234 두 번"으로 한다.
-// 급여잠금 1234는 운영 앱에선 '미설정' 취급이지만 데모 빌드는 예외 처리됨(SalaryAccessGate IS_DEMO).
-const DEMO_PIN_BRANCH = "1234";
-const DEMO_PIN_ADMIN = "1234";
-const DEMO_PASSWORD = "12341234";
-const SALARY_PASSCODE = "1234";
+// 체험 계정 간소화(사용자 지시 2026-08-24): **외울 번호를 하나로** 만든다 — 비밀번호·PIN·급여잠금 전부 123456.
+//
+// 원래 지시는 "1234"였으나 **Firebase 는 6자 미만 비밀번호를 거부한다**(실측: 1234·12345 거부,
+// 123456 통과 — auth/invalid-password). 비밀번호만 늘리면 번호가 둘이 되므로 셋 다 123456 으로 맞췄다.
+// 이 값을 4자리로 되돌리려는 시도는 Firebase 정책상 실패한다.
+//
+// 급여잠금은 운영 앱이라면 '미설정' 취급 규칙에 걸릴 수 있으나 데모 빌드는 예외 처리됨(SalaryAccessGate IS_DEMO).
+const DEMO_PIN_BRANCH = "123456";
+const DEMO_PIN_ADMIN = "123456";
+const DEMO_PASSWORD = "123456";
+const SALARY_PASSCODE = "123456";
+
+// 방문자가 직접 타이핑하는 주소라 짧게 둔다. 로그인 게이트가 쓰는 내부 계정
+// (admin@ugd-erp.example / branch-NN@ugd-erp.example)은 화면에 안 보이므로 그대로 둔다 —
+// 그쪽 주소는 gateAuth.ts 에 하드코딩돼 있어 바꾸면 운영 코드를 건드리게 된다.
+const DEMO_EMAIL_ADMIN = "admin@demo.com";
+const DEMO_EMAIL_BRANCH = "branch@demo.com";
 
 const BRANCHES = [
   { branchId: "01", branchName: "온담식당 시청점", brand: "온담식당", baseDaily: 2600000 },
@@ -759,9 +769,9 @@ const authAccounts = [
   })),
   // 시연 방문자용 개인 계정
   {
-    email: "demo-admin@ugd-erp.example", password: DEMO_PASSWORD, emailVerified: true, displayName: "데모 관리자",
+    email: DEMO_EMAIL_ADMIN, password: DEMO_PASSWORD, emailVerified: true, displayName: "데모 관리자",
     profile: {
-      name: "데모 관리자", email: "demo-admin@ugd-erp.example", phone: "010-0000-0001",
+      name: "데모 관리자", email: DEMO_EMAIL_ADMIN, phone: "010-0000-0001",
       workBranch: allBranchNames[0],
       role: "admin", allowedTabs: "all", allowedBranches: "all",
       allowedAdminTabs: "all",
@@ -770,9 +780,9 @@ const authAccounts = [
     },
   },
   {
-    email: "demo-branch@ugd-erp.example", password: DEMO_PASSWORD, emailVerified: true, displayName: "데모 지점장",
+    email: DEMO_EMAIL_BRANCH, password: DEMO_PASSWORD, emailVerified: true, displayName: "데모 지점장",
     profile: {
-      name: "데모 지점장", email: "demo-branch@ugd-erp.example", phone: "010-0000-0002",
+      name: "데모 지점장", email: DEMO_EMAIL_BRANCH, phone: "010-0000-0002",
       workBranch: allBranchNames[0],
       role: "branchAdmin", allowedTabs: "all",
       allowedBranches: allBranchNames, allowedBranchesEncoded: enc(allBranchNames),
