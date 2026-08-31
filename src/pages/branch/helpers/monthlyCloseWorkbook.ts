@@ -14,8 +14,7 @@ import {
   computePartTimeSalary,
   mergeManualPartTimeWork,
   resolvePartTimeAccumulatedHours,
-  resolvePartTimeAttendanceDates,
-  syncPartTimeActualPaid
+  resolvePartTimeAttendanceDates
 } from "./partTimeSalaryRules";
 
 export interface MonthlyCloseData {
@@ -292,7 +291,6 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
       // 화면에는 5시간이 보이는데 엑셀에는 0시간이 찍히는 상태였다 — 돈이 나가는 표라 그 어긋남을 없앤다.
       const accumulatedHours = resolvePartTimeAccumulatedHours(saved, String(tel.hours));
       const calcSalary = computePartTimeSalary(hourlyRate, accumulatedHours, tipsEtcAmount);
-      const calcActualPaid = syncPartTimeActualPaid(saved.actualPaidAmount, calcSalary);
       const attendanceDates = resolvePartTimeAttendanceDates(saved, tel.dates);
 
       return [
@@ -307,7 +305,11 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
         Number(tipsEtcAmount) || 0,
         Number(calcSalary) || 0,
         attendanceDates,
-        calcActualPaid ? (Number(calcActualPaid) || "") : "",
+        // 실수령액(송금액)은 항상 빈칸으로 내보낸다 — 본사가 직접 채우는 칸이기 때문이다(2026-08-31 지시).
+        // 정직원 급여대장(fullTimeSalaryWorkbook)과 같은 규칙. 지점이 저장한 값을 미리 찍어 두면
+        // 본사가 그 숫자를 그대로 이체하기 쉬워서, 애초에 비운 채로 받도록 한다.
+        // (화면·저장본의 actualPaidAmount는 그대로 둔다 — 엑셀 출력만 비운다.)
+        "",
         saved.payoutBranch || branchName,
         saved.memo || "",
       ];

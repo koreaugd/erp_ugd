@@ -39,6 +39,17 @@ export default defineConfig(({ mode }) => {
           return null;
         },
       },
+      // 브라우저 탭 제목은 index.html 에 정적으로 박혀 있어 IS_DEMO 분기가 닿지 않는다.
+      // 시연용 빌드에서만 여기서 갈아 끼운다 — 탭 제목에도 실제 회사명이 남으면 안 된다(2026-08-24).
+      isDemo && {
+        name: 'ugd-demo-title',
+        transformIndexHtml(html: string) {
+          return html.replace(
+            /<title>[^<]*<\/title>/,
+            '<title>ERP_DAON 일일마감정산 포털</title>'
+          );
+        },
+      },
       {
         name: 'ugd-app-version',
         buildStart() {

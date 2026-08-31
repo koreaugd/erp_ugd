@@ -25,7 +25,7 @@ import { normalizeKakaoTaxiOrders, taxiOrderKey } from "./admin/helpers/kakaoTax
 import { KAKAO_TAXI_BRANCH_HISTORY_KEY, buildBranchHistoryMap, type KakaoTaxiBranchHistoryEntry } from "./admin/helpers/kakaoTaxiBranchHistory";
 import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
-import { IS_DEMO } from "../demo";
+import { IS_DEMO, BRAND } from "../demo";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { AdminReportPackTab } from "./admin/AdminReportPackTab";
@@ -837,10 +837,10 @@ export default function AdminPage() {
       const XLSX = await import("xlsx");
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "UGD_정산조회");
+      XLSX.utils.book_append_sheet(workbook, worksheet, `${BRAND.short}_정산조회`);
 
       // 브라우저 다운로드 바인딩
-      XLSX.writeFile(workbook, `UGD_일일마감_${selectedDate}.xlsx`);
+      XLSX.writeFile(workbook, `${BRAND.short}_일일마감_${selectedDate}.xlsx`);
       triggerToast("엑셀 형태의 정산 현황 다운로드를 완료했습니다.", "success");
     } catch (err) {
       console.error("Excel download fail:", err);
@@ -895,8 +895,8 @@ export default function AdminPage() {
         aria-label="관리자 메뉴"
       >
         <div className="mb-10 text-center py-4 border-b border-white/10 relative">
-          <h2 className="text-2xl font-black tracking-widest text-[#D6E4F0]">ERP_UGD</h2>
-          <p className="text-[10px] text-white/60 mt-1 uppercase font-semibold">UGD 주식회사 마감 총괄 시스템</p>
+          <h2 className="text-2xl font-black tracking-widest text-[#D6E4F0]">{BRAND.app}</h2>
+          <p className="text-[10px] text-white/60 mt-1 uppercase font-semibold">{BRAND.tagline}</p>
           <button
             ref={mobileSidebarCloseBtnRef}
             onClick={() => setMobileSidebarOpen(false)}
@@ -1053,7 +1053,7 @@ export default function AdminPage() {
               <Menu className="w-6 h-6" />
             </button>
             <div className="flex flex-col">
-              <span className="text-lg font-black tracking-wider text-white">ERP_UGD</span>
+              <span className="text-lg font-black tracking-wider text-white">{BRAND.app}</span>
               <span className="text-[10px] text-white/75">본사 총괄 대시보드</span>
             </div>
           </div>
@@ -1094,7 +1094,7 @@ export default function AdminPage() {
             <>
               <section className="admin-hero-panel">
                 <div>
-                  <p className="admin-kicker">UGD Finance Control</p>
+                  <p className="admin-kicker">{BRAND.kicker}</p>
                   <AdminLatestNoticeHeadline />
                 </div>
                 <div className="admin-hero-actions">
@@ -3534,7 +3534,7 @@ const MONTHLY_CLOSE_SECTIONS: Array<{ key: MonthlyCloseSectionKey; label: string
 // 법인 분류 — 지점명 키워드로 3개 법인으로 나눈다. 실제 지점명 표기가 다양해(연하동 대학로점/연하동 연남본점/
 // 강남대골뼈국/카라멘야/마음죽) 정확 일치가 아닌 '키워드 포함'으로 매칭한다. 목록에 없는 나머지는 전부 UGD.
 const CORP_GROUPS: Array<{ key: string; label: string }> = [
-  { key: "ugd", label: "UGD" },
+  { key: "ugd", label: BRAND.short },
   { key: "karamenya", label: "카라멘야" },
   { key: "yeonhadong", label: "연하동" },
 ];

@@ -19,6 +19,7 @@
 //   · 지출 라벨 치환(헴프리스 임대료→렌트비 등)은 하지 않는다. 05 의 그 규칙은 render_branch.py
 //     원본이 유실돼(.pyc 만 남음) 정확히 재현할 수 없다. 화면 표와 같은 기본 라벨을 쓴다.
 import { PRIME_TARGET, foodRateOf, laborRateOf, type PnlDbRow } from "./pnlDb";
+import { BRAND } from "../../../demo";
 
 export interface PnlDetailImageInput {
   /** 지점명 — 헤더 아랫줄과 파일명에 쓴다 */
@@ -372,11 +373,12 @@ function drawBadge(ctx: CanvasRenderingContext2D, d: Delta, pctBaseline: number)
 // ── 각 구역 ───────────────────────────────────────────────
 
 function drawHeader(ctx: CanvasRenderingContext2D, input: PnlDetailImageInput) {
-  // 윗줄: UGD(네이비) · 브랜드(회색) — 베이스라인 29 (실측 잉크 20.7~29)
+  // 윗줄: 회사명(네이비) · 브랜드(회색) — 베이스라인 29 (실측 잉크 20.7~29)
+  // 회사명은 BRAND.short 를 쓴다 — 시연용 빌드에서 실제 회사명이 저장 이미지에 찍히면 안 된다(2026-08-24).
   const label = ` · ${brandOf(input.branch)}`;
-  const ugdW = widthOf(ctx, "UGD", 700, 11);
-  text(ctx, "UGD", 16, 28.8, { color: C.navy, weight: 700, size: 11 });
-  text(ctx, label, 16 + ugdW, 28.8, { color: C.muted, weight: 700, size: 11 });
+  const corpW = widthOf(ctx, BRAND.short, 700, 11);
+  text(ctx, BRAND.short, 16, 28.8, { color: C.navy, weight: 700, size: 11 });
+  text(ctx, label, 16 + corpW, 28.8, { color: C.muted, weight: 700, size: 11 });
 
   // 아랫줄: 지점명 — 베이스라인 56 (실측 잉크 41~57.7)
   text(ctx, input.branch, 16, 55.8, { color: C.navy, weight: 900, size: 18 });

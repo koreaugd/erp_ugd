@@ -3,12 +3,13 @@
 // 로그인 화면과 같은 흰 바탕·검정 테두리 톤을 쓰되, 이 화면은 로그인 이전 단계라
 // 디자인 토큰 스코프 밖이므로 색을 hex 로 직접 박는다(LoginPage 와 같은 규약).
 import { CANONICAL_APP_URL } from "../utils/allowedHost";
+import { BRAND } from "../demo";
 
 export default function WrongHostNotice() {
   return (
     <main className="min-h-screen bg-white flex items-center justify-center px-6" id="wrong-host-page">
       <div className="w-full max-w-sm space-y-6 text-center">
-        <h1 className="text-5xl font-black tracking-tight text-black">UGD</h1>
+        <h1 className="text-5xl font-black tracking-tight text-black">{BRAND.short}</h1>
         {/* 경고 배너 12px(text-xs) · 안내문 11px · 버튼 11px — DESIGN.md §6-0-1 폰트 기준표.
             본문·버튼에 text-sm(14px) 이상은 금지다.
             바탕 = 관리자 연한 바닐라 토큰값(--admin-vanilla #F4F2CC, DESIGN_ADMIN.md 오버라이드 표).
