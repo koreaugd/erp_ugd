@@ -11,10 +11,13 @@
 import { isSampleEmployee } from "./staffHelpers";
 // 파트타이머 급여 판정(저장값 vs 일일마감 집계)은 지점 화면과 반드시 같은 규칙이어야 한다.
 import {
+  absorbLegacyPartTimeRows,
   computePartTimeSalary,
   mergeManualPartTimeWork,
+  resolveExtraPartTimeWork,
   resolvePartTimeAccumulatedHours,
-  resolvePartTimeAttendanceDates
+  resolvePartTimeAttendanceDates,
+  type PartTimeWorkTelemetry
 } from "./partTimeSalaryRules";
 
 export interface MonthlyCloseData {
@@ -135,7 +138,7 @@ export function unnamedPartTimeSalaryRows({
 }
 
 /** 파트타이머 급여 시트의 칸 위치. buildMonthlyCloseSheetSpecs의 partTimeHeaders 순서와 같아야 한다. */
-const PART_TIME_COL = { name: 0, hourlyRate: 6, hours: 7, salary: 9 } as const;
+const PART_TIME_COL = { name: 0, account: 5, hourlyRate: 6, hours: 7, salary: 9 } as const;
 
 /**
  * 마감 엑셀에 **일은 했는데 급여가 0원으로** 나갈 파트타이머 행.
@@ -167,6 +170,64 @@ export function zeroPaidPartTimeRows(data: MonthlyCloseData): { name: string; ho
       name: String(row[PART_TIME_COL.name] || "").trim(),
       hours: Number(row[PART_TIME_COL.hours]) || 0
     }));
+}
+
+/**
+ * 마감 엑셀에 **같은 이름이 두 줄 이상** 나가는 사람.
+ *
+ * 이 표는 그대로 은행 이체로 이어진다. 같은 이름이 두 줄이고 두 줄 다 금액이 있으면 그 사람에게
+ * 급여가 두 번 나간다 — 실제로 사카바단단 2026-08 에서 세 사람이 그렇게 잡혔다(과다 1,878,500원).
+ *
+ * 판정은 **빌더가 실제로 만든 행**을 본다. 저장본만 따로 훑으면 흡수·집계로 달라진 결과를 못 보고,
+ * 게이트와 파일 내용이 어긋난다(zeroPaidPartTimeRows 와 같은 이유).
+ *
+ * `payingRows` 는 금액이 0보다 큰 줄 수다. 1 이하면 돈이 두 번 나가지는 않으므로 알리기만 한다.
+ *
+ * `provenDistinct` 는 **동명이인이라는 증거가 있는가**다. 같은 이름이라는 것만으로 막으면 이름이 같은
+ * 다른 두 사람을 쓰는 지점이 마감을 못 한다. 계좌번호가 둘 다 적혀 있고 서로 다르면 다른 사람이다 —
+ * 그때는 막지 않는다. 계좌가 같거나 한쪽이 비어 있으면 다른 사람이라고 증명할 수 없으니 막는다
+ * (돈이 나가는 표라, 헷갈리면 멈추는 쪽이 안전하다).
+ */
+export function duplicateNamePartTimeRows(
+  data: MonthlyCloseData
+): {
+  name: string;
+  rows: number;
+  payingRows: number;
+  duplicatedAmount: number;
+  provenDistinct: boolean;
+  /** 금액이 있는 줄들의 "급여/계좌뒤4자리" — 관리자가 같은 사람인지 눈으로 대조할 수 있게 함께 낸다. */
+  payingDetails: { salary: number; accountTail: string }[];
+}[] {
+  const sheet = buildMonthlyCloseSheetSpecs(data).find((spec) => spec.name === "파트타이머급여");
+  if (!sheet) return [];
+  const byName = new Map<string, { salary: number; account: string }[]>();
+  sheet.rows.forEach((row) => {
+    const name = String(row[PART_TIME_COL.name] ?? "").trim();
+    if (!name) return; // 이름 없는 행은 unnamedPartTimeSalaryRows 가 따로 막는다
+    const group = byName.get(name) || [];
+    group.push({
+      salary: Number(row[PART_TIME_COL.salary]) || 0,
+      account: String(row[PART_TIME_COL.account] ?? "").trim()
+    });
+    byName.set(name, group);
+  });
+  return [...byName.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([name, group]) => {
+      const paying = group.filter((item) => item.salary > 0);
+      // 첫 줄만 정상으로 보고 나머지가 더 나가는 금액이다.
+      const duplicatedAmount = paying.slice(1).reduce((sum, item) => sum + item.salary, 0);
+      const accounts = paying.map((item) => item.account);
+      const provenDistinct =
+        accounts.length > 1 && accounts.every(Boolean) && new Set(accounts).size === accounts.length;
+      const payingDetails = paying.map((item) => ({
+        salary: item.salary,
+        // 계좌번호를 통째로 띄우지 않는다 — 확인에 필요한 만큼(뒤 4자리)만 보여 준다.
+        accountTail: item.account ? item.account.slice(-4) : ""
+      }));
+      return { name, rows: group.length, payingRows: paying.length, duplicatedAmount, provenDistinct, payingDetails };
+    });
 }
 
 export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[] {
@@ -230,13 +291,26 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     return dateParts[2] ? `${Number(dateParts[2])}` : String(settleDate);
   });
 
+  // 명부에 등록된 사람의 옛 `legacy-` 행은 명부 행에 흡수한다 — 지점 화면과 **같은 함수**를 쓴다.
+  // 흡수하지 않으면 같은 사람이 두 줄로 나가고 두 줄 다 금액이 있어 그대로 두 번 이체된다
+  // (사카바단단 2026-08: 4,949,500원짜리 표가 6,828,000원으로 나갔다).
+  // 지점이 아직 대장을 열지 않아 서버 사본이 정리되기 전이라도, 엑셀은 여기서 바로 바로잡힌다.
+  const absorbedSalaries = absorbLegacyPartTimeRows(salaries as any[], {
+    branchName,
+    rosterNames: rosterPartTimers.map((pt: any) => String(pt?.name ?? "").trim()),
+    excludedIds: exclusions
+  });
+
   const savedSalaryMap: { [empId: string]: any } = {};
-  salaries.forEach((item: any) => {
+  absorbedSalaries.forEach((item: any) => {
     if (item && item.employeeId) savedSalaryMap[item.employeeId] = item;
   });
 
   const excludedSetForExcel = new Set(exclusions);
   const getStoredProfile = (empId: string): any => profiles[empId] || {};
+
+  // 명부에서 온 행의 이름 — 아래에서 '명부 밖 행'과 구분하는 데 쓴다.
+  const rosterOwnIds = new Set(rosterPartTimers.map((pt) => pt.id));
 
   // 로스터에 없지만 급여/텔레메트리에만 존재하는 파트타이머도 누락 없이 포함
   const knownPartTimerIds = new Set(rosterPartTimers.map((pt) => pt.id));
@@ -267,7 +341,13 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     .map((pt) => {
       // 근무시간·출근일은 반드시 **명부 이름**으로 찾는다 — 일일마감 기록에 그 이름으로 적혀 있다.
       // (급여대장에서 고친 이름으로 찾으면 옛 기록과 안 맞아 그 사람 집계가 0이 된다.)
-      const tel = ptTelemetry[pt.name] || { hours: 0, dates: [] };
+      //
+      // 명부 밖 행(수기 행·근무기록에서 온 legacy 행)은 이름이 아니라 **id 로** 찾는다.
+      // 이름으로 찾으면 명부 인원과 같은 이름을 적어 둔 수기 행이 그 사람 근무기록을 끌어와
+      // 급여를 한 번 더 만든다 — 화면엔 0원, 엑셀엔 776,000원으로 갈린다(사카바단단 2026-08).
+      const tel: PartTimeWorkTelemetry = rosterOwnIds.has(pt.id)
+        ? (ptTelemetry[pt.name] || { hours: 0, dates: [] })
+        : resolveExtraPartTimeWork(pt.id, branchName, ptTelemetry);
       const saved = savedSalaryMap[pt.id] || {};
       const profile = getStoredProfile(pt.id);
 

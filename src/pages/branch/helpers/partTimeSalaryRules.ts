@@ -137,3 +137,225 @@ export function resolvePartTimeAttendanceDates(
     .map((day) => String(Number(day)))
     .join(",");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 같은 사람이 두 줄이 되는 것을 막는 규칙 (2026-08-31 신설)
+//
+// 근무기록에 먼저 나타난 사람은 `legacy-<지점>-<이름>` 행으로 급여대장에 오른다. 그 사람이 나중에
+// 직원명부에 등록되면 명부 id 로 새 행이 만들어지는데, 옛 legacy 행은 아무도 지우지 않았다.
+// 저장 병합이 "서버엔 있고 화면엔 없는 행"을 다른 기기가 추가한 행으로 보고 되살려서, 칸 하나만
+// 고쳐도 유령 행이 화면에 튀어나왔고 마감 엑셀에는 같은 사람이 두 줄로 나가 급여가 두 번 잡혔다.
+//
+// 규칙은 화면과 엑셀이 **같은 함수**를 쓴다. 각자 판단하면 한쪽만 고쳐 다시 어긋난다.
+// 검증: scripts/check-parttime-dedupe.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 흡수 규칙이 들여다보는 칸만. 화면 행 타입과 저장본의 느슨한 행을 모두 받는다. */
+export interface PartTimeAbsorbableRow {
+  employeeId: string;
+  name: string;
+  rosterName?: string;
+  residentNumber?: string;
+  entryDate?: string;
+  contractStatus?: string;
+  bank?: string;
+  accountNumber?: string;
+  hourlyRate?: string;
+  accumulatedHours?: string;
+  hoursOverridden?: boolean;
+  autoAccumulatedHours?: string;
+  attendanceOverridden?: boolean;
+  tipsEtcAmount?: string;
+  calculatedSalary?: string;
+  attendanceDates?: string;
+  actualPaidAmount?: string;
+  payoutBranch?: string;
+  memo?: string;
+}
+
+export const legacyPartTimeId = (branchName: string, name: string) => `legacy-${branchName}-${name}`;
+
+const isLegacyId = (employeeId: unknown) => String(employeeId ?? "").startsWith("legacy-");
+const isManualId = (employeeId: unknown) => String(employeeId ?? "").startsWith("manual-");
+const trimmed = (value: unknown) => String(value ?? "").trim();
+const isEmptyCell = (value: unknown) => trimmed(value) === "";
+
+/**
+ * legacy 행이 대신하고 있는 **근무기록상의 이름**. 이 지점 것이 아니면 null.
+ *
+ * 표시 이름(name)이 아니라 id 를 본다. 급여대장에서 이름을 고쳐 쓴 legacy 행이 있기 때문이다
+ * (카츠스위스 2026-08: `legacy-카츠스위스-전지유` 행을 '이종현'으로 고쳐 씀). 표시 이름으로
+ * 판정하면 그 행이 엉뚱한 사람의 것으로 취급돼, 흡수되면서 근무분이 통째로 사라진다.
+ */
+export function legacyPartTimeNameOf(employeeId: unknown, branchName: string): string | null {
+  const id = String(employeeId ?? "");
+  const prefix = `legacy-${branchName}-`;
+  if (!id.startsWith(prefix)) return null;
+  const name = id.slice(prefix.length).trim();
+  return name || null;
+}
+
+/**
+ * legacy 행이 갖고 있을 수 있는 **사람이 적은 값**. 자동으로 정해지는 값(누적시간·출근일·급여)은
+ * 여기 없다 — 그건 흡수 대상이 아니라 언제나 지금 집계로 다시 정해지는 값이다.
+ */
+const ABSORBABLE_FIELDS = [
+  "residentNumber", "entryDate", "bank", "accountNumber",
+  "hourlyRate", "tipsEtcAmount", "payoutBranch", "memo"
+] as const;
+
+/**
+ * **시급만** 0 도 빈칸으로 본다.
+ *
+ * 시급 0 은 언제나 "아직 안 적음"이다 — 0원짜리 시급은 없고, 비어 있으면 급여가 통째로 0원이 되는
+ * 칸이라 화면에도 따로 경고가 뜬다. 그래서 legacy 행에 적힌 시급을 가져오는 편이 안전하다.
+ *
+ * 팁은 다르다. 0 이 "안 적음"인지 "없다고 적음"인지 구분할 표시가 없어서, 덮으면 **없는 팁이 급여에
+ * 붙어 더 나간다**(Codex 4R 지적 2026-08-31). 실제 데이터에도 팁이 0보다 큰 행은 한 건도 없어
+ * 가져올 이득이 없다. 그래서 팁은 칸이 완전히 비었을 때만(옛 저장본) 흡수한다.
+ */
+const MONEY_FIELDS = new Set<string>(["hourlyRate"]);
+const isAbsorbTarget = (field: string, value: unknown) =>
+  isEmptyCell(value) || (MONEY_FIELDS.has(field) && Number(value) === 0);
+
+/**
+ * 명부에 등록된 사람의 옛 `legacy-` 행을 명부 행에 흡수한다.
+ *
+ * 흡수는 **빈칸 채우기**다. 명부 행에 이미 값이 있으면 그대로 둔다 — 나중에 적은 값이 더 맞다.
+ * 흡수하고 나면 legacy 행은 목록에서 뺀다(그 사람은 이제 명부 행 한 줄로 대표된다).
+ *
+ * **명부 행이 제외(X) 상태면 흡수하지 않는다.** 지점이 일부러 명부 행을 지우고 legacy 행으로 급여를
+ * 주고 있는 경우가 있다(대물섬 한남점 2026-08). 거기서 흡수하면 남은 legacy 행까지 없어져
+ * 그 사람 급여가 통째로 사라진다.
+ *
+ * 명부 행이 아예 없으면(수기 행만 있는 경우 포함) 지우지 않는다 — 지울 곳이 없으면 legacy 행이
+ * 그 사람의 유일한 급여 행이다.
+ */
+export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
+  rows: T[],
+  options: {
+    branchName: string;
+    /**
+     * 직원명부 파트타이머의 이름 목록. **중복을 지운 Set 을 넘기면 안 된다** — 같은 이름이 두 번
+     * 들어 있다는 사실이 곧 "이 이름은 흡수하면 안 된다"는 신호라서, Set 으로 바꾸는 순간 그 판정이
+     * 조용히 죽는다. 배열만 받도록 타입을 좁혀 실수를 컴파일 단계에서 막는다.
+     */
+    rosterNames: readonly string[];
+    excludedIds?: Iterable<string>;
+  }
+): T[] {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const excluded = new Set([...(options.excludedIds || [])].map((id) => String(id)));
+
+  // **직원명부에 같은 이름이 둘 이상이면 그 이름은 흡수 대상에서 뺀다.**
+  // 그 legacy 행이 둘 중 누구 것인지 알 방법이 없는데, 아무 쪽에나 붙이면 그 사람 계좌로 남의 급여가
+  // 나간다. 판정은 **명부 이름 목록 자체**로 한다 — 화면에 남은 행으로만 세면, 동명이인 중 한쪽이
+  // 제외(X)돼 목록에서 빠졌을 때 "이름이 하나뿐"으로 보여 다시 잘못 붙는다(Codex 정지리뷰 2026-08-31).
+  const rosterNames = new Set<string>();
+  const duplicatedRosterNames = new Set<string>();
+  [...options.rosterNames].forEach((raw) => {
+    const name = trimmed(raw);
+    if (!name) return;
+    if (rosterNames.has(name)) duplicatedRosterNames.add(name);
+    rosterNames.add(name);
+  });
+
+  // 흡수받을 명부 행 — legacy 도 수기도 아니고, 제외되지 않은 행.
+  // 목록 안에서도 같은 이름이 두 줄이면 마찬가지로 뺀다(명부에는 한 명인데 급여 행이 둘인 경우).
+  // 손대지 않고 남겨 두면 중복 게이트가 잡아 사람이 정리한다 — 모를 때는 멈추는 쪽이 안전하다.
+  const hostByName = new Map<string, T>();
+  const ambiguousNames = new Set<string>(duplicatedRosterNames);
+  rows.forEach((row) => {
+    const id = String(row?.employeeId ?? "");
+    if (!id || isLegacyId(id) || isManualId(id) || excluded.has(id)) return;
+    const name = trimmed(row.rosterName || row.name);
+    if (!name) return;
+    if (hostByName.has(name)) ambiguousNames.add(name);
+    else hostByName.set(name, row);
+  });
+  ambiguousNames.forEach((name) => hostByName.delete(name));
+
+  const absorbedInto = new Map<string, T>();
+  const dropped = new Set<string>();
+  rows.forEach((row) => {
+    const id = String(row?.employeeId ?? "");
+    // 표시 이름이 아니라 id 로 판정한다 — 이름을 고쳐 쓴 legacy 행을 남의 행에 흡수시키지 않기 위해서다.
+    const name = legacyPartTimeNameOf(id, options.branchName);
+    if (!name || !rosterNames.has(name)) return; // 아직 명부에 없는 사람 — 이 행이 유일한 급여 행이다
+    const host = hostByName.get(name);
+    if (!host) return; // 명부 행이 없거나 제외됨 — 지울 곳이 없으니 그대로 둔다
+    const merged = { ...(absorbedInto.get(String(host.employeeId)) || host) } as T;
+    ABSORBABLE_FIELDS.forEach((field) => {
+      if (isAbsorbTarget(field, merged[field]) && !isAbsorbTarget(field, row[field])) (merged as any)[field] = row[field];
+    });
+    // 사람이 직접 적은 근무시간·출근일은 집계로 다시 만들 수 없다 — 버리면 그대로 사라진다.
+    // 명부 행이 이미 직접 적은 값을 갖고 있으면 그쪽이 이긴다(나중에 적은 값이 더 맞다).
+    if (row.hoursOverridden === true && merged.hoursOverridden !== true) {
+      merged.accumulatedHours = row.accumulatedHours;
+      merged.hoursOverridden = true;
+    }
+    if (row.attendanceOverridden === true && merged.attendanceOverridden !== true) {
+      merged.attendanceDates = row.attendanceDates;
+      merged.attendanceOverridden = true;
+    }
+    // **급여를 반드시 다시 계산한다.** 시급·팁·시간이 흡수로 바뀌었는데 금액이 옛 값 그대로면,
+    // 시급은 들어왔는데 급여가 0원인 행이 그대로 확정·이체로 나간다(Codex 정지리뷰 2026-08-31).
+    merged.calculatedSalary = computePartTimeSalary(merged.hourlyRate, merged.accumulatedHours, merged.tipsEtcAmount);
+    merged.actualPaidAmount = syncPartTimeActualPaid(merged.actualPaidAmount, merged.calculatedSalary);
+    absorbedInto.set(String(host.employeeId), merged);
+    dropped.add(id);
+  });
+
+  if (dropped.size === 0) return rows;
+  return rows
+    .filter((row) => !dropped.has(String(row?.employeeId ?? "")))
+    .map((row) => absorbedInto.get(String(row?.employeeId ?? "")) || row);
+}
+
+/**
+ * 명부 밖 행(수기 행·아직 흡수되지 않은 legacy 행)에 붙일 근무 집계.
+ *
+ * **표시 이름으로 찾으면 안 된다.** 그렇게 하면 수기로 추가한 행에 명부 인원과 같은 이름을 적었을 때
+ * 그 사람의 근무기록이 이 행에도 붙어 급여가 한 번 더 계산된다. 화면에는 0원으로 보이는데 마감
+ * 엑셀에서만 776,000원이 되는 식이라(사카바단단 2026-08 정서영) 아무도 알아채지 못한 채 두 번 나간다.
+ *
+ * 근무기록에서 온 행(legacy)만 집계를 받는다. 그 행이 대신하는 이름은 id 에 박혀 있다.
+ * 수기 행은 근무기록에 출처가 없으므로 저장된 값 그대로 나간다.
+ */
+export function resolveExtraPartTimeWork(
+  employeeId: string,
+  branchName: string,
+  telemetry: Record<string, PartTimeWorkTelemetry>
+): PartTimeWorkTelemetry {
+  const name = legacyPartTimeNameOf(employeeId, branchName);
+  if (!name) return { hours: 0, dates: [] };
+  return telemetry[name] || { hours: 0, dates: [] };
+}
+
+/**
+ * 서버 행을 그대로 채택할 때, **자동으로 정해지는 값만 화면의 최신 집계로 되돌린다.**
+ *
+ * 서버 사본에는 그 대장을 마지막으로 연 순간의 누적시간·출근일이 굳어 있다(이 표는 열기만 해도
+ * 저장된다). 그것을 그대로 화면에 채택하면 그 뒤 일한 시간이 사라진다 — 실제로 사카바단단에서
+ * 48.5시간 일한 사람이 저장본의 0시간으로 덮여 '근무기록 없는 인원'으로 밀려났다(2026-08-31).
+ *
+ * 사람이 직접 정한 값(hoursOverridden / attendanceOverridden)은 어느 쪽 것이든 그대로 지킨다 —
+ * 그건 집계로 다시 만들 수 없는 값이다.
+ */
+export function adoptFreshAutoValues<T extends PartTimeAbsorbableRow>(serverRow: T, localRow: T | undefined): T {
+  if (!localRow) return serverRow;
+  // 이 기기가 실제로 집계한 적이 있어야 그 값을 쓴다(autoAccumulatedHours = 집계의 흔적).
+  // 근거 없는 값으로 서버를 덮으면 다른 기기가 올려 둔 근무시간이 줄어든다 — 그건 곧 급여 축소다.
+  if (localRow.autoAccumulatedHours === undefined) return serverRow;
+  const next = { ...serverRow };
+  if (!serverRow.hoursOverridden && !localRow.hoursOverridden) {
+    next.accumulatedHours = localRow.accumulatedHours;
+    next.autoAccumulatedHours = localRow.autoAccumulatedHours;
+  }
+  if (!serverRow.attendanceOverridden && !localRow.attendanceOverridden) {
+    next.attendanceDates = localRow.attendanceDates;
+  }
+  next.calculatedSalary = computePartTimeSalary(next.hourlyRate, next.accumulatedHours, next.tipsEtcAmount);
+  next.actualPaidAmount = syncPartTimeActualPaid(next.actualPaidAmount, next.calculatedSalary);
+  return next;
+}

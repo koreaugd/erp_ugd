@@ -10,7 +10,10 @@ import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 // 저장값 vs 일일마감 집계 판정은 마감 엑셀과 같은 규칙을 써야 한다(어긋나면 곧 급여 누락이다).
 import {
   PART_TIME_ATTENDANCE_MAX,
+  absorbLegacyPartTimeRows,
+  adoptFreshAutoValues,
   computePartTimeSalary,
+  legacyPartTimeNameOf,
   mergeManualPartTimeWork,
   resolvePartTimeAccumulatedHours,
   resolvePartTimeAttendanceDates,
@@ -163,7 +166,9 @@ const getPartTimeSaveChain = (branchName: string) => {
  * baseline(flush 가 읽어 간 스냅샷)과 지문이 달라진 행 = flush 중 사용자가 고친 행이므로 화면 값을 지킨다.
  */
 type PartTimeScreenBridge = {
-  snapshot: () => { month: string; rows: PartTimeSalaryRow[] };
+  // rosterPartTimerNames: 옛 `legacy-` 행을 명부 행에 흡수할 때 쓴다. 마감 flush 는 화면 밖의 함수라
+  // 명부를 직접 모른다 — 비어 있으면 흡수하지 않는다(모르는 채 행을 지우면 급여가 사라진다).
+  snapshot: () => { month: string; rows: PartTimeSalaryRow[]; rosterPartTimerNames: string[] };
   reconcileUploaded: (month: string, baseline: PartTimeSalaryRow[], uploaded: PartTimeSalaryRow[]) => void;
 };
 const partTimeScreenSnapshots = new Map<string, PartTimeScreenBridge>();
@@ -251,10 +256,22 @@ const preserveServerManualFields = (
   return next;
 };
 
+/**
+ * @param localIsFreshlyAggregated localRows 가 **방금 집계한 화면의 표**인가.
+ *
+ *   자동 집계 값(누적시간·출근일)은 화면이 일일마감·수기근무로 매번 다시 계산한다. 그 값이라면
+ *   서버 사본의 굳은 값보다 새것이므로 채택해야 한다 — 그러지 않으면 20일에 저장된 0시간이
+ *   계속 이겨서 48.5시간 일한 사람이 화면에서 사라진다(사카바단단 2026-08).
+ *
+ *   **그러나 localStorage 사본은 다르다.** 그건 며칠 전 값일 수 있어서, 그것으로 서버를 덮으면
+ *   다른 기기가 올려 둔 더 새로운 근무시간이 줄어든다(Codex 정지리뷰 2026-08-31).
+ *   그래서 화면에서 온 표일 때만 true 를 넘기고, 사본에서 온 표(이탈 flush·재전송)는 false 다.
+ */
 const mergePendingLocalRows = (
   localRows: PartTimeSalaryRow[],
   serverRows: PartTimeSalaryRow[] | null,
-  syncedById: Map<string, PartTimeSalaryRow>
+  syncedById: Map<string, PartTimeSalaryRow>,
+  localIsFreshlyAggregated = false
 ): PartTimeSalaryRow[] => {
   if (!serverRows) return localRows;
   const remainingLocal = new Map(localRows.map((row) => [row.employeeId, row]));
@@ -276,7 +293,10 @@ const mergePendingLocalRows = (
       ? rowFingerprint(localRow) !== rowFingerprint(synced)
       : localRow.edited === true;
     // 내 행이 이겨도 다른 기기가 직접 정한 시간·출근일은 필드 단위로 지킨다(위 helper 설명 참고).
-    merged.push(changedHere ? preserveServerManualFields(localRow, serverRow, synced) : serverRow);
+    // 서버 행을 그대로 채택할 때도 **자동값(누적시간·출근일·급여)만은 지금 집계를 쓴다** —
+    // 서버 사본에는 그 대장을 마지막으로 연 순간의 시간이 굳어 있어서, 그대로 받으면 그 뒤 일한
+    // 시간이 사라진다(사카바단단 2026-08: 48.5시간 일한 사람이 0시간으로 덮여 화면에서 사라졌다).
+    merged.push(changedHere ? preserveServerManualFields(localRow, serverRow, synced) : (localIsFreshlyAggregated ? adoptFreshAutoValues(serverRow, localRow) : serverRow));
   });
   // 서버에 없는 행(이 기기에서 새로 만든 수기 행 등)은 뒤에 붙여 살린다.
   return [...merged, ...remainingLocal.values()];
@@ -395,7 +415,7 @@ interface PartTimeSalaryRow {
 }
 
 /** 마감 flush 가 막힌 이유. 부르는 쪽(MonthlySettleTab)이 이유별로 다른 안내를 띄운다. */
-export type PartTimeCloseBlockReason = "network" | "empty" | "unnamed" | "zeroPaid" | "manualWork";
+export type PartTimeCloseBlockReason = "network" | "empty" | "unnamed" | "zeroPaid" | "manualWork" | "duplicateName";
 
 /**
  * 파트타이머 급여대장 마감제출 전, 이 기기의 미저장 편집분을 서버에 반영 보장한다(정직원 flushFullTimeSalaryForClose 짝).
@@ -491,7 +511,7 @@ async function flushPartTimeSalaryForCloseInner(
   let uploadSalary = false;
   if (screenRows && screenRows.length > 0) {
     // 화면의 표를 원본으로 병합해 올린다 — 통째로 덮지 않고, 사람이 고친 행만 서버 위에 얹는다(자동저장과 같은 규칙).
-    const merged = mergePendingLocalRows(screenRows, serverRows, syncedById);
+    const merged = mergePendingLocalRows(screenRows, serverRows, syncedById, true); // 화면의 표 = 방금 집계한 값
     // 병합은 사람이 고친 값만 본다(fingerprint) — 자동 집계 필드(누적시간·출근일·급여)는 비교 밖이라,
     // 아무도 안 고친 행은 서버의 **옛 집계**가 그대로 확정된다(화면 12시간 vs 확정 10시간 — Codex High 2026-08-02).
     // 화면은 방금 일일마감·수기근무로 새로 집계했고 수기근무는 위 게이트가 확정을 보장하므로,
@@ -531,6 +551,12 @@ async function flushPartTimeSalaryForCloseInner(
   }
   if (finalRows.length === 0) return { blocked: true, reason: "empty" };
 
+  // 명부에 등록된 사람의 옛 `legacy-` 행을 흡수한다. 여기서 하지 않으면 병합이 서버에 남은 그 행을
+  // "다른 기기가 추가한 행"으로 되살려, **마감제출이 유령 행을 확정본으로 굳힌다** — 그 표가 그대로
+  // 마감 엑셀·은행 이체로 나간다(사카바단단 2026-08). 명부를 모르면(화면 밖 경로) 흡수하지 않는다.
+  const rosterNamesForAbsorb = snapshot && snapshot.month === selectedMonth ? snapshot.rosterPartTimerNames : [];
+  finalRows = absorbLegacyPartTimeRows(finalRows, { branchName, rosterNames: rosterNamesForAbsorb, excludedIds: exclusions });
+
   // 4) 돈이 새는 상태로는 확정하지 않는다(관리자 엑셀 다운로드 게이트와 같은 취지 — 거기서 막히면
   //    지점은 이미 '확정했다'고 믿은 뒤라 늦다. 제출 순간에 알려 바로 고치게 한다).
   //    확정본(finalRows)과 화면(screenRows) **둘 다** 본다 — 병합은 이 기기에서 안 고친 행을 서버 값으로
@@ -542,6 +568,21 @@ async function flushPartTimeSalaryForCloseInner(
   if (gateRows.some((row) => trimmedName(row) && Number(row.accumulatedHours) > 0 && !(Number(row.calculatedSalary) > 0))) {
     return { blocked: true, reason: "zeroPaid" };
   }
+  // 같은 이름이 금액 있는 두 줄로 확정되면 그 사람에게 급여가 두 번 나간다. 흡수가 못 고치는 중복
+  // (직원명부에 같은 이름이 두 번 등록된 경우 등)은 사람이 정리해야 하므로 여기서 막는다.
+  // 이름이 같아도 계좌가 둘 다 적혀 있고 서로 다르면 다른 사람이다 — 그때는 막지 않는다.
+  // 같은 이름만으로 막으면 동명이인을 쓰는 지점이 마감을 못 한다(Codex 지적 2026-08-31).
+  const payingByName = new Map<string, string[]>();
+  finalRows
+    .filter((row) => Number(row.calculatedSalary) > 0 && trimmedName(row))
+    .forEach((row) => {
+      const key = trimmedName(row);
+      payingByName.set(key, [...(payingByName.get(key) || []), String(row.accountNumber || "").trim()]);
+    });
+  const doublePaid = [...payingByName.values()].some(
+    (accounts) => accounts.length > 1 && !(accounts.every(Boolean) && new Set(accounts).size === accounts.length)
+  );
+  if (doublePaid) return { blocked: true, reason: "duplicateName" };
 
   // 5) 서버 반영. **제외 목록을 급여보다 먼저 쓴다** — 급여만 성공하고 제외가 실패하면, 제외 기준으로
   //    행이 빠진 급여 문서만 남고 제외 기록이 없어 다른 기기의 재조립이 그 사람을 자동 행으로 되살린다.
@@ -645,13 +686,73 @@ export function MonthlyPartTimeSalarySubTab({
   const salariesRef = useRef<PartTimeSalaryRow[]>([]);
   salariesRef.current = salaries;
   /**
+   * 직원명부에 등록된 파트타이머 이름. 옛 `legacy-` 행을 명부 행에 흡수할 때 쓴다.
+   *
+   * ref 인 이유: 흡수는 서버 사본을 읽어 병합하는 저장 경로에서도 필요한데, 그 경로는 명부 조회와
+   * 별개로 돈다. 명부를 아직 못 읽었으면 비어 있고, 그때는 흡수하지 않는다 —
+   * 명부를 모르는 채 행을 지우면 실제로 일한 사람의 급여가 사라진다(fail-closed).
+   */
+  const rosterPartTimerNamesRef = useRef<string[]>([]);
+  /**
+   * 옛 `legacy-` 행을 명부 행에 흡수한다. **목록을 새로 만드는 자리마다 반드시 거친다.**
+   *
+   * 흡수하지 않으면 저장본에 남은 legacy 행이 저장 병합에서 "다른 기기가 추가한 행"으로 되살아나
+   * 칸 하나만 고쳐도 같은 사람이 두 줄이 되고, 그 표가 그대로 마감 엑셀·은행 이체로 이어진다
+   * (사카바단단 2026-08: 4,949,500원짜리 표가 6,828,000원). 규칙은 마감 엑셀과 같은 함수를 쓴다.
+   */
+  const excludedEmployeeIdsRef = useRef<string[]>([]);
+  excludedEmployeeIdsRef.current = excludedEmployeeIds;
+  /**
+   * 달·지점이 바뀌면 표를 비운다.
+   *
+   * 비우지 않으면 지난달 행이 화면에 남아 있고, 아래 조립이 "다시 만들어지지 않는 행"(수기 행·근무기록
+   * legacy 행)으로 그것을 물려받아 **이번 달 대장에 저장된다** — 지난달 급여가 이번 달에 한 번 더
+   * 나가는 셈이다(Codex 지적 2026-08-31). 행에는 달 표시가 없어 물려받는 쪽에서는 구분할 수 없다.
+   *
+   * 비워도 잃는 것은 없다. 이번 달 값은 바로 아래 로더(로컬 사본·서버, 둘 다 달별 키)와 조립이 채운다.
+   * 이 효과는 조립 효과보다 먼저 선언돼 있어야 한다 — 같은 커밋에서 비운 뒤 채워진다.
+   */
+  useEffect(() => {
+    setSalaries([]);
+  }, [branchName, selectedMonth]);
+  /**
+   * 지금 보고 있는 지점·달. **늦게 도착한 응답을 버리는 기준**이다.
+   *
+   * 표를 비우는 것만으로는 부족하다 — 달을 옮기기 전에 떠난 조회·저장이 그 뒤에 끝나면서 옛 달 행을
+   * 새 달 화면에 되돌려 놓고, 그 상태에서 칸 하나만 고치면 그 행이 **새 달 키로 저장된다**
+   * (지난달 급여가 이번 달에 한 번 더 나가는 셈 — Codex 3R 지적 2026-08-31).
+   * 행에는 달 표시가 없어 받는 쪽에서는 구분할 수 없으므로, 떠날 때의 화면과 대조해 버린다.
+   */
+  const viewKeyRef = useRef("");
+  const viewKey = `${branchName}|${selectedMonth}`;
+  viewKeyRef.current = viewKey;
+  /** 이 응답을 낸 화면(지점·달)이 아직 그대로일 때만 표에 반영한다. */
+  const applyIfCurrent = useCallback(
+    (capturedViewKey: string, updater: (current: PartTimeSalaryRow[]) => PartTimeSalaryRow[]) => {
+      if (viewKeyRef.current !== capturedViewKey) return;
+      setSalaries((current) => (viewKeyRef.current === capturedViewKey ? updater(current) : current));
+    },
+    []
+  );
+  const absorbLegacyRows = useCallback(
+    (rows: PartTimeSalaryRow[]) =>
+      // 제외 목록·명부는 ref 로 읽는다 — 이 함수는 오래 사는 콜백(마감 다리·재전송 task)에도 들어가는데,
+      // 값으로 묶으면 그 안에 옛 목록이 갇혀 이미 되살린 행을 다시 지우거나 그 반대가 된다.
+      absorbLegacyPartTimeRows(rows, {
+        branchName,
+        rosterNames: rosterPartTimerNamesRef.current,
+        excludedIds: excludedEmployeeIdsRef.current
+      }),
+    [branchName]
+  );
+  /**
    * 마감 flush 에 '화면에 보이는 표'를 내어 주는 스냅샷 등록. 제출 중에는 표가 잠기므로(부모 isLocked)
    * flush 가 읽는 스냅샷은 사용자가 마지막으로 본 값 그대로다. 달·지점이 바뀌면 다시 등록하고,
    * 화면을 떠나면 지운다 — flush 는 스냅샷이 없으면 종전대로 사본/서버 값으로 동작한다.
    */
   useEffect(() => {
     partTimeScreenSnapshots.set(branchName, {
-      snapshot: () => ({ month: selectedMonth, rows: salariesRef.current }),
+      snapshot: () => ({ month: selectedMonth, rows: salariesRef.current, rosterPartTimerNames: rosterPartTimerNamesRef.current }),
       // 마감 flush 가 올린 최종본을 화면에 되반영한다. flush 를 시작한 뒤 사용자가 고친 행
       // (baseline 과 지문이 달라진 행)은 화면 값을 지킨다 — 자동저장 완료 지점과 같은 reconcile 규칙.
       reconcileUploaded: (month, baseline, uploaded) => {
@@ -668,12 +769,12 @@ export function MonthlyPartTimeSalarySubTab({
             return up;
           });
           // 올라간 목록에 없는 화면 행(그 사이 추가한 수기 행 등)은 지킨다 — 아직 안 올라갔을 뿐이다.
-          return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+          return absorbLegacyRows([...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))]);
         });
       },
     });
     return () => { partTimeScreenSnapshots.delete(branchName); };
-  }, [branchName, selectedMonth]);
+  }, [absorbLegacyRows, branchName, selectedMonth]);
   /**
    * 이 안내를 이미 띄웠는지. 재시도가 15초마다 돌면서 같은 토스트를 반복하면 화면을 덮어 버린다.
    * 못 읽은 상태는 상단 배너가 계속 말해 주므로, 토스트는 한 번이면 된다.
@@ -1013,7 +1114,7 @@ export function MonthlyPartTimeSalarySubTab({
             triggerToast("연결이 불안정해 저장을 잠시 미뤘습니다. 적으신 내용은 그대로 있고 곧 다시 저장됩니다.", "error");
             return;
           }
-          const mergedRows = toStorableRows(mergePendingLocalRows(storableSalaries, serverRows, readSyncedRows()));
+          const mergedRows = absorbLegacyRows(toStorableRows(mergePendingLocalRows(storableSalaries, serverRows, readSyncedRows(), true))); // 화면의 표
           // 아직 못 올린 제외 목록이 있으면 이 저장에 실어 함께 올린다.
           // **화면 값이 아니라 저장된 사본을 올린다** — 화면 값은 그 사이 달 전환 등으로 비워졌을 수 있다.
           // (제외를 바꾼 저장이면 위에서 방금 그 사본을 써 뒀으므로 같은 값이다.)
@@ -1043,7 +1144,7 @@ export function MonthlyPartTimeSalarySubTab({
           // 다른 기기가 새로 추가한 행이 화면에 안 들어오는데 기준값에는 들어 있어서,
           // 다음 저장 때 "이 기기에서 지운 행"으로 오해받아 서버에서 사라진다(급여 누락).
           const atSaveTimeById = new Map<string, PartTimeSalaryRow>(storableSalaries.map((row) => [row.employeeId, row]));
-          setSalaries((current) => {
+          applyIfCurrent(viewKey, (current) => {
             const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
             const mergedIds = new Set(mergedRows.map((row) => row.employeeId));
             const reconciledRows = mergedRows.map((merged) => {
@@ -1055,7 +1156,7 @@ export function MonthlyPartTimeSalarySubTab({
               return merged;
             });
             // 저장을 예약한 뒤 새로 추가한 행도 지킨다(아직 올라가지 않았을 뿐이다).
-            return [...reconciledRows, ...current.filter((row) => !mergedIds.has(row.employeeId))];
+            return absorbLegacyRows([...reconciledRows, ...current.filter((row) => !mergedIds.has(row.employeeId))]);
           });
           // 그 사이 새 편집이 있었으면 '못 올림' 표시와 로컬 사본을 건드리지 않는다.
           // 지워 버리면 아직 안 올라간 값이 올라간 것으로 취급돼, 탭을 옮기는 순간 사라진다.
@@ -1080,7 +1181,7 @@ export function MonthlyPartTimeSalarySubTab({
       });
     }, 500);
     return true; // 편집을 받아들였다. 부르는 쪽이 성공 안내를 띄워도 되는지 이걸로 가린다.
-  }, [branchName, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, manualWorkUnresolved, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast]);
+  }, [absorbLegacyRows, applyIfCurrent, branchName, excludedEmployeeIds, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, manualWorkUnresolved, readSyncedRows, restoreExclusionsFromServer, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, triggerToast, viewKey]);
 
   // 재시도 타이머가 부를 수 있게 최신 저장 함수를 ref 에 담아 둔다.
   persistPartTimeSalariesRef.current = persistPartTimeSalaries;
@@ -1107,7 +1208,7 @@ export function MonthlyPartTimeSalarySubTab({
         salaryRetryTimerRef.current = null;
       }
     };
-  }, [exclusionPendingKey, retryExclusionsOnly, salaryPendingKey, salaryStorageKey]);
+  }, [applyIfCurrent, exclusionPendingKey, retryExclusionsOnly, salaryPendingKey, salaryStorageKey, viewKey]);
 
   useEffect(() => {
     // **화면을 떠나는 순간에도 밀린 저장을 내보낸다.**
@@ -1174,9 +1275,11 @@ export function MonthlyPartTimeSalarySubTab({
             // 서버 전용 조회 — 캐시 폴백으로 옛 사본을 읽으면 병합이 상대 수정을 덮는 결과가 된다.
             gasClient.getSharedDataFromServer<PartTimeSalaryRow[]>(salaryDataKey)
               .then((server) => {
-                const merged = toStorableRows(
+                // 자동저장·재전송과 같이 흡수를 거친다 — 빠뜨리면 화면을 떠나는 순간의 이 업로드가
+                // 다른 경로가 정리해 둔 유령 행을 서버에 되돌려 놓는다(Codex 3R 지적 2026-08-31).
+                const merged = absorbLegacyRows(toStorableRows(
                   mergePendingLocalRows(pendingSalaries as PartTimeSalaryRow[], Array.isArray(server) ? server : null, syncedById)
-                );
+                ));
                 return Promise.all([
                   gasClient.saveSharedData(salaryDataKey, merged),
                   gasClient.saveSharedData(`part_time_profiles:${branchName}`, buildPartTimeProfiles(merged))
@@ -1217,7 +1320,7 @@ export function MonthlyPartTimeSalarySubTab({
                 (pendingSalaries as PartTimeSalaryRow[]).map((row) => [row.employeeId, row])
               );
               const uploadedRows = uploadedMerged;
-              setSalaries((current) => {
+              applyIfCurrent(viewKey, (current) => {
                 const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
                 const uploadedIds = new Set(uploadedRows.map((row) => row.employeeId));
                 const reconciledRows = uploadedRows.map((up) => {
@@ -1227,7 +1330,7 @@ export function MonthlyPartTimeSalarySubTab({
                   if (base && rowFingerprint(onScreen) !== rowFingerprint(base)) return onScreen;
                   return up;
                 });
-                return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+                return absorbLegacyRows([...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))]);
               });
             }
           })
@@ -1239,7 +1342,7 @@ export function MonthlyPartTimeSalarySubTab({
         return Promise.resolve();
       }
     }
-  }, [branchName, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey]);
+  }, [absorbLegacyRows, applyIfCurrent, branchName, exclusionDataKey, exclusionPendingKey, exclusionStorageKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, viewKey]);
 
   useEffect(() => {
     let active = true;
@@ -1463,11 +1566,18 @@ export function MonthlyPartTimeSalarySubTab({
       });
 
     // 수기 행은 직원명부에도 일일마감에도 없으니 위에서 다시 만들어지지 않는다. 그대로 물려준다.
-    setSalaries((current) => [
+    // 근무기록에서 온 `legacy-` 행도 함께 물려준다 — 여기서 버리면 그 행에 적어 둔 계좌·시급이 화면에서
+    // 사라지고, 흡수가 명부 행으로 옮겨 둔 값까지 되돌아간다(Codex 지적 2026-08-31).
+    // 물려준 뒤 흡수를 한 번 더 돌려, 명부에 등록된 사람의 legacy 행은 여기서도 한 줄로 접힌다.
+    setSalaries((current) => absorbLegacyRows([
       ...assembledRows,
-      ...current.filter((row) => isManualRow(row) && !excluded.has(row.employeeId))
-    ]);
-  }, [branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey, manualWorkRows]);
+      ...current.filter(
+        (row) =>
+          (isManualRow(row) || legacyPartTimeNameOf(row.employeeId, branchName) !== null) &&
+          !excluded.has(row.employeeId)
+      )
+    ]));
+  }, [absorbLegacyRows, branchName, selectedMonth, history, excludedEmployeeIds, salaryStorageKey, manualWorkRows]);
 
   useEffect(() => {
     const loadSharedSalaries = async () => {
@@ -1489,7 +1599,7 @@ export function MonthlyPartTimeSalarySubTab({
                 ...salary,
                 tipsEtcAmount: salary.tipsEtcAmount || "0"
               }));
-              setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
+              applyIfCurrent(viewKey, (current) => absorbLegacyRows(mergeKeepingManualRows(restoredRows, current, excluded)));
             }
             scheduleSalaryRetry();
             return;
@@ -1501,7 +1611,7 @@ export function MonthlyPartTimeSalarySubTab({
               tipsEtcAmount: salary.tipsEtcAmount || "0"
             }));
             // 화면 복원은 즉시 한다 — 시각적 복구를 저장 순서에 묶을 이유가 없다.
-            setSalaries((current) => mergeKeepingManualRows(restoredRows, current, excluded));
+            applyIfCurrent(viewKey, (current) => absorbLegacyRows(mergeKeepingManualRows(restoredRows, current, excluded)));
             // **서버 읽기→병합→쓰기는 자동저장과 같은 직렬화 체인에 세운다.**
             // 밖에서 따로 돌면, 이 재전송이 서버를 오가는 사이 사용자가 셀을 고쳐 500ms 자동저장이
             // 최신값을 먼저 올리고, 늦게 끝난 이 재전송이 옛값(uploadRows)을 다시 올려 되돌린다
@@ -1527,13 +1637,15 @@ export function MonthlyPartTimeSalarySubTab({
                 scheduleSalaryRetry();
                 return;
               }
-              const uploadRows = toStorableRows(mergePendingLocalRows(restoredRows, serverRows, readSyncedRows()));
+              // 이 경로도 흡수를 거친다 — 빠뜨리면 다른 저장 경로가 정리해 둔 유령 행을 이 재전송이
+              // 서버에 다시 올려, 이중지급 상태로 되돌아간다(Codex 지적 2026-08-31).
+              const uploadRows = absorbLegacyRows(toStorableRows(mergePendingLocalRows(restoredRows, serverRows, readSyncedRows())));
               // **화면 반영은 '재전송을 시작한 뒤 사용자가 안 고친 행'만.** 늦게 끝난 이 task 가 화면을
               // 통째로 uploadRows(옛 스냅샷)로 되돌리면, 그 사이 고친 값이 화면에서 사라지고 이후 편집 때
               // 그 옛 화면값이 다시 서버로 올라간다(Codex High 2026-08-02). 자동저장 완료 지점(atSaveTimeById
               // reconcile)과 같은 규칙 — 시작 시점 사본과 지문이 달라진 행은 화면 값을 지킨다.
               const atResendById = new Map<string, PartTimeSalaryRow>(restoredRows.map((row) => [row.employeeId, row]));
-              setSalaries((current) => {
+              applyIfCurrent(viewKey, (current) => {
                 const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
                 const uploadedIds = new Set(uploadRows.map((row) => row.employeeId));
                 const reconciledRows = uploadRows.map((uploaded) => {
@@ -1544,7 +1656,7 @@ export function MonthlyPartTimeSalarySubTab({
                   return uploaded;
                 });
                 // 재전송 시작 후 새로 추가한 행(수기 등)도 지킨다 — 아직 안 올라갔을 뿐이다.
-                return [...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))];
+                return absorbLegacyRows([...reconciledRows, ...current.filter((row) => !uploadedIds.has(row.employeeId))]);
               });
               // 프로필(주민번호·입사일·은행·계좌·시급)도 함께 올린다. 다른 두 저장 경로는 늘 같이 올리는데
               // 이 경로만 빠져 있었다 — 그러면 급여대장은 올라갔는데 시급이 서버에 없어,
@@ -1583,7 +1695,7 @@ export function MonthlyPartTimeSalarySubTab({
           }));
           // 통째로 갈아치우면 안 된다 — 이 요청이 오가는 사이에 "수기 추가"를 눌렀다면,
           // 뒤늦게 도착한 옛 응답이 방금 만든 행을 지워 버린다. 여기에 없는 수기 행은 지키고 얹는다.
-          setSalaries((current) => mergeKeepingManualRows(loadedRows, current, excluded));
+          applyIfCurrent(viewKey, (current) => absorbLegacyRows(mergeKeepingManualRows(loadedRows, current, excluded)));
           // 방금 서버에서 받은 값이 곧 "서버와 맞춰진 상태"다. 기준값으로 남겨 둔다.
           // 안 남기면 기준값 없이 sticky한 edited 표시로 판단하게 되어, 서버에서 받은 옛 행까지
           // "내가 고친 행"으로 잡혀 다음 재시도 때 상대의 수정을 덮는다.
@@ -1612,7 +1724,7 @@ export function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedSalaries();
-  }, [branchName, excludedEmployeeIds, exclusionPendingKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry]);
+  }, [absorbLegacyRows, applyIfCurrent, branchName, excludedEmployeeIds, exclusionPendingKey, readSyncedRows, salaryDataKey, salaryPendingKey, salaryStorageKey, salarySyncedKey, scheduleSalaryRetry, viewKey]);
 
   useEffect(() => {
     const loadSharedProfiles = async () => {
@@ -1622,7 +1734,7 @@ export function MonthlyPartTimeSalarySubTab({
         Object.entries(profiles).forEach(([employeeId, profile]) => {
           localStorage.setItem(`erp_pt_profile_${branchName}_${employeeId}`, JSON.stringify(profile));
         });
-        setSalaries((current) => current.map((salary) => {
+        applyIfCurrent(viewKey, (current) => current.map((salary) => {
           const profile = profiles[salary.employeeId];
           if (!profile) return salary;
           const merged = {
@@ -1645,7 +1757,7 @@ export function MonthlyPartTimeSalarySubTab({
       }
     };
     loadSharedProfiles();
-  }, [branchName, salaryPendingKey]);
+  }, [absorbLegacyRows, applyIfCurrent, branchName, salaryPendingKey, viewKey]);
 
   // 다른 기기에서도 공통 직원현황을 기준으로 파트타이머 행을 생성합니다.
   useEffect(() => {
@@ -1687,7 +1799,13 @@ export function MonthlyPartTimeSalarySubTab({
         // 기존 파트타이머 일지에만 있는 직원도 급여대장에 포함합니다.
         // 직원현황에 등록되지 않은 과거 기록은 이름 기반 임시 ID를 사용합니다.
         const allPartTimers = [...partTimers];
-        const rosterNames = new Set(allPartTimers.map((employee) => employee.name));
+        // **제외(X)된 명부 행의 이름은 여기서 세지 않는다.** 세어 버리면 legacy 행이 만들어지지 않는데
+        // 정작 명부 행은 아래에서 제외로 걸러져, 그 사람이 화면에서 통째로 사라진다. 그런데 마감 엑셀에는
+        // 저장본의 legacy 행이 그대로 나가므로 **화면에 없는 사람에게 급여가 나가는** 상태가 된다
+        // (대물섬 한남점 2026-08 문승휘·박수빈이 이 모양이었다 — Codex 지적 2026-08-31).
+        const rosterNames = new Set(
+          allPartTimers.filter((employee) => !excludedEmployeeIds.includes(employee.id)).map((employee) => employee.name)
+        );
         Object.keys(telemetry).forEach((name) => {
           if (!rosterNames.has(name)) {
             allPartTimers.push({
@@ -1700,11 +1818,20 @@ export function MonthlyPartTimeSalarySubTab({
 
         // 명단을 손질하는 동안에도 지점이 바뀌었을 수 있다. 화면에 넣기 직전에 한 번 더 본다.
         if (cancelled) return;
+        // 업로드 경로(persistPartTimeSalaries)도 같은 명부 이름으로 흡수해야 서버 사본이 정리된다.
+        rosterPartTimerNamesRef.current = partTimers.map((employee) => String(employee?.name ?? "").trim());
         setSalaries((current) => {
           const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
           const excluded = new Set<string>(excludedEmployeeIds);
           // 수기 행은 명부에도 마감에도 없어 여기서 다시 만들어지지 않는다. 뒤에 그대로 붙여 살린다.
-          const manualRows = current.filter((row) => isManualRow(row) && !excluded.has(row.employeeId));
+          // 근무기록에서 온 `legacy-` 행도 같이 살린다 — 명부에 등록된 사람의 legacy 행은 위 allPartTimers
+          // 에 안 들어오는데, 여기서 그냥 버리면 그 행에 적어 둔 계좌·시급이 화면에서 사라진다.
+          // 아래 흡수가 그 값을 명부 행의 빈칸으로 옮긴 뒤 한 줄로 접는다(조립 효과와 같은 처리).
+          const manualRows = current.filter(
+            (row) =>
+              (isManualRow(row) || legacyPartTimeNameOf(row.employeeId, branchName) !== null) &&
+              !excluded.has(row.employeeId)
+          );
           const rebuiltRows = allPartTimers.filter((employee) => !excluded.has(employee.id)).map((employee) => {
             const existing = byEmployeeId.get(employee.id);
             const work = telemetry[employee.name] || { hours: 0, dates: [] };
@@ -1752,7 +1879,8 @@ export function MonthlyPartTimeSalarySubTab({
               memo: ""
             } as PartTimeSalaryRow;
           });
-          return [...rebuiltRows, ...manualRows];
+          // 살려 온 legacy 행 중 명부에 등록된 사람 것은 여기서 명부 행에 흡수돼 한 줄이 된다.
+          return absorbLegacyRows([...rebuiltRows, ...manualRows]);
         });
       } catch (error) {
         console.warn("공통 파트타이머 명단을 불러오지 못했습니다.", error);
@@ -1762,7 +1890,7 @@ export function MonthlyPartTimeSalarySubTab({
     return () => {
       cancelled = true;
     };
-  }, [branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows]);
+  }, [absorbLegacyRows, branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     if (isLocked) return; // 마감 확정 후에는 입력을 받지 않는다(정직원 급여대장 updateRow 와 같은 가드).
