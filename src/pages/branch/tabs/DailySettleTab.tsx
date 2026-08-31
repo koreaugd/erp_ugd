@@ -9,6 +9,7 @@ import { GuideCallouts } from "../../../components/GuideCallouts";
 import { SheetKeyHint } from "../../../components/SheetKeyHint";
 import { dailySettleGuideSteps } from "../helpers/guideSteps";
 import { formatNumber } from "../../../utils/formatNumber";
+import { readBranchListCacheIncludingLegacy } from "../../../utils/branchListCache";
 import type { DailySettleValidationField, DailySettleValidationTargets, Employee, ExpenseRow, StaffAddDraft, StaffAddReason, StaffRow } from "../types";
 import { cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { ExpenseGrid } from "../components/ExpenseGrid";
@@ -248,9 +249,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         setLoadingTransferBranches(true);
         let list = await gasClient.getBranchList();
         if (!Array.isArray(list) || list.length === 0) {
-          const cached = sessionStorage.getItem("erp_branch_list_cache");
-          const parsed = cached ? JSON.parse(cached) : null;
-          list = Array.isArray(parsed) ? parsed : parsed?.branches || [];
+          // 목록이 비어 돌아온 경우의 폴백 — 순서가 아니라 "선택지가 있는지"가 중요한 자리라 옛 판 캐시까지 쓴다.
+          list = readBranchListCacheIncludingLegacy();
         }
         if (cancelled) return;
         const filtered = list.filter((b: any) => b.role === "branch" && b.branchName !== branchName);
@@ -260,9 +260,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
         console.warn("이동 전 지점 목록 로드 실패:", error);
         if (!cancelled) {
           try {
-            const cached = sessionStorage.getItem("erp_branch_list_cache");
-            const parsed = cached ? JSON.parse(cached) : null;
-            const cachedBranches = (Array.isArray(parsed) ? parsed : parsed?.branches || [])
+            const cachedBranches = readBranchListCacheIncludingLegacy()
               .filter((b: any) => b.role === "branch" && b.branchName !== branchName);
             setTransferBranchList(cachedBranches);
             setNewStaffInputFromBranch((current) => current || cachedBranches[0]?.branchName || "");
