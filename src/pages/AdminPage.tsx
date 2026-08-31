@@ -15,7 +15,7 @@ import { calcAutoGrantDays, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRI
 // 지점 연차관리 탭과 규칙이 갈라지면 두 화면의 인원이 달라진다.
 import { loadAnnualLeaveRoster, toAnnualLeaveMembers, fullTimeSalaryKey, findStrandedLeaveOwners, describeStrandedOwners } from "./branch/helpers/annualLeaveRoster";
 import { splitDailyMemoMetadata } from "./branch/helpers/memoMetadata";
-import { assembleMonthlyCloseWorkbook, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
+import { assembleMonthlyCloseWorkbook, duplicateNamePartTimeRows, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AccountManagementSection } from "./admin/AccountManagementSection";
 import { listUserProfiles } from "../api/userProfile";
@@ -3772,6 +3772,48 @@ function AdminMonthlyClosingStatusSection() {
       // 시급 미입력 지점 하나 때문에 관리자 다운로드가 통째로 막히는 게 더 큰 불편). 취소를 고르면 받지 않는다.
       // 판정은 워크북 빌더가 실제로 만든 행을 그대로 본다 — 저장된 급여 행만 보면 누적시간이 낡아
       // "0시간이니 넘어감"으로 새어 나간다(엑셀에는 일일마감 집계로 다시 계산한 시간이 찍힌다).
+      // 같은 이름이 두 줄로 나가면 그 사람에게 급여가 두 번 이체된다. 금액이 있는 줄이 둘 이상이면
+      // 실제로 두 번 나가므로 **차단**하고, 한쪽이 0원이면 돈은 한 번만 나가므로 알리고 선택하게 한다
+      // (시급 미입력 경고와 같은 방식 — 0원 한 줄 때문에 지점 마감이 통째로 막히면 더 큰 불편이다).
+      // 판정은 워크북이 실제로 만든 행을 본다 — 저장본만 훑으면 흡수·집계로 달라진 결과를 못 본다.
+      const duplicateRows = duplicateNamePartTimeRows(data);
+      // 이름이 같아도 계좌가 서로 다르면 동명이인이다 — 막으면 정당한 다운로드가 통째로 멈춘다.
+      const doublePaid = duplicateRows.filter((row) => row.payingRows > 1 && !row.provenDistinct);
+      if (doublePaid.length > 0) {
+        const who = doublePaid.map((row) => `${row.name}(${row.rows}줄, 중복 ${row.duplicatedAmount.toLocaleString()}원)`).join(", ");
+        const extra = doublePaid.reduce((sum, row) => sum + row.duplicatedAmount, 0);
+        window.alert(
+          `${branchName} · ${selectedMonth} 파트타이머 급여대장에 같은 사람이 금액 있는 두 줄로 들어 있습니다.\n` +
+          `(${who})\n\n` +
+          `그대로 받으면 이 표로 급여가 두 번 나갑니다(합계 ${extra.toLocaleString()}원 과다). 다운로드를 중단했습니다.\n` +
+          `해당 지점에서 [월말마감 → 파트타이머 급여대장] 탭을 열어 한 줄만 남기고 삭제(X)한 뒤 다시 받아주세요.`
+        );
+        return;
+      }
+      const zeroDupRows = duplicateRows.filter((row) => row.payingRows <= 1 || row.provenDistinct);
+      if (zeroDupRows.length > 0) {
+        // 계좌가 다르면 보통 동명이인이지만, **같은 사람이 계좌를 바꿔 두 줄이 된 경우도 같은 모양**이다.
+        // 그건 화면만 보고는 구분할 수 없으므로 막지 않고 사람에게 물어본다(막으면 동명이인 지점이 마감을 못 한다).
+        // 판단에 필요한 근거(금액·계좌 뒷자리)를 함께 보여 준다 — 이름만 나열하면 관리자가
+        // 정말 다른 사람인지 확인할 방법이 없어, 판단을 떠넘기기만 하는 확인창이 된다(Codex 4R).
+        const detail = zeroDupRows
+          .map((row) =>
+            `· ${row.name}: ` +
+            row.payingDetails
+              .map((item) => `${item.salary.toLocaleString()}원(계좌 …${item.accountTail || "없음"})`)
+              .join(" / ")
+          )
+          .join("\n");
+        const proceed = window.confirm(
+          `${branchName} · ${selectedMonth} 파트타이머 급여대장에 같은 이름이 두 줄인 사람이 ${zeroDupRows.length}명 있습니다.\n\n` +
+          `${detail}\n\n` +
+          `계좌가 다르면 보통 이름만 같은 다른 사람입니다. 다만 같은 사람이 계좌를 바꿔 두 줄이 된 경우도\n` +
+          `똑같이 보입니다 — 그 경우 그대로 받으면 급여가 두 번 나갑니다.\n` +
+          `위 금액과 계좌 뒷자리로 정말 다른 사람인지 확인한 뒤 [확인]을 눌러주세요. [취소]면 받지 않습니다.`
+        );
+        if (!proceed) return;
+      }
+
       const zeroPaidRows = zeroPaidPartTimeRows(data);
       if (zeroPaidRows.length > 0) {
         const who = zeroPaidRows.slice(0, 5).map((row) => `${row.name || "(이름 없음)"} ${row.hours}시간`).join(", ");
