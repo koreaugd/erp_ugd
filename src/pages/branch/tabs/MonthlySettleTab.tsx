@@ -401,6 +401,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         triggerToast(
           flush.reason === "unnamed" ? "성명이 비어 있는 행이 있어 마감할 수 없습니다. 이름을 적거나 필요 없는 행이면 삭제(X)해주세요."
           : flush.reason === "zeroPaid" ? "근무시간은 있는데 급여가 0원인 행이 있어 마감할 수 없습니다. 시급을 채운 뒤 다시 제출해주세요."
+          : flush.reason === "duplicateName" ? "같은 이름이 두 줄로 들어 있어 마감할 수 없습니다. 급여가 두 번 나갈 수 있으니, 급여대장에서 한 줄만 남기고 삭제(X)한 뒤 다시 제출해주세요."
           : flush.reason === "empty" ? "파트타이머 급여대장에 저장된 행이 없어 마감할 수 없습니다. 급여대장을 확인한 뒤 다시 시도해주세요."
           : flush.reason === "manualWork" ? "근무일지의 수기 근무를 아직 불러오지 못해 마감할 수 없습니다. 표 위의 [다시 시도]를 누른 뒤 다시 제출해주세요."
           : "파트타이머 급여대장을 서버에 반영/확인하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해주세요.",
