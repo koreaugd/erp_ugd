@@ -8,7 +8,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import GateStep from "./login/GateStep";
 import OnboardingStep from "./login/OnboardingStep";
 import ApprovalPendingStep from "./login/ApprovalPendingStep";
-import { IS_DEMO } from "../demo";
+import { IS_DEMO, BRAND } from "../demo";
 
 // PIN 단독 로그인은 2026-07-29 사용자 지시로 폐지 — 개인 계정(구글/이메일)으로만 로그인한다.
 // PIN 은 로그인 후의 게이트(GateStep)에서만 쓰인다. 백엔드의 PIN 검증 로직은 게이트가 계속 쓰므로 유지.
@@ -95,7 +95,7 @@ export default function LoginPage() {
         id="login-card"
       >
         <h1 className="text-center text-5xl font-black tracking-tight text-black" id="login-brand-title">
-          UGD
+          {BRAND.short}
         </h1>
 
         <AnimatePresence mode="wait">

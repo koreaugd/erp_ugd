@@ -4,20 +4,50 @@ import { collection, getDocs, getFirestore } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, type BranchSetting } from "./gasClient";
 import { hashPin } from "../utils/hashPin";
+import { compareBranchOrder } from "../utils/branchOrder";
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 const firebasePassword = (pin: string) => `ugd-${pin}`;
 
-const LOGIN_BRANCH_FALLBACK: LoginBranch[] = [
-  "대물섬 한남점", "대물섬 종로점", "남산광어", "사카바단단", "8번대물집", "카츠스위스", "오키스테이크하우스", "대학로고래", "연하동 연남본점", "연하동 대학로점", "강남대골뼈국", "마음죽", "카라멘야"
-].map((branchName, index) => ({ branchId: String(index + 1).padStart(2, "0"), branchName, brand: branchName, role: "branch", loginEmail: `branch-${String(index + 1).padStart(2, "0")}@ugd-erp.example`, isActive: true }));
+// public_branches 를 못 읽을 때만 쓰는 비상 목록.
+//
+// **지점 번호는 줄 순서가 아니라 실제 번호를 적는다.** 번호가 로그인 계정 branch-NN@ugd-erp.example
+// 과 짝이라, 순서를 바꾸려고 줄 순서로 번호를 매기면 앞자리 지점의 계정으로 로그인하게 된다
+// (대물섬 강남점=17번을 맨 위로 올리며 확인, 2026-08-31).
+//
+// 순서는 실제 목록의 표시순서(utils/branchOrder)와 같게 유지한다 — 여기만 옛 순서면
+// 조회 실패 때만 순서가 달라져 원인 찾기 어려운 차이가 된다.
+//
+// **운영에 있는 지점은 빠짐없이 적는다.** 공통 PIN 변경(changeFirebaseLoginPins)이 이 목록을 돌며
+// 지점 계정 비밀번호를 바꾸는데, 여기 없는 지점은 시트 해시만 새 PIN으로 바뀌고 Firebase 비밀번호는
+// 옛것으로 남아 그 지점만 로그인이 깨진다(금샤빠·본사가 빠져 있던 것을 Codex 3R 이 지적, 2026-08-31).
+const LOGIN_BRANCH_FALLBACK: LoginBranch[] = ([
+  ["대물섬 강남점", "17"],
+  ["대물섬 한남점", "01"],
+  ["대물섬 종로점", "02"],
+  ["남산광어", "03"],
+  ["사카바단단", "04"],
+  ["8번대물집", "05"],
+  ["카츠스위스", "06"],
+  ["오키스테이크하우스", "07"],
+  ["대학로고래", "08"],
+  ["연하동 연남본점", "09"],
+  ["연하동 대학로점", "10"],
+  ["강남대골뼈국", "11"],
+  ["마음죽", "12"],
+  ["카라멘야", "13"],
+  ["금샤빠", "14"],
+  ["본사", "15"]
+] as const).map(([branchName, branchId]) => ({ branchId, branchName, brand: branchName, role: "branch", loginEmail: `branch-${branchId}@ugd-erp.example`, isActive: true }));
 
 export interface LoginBranch extends BranchSetting {
   loginEmail: string;
   branchId: string;
   isActive: boolean;
+  /** 목록 표시순서(작을수록 위). 없으면 지점 번호 순 — utils/branchOrder 참고. */
+  sortOrder?: number;
 }
 
 export async function getFirebaseLoginBranches(): Promise<LoginBranch[]> {
@@ -26,7 +56,7 @@ export async function getFirebaseLoginBranches(): Promise<LoginBranch[]> {
     const branches = snapshot.docs
       .map((item) => item.data() as LoginBranch)
       .filter((branch) => branch?.branchName && branch?.loginEmail && branch?.isActive !== false)
-      .sort((a, b) => String(a.branchId || "").localeCompare(String(b.branchId || "")));
+      .sort(compareBranchOrder); // 정렬 규칙은 utils/branchOrder 한 곳에만 둔다.
     return branches.length > 0 ? branches : LOGIN_BRANCH_FALLBACK;
   } catch {
     return LOGIN_BRANCH_FALLBACK;

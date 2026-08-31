@@ -3,7 +3,43 @@
   "hosting": {
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "server.cjs", "server.cjs.map"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "_headers_comment": [
+      "[2026-08-24] 배포했는데 화면이 그대로인 문제의 원인이 여기였다.",
+      "파이어베이스 호스팅의 기본값은 모든 파일 max-age=3600 — index.html 이 한 시간 동안 캐시되어",
+      "브라우저가 **옛 index.html 이 가리키는 옛 자바스크립트 파일**을 계속 썼다.",
+      "app-version.json 도 같이 캐시돼서 앱의 자동 새버전 감지(useAppUpdateWatcher)조차 눈치채지 못했다.",
+      "",
+      "그래서 두 갈래로 나눈다:",
+      "  · index.html / app-version.json → no-store. 매번 서버에 묻는다(파일이 작아 부담 없다).",
+      "  · /assets/**, /fonts/** → 1년 immutable. 파일명에 내용 해시가 붙어 바뀌면 이름이 달라지므로",
+      "    영구 캐시가 안전하고, 오히려 재방문이 빨라진다.",
+      "",
+      "이 앱은 HashRouter 라 어느 화면이든 서버 요청 경로가 항상 '/' 다(#/admin 은 서버로 안 간다).",
+      "그래서 '/' 규칙만으로 모든 진입을 덮는다. 직접 /index.html 을 치는 경우도 함께 적어 둔다."
+    ],
+    "headers": [
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-store, must-revalidate" }]
+      },
+      {
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-store, must-revalidate" }]
+      },
+      {
+        "source": "/app-version.json",
+        "headers": [{ "key": "Cache-Control", "value": "no-store, must-revalidate" }]
+      },
+      {
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
+      {
+        "source": "/fonts/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      }
+    ]
   },
   "firestore": [
     {

@@ -1,5 +1,5 @@
 // src/pages/BranchConfirmPage.tsx
-import React, { Suspense, lazy, useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
 import { gasClient } from "../api/gasClient";
@@ -9,10 +9,12 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import MyAccountModal from "../components/MyAccountModal";
 import { hashPin } from "../utils/hashPin";
 import { ensureLatestAppVersion } from "../utils/appVersion";
+import { buildBranchRankMap, NO_SORT_ORDER } from "../utils/branchOrder";
+import { readBranchListCache, writeBranchListCache } from "../utils/branchListCache";
 import { cleanNumeric } from "./branch/helpers/formatters";
 import type { BranchDailyTab } from "./branch/types";
 import { BRANCH_TAB_REGISTRY, isTabAllowed, firstAllowedKey, permKeyForState, type PermKey } from "./branch/tabRegistry";
-import { IS_DEMO } from "../demo";
+import { IS_DEMO, BRAND } from "../demo";
 // **탭은 열 때 받는다.**
 // 예전에는 12개 탭을 전부 정적으로 들여와, 대시보드 하나를 보려고 모든 탭 코드를
 // 내려받아야 화면이 떴다(지점 화면 묶음 444KB / 압축 115KB). 매장 태블릿·약한 회선에서
@@ -61,25 +63,33 @@ export default function BranchConfirmPage() {
   const [checkingAppVersion, setCheckingAppVersion] = useState(false);
 
   // GAS 연결 불가 또는 시트 데이터 오류 시 사용할 로컬 지점 목록
+  // **지점명은 운영과 글자 하나까지 같아야 한다.** 이 목록은 조회 실패 시 그대로 캐시에 저장되고
+  // 지점 선택지가 되므로, 없는 이름이 섞여 있으면 장애 중에 존재하지 않는 지점으로 작업하게 된다
+  // (옛 이름 "카라멘야 신촌점"·"연하동"·"헴프리스"가 남아 있던 것을 Codex 4R 이 지적, 2026-08-31).
+  // 순서도 실제 목록(public_branches 표시순서)과 같게 유지한다 — 여기만 옛 순서면
+  // 조회 실패 시에만 순서가 달라져 원인 찾기 어려운 차이가 된다.
+  // 운영과의 대조는 scripts/verify-login-fallback.mjs 로 확인한다.
   const LOCAL_BRANCH_FALLBACK = [
-    { branchName: "대물섬 한남점", role: "branch", brand: "대물섬" },
-    { branchName: "대물섬 종로점", role: "branch", brand: "대물섬" },
-    { branchName: "대물섬 강남점", role: "branch", brand: "대물섬" },
-    { branchName: "8번대물집", role: "branch", brand: "대물섬" },
+    { branchName: "대물섬 강남점", role: "branch", brand: "대물섬 강남점" },
+    { branchName: "대물섬 한남점", role: "branch", brand: "대물섬 한남점" },
+    { branchName: "대물섬 종로점", role: "branch", brand: "대물섬 종로점" },
     { branchName: "남산광어", role: "branch", brand: "남산광어" },
-    { branchName: "카라멘야 신촌점", role: "branch", brand: "카라멘야" },
     { branchName: "사카바단단", role: "branch", brand: "사카바단단" },
+    { branchName: "8번대물집", role: "branch", brand: "8번대물집" },
     { branchName: "카츠스위스", role: "branch", brand: "카츠스위스" },
-    { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
+    { branchName: "오키스테이크하우스", role: "branch", brand: "오키스테이크하우스" },
     { branchName: "대학로고래", role: "branch", brand: "대학로고래" },
-    { branchName: "마음죽", role: "branch", brand: "마음죽" },
-    { branchName: "연하동", role: "branch", brand: "연하동" },
-    { branchName: "헴프리스", role: "branch", brand: "헴프리스" },
+    { branchName: "연하동 연남본점", role: "branch", brand: "연하동 연남본점" },
+    { branchName: "연하동 대학로점", role: "branch", brand: "연하동 대학로점" },
     { branchName: "강남대골뼈국", role: "branch", brand: "강남대골뼈국" },
+    { branchName: "마음죽", role: "branch", brand: "마음죽" },
+    { branchName: "카라멘야", role: "branch", brand: "카라멘야" },
+    { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
+    { branchName: "본사", role: "branch", brand: "본사" },
   ];
 
   // 1. Fetch available branches (세션 캐시 → GAS → 로컬 fallback 순서)
-  const BRANCH_LIST_CACHE_KEY = "erp_branch_list_cache";
+  // 지점 목록 캐시의 키·읽기·쓰기는 utils/branchListCache 한 곳에만 있다.
 
   // 캐시/네트워크/로컬 fallback 어느 경로로 얻은 목록이든 반드시 이 필터를 거쳐야
   // 권한 밖 지점이 화면에 노출되는 일이 없다.
@@ -93,12 +103,8 @@ export default function BranchConfirmPage() {
     if (user && !selectedBranch) {
       const fetchBranches = async () => {
         try {
-          const cached = sessionStorage.getItem(BRANCH_LIST_CACHE_KEY);
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            const cachedBranches = Array.isArray(parsed) ? parsed : parsed?.branches;
-            if (Array.isArray(cachedBranches) && cachedBranches.length > 0) setBranches(filterByAllowedBranches(cachedBranches));
-          }
+          const cachedBranches = readBranchListCache();
+          if (cachedBranches.length > 0) setBranches(filterByAllowedBranches(cachedBranches));
           setLoadingBranches(true);
           let filtered: any[] = [];
           try {
@@ -111,7 +117,7 @@ export default function BranchConfirmPage() {
             filtered = LOCAL_BRANCH_FALLBACK;
           }
           filtered = filterByAllowedBranches(filtered);
-          sessionStorage.setItem(BRANCH_LIST_CACHE_KEY, JSON.stringify({ branches: filtered, savedAt: Date.now() }));
+          writeBranchListCache(filtered);
           setBranches(filtered);
         } catch (e) {
           console.error("지점 목록 로드 실패:", e);
@@ -201,7 +207,7 @@ export default function BranchConfirmPage() {
           )}
         </div>
         <div className="text-center text-xs text-gray-400 font-mono">
-          ERP_UGD &copy; 2026. All rights reserved.
+          {BRAND.app} &copy; 2026. All rights reserved.
         </div>
       </div>
     );
@@ -408,16 +414,42 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   // Form states — 남은 편집 항목은 정직원 급여대장 열람 비밀번호뿐이다.
   const [formFullTimeSalaryPasscode, setFormFullTimeSalaryPasscode] = useState(adminSettings.fullTimeSalaryPasscode || "");
 
+  // 새로고침 연타·탭 재진입으로 이 조회가 겹칠 수 있다. 늦게 도착한 옛 응답이 최신 목록을
+  // 되돌리거나, 옛 순위표로 최신 목록을 다시 정렬하는 것을 막는다(AdminPage 제출현황과 같은 방식).
+  const adminBranchRequestRef = useRef(0);
+
   const fetchAdminBranches = async () => {
+    const requestId = ++adminBranchRequestRef.current;
     try {
       setLoadingAdminBranches(true);
+      // 이 목록만 구글시트 행 순서(등록 순)라 다른 화면과 순서가 달라진다. 지점 목록의
+      // 표시순서(public_branches)로 맞추되, **순서 조회를 기다리느라 목록이 안 뜨는 일은 없어야 한다** —
+      // 시트 목록이 오는 즉시 먼저 보여 주고, 순서는 뒤따라 맞춘다(조회가 실패·지연되면 시트 순서 그대로).
+      const orderedPromise = gasClient.getBranchList().catch(() => [] as any[]);
       const list = await gasClient.getBranchListAll();
+      if (requestId !== adminBranchRequestRef.current) return; // 더 새 조회가 시작됐다 — 이 응답은 버린다
       setAdminBranches(list);
+      // 로딩 표시도 여기서 내린다 — finally 까지 미루면 스피너가 목록을 덮고 있어서
+      // "먼저 보여 준다"가 화면에서는 지켜지지 않는다(순서 조회가 느리면 그만큼 빈 화면).
+      setLoadingAdminBranches(false);
+
+      // 자리 번호(rank)로 맞춘다 — 표시순서가 같은 지점끼리의 두 번째 기준(지점 번호)까지 따라가야
+      // 다른 화면과 순서가 어긋나지 않는다. 시트에만 있는 행(관리자·비활성 지점)은 순위가 없어 뒤에
+      // 남고, sort 가 안정 정렬이라 그들끼리의 시트 순서는 그대로 유지된다.
+      const rankMap = buildBranchRankMap((await orderedPromise) as any[]);
+      if (requestId !== adminBranchRequestRef.current) return;
+      const rank = (row: any) => rankMap.get(String(row?.branchName || "").trim()) ?? NO_SORT_ORDER;
+      // 화면에 남아 있는 목록(prev)이 아니라 **이 조회가 받아 온 list** 를 정렬한다 —
+      // prev 를 쓰면 늦게 온 옛 순위표가 더 새로운 목록을 헤집는다.
+      setAdminBranches([...list].sort((a: any, b: any) => rank(a) - rank(b)));
     } catch (e: any) {
       console.error("전체 지점 목록 로드 실패:", e);
-      triggerToast("전체 지점 목록을 불러오지 못했습니다. 스프레드시트 업데이트 상태를 체크해보세요.", "error");
+      if (requestId === adminBranchRequestRef.current) {
+        triggerToast("전체 지점 목록을 불러오지 못했습니다. 스프레드시트 업데이트 상태를 체크해보세요.", "error");
+      }
     } finally {
-      setLoadingAdminBranches(false);
+      // 최신 조회만 로딩 표시를 내린다 — 밀려난 옛 조회가 진행 중인 새 조회의 스피너를 끄면 안 된다.
+      if (requestId === adminBranchRequestRef.current) setLoadingAdminBranches(false);
     }
   };
 

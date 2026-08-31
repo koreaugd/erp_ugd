@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { gasClient, MasterDaily, ExpenseDetail, StaffRecord, DailyListRow } from "./gasClient";
+import { compareBranchOrder } from "../utils/branchOrder";
 
 const firebaseRecordId = (branchName: string, settleDate: string) => `${encodeURIComponent(branchName)}--${settleDate}`;
 
@@ -578,7 +579,11 @@ export async function firebaseGetSharedDataFromServer(dataKey: string) {
 
 export async function firebaseGetBranchList() {
   const snapshot = await getDocs(collection(getDirectDb(), "public_branches"));
-  return snapshot.docs.map((item) => item.data() as any).filter((branch) => branch.isActive !== false);
+  // 정렬 규칙은 utils/branchOrder 한 곳에만 둔다(로그인 목록과 순서가 갈리지 않게).
+  return snapshot.docs
+    .map((item) => item.data() as any)
+    .filter((branch) => branch.isActive !== false)
+    .sort(compareBranchOrder);
 }
 
 export async function firebaseGetDailyList(settleDate: string): Promise<DailyListRow[]> {
@@ -1046,6 +1051,8 @@ async function upsertPublicBranchDirect(branchName: string, data: any, isAdminSe
   const loginEmail = `branch-${branchId}@ugd-erp.example`;
   await ensureBranchAuthUser(loginEmail, data?.rawPin);
 
+  // merge 를 유지할 것 — 목록 표시순서(sortOrder, utils/branchOrder)는 여기서 쓰지 않으므로
+  // 통째로 덮어쓰면 지점 PIN 변경·활성 토글만 해도 순서 설정이 조용히 사라진다.
   await setDoc(doc(db, "public_branches", branchId), {
     branchId,
     branchName: branchName.trim(),
@@ -1274,6 +1281,9 @@ export async function restoreDirectFromFirebase(isAdminSession = false) {
         const isActive = d.is_active !== false;
 
         // 구글 앱스 스크립트(GAS) 또는 로컬 대체처로 개별 오버라이트 주입 실행
+        // 한계: public_branches 문서가 통째로 사라진 상태에서 이 복원을 돌리면, 문서를 새로 만들면서
+        // 목록 표시순서(sortOrder)는 되살아나지 않는다 — settings 에는 그 값이 없기 때문이다.
+        // (문서가 남아 있으면 merge 라 보존된다.) 그런 복원 뒤에는 표시순서를 다시 넣어야 한다.
         await gasClient.addBranch(branchName, pinHash, brand, role, undefined, isAdminSession);
         await gasClient.toggleBranchActive(branchName, isActive, isAdminSession);
         settingsCount++;

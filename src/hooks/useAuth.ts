@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { BranchSetting, gasClient } from "../api/gasClient";
 import { hashPin } from "../utils/hashPin";
+import { clearBranchListCache } from "../utils/branchListCache";
 import type { LoginBranch } from "../api/firebaseAuth";
 import type { UserProfile } from "../api/userProfile";
 import type { GateTarget } from "../api/gateAuth";
@@ -599,7 +600,7 @@ export function useAuth() {
     if (opts?.forgetGoogle) localStorage.removeItem(LAST_GOOGLE_EMAIL_KEY);
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SELECTED_BRANCH_KEY);
-    sessionStorage.removeItem("erp_branch_list_cache");
+    clearBranchListCache(); // 옛 키까지 함께 비운다 — 키가 흩어져 있어 로그아웃이 새 캐시를 못 지우던 문제
     setUser(null);
     setSelectedBranchState(null);
     setPendingGate(null);
