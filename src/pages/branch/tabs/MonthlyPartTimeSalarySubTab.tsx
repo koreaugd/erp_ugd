@@ -13,6 +13,7 @@ import {
   absorbLegacyPartTimeRows,
   adoptFreshAutoValues,
   computePartTimeSalary,
+  dedupePartTimeRowsById,
   legacyPartTimeNameOf,
   mergeManualPartTimeWork,
   resolvePartTimeAccumulatedHours,
@@ -273,10 +274,16 @@ const mergePendingLocalRows = (
   syncedById: Map<string, PartTimeSalaryRow>,
   localIsFreshlyAggregated = false
 ): PartTimeSalaryRow[] => {
-  if (!serverRows) return localRows;
-  const remainingLocal = new Map(localRows.map((row) => [row.employeeId, row]));
+  // **맵을 만들기 전에 먼저 접는다.** 같은 id 가 두 번 든 배열로 Map 을 만들면 **뒤의 행이 이긴다** —
+  // 사본에는 [방금 집계한 행, 화면에 있던 옛 행] 순서로 들어 있어서, 그대로 두면 옛 0시간짜리 행이
+  // 이겨 그 사람 급여가 옛 값으로 굳은 채 서버에 올라간다(Codex 지독한리뷰 2026-09-02).
+  // 이 경로는 흡수(absorbLegacyRows)보다 먼저 도는 자리가 있어 여기서 따로 막아야 한다.
+  const dedupedLocal = dedupePartTimeRowsById(localRows);
+  const dedupedServer = serverRows ? dedupePartTimeRowsById(serverRows) : null;
+  if (!dedupedServer) return dedupedLocal;
+  const remainingLocal = new Map(dedupedLocal.map((row) => [row.employeeId, row]));
   const merged: PartTimeSalaryRow[] = [];
-  serverRows.forEach((serverRow) => {
+  dedupedServer.forEach((serverRow) => {
     const localRow = remainingLocal.get(serverRow.employeeId);
     remainingLocal.delete(serverRow.employeeId);
     if (!localRow) {
@@ -307,10 +314,13 @@ const mergeKeepingManualRows = (
   current: PartTimeSalaryRow[],
   excluded: Set<string>
 ): PartTimeSalaryRow[] => {
-  const incomingIds = new Set(incoming.map((row) => row.employeeId));
-  const currentById = new Map(current.map((row) => [row.employeeId, row]));
-  const reconciled = incoming.map((row) => reconcileLoadedRow(row, currentById.get(row.employeeId)));
-  const keptManualRows = current.filter(
+  // 여기도 맵을 만들기 전에 접는다(위 mergePendingLocalRows 와 같은 이유).
+  const dedupedIncoming = dedupePartTimeRowsById(incoming);
+  const dedupedCurrent = dedupePartTimeRowsById(current);
+  const incomingIds = new Set(dedupedIncoming.map((row) => row.employeeId));
+  const currentById = new Map(dedupedCurrent.map((row) => [row.employeeId, row]));
+  const reconciled = dedupedIncoming.map((row) => reconcileLoadedRow(row, currentById.get(row.employeeId)));
+  const keptManualRows = dedupedCurrent.filter(
     (row) => isManualRow(row) && !incomingIds.has(row.employeeId) && !excluded.has(row.employeeId)
   );
   return [...reconciled, ...keptManualRows];
@@ -495,7 +505,7 @@ async function flushPartTimeSalaryForCloseInner(
   const snapshot = bridge?.snapshot();
   const screenRows: PartTimeSalaryRow[] | null =
     snapshot && snapshot.month === selectedMonth
-      ? toStorableRows(snapshot.rows.filter((row) => !excluded.has(row.employeeId)))
+      ? dedupePartTimeRowsById(toStorableRows(snapshot.rows.filter((row) => !excluded.has(row.employeeId))))
       : null;
   const localRaw = localStorage.getItem(storageKey);
   const localRows: PartTimeSalaryRow[] | null = (() => {
@@ -504,9 +514,8 @@ async function flushPartTimeSalaryForCloseInner(
   const salaryPending = localStorage.getItem(pendingKey) === "1" && !!localRows;
   // 병합 기준값 — '이 기기에서 정말 바뀐 행'만 서버 위에 얹기 위한 마지막 업로드 성공본.
   const syncedRaw = readJson(syncedKey);
-  const syncedById = new Map<string, PartTimeSalaryRow>(
-    Array.isArray(syncedRaw) ? syncedRaw.map((row: PartTimeSalaryRow) => [row.employeeId, row]) : []
-  );
+  const dedupedSyncedForFlush = dedupePartTimeRowsById<PartTimeSalaryRow>(Array.isArray(syncedRaw) ? syncedRaw : []);
+  const syncedById = new Map<string, PartTimeSalaryRow>(dedupedSyncedForFlush.map((row) => [row.employeeId, row]));
   let finalRows: PartTimeSalaryRow[];
   let uploadSalary = false;
   if (screenRows && screenRows.length > 0) {
@@ -521,7 +530,7 @@ async function flushPartTimeSalaryForCloseInner(
     // 시간과 금액이 어긋난 채 확정되지 않게 한다(reconcileLoadedRow 와 같은 규칙).
     // 다른 기기의 수기 시간·출근일 보존은 병합 함수(preserveServerManualFields)가 이미 처리했다 —
     // 여기서는 '자동 집계' 필드만 화면의 새 집계값으로 맞춰 확정본 = 보이는 표를 만든다.
-    const screenById = new Map(screenRows.map((row) => [row.employeeId, row]));
+    const screenById = new Map(dedupePartTimeRowsById(screenRows).map((row) => [row.employeeId, row]));
     finalRows = toStorableRows(merged.map((row) => {
       const onScreen = screenById.get(row.employeeId);
       if (!onScreen) return row; // 다른 기기가 만든, 이 화면에 없는 행 — 병합 결과 그대로.
@@ -757,9 +766,9 @@ export function MonthlyPartTimeSalarySubTab({
       // (baseline 과 지문이 달라진 행)은 화면 값을 지킨다 — 자동저장 완료 지점과 같은 reconcile 규칙.
       reconcileUploaded: (month, baseline, uploaded) => {
         if (month !== selectedMonth) return; // 그 사이 결산월을 옮겼으면 옛 달의 반영은 버린다.
-        const baselineById = new Map<string, PartTimeSalaryRow>(baseline.map((row) => [row.employeeId, row]));
+        const baselineById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById(baseline).map((row) => [row.employeeId, row]));
         setSalaries((current) => {
-          const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+          const currentById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById<PartTimeSalaryRow>(current).map((row) => [row.employeeId, row]));
           const uploadedIds = new Set(uploaded.map((row) => row.employeeId));
           const reconciledRows = uploaded.map((up) => {
             const onScreen = currentById.get(up.employeeId);
@@ -834,9 +843,8 @@ export function MonthlyPartTimeSalarySubTab({
     try {
       const raw = localStorage.getItem(salarySyncedKey);
       const parsed = raw ? JSON.parse(raw) : null;
-      return new Map<string, PartTimeSalaryRow>(
-        Array.isArray(parsed) ? parsed.map((row: PartTimeSalaryRow) => [row.employeeId, row]) : []
-      );
+      const dedupedSyncedRows = dedupePartTimeRowsById<PartTimeSalaryRow>(Array.isArray(parsed) ? parsed : []);
+      return new Map<string, PartTimeSalaryRow>(dedupedSyncedRows.map((row) => [row.employeeId, row]));
     } catch {
       return new Map<string, PartTimeSalaryRow>();
     }
@@ -1143,9 +1151,9 @@ export function MonthlyPartTimeSalarySubTab({
           // 반드시 **올린 목록(mergedRows)을 기준으로** 다시 만든다. 화면 목록만 훑으면
           // 다른 기기가 새로 추가한 행이 화면에 안 들어오는데 기준값에는 들어 있어서,
           // 다음 저장 때 "이 기기에서 지운 행"으로 오해받아 서버에서 사라진다(급여 누락).
-          const atSaveTimeById = new Map<string, PartTimeSalaryRow>(storableSalaries.map((row) => [row.employeeId, row]));
+          const atSaveTimeById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById(storableSalaries).map((row) => [row.employeeId, row]));
           applyIfCurrent(viewKey, (current) => {
-            const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+            const currentById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById<PartTimeSalaryRow>(current).map((row) => [row.employeeId, row]));
             const mergedIds = new Set(mergedRows.map((row) => row.employeeId));
             const reconciledRows = mergedRows.map((merged) => {
               const onScreen = currentById.get(merged.employeeId);
@@ -1316,12 +1324,15 @@ export function MonthlyPartTimeSalarySubTab({
             // 화면도 병합본으로 맞춘다 — flush 시작 후 사용자가 고친 행(지문 변화)은 화면 값을 지킨다
             // (자동저장 완료 지점과 같은 reconcile). 언마운트 뒤라면 setSalaries 는 조용히 무시된다.
             if (uploadedMerged && Array.isArray(pendingSalaries)) {
+              // 기준값도 접은 뒤에 만든다 — 사본에 같은 id 가 두 번 들어 있으면 뒤의 옛 행이 기준이 되어,
+              // 올리는 동안 사용자가 고친 행이 '안 고친 행'으로 읽혀 화면 편집이 덮인다(Codex 3R 2026-09-02).
+              const dedupedPending = dedupePartTimeRowsById(pendingSalaries as PartTimeSalaryRow[]);
               const baselineById = new Map<string, PartTimeSalaryRow>(
-                (pendingSalaries as PartTimeSalaryRow[]).map((row) => [row.employeeId, row])
+                dedupedPending.map((row) => [row.employeeId, row])
               );
               const uploadedRows = uploadedMerged;
               applyIfCurrent(viewKey, (current) => {
-                const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+                const currentById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById<PartTimeSalaryRow>(current).map((row) => [row.employeeId, row]));
                 const uploadedIds = new Set(uploadedRows.map((row) => row.employeeId));
                 const reconciledRows = uploadedRows.map((up) => {
                   const onScreen = currentById.get(up.employeeId);
@@ -1497,7 +1508,8 @@ export function MonthlyPartTimeSalarySubTab({
     try {
         const savedConfig = localStorage.getItem(salaryStorageKey);
       if (savedConfig) {
-        const list: PartTimeSalaryRow[] = JSON.parse(savedConfig);
+        // 사본에 같은 id 가 두 번 들어 있으면 뒤의 옛 행이 이긴다 — 접고 나서 맵을 만든다.
+        const list: PartTimeSalaryRow[] = dedupePartTimeRowsById(JSON.parse(savedConfig));
         list.forEach((item) => {
           savedSalaryMap[item.employeeId] = item;
         });
@@ -1644,9 +1656,9 @@ export function MonthlyPartTimeSalarySubTab({
               // 통째로 uploadRows(옛 스냅샷)로 되돌리면, 그 사이 고친 값이 화면에서 사라지고 이후 편집 때
               // 그 옛 화면값이 다시 서버로 올라간다(Codex High 2026-08-02). 자동저장 완료 지점(atSaveTimeById
               // reconcile)과 같은 규칙 — 시작 시점 사본과 지문이 달라진 행은 화면 값을 지킨다.
-              const atResendById = new Map<string, PartTimeSalaryRow>(restoredRows.map((row) => [row.employeeId, row]));
+              const atResendById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById(restoredRows).map((row) => [row.employeeId, row]));
               applyIfCurrent(viewKey, (current) => {
-                const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+                const currentById = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById<PartTimeSalaryRow>(current).map((row) => [row.employeeId, row]));
                 const uploadedIds = new Set(uploadRows.map((row) => row.employeeId));
                 const reconciledRows = uploadRows.map((uploaded) => {
                   const onScreen = currentById.get(uploaded.employeeId);
@@ -1821,7 +1833,7 @@ export function MonthlyPartTimeSalarySubTab({
         // 업로드 경로(persistPartTimeSalaries)도 같은 명부 이름으로 흡수해야 서버 사본이 정리된다.
         rosterPartTimerNamesRef.current = partTimers.map((employee) => String(employee?.name ?? "").trim());
         setSalaries((current) => {
-          const byEmployeeId = new Map<string, PartTimeSalaryRow>(current.map((salary) => [salary.employeeId, salary]));
+          const byEmployeeId = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById<PartTimeSalaryRow>(current).map((salary) => [salary.employeeId, salary]));
           const excluded = new Set<string>(excludedEmployeeIds);
           // 수기 행은 명부에도 마감에도 없어 여기서 다시 만들어지지 않는다. 뒤에 그대로 붙여 살린다.
           // 근무기록에서 온 `legacy-` 행도 같이 살린다 — 명부에 등록된 사람의 legacy 행은 위 allPartTimers
@@ -1880,6 +1892,9 @@ export function MonthlyPartTimeSalarySubTab({
             } as PartTimeSalaryRow;
           });
           // 살려 온 legacy 행 중 명부에 등록된 사람 것은 여기서 명부 행에 흡수돼 한 줄이 된다.
+          // **근무기록에서 온 legacy 행은 양쪽 목록에 같은 id 로 들어 있다.** 명부에 없는 사람은 흡수할
+          // 곳이 없어 그대로 두 줄이 됐다(대물섬 종로점 2026-09-02). 접는 것은 absorbLegacyRows 안의
+          // dedupePartTimeRowsById 가 한다 — 이어 붙이는 자리마다 따로 걸러 두면 또 한 곳을 빠뜨린다.
           return absorbLegacyRows([...rebuiltRows, ...manualRows]);
         });
       } catch (error) {

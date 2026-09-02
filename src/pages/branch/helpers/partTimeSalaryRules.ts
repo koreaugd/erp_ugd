@@ -219,6 +219,43 @@ const isAbsorbTarget = (field: string, value: unknown) =>
   isEmptyCell(value) || (MONEY_FIELDS.has(field) && Number(value) === 0);
 
 /**
+ * **같은 id 가 두 번 들어온 행을 앞의 것 하나로 접는다.**
+ *
+ * 화면은 명단을 만들 때마다 두 덩어리를 이어 붙인다 —
+ *   [근무기록·명부로 방금 다시 만든 행] + [화면에 있던 행 중 살려 둘 행(수기 행·legacy 행)].
+ * 그런데 근무기록에서 온 `legacy-` 행은 **양쪽에 같은 id 로 들어 있다.** 명부에 등록된 사람은 아래
+ * 흡수가 한 줄로 접어 주지만, 명부에 없는 사람은 접을 곳이 없어 두 줄이 그대로 남았다
+ * (대물섬 종로점 2026-09-02 이준오·김재린 — 8개 지점 17명이 같은 모양이었다).
+ * 이어 붙이는 자리가 화면·저장·마감에 걸쳐 여럿이라, 그 자리마다 막지 않고 **여기 한 곳**에서 막는다.
+ *
+ * **앞의 행이 이긴다.** 이어 붙일 때 앞에 오는 것이 언제나 방금 다시 만든 행이고, 그 행은 화면에
+ * 있던 행을 물려받아(`{...existing}`) 만들어진다 — 사람이 적어 둔 값은 이미 그 안에 들어 있고,
+ * 누적시간·급여만 지금 집계로 새로 정해져 있다. 뒤의 행을 남기면 그 새 집계가 옛 값으로 되돌아간다.
+ *
+ * **id 가 비어 있는 행은 접지 않는다.** 옛 저장본에는 id 없는 행이 있을 수 있는데, 그것끼리 같은
+ * 행으로 묶으면 서로 다른 사람의 급여가 통째로 사라진다. id 가 실제로 적힌 행만 같은 행으로 본다.
+ * (이름이 같고 id 가 다른 행은 여기서 건드리지 않는다 — 동명이인일 수 있어 사람이 봐야 한다.
+ *  그건 마감 게이트 `duplicateNamePartTimeRows` 가 관리자에게 알린다.)
+ */
+export function dedupePartTimeRowsById<T extends PartTimeAbsorbableRow>(rows: T[]): T[] {
+  if (!Array.isArray(rows) || rows.length < 2) return rows;
+  const seen = new Set<string>();
+  let hasDuplicate = false;
+  const kept = rows.filter((row) => {
+    const id = trimmed(row?.employeeId);
+    if (!id) return true;
+    if (seen.has(id)) {
+      hasDuplicate = true;
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+  // 중복이 없으면 원래 배열을 그대로 돌려준다(화면이 쓸데없이 다시 그려지지 않게).
+  return hasDuplicate ? kept : rows;
+}
+
+/**
  * 명부에 등록된 사람의 옛 `legacy-` 행을 명부 행에 흡수한다.
  *
  * 흡수는 **빈칸 채우기**다. 명부 행에 이미 값이 있으면 그대로 둔다 — 나중에 적은 값이 더 맞다.
@@ -245,6 +282,9 @@ export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
   }
 ): T[] {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
+  // **접는 것이 먼저다.** 같은 id 가 두 번 들어온 채로 아래 판정을 돌리면, 그 한 행이 "같은 이름이
+  // 두 줄"로 읽혀 흡수가 통째로 멈춘다 — 명부 행이 겹친 것뿐인데 legacy 행이 영영 접히지 않는다.
+  const deduped = dedupePartTimeRowsById(rows);
   const excluded = new Set([...(options.excludedIds || [])].map((id) => String(id)));
 
   // **직원명부에 같은 이름이 둘 이상이면 그 이름은 흡수 대상에서 뺀다.**
@@ -265,7 +305,7 @@ export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
   // 손대지 않고 남겨 두면 중복 게이트가 잡아 사람이 정리한다 — 모를 때는 멈추는 쪽이 안전하다.
   const hostByName = new Map<string, T>();
   const ambiguousNames = new Set<string>(duplicatedRosterNames);
-  rows.forEach((row) => {
+  deduped.forEach((row) => {
     const id = String(row?.employeeId ?? "");
     if (!id || isLegacyId(id) || isManualId(id) || excluded.has(id)) return;
     const name = trimmed(row.rosterName || row.name);
@@ -277,7 +317,7 @@ export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
 
   const absorbedInto = new Map<string, T>();
   const dropped = new Set<string>();
-  rows.forEach((row) => {
+  deduped.forEach((row) => {
     const id = String(row?.employeeId ?? "");
     // 표시 이름이 아니라 id 로 판정한다 — 이름을 고쳐 쓴 legacy 행을 남의 행에 흡수시키지 않기 위해서다.
     const name = legacyPartTimeNameOf(id, options.branchName);
@@ -306,8 +346,8 @@ export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
     dropped.add(id);
   });
 
-  if (dropped.size === 0) return rows;
-  return rows
+  if (dropped.size === 0) return deduped;
+  return deduped
     .filter((row) => !dropped.has(String(row?.employeeId ?? "")))
     .map((row) => absorbedInto.get(String(row?.employeeId ?? "")) || row);
 }

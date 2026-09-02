@@ -12,9 +12,11 @@
  *
  * 픽스처는 전부 **합성 데이터**다. 이 저장소는 공개돼 있어 실제 주민등록번호·계좌번호를 넣으면 안 된다.
  */
+import { readFileSync } from "node:fs";
 import {
   absorbLegacyPartTimeRows,
   adoptFreshAutoValues,
+  dedupePartTimeRowsById,
   resolveExtraPartTimeWork,
   type PartTimeAbsorbableRow
 } from "../src/pages/branch/helpers/partTimeSalaryRules";
@@ -345,6 +347,176 @@ console.log("\n[4] 서버의 낡은 자동값이 화면 집계를 덮지 않는�
   const server = row({ employeeId: "emp-1", name: "홍길동", hourlyRate: "15000", accumulatedHours: "10", autoAccumulatedHours: "10", calculatedSalary: "150000" });
   const out = adoptFreshAutoValues(server, local);
   check("집계 근거가 없는 화면 값으로는 서버 시간을 깎지 않는다", out.accumulatedHours, "10");
+}
+
+
+// ─────────────────────────────────────────────────────────────
+console.log("\n[5] 같은 행이 두 번 들어와도 한 줄로만 남는다");
+// ─────────────────────────────────────────────────────────────
+{
+  // 실제 사고(대물섬 종로점 2026-09-02): 화면이 명단을 만들 때
+  //   [근무기록으로 다시 만든 행] + [화면에 있던 행 중 살려 둘 행]
+  // 을 이어 붙이는데, 근무기록에서 온 legacy 행은 **양쪽에 같은 id 로** 들어 있다.
+  // 명부에 등록된 사람은 아래 흡수가 한 줄로 접어 주지만, 명부에 없는 사람은 접을 곳이 없어
+  // 두 줄이 그대로 남았다(이준오·김재린 …). 이어 붙이는 자리가 여러 곳이라 여기 한 곳에서 막는다.
+  const rebuilt = [
+    row({ employeeId: "emp-1", name: "엄희민", hourlyRate: "15000", accumulatedHours: "81" }),
+    // 방금 집계한 행 — 이번 달 근무 7시간이 반영돼 있다.
+    row({ employeeId: `legacy-${BRANCH}-이준오`, name: "이준오", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" })
+  ];
+  const kept = [
+    // 화면에 있던 옛 행 — 대장을 마지막으로 연 시점의 0시간에서 굳어 있다. 이 행이 남으면 급여가 사라진다.
+    row({ employeeId: `legacy-${BRANCH}-이준오`, name: "이준오", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" })
+  ];
+  const out = absorbLegacyPartTimeRows([...rebuilt, ...kept], { branchName: BRANCH, rosterNames: ["엄희민"], excludedIds: [] });
+  check("명부에 없는 사람도 한 줄만 남는다", out.map((r) => r.employeeId), ["emp-1", `legacy-${BRANCH}-이준오`]);
+  check("남는 것은 앞의 행 — 방금 집계한 값이다", [out[1].accumulatedHours, out[1].calculatedSalary], ["7", "84000"]);
+}
+{
+  // 명부 행이 두 번 들어오면 "명부엔 한 명인데 급여 행이 둘"로 읽혀 흡수가 통째로 멈춘다.
+  // 같은 id 는 같은 행이다 — 먼저 한 줄로 접은 뒤에 판정해야 흡수가 살아 있다.
+  const rows = [
+    row({ employeeId: "emp-1", name: "홍길동", accumulatedHours: "20" }),
+    row({ employeeId: "emp-1", name: "홍길동", accumulatedHours: "20" }),
+    row({ employeeId: `legacy-${BRANCH}-홍길동`, name: "홍길동", bank: "가나은행", accountNumber: "1111", hourlyRate: "15000" })
+  ];
+  const out = absorbLegacyPartTimeRows(rows, { branchName: BRANCH, rosterNames: ["홍길동"], excludedIds: [] });
+  check("같은 id 가 겹쳐도 흡수는 그대로 된다", out.map((r) => r.employeeId), ["emp-1"]);
+  check("겹친 채로도 legacy 계좌·시급이 옮겨진다", [out[0].bank, out[0].accountNumber, out[0].calculatedSalary], ["가나은행", "1111", "300000"]);
+}
+{
+  // id 가 다르면 이름이 같아도 다른 행이다 — 동명이인·수기 행을 함부로 지우면 그 사람 급여가 사라진다.
+  // (이름이 겹치는 것은 마감 게이트 duplicateNamePartTimeRows 가 사람에게 알려 정리하게 한다.)
+  const rows = [
+    row({ employeeId: `legacy-${BRANCH}-홍길동`, name: "홍길동", hourlyRate: "15000", accumulatedHours: "10" }),
+    row({ employeeId: "manual-abc", name: "홍길동", hourlyRate: "16000", accumulatedHours: "5" })
+  ];
+  const out = absorbLegacyPartTimeRows(rows, { branchName: BRANCH, rosterNames: [], excludedIds: [] });
+  check("id 가 다르면 이름이 같아도 지우지 않는다", out.map((r) => r.employeeId), [`legacy-${BRANCH}-홍길동`, "manual-abc"]);
+}
+{
+  // id 가 비어 있는 행은 옛 저장본에 있을 수 있다. 그것끼리 한 줄로 접으면 남의 급여가 통째로 사라진다.
+  // "같은 id" 로 묶을 수 있는 것은 id 가 실제로 적힌 행뿐이다.
+  const rows = [
+    row({ employeeId: "", name: "홍길동", hourlyRate: "15000", accumulatedHours: "10" }),
+    row({ employeeId: "", name: "김철수", hourlyRate: "15000", accumulatedHours: "5" })
+  ];
+  const out = absorbLegacyPartTimeRows(rows, { branchName: BRANCH, rosterNames: [], excludedIds: [] });
+  check("id 가 빈 행은 서로 다른 행으로 둔다", out.map((r) => r.name), ["홍길동", "김철수"]);
+}
+
+// ─────────────────────────────────────────────────────────────
+console.log("\n[6] 맵을 만들기 전에 접는다 (뒤의 옛 행이 이기지 않게)");
+// ─────────────────────────────────────────────────────────────
+{
+  // 저장 병합(mergePendingLocalRows)·복원 병합(mergeKeepingManualRows)은 행 배열로 Map 을 만든다.
+  // 같은 id 가 두 번 들어 있으면 **JavaScript Map 은 뒤의 것을 남긴다.** 사본은
+  // [방금 집계한 행, 화면에 있던 옛 행] 순서라, 접지 않고 맵을 만들면 옛 행이 이겨 그 사람 급여가
+  // 옛 값으로 굳은 채 서버로 올라간다(Codex 지독한리뷰 2026-09-02).
+  const id = `legacy-${BRANCH}-이준오`;
+  const fresh = row({ employeeId: id, name: "이준오", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" });
+  const stale = row({ employeeId: id, name: "이준오", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" });
+
+  const naive = new Map([fresh, stale].map((r) => [r.employeeId, r]));
+  check("접지 않고 맵을 만들면 옛 행이 이긴다 (그래서 접어야 한다)", naive.get(id)!.accumulatedHours, "0");
+
+  const safe = new Map(dedupePartTimeRowsById([fresh, stale]).map((r) => [r.employeeId, r]));
+  check("접고 만든 맵에는 방금 집계한 행이 남는다", [safe.get(id)!.accumulatedHours, safe.get(id)!.calculatedSalary], ["7", "84000"]);
+}
+{
+  // 위 규칙이 화면 코드에 **실제로 배선돼 있는지** 소스에서 확인한다.
+  // (두 병합 함수는 화면 모듈 안에 있어 여기서 직접 부를 수 없다.)
+  //
+  // 규칙: 행 배열로 Map 을 만드는 자리에서 그 배열 변수는 **접기를 거쳐 만들어진 변수여야 한다.**
+  // 문자열 몇 개를 찾는 식으로는 `new Map<string, Row>(current.map(...))` 같은 형태를 놓친다 —
+  // 실제로 첫 판이 그렇게 짜여 아무것도 못 보는 검사였다(Codex 2R 지적 2026-09-02).
+  const scanRowMapSites = (src: string): { examined: number; unsafe: string[] } => {
+    const sites: string[] = [];
+    let examined = 0;
+    const mapStart = /new Map\s*(?:<[^>]*>)?\s*\(/g;
+    let hit: RegExpExecArray | null;
+    while ((hit = mapStart.exec(src)) !== null) {
+      // 맵을 만드는 표현의 앞머리만 본다. 여러 줄에 걸쳐 있어도 이 길이면 `.map(... employeeId ...)` 까지 들어온다.
+      const head = src.slice(hit.index, hit.index + 300);
+      // 행 배열로 만드는 맵만 대상 — 키가 employeeId 인 맵이다(다른 용도의 맵은 접을 이유가 없다).
+      if (!head.includes(".map(") || !head.includes("employeeId")) continue;
+      examined++; // 이 자리를 실제로 봤다는 기록 — 하나도 못 보고 통과하는 검사를 막는다.
+      // 맵에 **무엇을 넣는지**만 본다. "어딘가에 접기 호출이 보이면 통과"로 두면
+      // `new Map((flag ? dedupePartTimeRowsById(rows) : rows).map(...))` 가 그대로 빠져나간다(Codex 5R 2026-09-02).
+      const operand = head.replace(/^new Map\s*(?:<[^>]*>)?\s*\(\s*/, "");
+      if (/^dedupePartTimeRowsById\s*(?:<[^>]*>)?\s*\(/.test(operand)) continue; // 그 자리에서 곧바로 접었다
+      // `x.map(` 과 `(x as Row[]).map(` 양쪽에서 변수 이름을 꺼낸다.
+      const name = operand.match(/^\(?\s*([A-Za-z_$][\w$]*)/)?.[1] ?? "(식)";
+      // 그 변수가 **언제나** 접기 결과인가. 선언이 곧바로 `= dedupePartTimeRowsById(` 이어야 하고,
+      // 그 뒤에 다른 값으로 다시 대입되지 않아야 한다. "선언문 어딘가에 접기가 있으면 통과"로 두면
+      // `cond ? dedupePartTimeRowsById(x) : x` 같은 형태가 그대로 빠져나간다(Codex 4R 2026-09-02).
+      const declaredByDedupe =
+        name !== "(식)" &&
+        // 정규식은 String.raw 로 쓴다 — 그냥 템플릿 리터럴에 넣으면 \b 가 **백스페이스 문자**가 되어
+        // 탐지기가 조용히 죽는다(같은 실수를 이미 한 번 했다). 아래 자기검증이 그것을 잡아 준다.
+        new RegExp(String.raw`\b(?:const|let)\s+` + name + String.raw`\s*(?::[^=;]*)?=\s*dedupePartTimeRowsById\s*(?:<[^>]*>)?\s*\(`).test(src);
+      // 다시 대입되면 그 뒤로는 접힌 값이라는 보장이 없다. 대입은 선언 한 번뿐이어야 한다.
+      const assignments = (src.match(new RegExp(String.raw`\b` + name + String.raw`\s*=(?!=)`, "g")) || []).length;
+      const madeByDedupe = declaredByDedupe && assignments === 1;
+      if (!madeByDedupe) sites.push(name);
+    }
+    return { examined, unsafe: sites };
+  };
+
+  // **탐지기 자기검증** — 통과하는데 아무것도 안 보는 검사는 없는 것보다 나쁘다.
+  // 위반 사례를 일부러 넣어, 탐지기가 그것을 실제로 잡는지 먼저 확인한다.
+  const unsafeTyped = `
+    const current = props.rows;
+    const currentById = new Map<string, PartTimeSalaryRow>(current.map((row) => [row.employeeId, row]));
+  `;
+  // 괄호·타입단언·줄바꿈이 섞인 형태. 첫 판 탐지기가 이것을 놓쳐 실제 결함이 살아남았다(Codex 3R 2026-09-02).
+  const unsafeCast = `
+    const baselineById = new Map<string, PartTimeSalaryRow>(
+      (pendingSalaries as PartTimeSalaryRow[]).map((row) => [row.employeeId, row])
+    );
+  `;
+  const safeVar = `
+    const currentRows = dedupePartTimeRowsById(props.rows);
+    const currentById = new Map<string, PartTimeSalaryRow>(currentRows.map((row) => [row.employeeId, row]));
+  `;
+  const safeInline = `
+    const byId = new Map<string, PartTimeSalaryRow>(dedupePartTimeRowsById(current).map((row) => [row.employeeId, row]));
+  `;
+  check("탐지기가 접지 않은 맵 생성을 잡아낸다", scanRowMapSites(unsafeTyped).unsafe, ["current"]);
+  check("탐지기가 괄호·타입단언·여러 줄 형태도 잡아낸다", scanRowMapSites(unsafeCast).unsafe, ["pendingSalaries"]);
+  // 조건부로만 접힌 변수는 접힌 것이 아니다 — false 쪽이 곧 last-wins 경로다(Codex 4R 2026-09-02).
+  const unsafeTernary = `
+    const rows = shouldDedupe ? dedupePartTimeRowsById(pendingSalaries) : pendingSalaries;
+    const byId = new Map<string, PartTimeSalaryRow>(rows.map((row) => [row.employeeId, row]));
+  `;
+  // 접은 뒤에 다시 원본을 대입하면 그때부터 접힌 값이 아니다.
+  const unsafeReassign = `
+    let rows = dedupePartTimeRowsById(pendingSalaries);
+    rows = pendingSalaries;
+    const byId = new Map<string, PartTimeSalaryRow>(rows.map((row) => [row.employeeId, row]));
+  `;
+  // 접기를 거치지 않은 별칭.
+  const unsafeAlias = `
+    const rows = pendingSalaries;
+    const byId = new Map<string, PartTimeSalaryRow>(rows.map((row) => [row.employeeId, row]));
+  `;
+  // 그 자리에서 조건부로만 접는 형태도 마찬가지다 — false 쪽이 곧 last-wins 경로다.
+  const unsafeInlineTernary = `
+    const byId = new Map<string, PartTimeSalaryRow>((flag ? dedupePartTimeRowsById(rows) : rows).map((row) => [row.employeeId, row]));
+  `;
+  check("탐지기가 그 자리에서 조건부로 접는 형태를 잡아낸다", scanRowMapSites(unsafeInlineTernary).unsafe, ["flag"]);
+  check("탐지기가 조건부로만 접힌 변수를 잡아낸다", scanRowMapSites(unsafeTernary).unsafe, ["rows"]);
+  check("탐지기가 접은 뒤 다시 대입된 변수를 잡아낸다", scanRowMapSites(unsafeReassign).unsafe, ["rows"]);
+  check("탐지기가 접지 않은 별칭을 잡아낸다", scanRowMapSites(unsafeAlias).unsafe, ["rows"]);
+  check("탐지기가 접어서 만든 변수는 통과시킨다", scanRowMapSites(safeVar).unsafe, []);
+  check("탐지기가 그 자리에서 접은 형태도 통과시킨다", scanRowMapSites(safeInline).unsafe, []);
+
+  const source = readFileSync(new URL("../src/pages/branch/tabs/MonthlyPartTimeSalarySubTab.tsx", import.meta.url), "utf-8");
+  check("탐지기가 화면 소스를 실제로 읽었다", source.includes("mergePendingLocalRows"), true);
+  const scanned = scanRowMapSites(source);
+  // 아무 자리도 못 보고 통과하는 검사를 막는다 — 화면 코드에는 행으로 만드는 맵이 여러 개 있다.
+  check("탐지기가 화면 소스의 행-맵 자리를 실제로 셌다", scanned.examined >= 6, true);
+  check("행 배열로 맵을 만드는 자리는 모두 접기를 거친다", scanned.unsafe, []);
 }
 
 console.log(failures === 0 ? "\n전부 통과" : `\n실패 ${failures}건`);
