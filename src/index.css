@@ -3276,41 +3276,8 @@ html body .branch-redesign.branch-redesign .sticky {
 
 
 
-html body .branch-redesign.branch-redesign #existing-record-warning-box {
-  display: block !important;
-  background: #F4F2CC !important;   /* 팔레트 개정 2026-08-04: 바닐라 새 값 */
-  background-color: #F4F2CC !important;
-  border: 1px solid #212121 !important;
-  color: #212121 !important;
-}
-
-html body .branch-redesign.branch-redesign #existing-record-warning-box * {
-  color: #212121 !important;
-}
-
-html body .branch-redesign.branch-redesign #existing-record-warning-box .space-y-1 p {
-  display: none !important;
-}
-
-html body .branch-redesign.branch-redesign #existing-record-warning-box button,
-html body .branch-redesign.branch-redesign #existing-record-warning-box button * {
-  color: #F6F5FA !important;
-}
-
-html body .branch-redesign.branch-redesign #existing-record-warning-box button:first-of-type,
-html body .branch-redesign.branch-redesign #existing-record-warning-box button:first-of-type *,
-html body .branch-redesign.branch-redesign #existing-record-warning-box button:last-of-type,
-html body .branch-redesign.branch-redesign #existing-record-warning-box button:last-of-type * {
-  background: #212121 !important;
-  background-color: #212121 !important;
-  border-color: #212121 !important;
-  color: #F6F5FA !important;
-}
-
-html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-settle-reset-button,
-html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-settle-reset-button * {
-  color: #111111 !important;
-}
+/* (일일마감 '기존 기록' 경고 상자 #existing-record-warning-box 규칙 삭제 — 상자 자체를 없애고
+   마감정보 카드 안 승인 버튼 하나로 바꿨다, 2026-09-14) */
 
 /* (구 사이드바 subtab-active/idle · branch-main-nav-* 규칙 제거 — §14 폐기 계약) */
 
@@ -3427,7 +3394,7 @@ html body .branch-redesign.branch-redesign #existing-record-warning-box #daily-s
   }
 }
 
-.branch-redesign #tab-view-settle > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#existing-record-warning-box):not(#edit-mode-locked-placeholder),
+.branch-redesign #tab-view-settle > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section),
 .branch-redesign #tab-view-settle > div > div:not(#settle-header-controls):not(#sales-section):not(#cash-closing-section):not(#staff-attendance-section):not(#memo-section):not(#expenses-section) {
   background: transparent !important;
   border-color: transparent !important;
