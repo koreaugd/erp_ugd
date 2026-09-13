@@ -15,6 +15,7 @@ import { calcAutoGrantDays, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRI
 // 지점 연차관리 탭과 규칙이 갈라지면 두 화면의 인원이 달라진다.
 import { loadAnnualLeaveRoster, toAnnualLeaveMembers, fullTimeSalaryKey, findStrandedLeaveOwners, describeStrandedOwners } from "./branch/helpers/annualLeaveRoster";
 import { splitDailyMemoMetadata } from "./branch/helpers/memoMetadata";
+import { formatPhoneTailDisplay } from "./branch/helpers/formatters";
 import { assembleMonthlyCloseWorkbook, duplicateNamePartTimeRows, purchaseRowHasExportableAmount, unnamedPartTimeSalaryRows, zeroPaidPartTimeRows, type MonthlyCloseData } from "./branch/helpers/monthlyCloseWorkbook";
 import { SalaryChangeHistoryTab } from "./admin/SalaryChangeHistoryTab";
 import { AccountManagementSection } from "./admin/AccountManagementSection";
@@ -4737,7 +4738,8 @@ function AdminLaborContractsSection() {
                       : <span className="text-gray-300">-</span>}
                   </td>
                   <td className={`${LABOR_SHEET_TD} font-extrabold text-[#212121]`}>{contract.name}</td>
-                  <td className={`${LABOR_SHEET_TD} font-mono font-black`}>{contract.phone}</td>
+                  {/* 연락처는 010을 뺀 뒤 8자리만(사용자 지시 2026-09-14). 저장값은 그대로 — 표시만 바꾼다. */}
+                  <td className={`${LABOR_SHEET_TD} font-mono font-black`}>{formatPhoneTailDisplay(contract.phone)}</td>
                   <td className={`${LABOR_SHEET_TD} font-mono text-gray-500`}>
                     {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
                   </td>

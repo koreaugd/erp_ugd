@@ -1,6 +1,6 @@
 // src/pages/branch/tabs/DailySettleTab.tsx  (BranchConfirmPage에서 분리 — 동작 변경 없음)
 import { useState, useEffect, useMemo, useCallback, useRef, type KeyboardEvent } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Lock, Plus, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, CheckCircle, CheckCircle2, ClipboardList, Info, Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import "./staffSheet.css";
 import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
@@ -1969,8 +1969,11 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           );
         })()}
 
-        {/* 표 아닌 안내 블록만 자기 여백을 갖는다(DESIGN.md §6-3). */}
-        <div className="mx-4 my-2.5">
+        {/* 표 아닌 안내 블록만 자기 여백을 갖는다(DESIGN.md §6-3).
+            기존 마감 기록이 있는 날짜의 안내는 이 한 줄이 전부다(사용자 지시 2026-09-14 "컴팩트하게") —
+            예전의 노란 배너·🚨 경고 상자·자물쇠 안내 블록·'날짜 다시 선택하기' 버튼은 지웠다.
+            날짜를 바꾸려면 위 표의 날짜 칸을 누르면 되고, 승인 전에는 아래 양식(지출·현금마감·근무자·메모)이 아예 그려지지 않는다. */}
+        <div className="mx-4 my-2.5 flex flex-wrap items-center gap-2">
         {!hasExistingRecord ? (
           // 큰 회색 박스로 감쌀 만한 내용이 아니다 — 한 줄 안내다.
           <span className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400">
@@ -1978,127 +1981,60 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             {settleDate} 마감을 새로 작성합니다.
           </span>
         ) : isEditApproved ? (
-          // 이미 승인해 수정 모드에 들어왔으면 '승인 필요'라고 하지 않는다 — 다음 할 일을 안내한다.
-          <div className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl inline-flex items-center gap-2 text-xs text-rose-800 leading-normal">
-            <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>
-              <strong>수정 모드:</strong> 값을 고친 뒤 마감을 다시 제출하세요.
-            </span>
-          </div>
+          // 이미 승인해 수정 모드에 들어왔으면 '승인 필요'라고 하지 않는다 — 다음 할 일을 안내하고,
+          // 저장된 기록을 지우고 처음부터 쓰는 '정산 리셋'을 같은 줄에 둔다(예전 경고 상자에 있던 기능을 옮긴 것).
+          <>
+            <div className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl inline-flex items-center gap-2 text-xs text-rose-800 leading-normal">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                <strong>수정 모드:</strong> 값을 고친 뒤 마감을 다시 제출하세요.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!existingRecordId) return;
+                if (!window.confirm(`${settleDate} 마감정산 내역을 완전히 초기화할까요?\n확인을 누르면 저장된 마감기록이 삭제되어 다시 들어와도 처음 입력 상태로 표시됩니다.`)) return;
+                try {
+                  await gasClient.deleteDaily(existingRecordId);
+                } catch (error: any) {
+                  triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
+                  return;
+                }
+                setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
+                originalSubmittedByRef.current = { name: "", uid: "" };
+                setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE)); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
+                triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
+              }}
+              id="daily-settle-reset-button"
+              className="px-3.5 py-2 bg-[#F4F2CC] hover:brightness-95 text-zinc-900 border border-zinc-900 rounded-xl text-[11px] font-black transition cursor-pointer"
+            >
+              ↺ 정산 리셋
+            </button>
+          </>
         ) : (
-          <div className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl inline-flex items-center gap-2 text-xs text-rose-800 leading-normal">
-            <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>
-              <strong>기저장 정보 존재:</strong> 수정하시려면 승인이 필요합니다.
-            </span>
-          </div>
+          // 기존 기록이 있다 — 설명 문장 대신 승인 버튼 하나만 둔다(사용자 지시 2026-09-14).
+          // bg-zinc-900 은 지점 스코프 catch-all 이 검정 바탕 + ghost 글자로 그린다(DESIGN.md §10).
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditApproved(true);
+              triggerToast("수정 모드로 진입했습니다. 값을 고친 뒤 마감을 다시 제출하세요.", "success");
+            }}
+            id="daily-settle-edit-approve-button"
+            className="px-3.5 py-2 bg-zinc-900 text-[#F4F2CC] rounded-full text-[11px] font-black transition hover:brightness-110 cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+            기존 마감 기록 있음 · 수정모드로 진행할 것을 승인함
+          </button>
         )}
         </div>
         </section>
       </div>
 
-      {/* Prominent Red warning for duplicate records */}
-      {hasExistingRecord && (
-        <div className={`p-5 rounded-2xl border ${
-          isEditApproved
-            ? "bg-rose-50 border-rose-200 text-rose-900 shadow-xs"
-            : "bg-red-600 border-red-700 text-white shadow-md"
-        } transition-all space-y-4`} id="existing-record-warning-box">
-          {/* 승인 전에만 안내한다 — 승인 후에는 아래 본문이 '승인되었습니다'로 바뀌므로 이 배너는 감춘다. */}
-          {!isEditApproved && (
-            <div className="rounded-2xl border border-zinc-900 bg-[#F4F2CC] p-4 text-sm font-black text-zinc-950">
-              기존 마감 기록이 있는 날짜입니다. 수정하려면 아래의 [수정모드로 진행할 것을 승인함] 버튼을 눌러 주세요.
-            </div>
-          )}
-          <div className="flex items-start gap-3">
-            <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-xs font-black tracking-tight uppercase">
-                🚨 이미 마감 기록이 완료된 정산일입니다 ({settleDate})
-              </h4>
-              <p className="text-[11px] opacity-90 leading-relaxed font-bold">
-                {isEditApproved
-                  ? "지점 마감 기록 수정 모드 진입이 최종 승인되었습니다. 아래 양식에서 값을 수정한 다음 [마감 제출]을 클릭하시면 이중 등록 없이 기존 내용이 완전히 교체 수정됩니다."
-                  : "선택하신 날짜에 이미 다른 마감 결재가 완료되었습니다. 본 마감 정산 내역을 정말로 수정하여 덮어쓰시겠습니까? 수정을 원치 않으시면 날짜를 다시 지정해 주십시오."
-                }
-              </p>
-            </div>
-          </div>
-
-          {(
-            <div className="flex flex-wrap gap-2 pt-1 font-extrabold text-[11px]">
-              {!isEditApproved && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditApproved(true);
-                    triggerToast("수정 모드로 진입했습니다. 값을 고친 뒤 마감을 다시 제출하세요.", "success");
-                  }}
-                  className="px-3.5 py-2 bg-white hover:bg-gray-100 text-red-600 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-                >
-                  ✏️ 수정모드로 진행할 것을 승인함
-                </button>
-              )}
-              {isEditApproved && <button
-                type="button"
-                onClick={async () => {
-                  if (!existingRecordId) return;
-                  if (!window.confirm(`${settleDate} 마감정산 내역을 완전히 초기화할까요?\n확인을 누르면 저장된 마감기록이 삭제되어 다시 들어와도 처음 입력 상태로 표시됩니다.`)) return;
-                  try {
-                    await gasClient.deleteDaily(existingRecordId);
-                  } catch (error: any) {
-                    triggerToast(error?.message || "정산 기록 삭제에 실패했습니다.", "error");
-                    return;
-                  }
-                  setHasExistingRecord(false); setExistingRecordId(null); setTimeErrors({}); setValidationErrors(false); setValidationTargets(createDailySettleValidationTargets()); setWriter("");
-                  originalSubmittedByRef.current = { name: "", uid: "" };
-                  setCashSales(""); setCardSales(""); setTransferSales(""); setDeliverySales(""); setNaverReviewCount(""); setExistingRecordHadNaverReview(false); setCashBalance(""); setCashDiffReason(""); setStaffMemo(""); setReviewMemo(""); setOtherMemo(""); setCashExpenses(padExpenseRows([], CASH_DEFAULT_CLASSIFICATION, CASH_DEFAULT_USAGE)); setCardExpenses(padExpenseRows([])); localStorage.removeItem(draftKey); initRosterInForm(); setIsEditApproved(true);
-                  triggerToast("선택한 날짜의 저장된 마감기록을 삭제하고 새 입력 상태로 초기화했습니다.", "success");
-                }}
-                id="daily-settle-reset-button"
-                className="px-3.5 py-2 bg-amber-100 hover:bg-amber-200 text-black border border-amber-200 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-              >
-                ↺ 정산 리셋
-              </button>}
-              <button
-                type="button"
-                onClick={() => {
-                  triggerToast("마감 정산 날짜를 달력에서 다시 선택해 주십시오.", "error");
-                  setShowStatusCalendar(true);
-                }}
-                className="px-3.5 py-2 bg-red-800 hover:bg-red-900 text-white border border-red-700 rounded-xl transition-colors cursor-pointer flex items-center gap-1"
-              >
-                📅 날짜 다시 선택하기
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Conditional form guard */}
-      {hasExistingRecord && !isEditApproved ? (
-        <div className="bg-gray-50 border border-dashed border-gray-200 rounded-2xl p-10 text-center flex flex-col items-center justify-center space-y-3 min-h-[250px]" id="edit-mode-locked-placeholder">
-          <div className="w-12 h-12 bg-gray-100/80 text-gray-400 rounded-full flex items-center justify-center border border-gray-100">
-            <Lock className="w-5 h-5 text-gray-400" />
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-xs font-black text-gray-700">작성 및 편집이 불가능합니다</h4>
-            <p className="text-[11px] text-gray-400 max-w-md mx-auto leading-relaxed">
-              기록 보호조치를 해제하신 뒤에만 양식 기록이 허용됩니다.<br />
-              상단의 빨간색 경고 영역 내 <strong>[✏️ 수정모드로 진행할 것을 승인함]</strong> 단추를 클릭해 주세요.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setShowStatusCalendar(true);
-            }}
-            className="px-3.5 py-2 bg-white hover:bg-gray-50 border border-gray-200 text-gray-600 text-xs font-extrabold rounded-lg shadow-2xs transition-colors cursor-pointer"
-          >
-            달력 다시 열어 날짜 조정하기
-          </button>
-        </div>
-      ) : (
+      {/* 승인 전에는 아래 양식을 그리지 않는다. 예전엔 여기 자물쇠 안내 상자가 있었으나
+          마감정보 카드의 승인 버튼 하나로 대신한다(2026-09-14). */}
+      {hasExistingRecord && !isEditApproved ? null : (
         <>
           {!isHeadOffice && (
             <>
