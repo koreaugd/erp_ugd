@@ -10,12 +10,17 @@
 import { useAuthContext } from "../contexts/AuthContext";
 import { useAppUpdateWatcher } from "../hooks/useAppUpdateWatcher";
 import { useIdleLogout } from "../hooks/useIdleLogout";
+import { isIdleLogoutExempt } from "../utils/idleLogoutExempt";
 
 const IDLE_LOGOUT_MS = 30 * 60 * 1000; // 마지막 조작 후 30분
 
 export function AppSessionGuard() {
   const { user, logout } = useAuthContext();
   useAppUpdateWatcher();
-  useIdleLogout(() => { if (user) logout(); }, IDLE_LOGOUT_MS);
+  // 면제 계정(총괄 구글 계정)은 30분이 지나도 로그아웃하지 않는다 — 사용자 지시 2026-09-14.
+  // 판정은 매 렌더에서 다시 하므로 로그아웃·재로그인으로 계정이 바뀌면 그대로 따라간다
+  // (useIdleLogout 이 콜백을 ref 로 들고 있어 최신 클로저를 본다).
+  const exempt = isIdleLogoutExempt(user);
+  useIdleLogout(() => { if (user && !exempt) logout(); }, IDLE_LOGOUT_MS);
   return null;
 }
