@@ -148,6 +148,10 @@ export function useAuth() {
               const freshSession: UserSession = {
                 ...parsedSession,
                 name: profile.name,
+                // email 도 프로필에서 다시 읽는다 — sessionStorage 를 고쳐 다른 사람 주소를 넣어도
+                // 유휴 로그아웃 면제(isIdleLogoutExempt) 같은 이메일 기반 판정을 속이지 못하게(Codex 지적 2026-09-14).
+                // 프로필 email 은 생성 후 수정되지 않는 필드다(updateUserProfile 이 email 을 받지 않는다).
+                email: profile.email,
                 role: profile.role,
                 allowedTabs: profile.role === "admin" ? "all" : profile.allowedTabs,
                 allowedBranches: profile.allowedBranches,

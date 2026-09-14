@@ -13,13 +13,14 @@
 //
 // 언제 갈아끼우나
 //   **입력 중에는 절대 안 한다.** 마감을 절반 쓰다가 화면이 날아가면 안 된다.
-//   글자를 치는 칸에 커서가 있거나, 최근 30초 안에 뭔가를 입력했다면 미룬다.
+//   최근 30초 안에 뭔가를 눌렀거나, 입력칸에 커서가 있으면서 최근 5분 안에 조작했다면 미룬다.
 //   조용해지면 그때 갈아끼운다. (작성 중이던 값은 localStorage에 남으므로 새로고침 후에도 이어진다)
+//   [2026-09-14] 예전엔 입력칸에 커서만 있어도 무한정 미뤘다 — 지점 화면은 커서가 늘 어느 칸엔가 남아 있어
+//   새 버전이 몇 시간씩 적용되지 않았다. 판정은 appVersion.ts 의 shouldDeferAppSwap 한 곳에 있다.
 import { useEffect, useRef, useState } from "react";
-import { applyAppVersion, fetchNewAppVersion } from "../utils/appVersion";
+import { applyAppVersion, fetchNewAppVersion, shouldDeferAppSwap } from "../utils/appVersion";
 
 const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10분마다
-const QUIET_AFTER_TYPING_MS = 30 * 1000; // 마지막 입력 후 이만큼 조용해야 갈아끼운다
 
 const isTypingNow = () => {
   const el = document.activeElement;
@@ -68,13 +69,17 @@ export function useAppUpdateWatcher() {
     };
   }, []);
 
-  // 조용해지면 갈아끼운다. 입력 중이면 계속 미룬다.
+  // 조용해지면 갈아끼운다. 작업 중이면 미룬다(판정 규칙은 shouldDeferAppSwap).
   useEffect(() => {
     if (!pendingVersion) return;
     const timer = window.setInterval(() => {
-      if (isTypingNow()) return;
-      if (Date.now() - lastTypedAt.current < QUIET_AFTER_TYPING_MS) return;
+      if (shouldDeferAppSwap(isTypingNow(), Date.now() - lastTypedAt.current)) return;
       applyAppVersion(pendingVersion);
+      // 한 번 시도했으면 대기 버전을 비운다. 새로고침이 취소될 수 있기 때문이다 —
+      // 미저장 탭(주류재고·통합보고서)의 "나가시겠습니까?" 창에서 [취소]를 누르면 이 화면이 그대로 남는데,
+      // 대기 버전을 들고 있으면 5초 뒤 또 시도해 창을 반복해서 띄운다(Codex 지적 2026-09-14).
+      // 비워 두면 다음 확인(10분 간격·탭 복귀)이 fetchNewAppVersion 의 쿨다운을 거쳐 다시 예약한다.
+      setPendingVersion(null);
     }, 5000);
     return () => window.clearInterval(timer);
   }, [pendingVersion]);
