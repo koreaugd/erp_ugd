@@ -39,7 +39,8 @@ const LOGIN_BRANCH_FALLBACK: LoginBranch[] = ([
   ["마음죽", "12"],
   ["카라멘야", "13"],
   ["금샤빠", "14"],
-  ["본사", "15"]
+  ["본사", "15"],
+  ["두부식", "18"]
 ] as const).map(([branchName, branchId]) => ({ branchId, branchName, brand: branchName, role: "branch", loginEmail: `branch-${branchId}@ugd-erp.example`, isActive: true }));
 
 export interface LoginBranch extends BranchSetting {

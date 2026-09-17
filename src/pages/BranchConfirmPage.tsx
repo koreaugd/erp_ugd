@@ -86,6 +86,7 @@ export default function BranchConfirmPage() {
     { branchName: "카라멘야", role: "branch", brand: "카라멘야" },
     { branchName: "금샤빠", role: "branch", brand: "금샤빠" },
     { branchName: "본사", role: "branch", brand: "본사" },
+    { branchName: "두부식", role: "branch", brand: "두부식" },
   ];
 
   // 1. Fetch available branches (세션 캐시 → GAS → 로컬 fallback 순서)
