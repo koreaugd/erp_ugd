@@ -870,16 +870,28 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             const rb = renderReasonBox(activeSubTab === "fullTimeSalary" ? "salary" : "purchase");
             return rb ? <div className="px-4 pt-4">{rb}</div> : null;
           })()}
-          {loading ? (
+          {activeSubTab === "fullTimeSalary" ? (
+            // 역할 권한 → 비밀번호 두 관문을 통과해야 표가 마운트된다(설계서 §15.4).
+            //
+            // [중요] 로딩 스피너는 반드시 게이트 **안쪽**에 있어야 한다(2026-09-20).
+            // 바깥에 두면 결산월을 바꿀 때마다 스피너가 게이트를 잠깐 걷어내고, 게이트는 그 언마운트를
+            // '탭을 떠남'으로 보고 자동 재잠금한다 — 월을 옮길 때마다 비밀번호를 다시 묻던 원인이다.
+            // 탭 이탈·장시간 화면 숨김 시 재잠금은 그대로 살아 있다(게이트가 진짜로 사라질 때만 작동).
+            <SalaryAccessGate branchName={branchName} title="정직원 급여대장 - 보안 잠금" guideAnchor="fulltime-salary-table">
+              {loading ? (
+                <div className="py-16 flex flex-col items-center justify-center space-y-3">
+                  <LoadingSpinner size="lg" />
+                  <span className="text-xs text-gray-400 font-bold font-mono">가맹점 무인 원격 일지에서 일일 정산자료 조합 파싱 중...</span>
+                </div>
+              ) : (
+                <MonthlyFullTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} isLocked={getSectionStatus("salary") === "confirmed"} registerAddRow={(fn) => { fulltimeAddRowRef.current = fn; }} showOtSummary={showOtSummary} />
+              )}
+            </SalaryAccessGate>
+          ) : loading ? (
             <div className="py-16 flex flex-col items-center justify-center space-y-3">
               <LoadingSpinner size="lg" />
               <span className="text-xs text-gray-400 font-bold font-mono">가맹점 무인 원격 일지에서 일일 정산자료 조합 파싱 중...</span>
             </div>
-          ) : activeSubTab === "fullTimeSalary" ? (
-            // 역할 권한 → 비밀번호 두 관문을 통과해야 표가 마운트된다(설계서 §15.4).
-            <SalaryAccessGate branchName={branchName} title="정직원 급여대장 - 보안 잠금" guideAnchor="fulltime-salary-table">
-              <MonthlyFullTimeSalarySubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} isLocked={getSectionStatus("salary") === "confirmed"} registerAddRow={(fn) => { fulltimeAddRowRef.current = fn; }} showOtSummary={showOtSummary} />
-            </SalaryAccessGate>
           ) : (
             <MonthlyPurchaseSalesSubTab branchName={branchName} selectedMonth={selectedMonth} triggerToast={triggerToast} resetToken={purchaseResetToken} isLocked={getSectionStatus("purchase") === "confirmed"} registerAddRow={(fn) => { purchaseAddRowRef.current = fn; }} />
           )}
@@ -890,7 +902,46 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
           {/* 파트타이머 급여대장·현금관리·현금지출·카드지출에는 '월말마감' 헤더 카드를 두지 않는다.
               이 탭들에서 그 카드는 제목과 설명만 담고 있었다 — 결산월 선택·마감 버튼은
               매입매출/정직원급여 탭에서만 렌더되므로 지워도 잃는 기능이 없다. */}
-          {loading ? (
+          {activeSubTab === "partTimeSalary" ? (
+            /* 파트타이머 급여대장은 로딩 분기 **바깥**에 둔다 — 정직원 급여대장과 같은 이유(2026-09-20).
+               스피너가 게이트를 걷어내면 게이트는 그걸 '탭 이탈'로 보고 재잠금해서, 결산월을 바꿀 때마다
+               비밀번호를 다시 묻게 된다. 스피너는 게이트 안쪽에서 표 자리만 대신한다. */
+            <div className="space-y-6">
+              {renderReasonBox("partTimeSalary")}
+              {/* 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28). */}
+              <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
+                {/* 결산월 선택 + 제출상태 + 마감 컨트롤(제출/수정/취소)은 급여대장 카드의 **제목 밴드 안**에 넣는다.
+                    종전에는 카드 위에 옛 회색 입력칸 한 줄이 따로 떠 있어, 밴드로 옮긴 다른 월말 탭들과 혼자 달라 보였다
+                    (DESIGN.md §6-3 — 카드 밖에 뜬 필터 줄은 밴드 필터 자리로 넣는다).
+                    마감 버튼은 정직원 헤더와 같은 이중 방어 — 역할·지점 권한 + 비밀번호 해제를 모두 통과해야 보인다
+                    (각 핸들러의 fail-closed 가드와 별개로, 잠긴 채 마감을 눌러 급여를 읽고 쓰는 우회를 막는다).
+                    [바뀐 점] 월 선택기와 제출상태가 이제 가드 **안**에 있어 잠금 해제 뒤에 보인다 —
+                    어차피 이 탭에서 볼 것은 표뿐이고, 마감 여부는 월말업무 제출현황에서도 확인된다. */}
+                {loading ? (
+                  <div className="py-24 flex flex-col items-center justify-center space-y-3">
+                    <LoadingSpinner size="lg" />
+                    <span className="text-xs text-gray-400 font-bold font-mono">가맹점 무인 원격 일지에서 일일 정산자료 조합 파싱 중...</span>
+                  </div>
+                ) : (
+                  <MonthlyPartTimeSalarySubTab
+                    branchName={branchName}
+                    selectedMonth={selectedMonth}
+                    history={history}
+                    triggerToast={triggerToast}
+                    isLocked={getSectionStatus("partTimeSalary") === "confirmed" || partTimeSubmitting}
+                    monthPicker={renderMonthPicker()}
+                    bandActions={
+                      <>
+                        <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
+                        {statusPill("partTimeSalary")}
+                        {canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("partTimeSalary")}
+                      </>
+                    }
+                  />
+                )}
+              </SalaryAccessGate>
+            </div>
+          ) : loading ? (
             <div className="py-24 flex flex-col items-center justify-center bg-white rounded-3xl border border-gray-100 shadow-sm space-y-3">
               <LoadingSpinner size="lg" />
               <span className="text-xs text-gray-400 font-bold font-mono">가맹점 무인 원격 일지에서 일일 정산자료 조합 파싱 중...</span>
@@ -901,36 +952,6 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
                   종전에는 매입매출·정직원급여 헤더에만 있어서, 이 세 탭은 지난달을 볼 방법이 없었다.
                   (그 헤더는 '매입집계/정직원 급여대장' 제목과 마감 버튼이 함께 있어 여기서는 못 쓴다 —
                   선택기만 같은 모양으로 따로 둔다. 값은 같은 selectedMonth 라 탭을 옮겨도 유지된다.) */}
-              {activeSubTab === "partTimeSalary" && (
-                <>
-                  {renderReasonBox("partTimeSalary")}
-                  {/* 파트타이머 급여대장도 정직원과 같은 권한·같은 비밀번호로 막는다(사용자 지시 2026-07-28). */}
-                  <SalaryAccessGate branchName={branchName} title="파트타이머 급여대장 - 보안 잠금">
-                    {/* 결산월 선택 + 제출상태 + 마감 컨트롤(제출/수정/취소)은 급여대장 카드의 **제목 밴드 안**에 넣는다.
-                        종전에는 카드 위에 옛 회색 입력칸 한 줄이 따로 떠 있어, 밴드로 옮긴 다른 월말 탭들과 혼자 달라 보였다
-                        (DESIGN.md §6-3 — 카드 밖에 뜬 필터 줄은 밴드 필터 자리로 넣는다).
-                        마감 버튼은 정직원 헤더와 같은 이중 방어 — 역할·지점 권한 + 비밀번호 해제를 모두 통과해야 보인다
-                        (각 핸들러의 fail-closed 가드와 별개로, 잠긴 채 마감을 눌러 급여를 읽고 쓰는 우회를 막는다).
-                        [바뀐 점] 월 선택기와 제출상태가 이제 가드 **안**에 있어 잠금 해제 뒤에 보인다 —
-                        어차피 이 탭에서 볼 것은 표뿐이고, 마감 여부는 월말업무 제출현황에서도 확인된다. */}
-                    <MonthlyPartTimeSalarySubTab
-                      branchName={branchName}
-                      selectedMonth={selectedMonth}
-                      history={history}
-                      triggerToast={triggerToast}
-                      isLocked={getSectionStatus("partTimeSalary") === "confirmed" || partTimeSubmitting}
-                      monthPicker={renderMonthPicker()}
-                      bandActions={
-                        <>
-                          <span className="text-[11px] font-bold text-slate-400">{selectedMonth} 제출상태</span>
-                          {statusPill("partTimeSalary")}
-                          {canReadSalaryBranch(user, branchName) && salaryUnlocked && renderCloseControls("partTimeSalary")}
-                        </>
-                      }
-                    />
-                  </SalaryAccessGate>
-                </>
-              )}
               {activeSubTab === "cashExpenses" && (
                 <MonthlyCashExpensesSubTab branchName={branchName} selectedMonth={selectedMonth} history={history} isAdmin={isAdmin} refreshHistory={() => fetchHistory({ silent: true })} monthPicker={renderMonthPicker()} />
               )}
