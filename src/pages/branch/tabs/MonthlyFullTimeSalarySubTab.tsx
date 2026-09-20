@@ -190,7 +190,15 @@ export function MonthlyFullTimeSalarySubTab({
       if (needsPreviousMonth(merged, firstOpenOfMonth)) {
         try {
           const prevMonth = addMonthsToMonthInputValue(selectedMonth, -1);
-          const prevRows = await gasClient.getSharedData<FullTimeSalaryRow[]>(`monthly_fulltime_salary:${branchName}:${prevMonth}`);
+          // 전월 자료는 **서버에서만** 읽는다(캐시 폴백 금지 — serverOnly).
+          // getSharedData 는 서버 읽기에 실패하면 조용히 이 기기의 캐시로 넘어간다. 그 캐시가 옛 판이면
+          // 그때의 **계좌번호·주민등록번호**가 이번 달 빈칸에 채워지고, 그대로 급여 지급정보가 된다.
+          // 지점 눈에는 정상으로 보여서 알아채기 어렵다 — 바로 아래 초과근무 집계도 같은 이유로
+          // serverOnly 를 쓴다("급여 입력의 참고값이라 캐시 폴백 금지", 2026-08-04).
+          // 읽지 못하면 아래 catch 로 빠져 **아무것도 이어받지 않는다**(빈칸으로 두고 지점이 직접 적는다).
+          // 빈칸은 지점이 채우면 그만이지만, 남의 옛 계좌가 조용히 채워지면 잘못된 곳으로 송금된다.
+          // — Codex 지적 2026-09-20
+          const prevRows = await gasClient.getSharedDataFromServer<FullTimeSalaryRow[]>(`monthly_fulltime_salary:${branchName}:${prevMonth}`);
           merged = applyPreviousMonthCarryover(merged, prevRows, { seedOrder: firstOpenOfMonth });
         } catch {}
       }
