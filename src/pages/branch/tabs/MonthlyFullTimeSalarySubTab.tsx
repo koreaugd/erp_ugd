@@ -1,7 +1,7 @@
 // src/pages/branch/tabs/MonthlyFullTimeSalarySubTab.tsx
 // 월말마감정산 - 정직원 급여대장 탭 (비밀번호 잠금 + 직원현황 자동연동, 전 컬럼 수정 가능)
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch } from "../../../utils/salaryAccess";
@@ -10,28 +10,16 @@ import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatResidentNumber, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey, readLocalStaffList } from "../helpers/staffHelpers";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
-
-interface FullTimeSalaryRow {
-  id: string;
-  employeeId?: string;
-  name: string;
-  rank: string;
-  residentNumber: string;
-  entryDate: string;
-  contractType: string;
-  bank: string;           // 은행명(국민은행 등)
-  accountNumber: string;  // 계좌번호(숫자만 저장)
-  prevSalary: string;
-  thisSalary: string;
-  taxiEtc: string;
-  bonusTip: string;
-  overtimePay: string;   // 옛 '추가근무' 금액(레거시). 신규는 시간×시급으로 계산하며 이 필드에 저장하지 않는다.
-  overtimeHours: string; // 연장 근무시간(소수 허용)
-  overtimeRate: string;  // 연장 시급(원)
-  remitBranch: string;
-  memo: string;
-  isManual?: boolean;
-}
+// 행을 만드는 규칙(직원현황 병합 · 전월 이어받기 · 순서 이동)은 전부 이 헬퍼에 있다.
+// 값이 사라지거나 한 사람이 두 줄로 나오는 사고가 잦았던 자리라, 화면과 떼어 놓고 거기서만 고친다.
+import {
+  type FullTimeSalaryRow,
+  applyPreviousMonthCarryover,
+  mayBeFirstOpenOfMonth,
+  mergeRows,
+  moveRow,
+  needsPreviousMonth,
+} from "../helpers/fullTimeSalaryMerge";
 
 const num = (v: string) => Number(cleanNumeric(String(v || ""))) || 0;
 // 연장근무 '시간'은 소수(예: 2.5)를 허용하므로 cleanNumeric(정수화) 대신 소수점 하나만 남긴다.
@@ -46,16 +34,6 @@ const cleanHours = (v: string) => {
 const RANK_OPTIONS = ["사원", "대리", "과장", "차장", "실장", "부장", "이사"];
 const CONTRACT_OPTIONS = ["4대보험", "3.3%"];
 
-// 레거시 '입금계좌' 한 칸에 은행명+계좌가 함께 적힌 값("국민 123-456")을 은행/계좌 두 칸으로 분리한다.
-// 로드·병합 시 한 번 실행돼 화면·저장·엑셀이 같은 값을 본다. 은행 칸에 이미 값이 있으면 건드리지 않는다.
-// 분리하지 않고 두면, 계좌번호 칸을 한 글자만 수정해도 입력 필터(숫자·하이픈만)가 은행명을 지워 영구 소실된다.
-const splitLegacyAccount = (r: FullTimeSalaryRow): FullTimeSalaryRow => {
-  const acc = String(r.accountNumber || "");
-  if (r.bank || !/[^\d\- ]/.test(acc)) return r; // 은행이 이미 있거나, 계좌에 문자가 없으면 그대로
-  const bank = acc.replace(/[0-9\-./() ]/g, "").trim();
-  const number = acc.replace(/[^0-9-]/g, "");
-  return bank ? { ...r, bank, accountNumber: number } : r;
-};
 // 연장근무 계 = 근무시간 × 시급(원, 반올림). 이 값이 총금액에 합산된다.
 // 반드시 시간·시급이 '둘 다' 있을 때만 계산값을 쓴다. 한쪽만 입력됐을 땐 옛 '추가근무' 금액(overtimePay)을 보존한다
 //   → 개편 전에 적어둔 초과근무수당이, 시간/시급 한쪽만 건드리는 순간 0으로 덮여 사라지는 사고를 막는다.
@@ -65,27 +43,6 @@ const rowOvertimePay = (r: FullTimeSalaryRow) =>
     ? Math.round(otNum(r.overtimeHours) * num(r.overtimeRate))
     : num(r.overtimePay);
 const rowTotal = (r: FullTimeSalaryRow) => num(r.thisSalary) + num(r.taxiEtc) + num(r.bonusTip) + rowOvertimePay(r);
-
-const rosterToRow = (emp: any): FullTimeSalaryRow => ({
-  id: `ft_${emp.id || emp.name}`,
-  employeeId: emp.id || undefined,
-  name: emp.name || "",
-  rank: emp.rank || emp.customRank || "",
-  residentNumber: emp.residentNumber || "",
-  entryDate: emp.entryDate || emp.hireDate || "",
-  contractType: emp.contractType || "4대보험",
-  bank: emp.bank || "",
-  accountNumber: "",
-  prevSalary: "",
-  thisSalary: "",
-  taxiEtc: "",
-  bonusTip: "",
-  overtimePay: "",
-  overtimeHours: "",
-  overtimeRate: "",
-  remitBranch: "",
-  memo: "",
-});
 
 // 마감제출 전, 급여 행이 서버(공유)에 반드시 존재하도록 보장한다. 실패하면 blocked=true로 마감을 막는다.
 // (0) 미저장 편집(pending) → 실 데이터 여부와 무관하게 로컬 최신본(행 삭제·0원 편집 포함)을 서버로 반영
@@ -184,55 +141,6 @@ export function MonthlyFullTimeSalarySubTab({
     return list.filter((e) => e && e.division === "정직원" && String(e.name || "").trim());
   }, [branchName]);
 
-  // 저장된 급여 행은 절대 버리지 않는다. 로스터는 (1) 빈 항목의 기본값 채우기, (2) 명단에 없는 신규 정직원 추가에만 쓴다.
-  const mergeRows = useCallback((roster: any[], saved: FullTimeSalaryRow[]): FullTimeSalaryRow[] => {
-    const savedByEmp = new Map<string, FullTimeSalaryRow>();
-    const savedByName = new Map<string, FullTimeSalaryRow>();
-    saved.forEach((r) => {
-      if (r.employeeId) savedByEmp.set(r.employeeId, r);
-      if (r.name) savedByName.set(r.name.trim(), r);
-    });
-    const consumed = new Set<FullTimeSalaryRow>();
-    const rosterRows = roster.map((emp) => {
-      const base = rosterToRow(emp);
-      const prior = (emp.id && savedByEmp.get(emp.id)) || savedByName.get(String(emp.name || "").trim());
-      if (prior) {
-        consumed.add(prior);
-        // 저장값(사용자 수정)이 우선, 비어 있으면 로스터 기본값으로 채운다.
-        return splitLegacyAccount({
-          ...base,
-          name: prior.name || base.name,
-          rank: prior.rank || base.rank,
-          residentNumber: prior.residentNumber || base.residentNumber,
-          entryDate: prior.entryDate || base.entryDate,
-          contractType: prior.contractType || base.contractType,
-          bank: prior.bank || "",
-          accountNumber: prior.accountNumber || "",
-          prevSalary: prior.prevSalary || "",
-          thisSalary: prior.thisSalary || "",
-          taxiEtc: prior.taxiEtc || "",
-          bonusTip: prior.bonusTip || "",
-          overtimePay: prior.overtimePay || "",
-          overtimeHours: prior.overtimeHours || "",
-          overtimeRate: prior.overtimeRate || "",
-          remitBranch: prior.remitBranch || "",
-          memo: prior.memo || "",
-        });
-      }
-      return base;
-    });
-    // 로스터가 비었거나 불완전해도 저장된 급여 행은 모두 보존한다.
-    // 개편 전 저장분에는 연장근무 시간/시급 필드가 없으므로 기본값("")을 채워 controlled input을 보장한다.
-    const leftover = saved.filter((r) => !consumed.has(r)).map((r) => splitLegacyAccount({
-      ...r,
-      bank: r.bank || "",
-      overtimePay: r.overtimePay || "",
-      overtimeHours: r.overtimeHours || "",
-      overtimeRate: r.overtimeRate || "",
-    }));
-    return [...rosterRows, ...leftover];
-  }, []);
-
   useEffect(() => {
     // 권한이 없으면 급여 데이터를 아예 요청하지 않는다 — 아래 안내 화면은 렌더 단계라 이 effect보다 늦게 걸린다.
     // 막지 않으면 권한 없는 계정도 급여 조회를 시도해 permission-denied 오류가 나고, 로컬 캐시가 화면에 남을 수 있다.
@@ -241,45 +149,49 @@ export function MonthlyFullTimeSalarySubTab({
     const load = async () => {
       let saved: FullTimeSalaryRow[] = [];
       const hasPendingLocal = localStorage.getItem(pendingKey) === "1";
+      const localRaw = localStorage.getItem(storageKey);
+      // 서버에서 배열을 받았는가(빈 배열이어도 '문서가 있다'는 뜻). 실패·null 이면 false로 남는다.
+      let remoteIsArray = false;
       try {
         if (hasPendingLocal) {
-          const local = localStorage.getItem(storageKey);
-          if (local) saved = JSON.parse(local);
+          if (localRaw) saved = JSON.parse(localRaw);
         } else {
           const remote = await gasClient.getSharedData<FullTimeSalaryRow[]>(sharedKey);
-          if (Array.isArray(remote)) saved = remote;
-          else {
-            const local = localStorage.getItem(storageKey);
-            if (local) saved = JSON.parse(local);
-          }
+          if (Array.isArray(remote)) { saved = remote; remoteIsArray = true; }
+          else if (localRaw) saved = JSON.parse(localRaw);
         }
       } catch {
-        const local = localStorage.getItem(storageKey);
-        if (local) { try { saved = JSON.parse(local); } catch {} }
+        if (localRaw) { try { saved = JSON.parse(localRaw); } catch {} }
+      }
+
+      // 지난달 순서를 깔아 주는 건 이 달을 '처음 여는' 경우뿐이다. 두 단계로 판정한다.
+      //  1차: 미저장 편집·이 노트북 기록·서버 배열 중 하나라도 있으면 처음이 아니다(헬퍼).
+      //  2차: 1차를 통과했을 때만, **캐시 폴백 없는 서버 읽기**로 '정말 문서가 없다'를 확인한다.
+      //       위의 getSharedData 는 서버가 죽어도 캐시로 넘어가 null 을 주기 때문에 그것만으론
+      //       '없음'과 '못 읽음'이 구분되지 않는다. 확인하지 못하면 깔지 않는다(Codex 8R 지적).
+      //       이 추가 조회는 '아무 데도 기록이 없는' 드문 경우에만 일어난다 — 평소 로드에는 영향이 없다.
+      //       덤으로, 캐시가 비어 첫 읽기가 빈손이었지만 서버엔 문서가 있던 경우 여기서 실제 값을 되찾는다.
+      let firstOpenOfMonth = false;
+      if (mayBeFirstOpenOfMonth({ hasPendingLocal, hasLocalEntry: localRaw !== null, remoteIsArray })) {
+        try {
+          const authoritative = await gasClient.getSharedDataFromServer<FullTimeSalaryRow[]>(sharedKey);
+          if (Array.isArray(authoritative)) saved = authoritative; // 실은 있었다 — 순서를 깔지 않는다
+          else firstOpenOfMonth = true;                            // 서버가 '없다'고 확인해 줬다
+        } catch {
+          // 서버에 닿지 못했다 — 처음인지 알 수 없으므로 순서를 건드리지 않는다.
+        }
       }
 
       const roster = await loadRoster();
       let merged = mergeRows(roster, saved);
 
-      // 전월급여 자동 로드 (이번달 prevSalary가 비어있는 직원만)
-      const needPrev = merged.some((r) => !r.prevSalary);
-      if (needPrev) {
+      // 전월 이어받기: 전월급여 + 고정 정보(주민번호·입사일·은행·계좌 등)를 **빈칸만** 채운다.
+      // 이어받을 빈칸이 하나도 없고 순서도 깔 필요가 없으면 서버를 부르지 않는다.
+      if (needsPreviousMonth(merged, firstOpenOfMonth)) {
         try {
           const prevMonth = addMonthsToMonthInputValue(selectedMonth, -1);
           const prevRows = await gasClient.getSharedData<FullTimeSalaryRow[]>(`monthly_fulltime_salary:${branchName}:${prevMonth}`);
-          if (Array.isArray(prevRows) && prevRows.length > 0) {
-            const prevByEmp = new Map<string, string>();
-            const prevByName = new Map<string, string>();
-            prevRows.forEach((r) => {
-              if (r.employeeId) prevByEmp.set(r.employeeId, r.thisSalary || "");
-              if (r.name) prevByName.set(r.name.trim(), r.thisSalary || "");
-            });
-            merged = merged.map((r) => {
-              if (r.prevSalary) return r;
-              const p = (r.employeeId && prevByEmp.get(r.employeeId)) || prevByName.get(r.name.trim()) || "";
-              return p ? { ...r, prevSalary: p } : r;
-            });
-          }
+          merged = applyPreviousMonthCarryover(merged, prevRows, { seedOrder: firstOpenOfMonth });
         } catch {}
       }
 
@@ -299,9 +211,16 @@ export function MonthlyFullTimeSalarySubTab({
         const local = localStorage.getItem(storageKey);
         if (local) {
           try {
-            void gasClient.saveSharedData(sharedKey, JSON.parse(local))
+            const parsed = JSON.parse(local);
+            const send = () => gasClient.saveSharedData(sharedKey, parsed)
               .then(() => localStorage.removeItem(pendingKey))
               .catch(() => {});
+            // 아직 날아가고 있는 저장이 있으면 **그것이 끝난 뒤**에 보낸다.
+            // 곧바로 보내면 두 요청이 겹쳐, 먼저 보낸 옛 값이 나중에 도착해 이 최신본을 덮을 수 있다
+            // (위 직렬화와 같은 이유 — 화면을 떠나는 순간에도 순서를 지켜야 한다).
+            const busy = inFlightRef.current;
+            if (busy) void busy.then(send, send);
+            else void send();
           } catch {}
         }
       }
@@ -363,32 +282,76 @@ export function MonthlyFullTimeSalarySubTab({
     return () => { cancelled = true; };
   }, [branchName, selectedMonth, user]);
 
+  // 저장은 **한 번에 하나씩만** 내보낸다(직렬화).
+  //
+  // 지연(450ms)만으로는 부족하다. 간격을 두고 두 번 저장하면 요청 두 개가 동시에 날아갈 수 있고,
+  // 먼저 보낸 느린 요청이 나중에 도착하면 서버에 **옛 배열이 최종본으로 남는다**.
+  // 순서 이동(▲▼)은 클릭 한 번이 곧 배열 한 번 저장이라 이 간격에 정확히 걸린다
+  // (Codex 정지게이트 지적 2026-09-20 — sharedSaveSlot.ts 가 다른 탭에서 막고 있는 것과 같은 사고다).
+  //
+  // 보내는 중에 새 값이 생기면 대기시켰다가, 끝난 뒤 **가장 마지막 값 하나만** 이어서 보낸다.
+  const sendingRef = useRef(false);
+  // 대기 작업에는 **어느 달(키)의 값인지**를 함께 담는다. 아래 키 확인의 근거다.
+  const queuedRef = useRef<{ rows: FullTimeSalaryRow[]; gen: number; key: string; pendingKey: string } | null>(null);
+  const inFlightRef = useRef<Promise<unknown> | null>(null);
+
+  const pumpSave = useCallback(() => {
+    if (sendingRef.current) return; // 보내는 중 — 끝나면 아래 finally 가 다음 것을 이어서 보낸다
+    const job = queuedRef.current;
+    if (!job) return;
+    // 이 pump 는 **자기 달의 값만** 보낸다.
+    // 결산월을 바꿔도 이 컴포넌트가 잠깐 살아 있는 순간이 있고, 그 사이 옛 달 요청이 끝나면서
+    // 옛 클로저의 pumpSave 를 부른다. 그 클로저의 sharedKey 는 '옛 달'인데 대기열에는 '새 달' 값이
+    // 들어 있을 수 있다 — 확인하지 않으면 **새 달 급여가 옛 달 문서에 저장된다**(달을 넘나드는 오염).
+    // 보내지 못한 값은 로드 effect 의 cleanup(월 변경 시 pending flush)이 제 달 키로 올려 준다.
+    // — Codex 11R 지적 2026-09-20
+    if (job.key !== sharedKey) return;
+    queuedRef.current = null;
+    sendingRef.current = true;
+    // Firestore는 undefined 값이 든 필드가 하나라도 있으면 문서 전체 저장을 거부한다.
+    // 명부에 id가 없는 직원은 employeeId가 undefined로 들어오므로(rosterToRow), JSON 왕복으로 걷어내고 보낸다.
+    const safe = JSON.parse(JSON.stringify(job.rows)) as FullTimeSalaryRow[];
+    const p = gasClient.saveSharedData(job.key, safe)
+      .then(() => {
+        // 더 최신 편집이 있으면(gen 불일치) pending 표시를 지우지 않는다 — 그 값이 아직 안 나갔다.
+        // 지우는 표시도 **그 작업이 속한 달의 것**이어야 한다(달을 넘나들며 남의 표시를 지우지 않게).
+        if (autoSaveGenRef.current === job.gen) localStorage.removeItem(job.pendingKey);
+      })
+      .catch((e) => {
+        console.error("정직원 급여대장 자동저장 실패:", e); // 개발자도구에서 실제 원인 확인용
+        // 실패한 값을 버리지 않는다 — 더 새로운 값이 없으면 되돌려 넣어 다음 저장 때 함께 나간다.
+        if (!queuedRef.current) queuedRef.current = job;
+        // 로그인 세션이 풀린 경우는 지점에서 실제로 겪는 상황(1시간 유휴 자동 로그아웃 등)이라
+        // "부득이한 에러"가 아니라 해야 할 일을 알려준다. 입력값은 로컬(pending)에 보관돼 재로그인 후 재전송된다.
+        const authIssue = String((e as any)?.message ?? e).includes("로그인");
+        triggerToast(
+          authIssue
+            ? "로그인이 풀려 저장하지 못했습니다. 다시 로그인해 주세요. 입력값은 이 노트북에 보관됩니다."
+            : "저장 중 부득이한 에러발생",
+          "error"
+        );
+      })
+      .finally(() => {
+        sendingRef.current = false;
+        if (inFlightRef.current === p) inFlightRef.current = null;
+        // 기다리던 최신 값이 있으면 이어서 보낸다. 실패해 되돌려 넣은 값도 여기서 다시 나간다.
+        if (queuedRef.current) pumpSave();
+      });
+    inFlightRef.current = p;
+  }, [pendingKey, sharedKey, triggerToast]);
+
   const persist = useCallback((next: FullTimeSalaryRow[]) => {
     setRows(next);
     localStorage.setItem(storageKey, JSON.stringify(next));
     localStorage.setItem(pendingKey, "1");
-    const gen = ++autoSaveGenRef.current;
+    // 대기열에는 항상 '가장 마지막 값' 하나만 둔다 — 중간 값들은 보낼 필요가 없다.
+    queuedRef.current = { rows: next, gen: ++autoSaveGenRef.current, key: sharedKey, pendingKey };
     if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
-      // Firestore는 undefined 값이 든 필드가 하나라도 있으면 문서 전체 저장을 거부한다.
-      // 명부에 id가 없는 직원은 employeeId가 undefined로 들어오므로(rosterToRow), JSON 왕복으로 걷어내고 보낸다.
-      const safe = JSON.parse(JSON.stringify(next)) as FullTimeSalaryRow[];
-      gasClient.saveSharedData(sharedKey, safe)
-        .then(() => { if (autoSaveGenRef.current === gen) localStorage.removeItem(pendingKey); })
-        .catch((e) => {
-          console.error("정직원 급여대장 자동저장 실패:", e); // 개발자도구에서 실제 원인 확인용
-          // 로그인 세션이 풀린 경우는 지점에서 실제로 겪는 상황(1시간 유휴 자동 로그아웃 등)이라
-          // "부득이한 에러"가 아니라 해야 할 일을 알려준다. 입력값은 로컬(pending)에 보관돼 재로그인 후 재전송된다.
-          const authIssue = String((e as any)?.message ?? e).includes("로그인");
-          triggerToast(
-            authIssue
-              ? "로그인이 풀려 저장하지 못했습니다. 다시 로그인해 주세요. 입력값은 이 노트북에 보관됩니다."
-              : "저장 중 부득이한 에러발생",
-            "error"
-          );
-        });
+      autoSaveTimerRef.current = null;
+      pumpSave();
     }, 450);
-  }, [pendingKey, sharedKey, storageKey, triggerToast]);
+  }, [pendingKey, pumpSave, storageKey]);
 
   const updateRow = (id: string, field: keyof FullTimeSalaryRow, value: string) => {
     if (isLocked) return;
@@ -420,6 +383,16 @@ export function MonthlyFullTimeSalarySubTab({
     registerAddRow?.(addManualRow);
     return () => { registerAddRow?.(null); };
   });
+
+  // 지점마다 급여대장에 적는 인원 순서가 정해져 있어 한 칸씩 위·아래로 옮긴다(사용자 지시 2026-09-20).
+  // 저장되는 배열 순서가 곧 화면 순서이고, 관리자 급여 엑셀도 이 순서를 그대로 받아 적는다.
+  // 다음 달은 이 순서를 그대로 이어받는다(applyPreviousMonthCarryover 의 seedOrder).
+  const moveRowBy = (index: number, delta: -1 | 1) => {
+    if (isLocked) return;
+    const next = moveRow(rows, index, delta);
+    if (next === rows) return; // 맨 위에서 ▲, 맨 아래에서 ▼ — 바뀐 게 없으면 저장하지 않는다
+    persist(next);
+  };
 
   const deleteRow = (id: string) => {
     if (isLocked) return;
@@ -524,14 +497,15 @@ export function MonthlyFullTimeSalarySubTab({
           키 이동 칩은 카드(밴드 상단선)로 올라갔다 — 부모 MonthlySettleTab 이 그린다(2026-08-04). */}
       <div className="max-h-[70vh] overflow-auto" data-guide="fulltime-salary-table">
         {/* border-separate 필수 — collapse에서는 sticky 헤더/고정열의 테두리가 스크롤을 따라오지 않아 선이 깨진다(index.css 참고). */}
-        <table className="text-left text-[11px] border-separate font-medium" style={{ minWidth: 1750, borderSpacing: 0 }}>
+        {/* 성명칸에 순서 이동(▲▼)이 들어가 그만큼(16px) 넓어졌다 — minWidth 도 같이 올린다. */}
+        <table className="text-left text-[11px] border-separate font-medium" style={{ minWidth: 1766, borderSpacing: 0 }}>
           <thead className="sticky top-0 z-20">
             {/* 머리글 색·격자 = 지점 표준. 이 표는 2줄 머리글(rowSpan/colSpan)이라 `.branch-sheet-head` 를
                 붙이면 둘째 줄 th 까지 top:0 에 붙어 스크롤 때 첫 줄과 겹친다 — thead 통째 sticky 를 유지하고
                 색·선은 index.css 의 `#fulltime-salary-subtab thead th` 규칙이 입힌다(2026-08-04). */}
             <tr>
               {/* 성명만 왼쪽 고정(발주관리 '일' 컬럼과 같은 패턴). 다른 열은 고정하지 않는다 — 여러 열 sticky는 오프셋이 어긋나 표가 깨졌다. */}
-              <th rowSpan={2} className={`${th} w-24 sticky left-0 z-30`}>성명</th>
+              <th rowSpan={2} className={`${th} w-28 sticky left-0 z-30`}>성명</th>
               <th rowSpan={2} className={`${th} w-20`}>직급</th>
               <th rowSpan={2} className={`${th} w-36 whitespace-nowrap`}>주민등록번호</th>
               <th rowSpan={2} className={`${th} w-32`}>입사일</th>
@@ -566,8 +540,29 @@ export function MonthlyFullTimeSalarySubTab({
                       z는 활성 셀(z-10)과 헤더(z-20) '사이'여야 한다 — z-10이면 활성 셀이 가로 스크롤 때 이 칸을 덮고,
                       z-20이면 DOM 뒤쪽인 이 칸이 세로 스크롤 때 헤더를 덮는다. */}
                   <td className={`sticky left-0 z-[15] bg-white border-l border-r border-b border-black/10 p-0 ${isActive(rowIndex, 0) ? "outline outline-2 -outline-offset-2 outline-[#2E6DB4]" : ""}`}>
-                    {/* 성명 + 행 삭제(×). 표가 가로로 길어 오른쪽 끝 삭제칸은 스크롤해야 닿으므로 이름 옆에 둔다(파트타이머 급여대장과 동일). */}
-                    <div className="flex items-center gap-1 pl-1 pr-0.5">
+                    {/* 순서 이동(▲▼) + 성명 + 행 삭제(×). 표가 가로로 길어 오른쪽 끝 삭제칸은 스크롤해야 닿으므로 이름 옆에 둔다(파트타이머 급여대장과 동일). */}
+                    <div className="flex items-center gap-0.5 pl-0.5 pr-0.5">
+                      {/* 지점마다 정해진 인원 순서를 맞추는 칸(2026-09-20). 왼쪽 고정 칸이라 가로로 스크롤해도 항상 닿는다.
+                          엑셀식 칸 이동(Tab·화살표)에 끼어들지 않게 tabIndex={-1} — 삭제(×) 버튼과 같은 규칙.
+                          마감 확정되면 다른 입력칸과 함께 잠긴다. */}
+                      <div className="flex shrink-0 flex-col">
+                        <button
+                          type="button" tabIndex={-1} onClick={() => moveRowBy(rowIndex, -1)}
+                          disabled={isLocked || rowIndex === 0}
+                          aria-label={`${row.name || "이름 없는 행"} 한 칸 위로`} title="한 칸 위로 옮깁니다"
+                          className="rounded text-gray-400 transition hover:bg-zinc-100 hover:text-zinc-900 focus:text-zinc-900 focus:outline-none disabled:text-gray-200 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button" tabIndex={-1} onClick={() => moveRowBy(rowIndex, 1)}
+                          disabled={isLocked || rowIndex === rows.length - 1}
+                          aria-label={`${row.name || "이름 없는 행"} 한 칸 아래로`} title="한 칸 아래로 옮깁니다"
+                          className="rounded text-gray-400 transition hover:bg-zinc-100 hover:text-zinc-900 focus:text-zinc-900 focus:outline-none disabled:text-gray-200 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                       <input {...cellProps(rowIndex, 0)} type="text" value={row.name} disabled={isLocked} onChange={(e) => updateRow(row.id, "name", e.target.value)} placeholder="성명" className="sheet-cell-input w-full min-w-0 h-9 px-1 text-[11px] font-bold placeholder-gray-300 focus:outline-none" />
                       <button type="button" tabIndex={-1} onClick={() => deleteRow(row.id)} disabled={isLocked} aria-label={`${row.name || "이름 없는 행"} 삭제`} title="이 행을 삭제합니다" className="shrink-0 rounded p-0.5 text-gray-300 transition hover:bg-rose-50 hover:text-rose-600 focus:text-rose-600 focus:outline-none disabled:text-gray-200 disabled:cursor-not-allowed">
                         <X className="h-3.5 w-3.5" />
