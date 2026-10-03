@@ -14,6 +14,7 @@ import {
   absorbLegacyPartTimeRows,
   computePartTimeSalary,
   mergeManualPartTimeWork,
+  partTimeRosterForMonth,
   resolveExtraPartTimeWork,
   resolvePartTimeAccumulatedHours,
   resolvePartTimeAttendanceDates,
@@ -121,10 +122,13 @@ export function unnamedPartTimeSalaryRows({
   roster: any[] | null | undefined;
   exclusions: string[] | null | undefined;
 }): any[] {
+  // 명부 행으로 볼 사람은 빌더와 같은 함수로 고른다(달 중간에 정직원이 된 사람 포함) — 다르면 관문과 파일이 어긋난다.
+  // 근무기록 근거(이름)는 넘기지 않는다: 여기서 보는 건 급여 행의 id 뿐이라, 급여 행이 있는 사람은 id 근거로 이미 걸린다.
   const rosterPartTimerIds = new Set(
-    (Array.isArray(roster) ? roster : [])
-      .filter((emp: any) => emp?.division === "파트타이머" && !isSampleEmployee(emp))
-      .map((emp: any) => emp.id)
+    partTimeRosterForMonth(
+      (Array.isArray(roster) ? roster : []).filter((emp: any) => !isSampleEmployee(emp)),
+      { salaryEmployeeIds: (Array.isArray(salaries) ? salaries : []).map((row: any) => String(row?.employeeId ?? "")) }
+    ).map((emp: any) => emp.id)
   );
   const excluded = new Set(Array.isArray(exclusions) ? exclusions : []);
 
@@ -259,8 +263,6 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   // ─────────────────────────────────────────────
   // 2. 파트타이머 급여대장
   // ─────────────────────────────────────────────
-  const rosterPartTimers: any[] = roster.filter((emp: any) => emp.division === "파트타이머" && !isSampleEmployee(emp));
-
   // 일일마감 메타데이터에서 파트타이머 누적 근무시간/출근일 텔레메트리 집계
   const ptTelemetry: { [name: string]: { hours: number; dates: string[] } } = {};
   history.forEach((m: any) => {
@@ -291,11 +293,35 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     return dateParts[2] ? `${Number(dateParts[2])}` : String(settleDate);
   });
 
+  // 명부 행으로 볼 사람 — 파트타이머 + 이 달 급여 행이 있거나 이 달 파트타이머로 일한 사람. 지점 화면과 같은 함수.
+  // 구분만 보고 고르면 달 중간에 정직원이 된 사람은 명부 밖 행이 되어 파트 근무시간이 0으로 나간다
+  // (대물섬 강남점 2026-09). 근무 집계를 다 모은 뒤에 고른다 — 수기 근무만 있는 사람도 알아봐야 한다.
+  const rosterPartTimers: any[] = partTimeRosterForMonth(
+    roster.filter((emp: any) => !isSampleEmployee(emp)),
+    {
+      salaryEmployeeIds: salaries.map((row: any) => String(row?.employeeId ?? "")),
+      partTimeWorkerNames: Object.keys(ptTelemetry)
+    }
+  );
+
   // 명부에 등록된 사람의 옛 `legacy-` 행은 명부 행에 흡수한다 — 지점 화면과 **같은 함수**를 쓴다.
   // 흡수하지 않으면 같은 사람이 두 줄로 나가고 두 줄 다 금액이 있어 그대로 두 번 이체된다
   // (사카바단단 2026-08: 4,949,500원짜리 표가 6,828,000원으로 나갔다).
   // 지점이 아직 대장을 열지 않아 서버 사본이 정리되기 전이라도, 엑셀은 여기서 바로 바로잡힌다.
-  const absorbedSalaries = absorbLegacyPartTimeRows(salaries as any[], {
+  //
+  // **급여 행이 아직 없는 명부 인원에게는 빈 행을 먼저 세워 둔다.** 흡수는 '받을 명부 행'이 목록에 있어야
+  // 일어나는데, 명부 등록 뒤 대장을 한 번도 열지 않았으면 서버 사본엔 legacy 행뿐이다. 그대로 두면 명부 행
+  // (근무기록으로 새로 만든 줄)과 legacy 행이 둘 다 나가 같은 사람이 두 줄이 된다. 지점 화면은 다시 만든
+  // 명부 행이 그 자리를 맡아 흡수가 되므로, 엑셀도 같은 모양을 만들어 맞춘다(2026-10-03).
+  // 빈 행은 아래에서 `{}`(저장값 없음)와 똑같이 읽힌다 — 흡수가 안 일어나면 결과는 예전과 같다.
+  // 제외(X)한 인원은 세우지 않는다. 흡수는 제외된 행으로 가지 않으므로(지점이 일부러 명부 행을 지우고 legacy 행으로
+  // 급여를 주는 경우 — 대물섬 한남점 2026-08) 세워 봐야 쓸모가 없고, 그 legacy 행은 화면과 똑같이 그대로 나간다.
+  const excludedForHosts = new Set(exclusions.map((id) => String(id)));
+  const savedSalaryIds = new Set(salaries.map((row: any) => String(row?.employeeId ?? "")));
+  const emptyRosterHosts = rosterPartTimers
+    .filter((pt: any) => !savedSalaryIds.has(String(pt.id)) && !excludedForHosts.has(String(pt.id)))
+    .map((pt: any) => ({ employeeId: pt.id, name: pt.name, rosterName: pt.name }));
+  const absorbedSalaries = absorbLegacyPartTimeRows([...(salaries as any[]), ...emptyRosterHosts], {
     branchName,
     rosterNames: rosterPartTimers.map((pt: any) => String(pt?.name ?? "").trim()),
     excludedIds: exclusions
@@ -616,7 +642,10 @@ function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spe
       const cell = sheet[address];
       if (!cell) continue;
       cell.s = { font: { sz: 10 }, border: bodyBorder, alignment: { vertical: "center", wrapText: col === headers.length - 1 } };
-      if (numericColumns.includes(col)) cell.z = "#,##0";
+      // 소수가 있는 숫자(0.5시간 등)는 소수까지 보여 준다. 정수 서식(#,##0)을 그대로 걸면 167.5시간이 168로 보여
+      // 같은 줄의 급여(167.5시간으로 계산됨)와 안 맞아 보인다. 셀 값 자체는 원래도 정확했다 — 표시만의 문제.
+      // "0.0#"(소수 둘째 자리까지)인 이유: "#,##0.0#"는 엑셀은 읽지만 SheetJS 서식기가 못 읽어 검증할 수 없다.
+      if (numericColumns.includes(col)) cell.z = typeof cell.v === "number" && !Number.isInteger(cell.v) ? "0.0#" : "#,##0";
       if (textColumns.includes(col)) cell.z = "@";
     }
   }
