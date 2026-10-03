@@ -70,24 +70,19 @@ export const formatMobilePhone = (tail8: string) => {
   if (digits.length !== 8) return digits;
   return `010-${digits.slice(0, 4)}-${digits.slice(4)}`;
 };
-// 표시 전용 — 010을 뺀 뒤 8자리만 "1234-5678"로 보여 준다(관리자 근로계약서 발송현황 연락처 칸, 사용자 지시 2026-09-14).
-// 규칙을 여기서 직접 정한다 — toPhoneTail8 은 '입력 정규화'용이라 010이 아닌 값도 앞 8자리로 잘라 버려서
-// "011-123-4567" 이 "0111-2345" 처럼 그럴듯한 다른 번호로 보이게 된다(Codex 리뷰 지적 2026-09-14).
-//   · 숫자 11자리 + 010 시작(정상 저장값 "010-1234-5678") → 뒤 8자리
-//   · 숫자 정확히 8자리(이미 뒤 8자리만 저장된 값) → 그대로 하이픈만
-//   · 그 밖의 옛/이상 데이터 → 손대지 않고 원문 그대로. 잘못 잘라 다른 번호처럼 보이는 것보다 낫다.
+// 표시 전용 — 연락처를 010까지 붙여 "010-1234-5678"로 보여 준다(관리자 근로계약서 발송현황 연락처 칸).
+// 2026-09-14엔 010을 빼고 뒤 8자리만 보였는데, 2026-10-03 사용자 지시로 010을 다시 붙였다.
+//   · 숫자 11자리 + 010 시작(정상 저장값 "010-1234-5678") → 010-1234-5678
+//   · 그 밖의 값 → 손대지 않고 원문 그대로. **8자리에 010을 짐작해 붙이지 않는다** — 원래 휴대폰 뒷자리였는지
+//     알 근거가 없어, 다른 번호를 그럴듯하게 보여 줄 수 있다(Codex 2026-10-03). 운영 데이터 23건은 전부 11자리였다.
+// toPhoneTail8 을 쓰지 않는 이유: '입력 정규화'용이라 010이 아닌 값도 잘라 "011-123-4567"을 다른 번호처럼 만든다.
 // 저장값은 바꾸지 않는다(지점 등록·매칭은 여전히 "010-1234-5678" 전체 문자열).
-export const formatPhoneTailDisplay = (value?: string) => {
+export const formatContractPhoneDisplay = (value?: string) => {
   const raw = String(value || "").trim();
   if (!raw) return "-";
   const digits = raw.replace(/\D/g, "");
-  const tail = digits.length === 11 && digits.startsWith("010")
-    ? digits.slice(3)
-    : digits.length === 8 && /^[\d\s-]+$/.test(raw)
-      ? digits
-      : "";
-  if (tail.length !== 8) return raw;
-  return `${tail.slice(0, 4)}-${tail.slice(4)}`;
+  if (digits.length !== 11 || !digits.startsWith("010")) return raw;
+  return `010-${digits.slice(3, 7)}-${digits.slice(7)}`;
 };
 
 export const residentBirthKey = (value?: string) => String(value || "").replace(/\D/g, "").slice(0, 6);
