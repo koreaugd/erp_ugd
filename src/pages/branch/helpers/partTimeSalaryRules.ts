@@ -353,6 +353,46 @@ export function absorbLegacyPartTimeRows<T extends PartTimeAbsorbableRow>(
 }
 
 /**
+ * 이 달 급여대장에서 **'명부 행'으로 다룰 직원**. 셋 중 하나면 된다.
+ *   1) 지금 구분이 파트타이머
+ *   2) 이 달 급여 행이 이미 있다(id 가 같다)
+ *   3) 이 달 일일마감·수기 근무에 **'파트타이머'로** 일한 기록이 있다(이름이 같다)
+ *
+ * 구분만 보고 고르면 **달 중간에 정직원이 된 사람의 파트 근무가 사라진다.** 그 사람의 급여 행은
+ * 명부 밖 행으로 빠지고, 명부 밖 행은 근무기록을 받지 못해(resolveExtraPartTimeWork) 0시간·0원이 된다 —
+ * 지점 화면은 그 기기의 옛 명부(아직 파트타이머)로 정상 금액을 보여 주는데 마감 엑셀만 0원이 됐다
+ * (대물섬 강남점 2026-09, 9/28 정직원 전환).
+ *
+ * 3)이 있어야 급여 행이 아직 없을 때도 같은 사람이 legacy 행(이름 기반 임시 id)으로 따로 만들어지지 않는다.
+ * 근무시간은 여전히 일일마감의 **'파트타이머' 줄만** 센다 — 정직원이 된 뒤의 근무는 파트 급여에 들어가지 않는다.
+ * 넘기는 값은 모두 **그 달 것**이어야 한다. 다른 달 급여 행을 섞으면 지난달에만 파트였던 정직원이 이 달 표에 들어온다.
+ *
+ * **2)·3)으로 끌어오는 건 명부에 그 이름이 한 명뿐일 때만이다.** 근무시간은 이름으로 찾기 때문에, 같은 이름이
+ * 둘이면 끌어온 사람에게도 남의 근무시간이 그대로 붙어 같은 시간이 두 번 지급된다(Codex 2026-10-03).
+ * 누구 것인지 모를 때는 끌어오지 않는다 — 예전 동작(명부 밖 행)으로 남는다.
+ * 관리자 엑셀과 지점 화면이 반드시 이 함수로 고른다 — 한쪽만 다르면 화면과 엑셀 금액이 갈린다.
+ */
+export function partTimeRosterForMonth<T extends { id: string; name?: string; division?: string }>(
+  roster: readonly T[],
+  monthEvidence: { salaryEmployeeIds?: Iterable<string>; partTimeWorkerNames?: Iterable<string> }
+): T[] {
+  const withSalary = new Set([...(monthEvidence.salaryEmployeeIds || [])].map((id) => String(id)));
+  const workedAsPartTimer = new Set([...(monthEvidence.partTimeWorkerNames || [])].map((name) => String(name)));
+  // 구분과 상관없이 명부 전체에서 센다 — 정직원과 파트타이머가 같은 이름이어도 근무시간은 구분이 안 된다.
+  const nameCount = new Map<string, number>();
+  roster.forEach((employee) => {
+    const name = String(employee?.name ?? "");
+    nameCount.set(name, (nameCount.get(name) || 0) + 1);
+  });
+  return roster.filter((employee) => {
+    if (employee?.division === "파트타이머") return true;
+    const name = String(employee?.name ?? "");
+    if (!name || nameCount.get(name) !== 1) return false;
+    return withSalary.has(String(employee?.id ?? "")) || workedAsPartTimer.has(name);
+  });
+}
+
+/**
  * 명부 밖 행(수기 행·아직 흡수되지 않은 legacy 행)에 붙일 근무 집계.
  *
  * **표시 이름으로 찾으면 안 된다.** 그렇게 하면 수기로 추가한 행에 명부 인원과 같은 이름을 적었을 때
