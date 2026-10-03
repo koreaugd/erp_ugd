@@ -16,6 +16,7 @@ import {
   dedupePartTimeRowsById,
   legacyPartTimeNameOf,
   mergeManualPartTimeWork,
+  partTimeRosterForMonth,
   resolvePartTimeAccumulatedHours,
   resolvePartTimeAttendanceDates,
   syncPartTimeActualPaid
@@ -1454,12 +1455,13 @@ export function MonthlyPartTimeSalarySubTab({
   // 1. Fetch current live Roster for PTs and merge with previously saved info + auto computed work logs from history!
   useEffect(() => {
     // A. Retrieve general roster
-    let rosterPartTimers: any[] = [];
+    // 여기서는 구분으로 거르지 않는다 — 누가 '명부 행'인지는 아래 C 에서 이 달 급여 행을 본 뒤 정한다.
+    let rosterAll: any[] = [];
     try {
       const savedRoster = localStorage.getItem(`erp_staff_list_${branchName}`);
       if (savedRoster) {
         const parsed = JSON.parse(savedRoster);
-        rosterPartTimers = parsed.filter((emp: any) => emp.division === "파트타이머");
+        if (Array.isArray(parsed)) rosterAll = parsed;
       }
     } catch (e) {
       console.error("Roster 파악 에러:", e);
@@ -1515,6 +1517,13 @@ export function MonthlyPartTimeSalarySubTab({
         });
       }
     } catch {}
+
+    // 파트타이머 + 이 달 급여 행이 있거나 이 달 파트타이머로 일한 사람(달 중간에 정직원이 된 사람).
+    // 마감 엑셀과 같은 함수로 고른다 — 구분만 보면 그 사람은 화면에서 사라지고 엑셀에선 0원이 된다(대물섬 강남점 2026-09).
+    const rosterPartTimers: any[] = partTimeRosterForMonth(rosterAll, {
+      salaryEmployeeIds: Object.keys(savedSalaryMap),
+      partTimeWorkerNames: Object.keys(ptTelemetry)
+    });
 
     // D. Fetch profile memory (은행, 주민번호, 입사일 등 매월 반복되는 기초 사원 데이터) to auto-fill across months
     const getStoredProfile = (empId: string): any => {
@@ -1783,9 +1792,6 @@ export function MonthlyPartTimeSalarySubTab({
       try {
         const roster = await gasClient.getBranchOwnRoster(branchName);
         if (cancelled) return;
-        const partTimers = roster.filter((employee) => employee.division === "파트타이머");
-        if (partTimers.length === 0) return;
-
         const telemetry: Record<string, { hours: number; dates: string[] }> = {};
         history.filter((record) => record.settleDate?.startsWith(selectedMonth)).forEach((record) => {
           const metadata = String(record.memo || "").split("\n---\nMETADATA:")[1];
@@ -1807,6 +1813,21 @@ export function MonthlyPartTimeSalarySubTab({
         mergeManualPartTimeWork(telemetry, manualWorkRows, selectedMonth, (settleDate) =>
           String(settleDate).split("-")[2] || ""
         );
+
+        // 파트타이머 + 이 달 급여 행이 있거나 이 달 파트타이머로 일한 사람(달 중간에 정직원이 된 사람) —
+        // 조립 효과·마감 엑셀과 같은 함수. 급여 행 근거는 **이 달 로컬 사본**만 본다(화면 상태는 달을 바꾼 직후
+        // 지난달 행이 남아 있을 수 있다). 사본이 아직 없어도 근무기록 근거로 알아보므로 legacy 행이 따로 생기지 않는다.
+        const salaryIds: string[] = [];
+        try {
+          const savedConfig = localStorage.getItem(salaryStorageKey);
+          const savedRows = savedConfig ? JSON.parse(savedConfig) : null;
+          if (Array.isArray(savedRows)) savedRows.forEach((row: any) => row?.employeeId && salaryIds.push(String(row.employeeId)));
+        } catch {}
+        const partTimers = partTimeRosterForMonth(roster, {
+          salaryEmployeeIds: salaryIds,
+          partTimeWorkerNames: Object.keys(telemetry)
+        });
+        if (partTimers.length === 0) return;
 
         // 기존 파트타이머 일지에만 있는 직원도 급여대장에 포함합니다.
         // 직원현황에 등록되지 않은 과거 기록은 이름 기반 임시 ID를 사용합니다.
@@ -1905,7 +1926,7 @@ export function MonthlyPartTimeSalarySubTab({
     return () => {
       cancelled = true;
     };
-  }, [absorbLegacyRows, branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows]);
+  }, [absorbLegacyRows, branchName, selectedMonth, history, excludedEmployeeIds, manualWorkRows, salaryStorageKey]);
 
   const handleUpdate = (empId: string, field: keyof PartTimeSalaryRow, value: any) => {
     if (isLocked) return; // 마감 확정 후에는 입력을 받지 않는다(정직원 급여대장 updateRow 와 같은 가드).
