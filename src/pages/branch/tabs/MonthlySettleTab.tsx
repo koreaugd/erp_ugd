@@ -413,7 +413,13 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     if (section === "purchase") {
       const flush = await flushMonthlyPurchasesForClose(branchName, selectedMonth);
       if (flush.blocked) {
-        triggerToast("매입매출(거래처)에 금액이 0보다 큰 행이 하나도 없거나 서버 반영에 실패했습니다. 거래처 금액을 입력한 뒤 다시 시도해주세요.", "error");
+        const missing = flush.missingTransferVendors || [];
+        triggerToast(
+          missing.length > 0
+            ? `이체필요에 체크했는데 이체필요 금액이 비어 있는 업체가 있어 마감할 수 없습니다: ${missing.join(", ")}. 금액을 적거나, 이미 결제했으면 이체필요 체크를 풀어주세요.`
+            : "매입매출(거래처)에 금액이 0보다 큰 행이 하나도 없거나 서버 반영에 실패했습니다. 거래처 금액을 입력한 뒤 다시 시도해주세요.",
+          "error"
+        );
         return;
       }
     }
