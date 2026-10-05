@@ -71,6 +71,15 @@ const rowHasExportableAmount = (r) => {
   return transferExport(r) + (u === "" ? 0 : u) > 0;
 };
 const hasMeaningful = (rows) => Array.isArray(rows) && rows.some(rowHasExportableAmount);
+// 이체필요 체크 + 사용액만 있고 이체금액이 빈 행 — 지점 화면은 이 행이 있으면 마감 제출을 막는다(2026-10-05).
+// monthlyCloseWorkbook.ts purchaseRowMissingTransferAmount(보정 normalizePurchaseRows 후)와 같은 판정.
+// 옛 선입금 '사용액만' 행(isPrepaid·이체금액 공란)은 보정에서 결제완료로 옮겨지므로 여기서도 뺀다.
+const missingTransfer = (r) => {
+  if (String(r?.vendorName || "").trim() === "") return false;
+  if (r?.transferNeeded === false) return false;
+  if (r?.isPrepaid === true && String(r?.transferAmount || "").trim() === "" && num(r?.monthlyUsageAmount) > 0) return false;
+  return num(r?.transferAmount) <= 0 && num(r?.monthlyUsageAmount) > 0;
+};
 const sumT = (rows) => (Array.isArray(rows) ? rows.reduce((a, r) => a + transferExport(r), 0) : 0);
 
 // ---------------------------------------------------------------- 대상 추리기
@@ -94,6 +103,8 @@ for (const branchName of branches) {
 
   if (!hasMeaningful(rows)) { skips.push({ branchName, why: "매입매출 데이터 없음(대장에 나갈 금액이 있는 행이 없음)" }); continue; }
   if (status === "confirmed") { skips.push({ branchName, why: "이미 확정됨" }); continue; }
+  const missing = rows.filter(missingTransfer).map((r) => String(r.vendorName).trim());
+  if (missing.length) { skips.push({ branchName, why: `이체필요인데 이체금액이 빈 업체 — 지점이 금액을 채워야 함: ${missing.join(", ")}` }); continue; }
   // '수정중'은 지점이 확정본을 열어 고치는 중이다. 여기서 확정하면 지점이 입력해야 할 '수정 사유'를 건너뛰게 되고,
   // 앱의 재확정 게이트(serverReconfirm && !reason → 거부)와도 어긋난다. 사람이 판단하도록 남긴다.
   if (status === "editing" && !allowEditing) { skips.push({ branchName, why: "지점이 마감수정 중 — 지점이 사유와 함께 직접 제출해야 함 (강행하려면 --allow-editing)" }); continue; }
