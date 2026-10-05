@@ -50,7 +50,11 @@ const transferExport = (r) => (r?.transferNeeded === false ? 0 : num(r?.transfer
 const usageExport = (r) => {
   // 선입금 개념 폐지(2026-08-02) — 옛 선입금 행만 옛 규칙 그대로(monthlyCloseWorkbook.ts와 동일).
   if (r?.isPrepaid === true) return num(r?.monthlyUsageAmount);
-  if (r?.transferNeeded !== false) return 0;
+  // 이체필요 행도 사용액을 이체금액과 다르게 적었으면 내보낸다(선입금 초과분 추가이체, 2026-10-05).
+  if (r?.transferNeeded !== false) {
+    if (String(r?.monthlyUsageAmount ?? "").trim() === "") return 0;
+    return num(r?.monthlyUsageAmount) === num(r?.transferAmount) ? 0 : num(r?.monthlyUsageAmount);
+  }
   return String(r?.monthlyUsageAmount ?? "").trim() === "" ? num(r?.transferAmount) : num(r?.monthlyUsageAmount);
 };
 const sumT = (rows) => (Array.isArray(rows) ? rows.reduce((a, r) => a + transferExport(r), 0) : 0);

@@ -109,6 +109,10 @@ def read_sheet(path):
         grid = [list(r) for r in ws.iter_rows(min_row=1, max_col=8, values_only=True)]
 
     header_c = str(grid[1][2]).strip() if len(grid) > 1 and grid[1][2] else ""
+    # 2026-10-05부터 ERP 관리자 다운로드는 지점 화면 모양(C열='이체 필요?', 금액이 D·E열)이다.
+    # 이 스크립트는 칸 위치로 읽으므로 그 파일을 넣으면 은행 칸에 금액이 들어가는 식으로 조용히 틀린다. 멈춘다.
+    if header_c == "이체 필요?":
+        raise SystemExit(f"!! {path}: ERP 새 형식(화면 모양) 매입매출 시트는 이 스크립트가 읽지 못합니다 — 지점이 보낸 옛 양식 파일만 넣으세요")
     rows = []
     for r in grid[2:]:
         r = list(r) + [None] * (8 - len(r))
