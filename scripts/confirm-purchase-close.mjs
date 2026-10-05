@@ -58,7 +58,11 @@ const usageExport = (r) => {
   // (monthlyCloseWorkbook.ts purchaseUsageExportValue와 동일 — 여기가 어긋나면 스크립트가 확정한 달과
   //  관리자 엑셀 내용이 달라진다).
   if (r?.isPrepaid === true) return num(r?.monthlyUsageAmount);
-  if (r?.transferNeeded !== false) return "";
+  // 이체필요 행도 사용액을 이체금액과 다르게 적었으면 내보낸다(선입금 초과분 추가이체, 2026-10-05).
+  if (r?.transferNeeded !== false) {
+    if (String(r?.monthlyUsageAmount ?? "").trim() === "") return "";
+    return num(r?.monthlyUsageAmount) === num(r?.transferAmount) ? "" : num(r?.monthlyUsageAmount);
+  }
   return String(r?.monthlyUsageAmount ?? "").trim() === "" ? num(r?.transferAmount) : num(r?.monthlyUsageAmount);
 };
 const rowHasExportableAmount = (r) => {
