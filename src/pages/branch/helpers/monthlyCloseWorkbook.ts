@@ -44,6 +44,12 @@ export interface SheetSpec {
   numericColumns: number[];
   textColumns: number[];
   includeTitle: boolean;
+  /** 데이터 행별 배경색(RGB). 없거나 null이면 배경 없음. 매입매출 시트만 쓴다. */
+  rowFills?: (string | null)[];
+  /** 굵게 표시할 데이터 행 번호(0부터). 합계 줄에 쓴다. */
+  boldRows?: number[];
+  /** 흐리게(회색 글자) 표시할 칸 "행:열". 화면에서 잠겨 회색으로 보이는 칸에 쓴다. */
+  mutedCells?: string[];
 }
 
 const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
@@ -62,6 +68,10 @@ export function purchaseTransferExportValue(r: any): number {
 /**
  * 매입매출 대장 '이달사용금액' 칸의 값. 공란("")이면 export에 빈 칸으로 나간다.
  * - 이체 필요 업체: 이체필요금액=사용액이라 중복 방지로 공란.
+ *   단, 사용액을 이체금액과 **다르게** 적은 행은 사용액을 내보낸다 — 선입금 업체가 선입금을 넘겨 써서
+ *   추가이체하는 달(사용액=선입금+이체금액). 01 AGENT가 이 행을 '이체 + 선입금조정' 둘 다로 처리하고,
+ *   03 손익은 통장 이체액 대신 사용액으로 맞춘다(2026-10-05). 같은 값이면 평소처럼 공란.
+ *   01 `_개발자료/소스코드/vendor/sales_format.py`의 `_legacy_values`가 같은 규칙을 쓴다 — 함께 고칠 것.
  * - 결제완료 업체: 이미 결제한 업체의 실제 사용액.
  *   사용액이 비어 있으면 이체금액으로 폴백한다 — UI가 두 필드를 미러링하므로 통상 같은 값이고,
  *   비어 있는 건 구버전/외부 유입 데이터뿐이라 금액이 0으로 증발하지 않게 보존한다.
@@ -77,7 +87,10 @@ export function purchaseUsageExportValue(r: any): number | "" {
   // 화면 마이그레이션(normalizePurchaseRows)은 지점이 탭을 열어야 반영되지만 관리자 다운로드는 서버 원본을
   // 직접 읽으므로, 두 경로가 어긋나지 않도록 판정을 여기(공유 헬퍼)에 둔다.
   if (r?.isPrepaid === true) return num(r?.monthlyUsageAmount);
-  if (r?.transferNeeded !== false) return "";
+  if (r?.transferNeeded !== false) {
+    if (isBlank(r?.monthlyUsageAmount)) return "";
+    return num(r?.monthlyUsageAmount) === num(r?.transferAmount) ? "" : num(r?.monthlyUsageAmount);
+  }
   return isBlank(r?.monthlyUsageAmount) ? num(r?.transferAmount) : num(r?.monthlyUsageAmount);
 }
 
@@ -91,6 +104,84 @@ export function purchaseRowHasExportableAmount(r: any): boolean {
   const usage = purchaseUsageExportValue(r);
   return purchaseTransferExportValue(r) + (usage === "" ? 0 : usage) > 0;
 }
+
+// ─────────────────────────────────────────────
+// 매입매출 '화면과 같은 모양' 규칙 — 지점 화면(MonthlyPurchaseSalesSubTab)과 관리자 엑셀이 함께 쓴다.
+// 2026-10-05 지시: 관리자가 내려받는 매입매출 시트를 지점 화면과 똑같은 모양으로 낸다.
+// 정렬·보정·합계를 양쪽이 따로 계산하면 언젠가 어긋나므로 여기 한 곳에 둔다.
+// ─────────────────────────────────────────────
+
+/** 분류항목 표시 순서 (식재료비 → 주류비 → 식음료외 기타). 저장 순서는 건드리지 않고 표시에만 쓴다. */
+export const PURCHASE_CATEGORY_ORDER: Record<string, number> = {
+  "식재료비": 0,
+  "주류비": 1,
+  "식음료외 기타": 2,
+};
+
+/** 화면 표시 순서로 정렬한 사본. Array.sort는 안정 정렬이라 같은 분류 안에서는 입력 순서가 유지된다. */
+export function sortPurchaseRowsForDisplay<T>(rows: T[]): T[] {
+  const rank = (r: any) => PURCHASE_CATEGORY_ORDER[String(r?.category ?? "")] ?? 99;
+  return [...rows].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * 불러온 매입매출 행 보정 — 화면이 탭을 열 때 거치는 그 단계.
+ * - 옛 데이터엔 transferNeeded가 없으므로 기본 '이체 필요(true)'로 본다.
+ * - 선입금 폐지 마이그레이션(2026-08-02): 이체금액이 비어 있고 사용액만 있는 옛 선입금 행은
+ *   '결제완료(transferNeeded=false)'로 옮겨 사용액이 그대로 나가게 한다. 그러지 않으면 대장에서 통째로 사라지고
+ *   확정 게이트(purchaseRowHasExportableAmount)까지 '내역 없음'으로 본다(Codex 4R).
+ *   이체금액이 있는 옛 선입금 행은 건드리지 않는다 — 실제 송금액이 0으로 지워지면 안 되기 때문.
+ * 관리자 엑셀도 같은 보정을 거쳐야 지점이 탭을 열지 않은 달에도 화면과 같은 모양이 나온다.
+ * (이 보정은 export 금액을 바꾸지 않는다 — 옮겨지는 행은 원래도 이체 0·사용액만 나가던 행이다.)
+ */
+export function normalizePurchaseRows<T extends Record<string, any>>(sourceRows: T[]): (T & { transferNeeded: boolean })[] {
+  return sourceRows.map((row) => {
+    const transferNeeded = row.transferNeeded ?? true;
+    const usageOnlyLegacyPrepaid =
+      row.isPrepaid === true
+      && transferNeeded !== false
+      && String(row.transferAmount || "").trim() === ""
+      && (Number(String(row.monthlyUsageAmount || "").replace(/[^0-9]/g, "")) || 0) > 0;
+    return {
+      ...row,
+      transferNeeded: usageOnlyLegacyPrepaid ? false : transferNeeded,
+    };
+  });
+}
+
+/** 화면 맨 아래 합계 줄. 이체 합계는 결제완료 행을 빼고, 사용액 합계는 모든 행을 더한다(화면 그대로). */
+export function purchaseDisplayTotals(rows: any[]): { totalTransfer: number; totalUsage: number } {
+  return {
+    // num()으로 읽는다 — 외부 유입값("1,000")을 Number()로 읽으면 0이 돼 합계에서 빠진다(Codex 2026-10-05).
+    totalTransfer: rows.reduce((acc, r) => acc + (r?.transferNeeded === false ? 0 : num(r?.transferAmount)), 0),
+    totalUsage: rows.reduce((acc, r) => acc + num(r?.monthlyUsageAmount), 0),
+  };
+}
+
+/**
+ * 엑셀 '이체 필요?' 칸에 적는 글자. 화면의 체크박스(체크=이체필요, 해제=결제완료)를 글자로 옮긴 것.
+ *
+ * **01 월말정산 AGENT가 이 글자로 이체 대상과 선입금조정 대상을 가른다** — 바꾸려면 그쪽
+ * (`_개발자료/소스코드/vendor/sales_format.py`)을 같이 고쳐야 한다.
+ * 옛 선입금 행(isPrepaid, 2026-07 이전 데이터)은 '(선입금)'을 붙인다. 그 행은 화면에선 구분이 안 보이지만
+ * 사용액을 이체 여부와 무관하게 정산에 넘겨야 해서(purchaseUsageExportValue), AGENT가 알아볼 표식이 필요하다.
+ */
+export function purchaseTransferNeededLabel(r: any): string {
+  const base = r?.transferNeeded === false ? "결제완료" : "이체필요";
+  return r?.isPrepaid === true ? `${base}(선입금)` : base;
+}
+
+/** 매입매출 시트 헤더 — 지점 화면 표 머리글과 같은 글자(Action 칸 제외). 01 AGENT가 이 글자로 칸을 찾는다. */
+export const PURCHASE_SHEET_HEADERS = [
+  "분류항목", "업체명", "이체 필요?", "이체필요 금액 (원)", "실제 이달사용액 (원)", "은행", "계좌번호", "거래 비고 고지",
+];
+
+/** 화면 분류별 행 색(index.css: --branch-vanilla/honey/alice 를 흰색과 65% 섞은 값)을 엑셀 배경색으로. */
+const PURCHASE_CATEGORY_FILL: Record<string, string> = {
+  "식재료비": "F8F7DE",
+  "주류비": "EBF2E8",
+  "식음료외 기타": "EFF2F7",
+};
 
 /**
  * 5개 시트(매입매출·파트타이머급여·현금지출·카드지출·현금관리)의 헤더/행/열폭 스펙을 계산.
@@ -246,19 +337,41 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   const inMonth = (settleDate: unknown) => String(settleDate || "").startsWith(month);
 
   // ─────────────────────────────────────────────
-  // 1. 매입매출 대장
+  // 1. 매입매출 대장 — 지점 화면과 같은 모양(2026-10-05 지시)
   // ─────────────────────────────────────────────
-  const purchaseHeaders = ["매출항목", "업체명", "이체 필요금액", "은행", "계좌번호", "기타내용", "이달사용금액", "오류"];
-  const purchaseRows: (string | number)[][] = purchases.map((r: any) => [
-    r.category,
-    r.vendorName,
-    purchaseTransferExportValue(r),
-    r.bank,
-    r.accountNumber,
-    r.memo,
-    purchaseUsageExportValue(r),
-    "",
+  // 화면과 같은 보정·정렬·칸 순서·합계 줄. 금액은 화면에 보이는 저장값 그대로 낸다
+  // (결제완료 행의 이체금액도 화면처럼 회색으로 보이고, 이체필요 행의 사용액도 화면처럼 이체금액과 같은 값이 보인다).
+  // 그래서 **'이체필요 금액' 칸 숫자만 보고 이체하면 안 된다** — '이체 필요?' 칸이 '결제완료'인 행은 이체 대상이 아니다.
+  // 01 월말정산 AGENT는 '이체 필요?' 칸으로 옛 형식 값(purchaseTransferExportValue/purchaseUsageExportValue)을
+  // 다시 계산해 쓴다(vendor/sales_format.py). 두 규칙은 같이 움직여야 한다.
+  // 맨 위 제목줄(A1 지점명·D1 월)은 화면에 없지만 남긴다 — AGENT가 지점과 월을 여기서 읽는다.
+  const amountCell = (v: unknown): string | number => (isBlank(v) ? "" : num(v));
+  const displayPurchases = sortPurchaseRowsForDisplay(normalizePurchaseRows(purchases));
+  const purchaseRows: (string | number)[][] = displayPurchases.map((r: any) => [
+    r.category ?? "",
+    r.vendorName ?? "",
+    purchaseTransferNeededLabel(r),
+    amountCell(r.transferAmount),
+    amountCell(r.monthlyUsageAmount),
+    r.bank ?? "",
+    r.accountNumber ?? "",
+    r.memo ?? "",
   ]);
+  const purchaseRowFills: (string | null)[] = displayPurchases.map((r: any) => PURCHASE_CATEGORY_FILL[String(r.category)] ?? null);
+  // 화면에서 잠겨(회색) 보이는 칸: 결제완료 행의 이체금액, 이체필요 행의 사용액(옛 선입금 행은 사용액이 열려 있다).
+  const purchaseMuted: string[] = [];
+  displayPurchases.forEach((r: any, i: number) => {
+    if (r.transferNeeded === false) purchaseMuted.push(`${i}:3`);
+    else if (r.isPrepaid !== true) purchaseMuted.push(`${i}:4`);
+  });
+  const purchaseBoldRows: number[] = [];
+  if (displayPurchases.length > 0) {
+    // 합계 줄 — 01 AGENT는 분류항목이 '합계'이고 업체명이 빈 줄을 건너뛴다.
+    const { totalTransfer, totalUsage } = purchaseDisplayTotals(displayPurchases);
+    purchaseBoldRows.push(purchaseRows.length);
+    purchaseRows.push(["합계", "", "", totalTransfer, totalUsage, "", "", ""]);
+    purchaseRowFills.push("F4F4F5");
+  }
 
   // ─────────────────────────────────────────────
   // 2. 파트타이머 급여대장
@@ -557,12 +670,15 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
   return [
     {
       name: "매입매출",
-      headers: purchaseHeaders,
+      headers: PURCHASE_SHEET_HEADERS,
       rows: purchaseRows,
-      widths: [17.17, 14, 12.17, 13.33, 40.83, 60.17, 14.83, 10.33],
-      numericColumns: [2, 6],
-      textColumns: [4],
+      widths: [14, 20, 11, 16, 18, 12, 24, 40],
+      numericColumns: [3, 4],
+      textColumns: [6],
       includeTitle: true,
+      rowFills: purchaseRowFills,
+      boldRows: purchaseBoldRows,
+      mutedCells: purchaseMuted,
     },
     {
       name: "파트타이머급여",
@@ -608,7 +724,9 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
  * XLSX는 동적 import한 xlsx-js-style 모듈을 그대로 받는다.
  */
 function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spec: SheetSpec) {
-  const { headers, rows, widths, numericColumns, textColumns, includeTitle } = spec;
+  const { headers, rows, widths, numericColumns, textColumns, includeTitle, rowFills, boldRows, mutedCells } = spec;
+  const mutedSet = new Set(mutedCells ?? []);
+  const boldSet = new Set(boldRows ?? []);
 
   const headerStyle = {
     font: { bold: true, sz: 10, color: { rgb: "1F2937" } },
@@ -641,7 +759,17 @@ function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spe
       const address = XLSX.utils.encode_cell({ r: row, c: col });
       const cell = sheet[address];
       if (!cell) continue;
-      cell.s = { font: { sz: 10 }, border: bodyBorder, alignment: { vertical: "center", wrapText: col === headers.length - 1 } };
+      const dataIndex = row - headerRow - 1;
+      const fillRgb = rowFills?.[dataIndex];
+      const font: any = { sz: 10 };
+      if (boldSet.has(dataIndex)) font.bold = true;
+      if (mutedSet.has(`${dataIndex}:${col}`)) font.color = { rgb: "9CA3AF" };
+      cell.s = {
+        font,
+        border: bodyBorder,
+        alignment: { vertical: "center", wrapText: col === headers.length - 1 },
+        ...(fillRgb ? { fill: { patternType: "solid", fgColor: { rgb: fillRgb } } } : {}),
+      };
       // 소수가 있는 숫자(0.5시간 등)는 소수까지 보여 준다. 정수 서식(#,##0)을 그대로 걸면 167.5시간이 168로 보여
       // 같은 줄의 급여(167.5시간으로 계산됨)와 안 맞아 보인다. 셀 값 자체는 원래도 정확했다 — 표시만의 문제.
       // "0.0#"(소수 둘째 자리까지)인 이유: "#,##0.0#"는 엑셀은 읽지만 SheetJS 서식기가 못 읽어 검증할 수 없다.

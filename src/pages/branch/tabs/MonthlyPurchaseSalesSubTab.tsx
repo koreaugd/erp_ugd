@@ -6,7 +6,12 @@ import { gasClient } from "../../../api/gasClient";
 import { formatNumber } from "../../../utils/formatNumber";
 import { addMonthsToMonthInputValue, cleanNumeric, formatWithCommas } from "../helpers/formatters";
 import { pendingLocalSaveStorageKey } from "../helpers/staffHelpers";
-import { purchaseRowHasExportableAmount } from "../helpers/monthlyCloseWorkbook";
+import {
+  normalizePurchaseRows as normalizePurchaseRowsShared,
+  purchaseDisplayTotals,
+  purchaseRowHasExportableAmount,
+  sortPurchaseRowsForDisplay
+} from "../helpers/monthlyCloseWorkbook";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
 
 // 표에 보이는 순서 그대로의 셀 좌표. 키보드 이동이 이 순서를 따른다.
@@ -38,12 +43,8 @@ interface PurchaseSalesRow {
   memo: string;
 }
 
-// 분류항목 표시 정렬 순서 (식재료비 → 주류비 → 식음료외 기타). 저장 순서는 건드리지 않고 화면 표시에만 사용.
-const CATEGORY_ORDER: Record<PurchaseSalesRow["category"], number> = {
-  "식재료비": 0,
-  "주류비": 1,
-  "식음료외 기타": 2,
-};
+// 분류항목 표시 정렬 순서(식재료비 → 주류비 → 식음료외 기타)는 관리자 엑셀과 같이 쓰도록
+// helpers/monthlyCloseWorkbook.ts 의 PURCHASE_CATEGORY_ORDER / sortPurchaseRowsForDisplay 에 둔다.
 
 // 분류항목별 행 배경색은 index.css에서 DESIGN.md 토큰(--branch-vanilla/honey/alice)으로 지정한다.
 // (.branch-redesign #purchase-sales-subtab tbody tr[data-cat=...]) — tbody nth-child !important 줄무늬를
@@ -122,27 +123,11 @@ export function MonthlyPurchaseSalesSubTab({
   const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
 
-  const normalizePurchaseRows = useCallback((sourceRows: PurchaseSalesRow[]) => {
-    return sourceRows.map((row) => {
-      // 옛 데이터엔 transferNeeded가 없으므로 기본 '이체 필요(true)'로 보정.
-      const transferNeeded = row.transferNeeded ?? true;
-      // 선입금 폐지 마이그레이션(2026-08-02).
-      // 옛 선입금 행은 '이체필요금액'과 '이달사용액'을 둘 다 내보냈다. 새 규칙에서는 이체 필요(true)면
-      // 이달사용액이 공란으로 나가므로, 이체금액이 비어 있고 사용액만 있는 옛 선입금 행은 export가 0/공란이 되어
-      // 대장에서 통째로 사라지고 확정 게이트(purchaseRowHasExportableAmount)까지 '내역 없음'으로 본다(Codex 4R).
-      // 그런 행만 '결제완료(transferNeeded=false)'로 옮겨 사용액이 그대로 나가게 한다.
-      // (이체금액이 있는 옛 선입금 행은 건드리지 않는다 — 실제 송금액이 0으로 지워지면 안 되기 때문.)
-      const usageOnlyLegacyPrepaid =
-        row.isPrepaid === true
-        && transferNeeded !== false
-        && String(row.transferAmount || "").trim() === ""
-        && (Number(cleanNumeric(String(row.monthlyUsageAmount || ""))) || 0) > 0;
-      return {
-        ...row,
-        transferNeeded: usageOnlyLegacyPrepaid ? false : transferNeeded,
-      };
-    });
-  }, []);
+  // 보정 규칙(기본 '이체 필요', 선입금 폐지 마이그레이션)은 관리자 엑셀과 같이 쓰도록 공용 함수에 둔다.
+  const normalizePurchaseRows = useCallback(
+    (sourceRows: PurchaseSalesRow[]): PurchaseSalesRow[] => normalizePurchaseRowsShared(sourceRows),
+    []
+  );
 
   const emptyAmounts = useCallback((sourceRows: PurchaseSalesRow[]) => {
     return normalizePurchaseRows(sourceRows).map((row) => ({
@@ -272,7 +257,15 @@ export function MonthlyPurchaseSalesSubTab({
         // 선입금 체크박스가 화면에서 사라져 되돌릴 방법도 없으므로 되돌릴 수 없는 손실이 된다.
         const isLegacyPrepaid = updated.isPrepaid === true;
         // 이체 필요금액이 바뀌면 이달사용액이 따라간다(두 값은 통상 같다).
-        if (field === "transferAmount" && !isLegacyPrepaid) {
+        // 단, 이체필요 상태에서 사용액을 따로 적어 둔 행(선입금 초과분 추가이체: 사용액=선입금+이체금액)은
+        // 따라가지 않는다 — 이체금액을 고치는 순간 직접 적은 사용액이 덮여 사라지기 때문(2026-10-05).
+        // 그래서 '사용액이 비었거나 고치기 전 이체금액과 같을 때'만 따라간다.
+        // 비교는 쉼표 등을 걷어낸 숫자로 한다 — 외부 유입값("1,000")을 Number()로 바로 읽으면 NaN이 돼
+        // 같은 값인데도 '따로 적은 사용액'으로 오판하고 선입금조정으로 나간다(Codex 2026-10-05).
+        const usageFollowsTransfer =
+          String(r.monthlyUsageAmount ?? "").trim() === ""
+          || (Number(cleanNumeric(String(r.monthlyUsageAmount))) || 0) === (Number(cleanNumeric(String(r.transferAmount ?? ""))) || 0);
+        if (field === "transferAmount" && !isLegacyPrepaid && usageFollowsTransfer) {
           updated.monthlyUsageAmount = nextValue;
         }
         // 이체 필요?를 다시 체크(true)하면 이달사용액은 이체 필요금액을 다시 미러링한다.
@@ -362,12 +355,11 @@ export function MonthlyPurchaseSalesSubTab({
 
   // Calculations
   // 결제완료(이체 필요 해제) 업체는 이체 불필요이므로 이체 합계에서 제외 — 관리자 엑셀(이체금액 0 처리)과 일치시킨다.
-  const totalTransfer = rows.reduce((acc, r) => acc + (r.transferNeeded === false ? 0 : (Number(r.transferAmount) || 0)), 0);
-  const totalUsage = rows.reduce((acc, r) => acc + (Number(r.monthlyUsageAmount) || 0), 0);
+  const { totalTransfer, totalUsage } = purchaseDisplayTotals(rows);
 
   // 화면 표시용 정렬: 분류항목 순서대로(식재료비→주류비→식음료외 기타). Array.sort는 안정 정렬이라 같은 분류 내 입력 순서는 유지된다.
   // 저장(rows)·자동저장·확정 로직은 원래 순서를 그대로 쓰므로 표시 정렬은 부작용이 없다.
-  const displayRows = [...rows].sort((a, b) => (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99));
+  const displayRows = sortPurchaseRowsForDisplay<PurchaseSalesRow>(rows);
 
   // 엑셀처럼 키보드로 칸을 옮긴다.
   // 마지막 행에서 ↓/Enter로 행을 늘리지는 않는다 — 아래로 훑어보다가 실수로 빈 업체가 생긴다.
@@ -506,11 +498,12 @@ export function MonthlyPurchaseSalesSubTab({
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
-                      // 옛 선입금 행은 이체 필요 상태여도 사용액(발주액 합계)을 그대로 export하므로 편집을 열어 둔다.
-                      // 잠가 두면 엑셀에는 나가는데 화면에서 고칠 수 없는 숫자가 된다.
-                      disabled={isLocked || !(row.isPrepaid === true || row.transferNeeded === false)}
+                      // 이체필요 상태에서도 열어 둔다(2026-10-05 사용자 지시) — 선입금 업체가 선입금을 넘겨 써서
+                      // 추가이체하는 달엔 사용액에 '선입금+이체금액'을 따로 적어야 한다. 평소엔 이체금액을 그대로 따라간다.
+                      // 사용액이 이체금액과 다르면 엑셀에 사용액이 나가 01·03이 선입금조정으로 처리한다(purchaseUsageExportValue).
+                      disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder={row.isPrepaid === true ? "발주액 합계" : (row.transferNeeded === false ? "이달 사용액" : "-")}
+                      placeholder={row.isPrepaid === true ? "발주액 합계" : "이달 사용액"}
                       className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>
