@@ -73,7 +73,7 @@ export function purchaseTransferExportValue(r: any): number {
  *   03 손익은 통장 이체액 대신 사용액으로 맞춘다(2026-10-05). 같은 값이면 평소처럼 공란.
  *   01 `_개발자료/소스코드/vendor/sales_format.py`의 `_legacy_values`가 같은 규칙을 쓴다 — 함께 고칠 것.
  * - 결제완료 업체: 이미 결제한 업체의 실제 사용액.
- *   사용액이 비어 있으면 이체금액으로 폴백한다 — UI가 두 필드를 미러링하므로 통상 같은 값이고,
+ *   사용액이 비어 있으면 이체금액으로 폴백한다 — 통상 같은 값이고(2026-10-05 전까지는 UI가 두 필드를 미러링했다),
  *   비어 있는 건 구버전/외부 유입 데이터뿐이라 금액이 0으로 증발하지 않게 보존한다.
  *   (사용자가 명시적으로 "0"을 넣은 경우는 공란이 아니므로 그대로 0.)
  *
@@ -103,6 +103,22 @@ export function purchaseRowHasExportableAmount(r: any): boolean {
   if (String(r?.vendorName || "").trim() === "") return false;
   const usage = purchaseUsageExportValue(r);
   return purchaseTransferExportValue(r) + (usage === "" ? 0 : usage) > 0;
+}
+
+/**
+ * '이체필요'에 체크돼 있고 사용액은 적었는데 이체금액을 빠뜨린 행 — 매입매출 마감 제출을 막는다(2026-10-05 사용자 지시).
+ * 이체금액이 비면 이체 목록에서 통째로 빠져 돈이 안 나가는데, 사용액이 있어 확정 게이트는 통과해 버린다.
+ * 이체금액·사용액이 둘 다 빈 행은 '이번 달 거래 없음'(지난달에서 이월만 된 업체)이라 막지 않는다.
+ * 판정 전에 보정(normalizePurchaseRows)을 이 함수 안에서 거친다 — 옛 선입금 '사용액만' 행은 보정에서 결제완료로
+ * 옮겨져 여기 안 걸린다. 호출하는 쪽마다 보정 여부가 다르면 화면은 빨간데 제출은 통과하는 식으로 어긋난다(Codex 2026-10-05).
+ * 화면 표시와 제출 게이트가 같은 기준을 쓰도록 여기 한 곳에 둔다.
+ */
+export function purchaseRowMissingTransferAmount(r: any): boolean {
+  if (!r) return false;
+  const row = normalizePurchaseRows([r])[0];
+  if (String(row?.vendorName || "").trim() === "") return false;
+  if (row?.transferNeeded === false) return false;
+  return num(row?.transferAmount) <= 0 && num(row?.monthlyUsageAmount) > 0;
 }
 
 // ─────────────────────────────────────────────

@@ -19,6 +19,8 @@ import XLSX from "xlsx-js-style";
 import {
   assembleMonthlyCloseWorkbook,
   buildMonthlyCloseSheetSpecs,
+  normalizePurchaseRows,
+  purchaseRowMissingTransferAmount,
   purchaseTransferExportValue,
   purchaseUsageExportValue,
   type MonthlyCloseData
@@ -103,6 +105,18 @@ check("일반 이체필요(같은 값) → 공란", purchaseUsageExportValue(pur
 check("선입금 초과분(다른 값) → 사용액", purchaseUsageExportValue(purchases.find((r) => r.id === "j")), 1100000);
 check("선입금 초과분 이체금액", purchaseTransferExportValue(purchases.find((r) => r.id === "j")), 800000);
 check("이체필요·사용액 공란 → 공란", purchaseUsageExportValue({ transferNeeded: true, transferAmount: "5000", monthlyUsageAmount: "" }), "");
+
+console.log("\n[4-2] 마감 제출 차단 — 이체필요 체크 + 사용액만 있고 이체금액이 빈 행");
+check("사용액만 있고 이체금액 빈칸 → 차단", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: true, transferAmount: "", monthlyUsageAmount: "50000" }), true);
+check("이체금액 0 + 사용액 → 차단", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: true, transferAmount: "0", monthlyUsageAmount: "50000" }), true);
+check("transferNeeded 없음(옛 데이터=이체필요) → 차단", purchaseRowMissingTransferAmount({ vendorName: "가", transferAmount: "", monthlyUsageAmount: "1,000" }), true);
+check("둘 다 빈칸(이번 달 거래 없음) → 통과", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: true, transferAmount: "", monthlyUsageAmount: "" }), false);
+check("이체금액 있음 → 통과", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: true, transferAmount: "1000", monthlyUsageAmount: "" }), false);
+check("결제완료 → 통과", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: false, transferAmount: "", monthlyUsageAmount: "50000" }), false);
+check("업체명 없음 → 통과", purchaseRowMissingTransferAmount({ vendorName: " ", transferNeeded: true, transferAmount: "", monthlyUsageAmount: "50000" }), false);
+check("옛 선입금 사용액만(이체필요로 남아 있어도) → 보정돼 통과", purchaseRowMissingTransferAmount({ vendorName: "가", isPrepaid: true, transferNeeded: true, transferAmount: "", monthlyUsageAmount: "50000" }), false);
+check("픽스처 원본 그대로 넣어도 해당 없음", purchases.filter(purchaseRowMissingTransferAmount).length, 0);
+check("합성 픽스처 전체(보정 후)엔 해당 없음", normalizePurchaseRows(purchases).filter(purchaseRowMissingTransferAmount).length, 0);
 
 console.log("\n[5] 빈 시트엔 합계 줄을 붙이지 않는다");
 const empty = buildMonthlyCloseSheetSpecs({ ...data, purchases: [] }).find((s) => s.name === "매입매출")!;

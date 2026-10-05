@@ -10,6 +10,7 @@ import {
   normalizePurchaseRows as normalizePurchaseRowsShared,
   purchaseDisplayTotals,
   purchaseRowHasExportableAmount,
+  purchaseRowMissingTransferAmount,
   sortPurchaseRowsForDisplay
 } from "../helpers/monthlyCloseWorkbook";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
@@ -57,7 +58,10 @@ interface PurchaseSalesRow {
 // (3) 둘 다 없거나 서버 확인 실패 → 중단
 // ※ 지점당 단일 로그인·단일 기기 사용 전제. 같은 지점·달을 두 기기서 동시 편집하는 경우의 충돌 방어는
 //   명시적 결정(2026-07-08)으로 범위 외 — 완전 방어가 필요하면 payload에 버전/타임스탬프를 심어 별도 대응.
-export async function flushMonthlyPurchasesForClose(branchName: string, selectedMonth: string): Promise<{ blocked: boolean }> {
+export async function flushMonthlyPurchasesForClose(
+  branchName: string,
+  selectedMonth: string
+): Promise<{ blocked: boolean; missingTransferVendors?: string[] }> {
   const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
   const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
@@ -69,6 +73,17 @@ export async function flushMonthlyPurchasesForClose(branchName: string, selected
   // 관리자 다운로드 게이트와 동일한 공유 헬퍼(purchaseRowHasExportableAmount)를 사용한다.
   const hasMeaningful = (rows: PurchaseSalesRow[] | null) =>
     Array.isArray(rows) && rows.some(purchaseRowHasExportableAmount);
+  // 이체필요 체크 + 사용액만 있고 이체금액이 빈 행이 있으면 확정하지 않는다(2026-10-05 사용자 지시).
+  // 저장은 이미 끝난 뒤에 판정하므로 입력값은 서버에 남는다 — 지점이 금액만 채워 다시 제출하면 된다.
+  const missingTransfer = (rows: PurchaseSalesRow[] | null): string[] =>
+    (Array.isArray(rows) ? normalizePurchaseRowsShared(rows) : [])
+      .filter(purchaseRowMissingTransferAmount)
+      .map((r) => String(r.vendorName || "").trim());
+  const judge = (rows: PurchaseSalesRow[] | null) => {
+    if (!hasMeaningful(rows)) return { blocked: true };
+    const missing = missingTransfer(rows);
+    return missing.length > 0 ? { blocked: true, missingTransferVendors: missing } : { blocked: false };
+  };
   const local = readLocal();
 
   // 0) 이 기기에 미저장 편집(pending)이 있으면, 그 최신 상태(행 추가·수정·삭제·비움 모두 포함)를 확정 전에 서버로 반영한다.
@@ -77,7 +92,7 @@ export async function flushMonthlyPurchasesForClose(branchName: string, selected
   if (localStorage.getItem(pendingKey) === "1" && Array.isArray(local)) {
     try { await gasClient.saveSharedData(sharedKey, local as PurchaseSalesRow[]); localStorage.removeItem(pendingKey); }
     catch { return { blocked: true }; }
-    return hasMeaningful(local) ? { blocked: false } : { blocked: true };
+    return judge(local);
   }
 
   // 1) 미저장 편집이 없으면 서버(공유) 최신값을 신뢰한다(오프라인/서버 실패 → throw → 마감 차단).
@@ -85,12 +100,12 @@ export async function flushMonthlyPurchasesForClose(branchName: string, selected
   let remote: PurchaseSalesRow[] | null = null;
   try { remote = await gasClient.getSharedDataFromServer<PurchaseSalesRow[]>(sharedKey); }
   catch { return { blocked: true }; }
-  if (hasMeaningful(remote)) return { blocked: false };
+  if (hasMeaningful(remote)) return judge(remote);
 
   // 2) 서버가 비었지만(=pending이 아니어서 아직 안 올라간) 로컬에 실 데이터가 있으면 복구 저장 후 확정.
   //    → "확정 기록은 있는데 서버 상세가 비어있는" 레거시 상태를 지점 재확정만으로 만회.
   if (hasMeaningful(local)) {
-    try { await gasClient.saveSharedData(sharedKey, local as PurchaseSalesRow[]); localStorage.removeItem(pendingKey); return { blocked: false }; }
+    try { await gasClient.saveSharedData(sharedKey, local as PurchaseSalesRow[]); localStorage.removeItem(pendingKey); return judge(local); }
     catch { return { blocked: true }; }
   }
 
@@ -135,8 +150,8 @@ export function MonthlyPurchaseSalesSubTab({
       id: `p_${selectedMonth}_${row.id || Date.now()}`,
       transferAmount: "",
       // 폐지된 선입금 표식은 새 달로 넘기지 않는다.
-      // 넘기면 금액이 빈 새 행인데도 레거시 취급을 받아 이체금액→이달사용액 미러링이 꺼진 채 동작하고,
-      // export도 사용액을 0으로 내보낸다(Codex 정지리뷰 2026-08-02). 레거시 보호는 옛 달에만 필요하다.
+      // 넘기면 금액이 빈 새 행인데도 레거시 취급을 받아
+      // export가 사용액을 0으로 내보낸다(Codex 정지리뷰 2026-08-02). 레거시 보호는 옛 달에만 필요하다.
       isPrepaid: false,
       prepaidChargeAmount: "",
       monthlyUsageAmount: "",
@@ -249,31 +264,10 @@ export function MonthlyPurchaseSalesSubTab({
     setRows(prev => {
       const nextRows = prev.map(r => {
         if (r.id !== id) return r;
-        const updated = { ...r, [field]: nextValue };
-        // 아래 두 미러링은 옛 선입금 행(isPrepaid === true)에는 적용하지 않는다.
-        // 그 행의 이달사용액은 '발주액 합계'로, 이체금액과 뜻이 다른 별개의 숫자다. 미러링을 걸면
-        // 이체금액을 한 번 고치는 순간 발주액이 조용히 덮여 사라지고, export가 그 행의 사용액으로
-        // monthlyUsageAmount를 그대로 쓰기 때문에 대장 금액까지 바뀐다(Codex 정지리뷰 2026-08-02).
-        // 선입금 체크박스가 화면에서 사라져 되돌릴 방법도 없으므로 되돌릴 수 없는 손실이 된다.
-        const isLegacyPrepaid = updated.isPrepaid === true;
-        // 이체 필요금액이 바뀌면 이달사용액이 따라간다(두 값은 통상 같다).
-        // 단, 이체필요 상태에서 사용액을 따로 적어 둔 행(선입금 초과분 추가이체: 사용액=선입금+이체금액)은
-        // 따라가지 않는다 — 이체금액을 고치는 순간 직접 적은 사용액이 덮여 사라지기 때문(2026-10-05).
-        // 그래서 '사용액이 비었거나 고치기 전 이체금액과 같을 때'만 따라간다.
-        // 비교는 쉼표 등을 걷어낸 숫자로 한다 — 외부 유입값("1,000")을 Number()로 바로 읽으면 NaN이 돼
-        // 같은 값인데도 '따로 적은 사용액'으로 오판하고 선입금조정으로 나간다(Codex 2026-10-05).
-        const usageFollowsTransfer =
-          String(r.monthlyUsageAmount ?? "").trim() === ""
-          || (Number(cleanNumeric(String(r.monthlyUsageAmount))) || 0) === (Number(cleanNumeric(String(r.transferAmount ?? ""))) || 0);
-        if (field === "transferAmount" && !isLegacyPrepaid && usageFollowsTransfer) {
-          updated.monthlyUsageAmount = nextValue;
-        }
-        // 이체 필요?를 다시 체크(true)하면 이달사용액은 이체 필요금액을 다시 미러링한다.
-        // (결제완료 상태에서 따로 적은 값은 '이체 필요' 복귀 시 이체금액 기준으로 되돌린다.)
-        if (field === "transferNeeded" && val === true && !isLegacyPrepaid) {
-          updated.monthlyUsageAmount = updated.transferAmount || "";
-        }
-        return updated;
+        // 이체금액 → 이달사용액 자동 미러링은 2026-10-05에 없앴다(사용자 지시). 사용액은 지점이 직접 적는다.
+        // 남겨 두면 선입금 초과분처럼 두 값이 달라야 하는 행에서 직접 적은 사용액이 덮여 사라지고,
+        // '이체필요 다시 체크' 때도 결제완료 상태에서 적은 사용액이 이체금액으로 바뀐다.
+        return { ...r, [field]: nextValue };
       });
       localStorage.setItem(storageKey, JSON.stringify(nextRows));
       localStorage.setItem(pendingKey, "1");
@@ -332,7 +326,7 @@ export function MonthlyPurchaseSalesSubTab({
       const resetRows = currentRows.map((row) => ({
         ...row,
         transferAmount: "",
-        // 금액을 다 비우면 지킬 레거시 값도 없다 — 표식까지 끊어 새로 입력하는 값이 새 규칙(미러링)을 따르게 한다.
+        // 금액을 다 비우면 지킬 레거시 값도 없다 — 표식까지 끊어 새로 입력하는 값이 새 규칙을 따르게 한다.
         isPrepaid: false,
         prepaidChargeAmount: "",
         monthlyUsageAmount: "",
@@ -478,16 +472,23 @@ export function MonthlyPurchaseSalesSubTab({
                       </span>
                     </label>
                   </td>
-                  <td className={cellTd(rowIndex, COL_TRANSFER_AMOUNT)}>
+                  {/* 이체필요 체크 + 사용액만 있고 이체금액이 빈 칸은 빨간 테두리 — 이 상태면 마감 제출이 막힌다(2026-10-05).
+                      지점 CSS가 rose 계열을 치환하므로 hex로 칠한다(DESIGN.md §11 경고색). */}
+                  <td
+                    className={cellTd(rowIndex, COL_TRANSFER_AMOUNT)}
+                    style={purchaseRowMissingTransferAmount(row) ? { boxShadow: "inset 0 0 0 2px #C93A3A", background: "#FDE2E2" } : undefined}
+                  >
                     <input
                       {...cellProps(rowIndex, COL_TRANSFER_AMOUNT)}
                       aria-label={`${rowIndex + 1}번 행 이체필요 금액`}
+                      aria-invalid={purchaseRowMissingTransferAmount(row) || undefined}
+                      title={purchaseRowMissingTransferAmount(row) ? "이체필요에 체크돼 있어 이체필요 금액을 적어야 마감할 수 있습니다" : undefined}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.transferAmount)}
                       disabled={isLocked || row.transferNeeded === false}
                       onChange={(e) => handleUpdateRow(row.id, "transferAmount", e.target.value)}
-                      placeholder={row.transferNeeded === false ? "-" : "송금 필요 금액"}
+                      placeholder={row.transferNeeded === false ? "-" : (purchaseRowMissingTransferAmount(row) ? "금액 입력 필요" : "송금 필요 금액")}
                       className={`${cellInput} font-mono font-black text-right text-red-650`}
                     />
                   </td>
