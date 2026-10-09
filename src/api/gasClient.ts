@@ -259,6 +259,8 @@ export interface DailyFormBootstrap {
   recordId: string | null;
   record: MasterDaily | null;
   previousCash: string;
+  /** 직전 제출 마감의 근무자 행. 없거나 못 읽으면 null(→ 직원현황으로 시작). */
+  previousStaffRows: any[] | null;
 }
 
 // 같은 화면에서 동일한 읽기 요청이 반복되는 것을 막습니다. 탭 이동 시에는
