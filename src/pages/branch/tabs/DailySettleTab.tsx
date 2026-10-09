@@ -313,76 +313,81 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
     officeWorkplace: branchName
   }), [branchName, defaultStandardHours]);
 
-  const hasMeaningfulTimeInput = (value?: string) => Boolean(value && value !== "00:00");
-
-  const hasStaffWorkInput = (row: StaffRow) =>
-    Boolean(
-      hasMeaningfulTimeInput(row.clockIn) ||
-      hasMeaningfulTimeInput(row.clockOut) ||
-      Number(row.workHours || 0) > 0 ||
-      Number(row.overtime || 0) > 0 ||
-      String(row.overtimeReason || "").trim() ||
-      String(row.officeTaskMemo || "").trim()
-    );
-
-  const reconcileDraftStaffRows = useCallback((rows: StaffRow[]) => {
-    const roster = getRoster();
+  // 직원현황에서 수정된 최신 정보(주민번호·직급·입사일·구분 등)를 행에 반영한다.
+  // **누가 목록에 있는지는 바꾸지 않는다** — 근무자 명단은 직전 마감을 이어받는다(2026-10-09).
+  // 근무 입력값(출퇴근시간·초과근무·메모)은 그대로 둔다.
+  const applyRosterInfo = useCallback((rows: StaffRow[], roster: Employee[]): StaffRow[] => {
     const rosterByName = new Map<string, Employee>();
     roster.forEach((emp) => rosterByName.set(emp.name, emp));
-    const rosterKeys = new Set(roster.map((emp) => `${emp.name}|${emp.residentNumber || ""}`));
-    const rosterNames = new Set(roster.map((emp) => emp.name));
-    const usedKeys = new Set<string>();
-
-    const keptRows = rows
-      .filter((row) => {
-        const key = `${row.name}|${row.residentNumber || ""}`;
-        const inRoster = rosterKeys.has(key) || rosterNames.has(row.name);
-        if (inRoster) {
-          usedKeys.add(key);
-          usedKeys.add(`${row.name}|`);
-          return true;
-        }
-        return hasStaffWorkInput(row);
-      })
-      .map((row) => {
-        // 직원현황에서 수정된 최신 정보(주민번호·직급·입사일·구분 등)를 반영합니다.
-        // 근무 입력값(출퇴근시간·초과근무·메모)은 그대로 보존합니다.
-        const emp = rosterByName.get(row.name);
-        if (!emp) return row;
-        return {
-          ...row,
-          division: emp.division,
-          residentNumber: emp.residentNumber || "",
-          rank: emp.rank || "",
-          entryDate: emp.entryDate || "",
-          phone: emp.phone || "",
-          addReason: emp.addReason,
-          fromBranch: emp.fromBranch || "",
-          transferDate: emp.transferDate || "",
-          salaryChanged: emp.salaryChanged,
-          hireDate: emp.hireDate || "",
-          addReasonMemo: emp.addReasonMemo || "",
-          standardHours: emp.division === "정직원" ? defaultStandardHours : 0
-        };
-      });
-
-    const nextRows = [...keptRows];
-    roster.forEach((emp) => {
-      const key = `${emp.name}|${emp.residentNumber || ""}`;
-      const exists = nextRows.some((row) =>
-        `${row.name}|${row.residentNumber || ""}` === key ||
-        (!emp.residentNumber && row.name === emp.name) ||
-        (emp.residentNumber && row.name === emp.name && !row.residentNumber)
-      );
-      if (!exists && !usedKeys.has(key)) {
-        nextRows.push(mapEmployeeToStaffRow(emp));
-      }
+    return rows.map((row) => {
+      const emp = rosterByName.get(row.name);
+      if (!emp) return row;
+      return {
+        ...row,
+        division: emp.division,
+        residentNumber: emp.residentNumber || "",
+        rank: emp.rank || "",
+        entryDate: emp.entryDate || "",
+        phone: emp.phone || "",
+        addReason: emp.addReason,
+        fromBranch: emp.fromBranch || "",
+        transferDate: emp.transferDate || "",
+        salaryChanged: emp.salaryChanged,
+        hireDate: emp.hireDate || "",
+        addReasonMemo: emp.addReasonMemo || "",
+        standardHours: emp.division === "정직원" ? defaultStandardHours : 0
+      };
     });
+  }, [defaultStandardHours]);
 
+  // 임시저장 복원 후 정리. 예전에는 '직원현황에 있는데 초안에 없는 사람'을 다시 끼워 넣었는데,
+  // 그러면 X로 지운 사람이 되살아난다. 이제 초안의 행은 그대로 두고 정보만 최신화한다.
+  const reconcileDraftStaffRows = useCallback((rows: StaffRow[]) => {
+    const nextRows = applyRosterInfo(rows, getRoster());
     return isHeadOffice ? distributeHeadOfficeOvertime(nextRows) : nextRows;
-  }, [getRoster, isHeadOffice, mapEmployeeToStaffRow, defaultStandardHours]);
+  }, [applyRosterInfo, getRoster, isHeadOffice]);
+
+  // 새 마감 화면의 시작 명단. null = 직전 마감이 없어 직원현황으로 시작한 경우.
+  // 제출 직후 '새로 작성'·기록 초기화 버튼도 이 명단으로 되돌린다.
+  const carriedStaffRowsRef = useRef<StaffRow[] | null>(null);
+
+  // 직전 마감의 근무자 행 → 오늘 빈 근무자 행. 사람(이름·주민번호)만 남기고 근무 입력은 비운다.
+  // 본사의 추가 근무구간(segmentId) 행은 그날만의 것이라 넘기지 않는다.
+  const carryOverStaffRows = useCallback((previousRows: any[], roster: Employee[]): StaffRow[] => {
+    const seen = new Set<string>();
+    const rows: StaffRow[] = [];
+    previousRows.forEach((raw) => {
+      if (!raw || typeof raw !== "object" || raw.segmentId) return;
+      const name = String(raw.name || "").trim();
+      if (!name) return;
+      const key = `${name}|${String(raw.residentNumber || "").trim()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const division: StaffRow["division"] = raw.division === "정직원" ? "정직원" : "파트타이머";
+      const { segmentId: _segmentId, ...rest } = raw as StaffRow;
+      rows.push({
+        ...rest,
+        name,
+        division,
+        standardHours: division === "정직원" ? defaultStandardHours : 0,
+        clockIn: "",
+        clockOut: "",
+        workHours: 0,
+        overtime: 0,
+        overtimeReason: "",
+        officeWorkType: "근무",
+        officeTaskMemo: "",
+        officeWorkplace: branchName
+      });
+    });
+    return applyRosterInfo(rows, roster);
+  }, [applyRosterInfo, branchName, defaultStandardHours]);
 
   const initRosterInForm = useCallback((freshRoster?: Employee[]) => {
+    if (carriedStaffRowsRef.current) {
+      setStaffRows(carriedStaffRowsRef.current);
+      return;
+    }
     const list = freshRoster || getRoster();
     const mappedRows: StaffRow[] = list.map(mapEmployeeToStaffRow);
     setStaffRows(mappedRows);
@@ -541,9 +546,14 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       try {
         setChecking(true);
         setDraftReady(false);
+        carriedStaffRowsRef.current = null;
         const res = await gasClient.getDailyFormBootstrap(branchName, settleDate);
         if (cancelled) return;
         const prevCashVal = res.previousCash || "0";
+        // 근무자 명단 = 직전 제출 마감의 명단(직원현황과 무관). 직전 마감이 없을 때만 직원현황으로 시작한다.
+        if (Array.isArray(res.previousStaffRows)) {
+          carriedStaffRowsRef.current = carryOverStaffRows(res.previousStaffRows, getRoster());
+        }
 
         if (res.exists && res.recordId) {
           setHasExistingRecord(true);
@@ -702,6 +712,10 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
           setOtherMemo("");
           const freshRoster = await refreshRosterCache();
           if (cancelled) return;
+          if (Array.isArray(res.previousStaffRows)) {
+            // 방금 받은 직원현황으로 구분·직급 등 정보를 다시 맞춘다(명단 구성은 그대로).
+            carriedStaffRowsRef.current = carryOverStaffRows(res.previousStaffRows, freshRoster);
+          }
           initRosterInForm(freshRoster);
           scheduleDraftRestore(prevCashVal);
         }
@@ -741,7 +755,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       cancelled = true;
       if (draftRestoreTimer !== null) window.clearTimeout(draftRestoreTimer);
     };
-  }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable, refreshRosterCache]);
+  }, [settleDate, branchName, getRoster, initRosterInForm, reconcileDraftStaffRows, restoreDraftIfAvailable, refreshRosterCache, carryOverStaffRows]);
 
   // Real-time Sum calculations
   const totalSales = useMemo(() => {
