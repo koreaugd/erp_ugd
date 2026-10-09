@@ -122,8 +122,15 @@ export async function firebaseGetDailyFormBootstrap(branchName: string, settleDa
   const previous = items.filter((item: any) => item.master?.settleDate < settleDate)
     .sort((a: any, b: any) => b.master.settleDate.localeCompare(a.master.settleDate))[0];
   let previousCash = "0";
-  try { previousCash = String(JSON.parse(String(previous?.master?.memo || "").split("\n---\nMETADATA:")[1]).cashBalance ?? "0"); } catch {}
-  return { exists: !!duplicate, recordId: duplicate?.recordId || duplicate?.id || null, record: duplicate?.master || null, previousCash };
+  // 일일마감 근무자 명단은 직원현황이 아니라 '직전 제출 마감'의 명단을 이어받는다(2026-10-09 사용자 지시).
+  // null = 직전 마감이 없거나 옛 형식이라 명단을 못 읽음 → 화면이 직원현황으로 시작한다.
+  let previousStaffRows: any[] | null = null;
+  try {
+    const previousMeta = JSON.parse(String(previous?.master?.memo || "").split("\n---\nMETADATA:")[1]);
+    previousCash = String(previousMeta.cashBalance ?? "0");
+    if (Array.isArray(previousMeta.staffRows)) previousStaffRows = previousMeta.staffRows;
+  } catch {}
+  return { exists: !!duplicate, recordId: duplicate?.recordId || duplicate?.id || null, record: duplicate?.master || null, previousCash, previousStaffRows };
 }
 
 export async function firebaseSubmitDaily(master: MasterDaily, expenses: ExpenseDetail[], staff: StaffRecord[]) {
