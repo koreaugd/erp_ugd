@@ -1148,6 +1148,15 @@ input[type=number] {
   line-height: 1.2;
   white-space: nowrap;
 }
+/* 행 강조(바닐라) — 위 '배경 칠하지 않기'의 **예외**로, 건수가 적은 곳에만 쓴다.
+   쓰는 곳: '최근 3일' 알약이 붙는 모든 관리자 표의 **최근 1일(어제·오늘)** 행(사용자 지시 2026-10-12 —
+   이상점검·법인택시 이상 점검·마감 이력 점검 3표), 초과근무일지 집계의 선택 직원 행.
+   [범위] .admin-sheet 가 아닌 표(법인택시 이상 점검)도 있어 관리자 tbody 전체에 건다.
+   [tr 이 아니라 td 에 칠한다] `.admin-redesign tbody tr:nth-child(odd/even)` 줄무늬가 tr 배경을 !important 로
+   덮어서, tr 에 색 클래스를 줘도 보이지 않는다. td 배경은 tr 배경 위에 그려지므로 줄무늬를 이긴다. */
+.admin-redesign tbody tr.admin-row-highlight > td {
+  background: var(--admin-vanilla);
+}
 .admin-redesign .admin-band-filters button:hover { background: var(--admin-vanilla) !important; }
 /* 켜진 필터 칩은 검정 채움(DESIGN.md §10 알약 토글) */
 .admin-redesign .admin-band-filters button.is-active {

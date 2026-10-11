@@ -3,6 +3,8 @@
  *   npx tsx scripts/verify-kakao-multiaccount.mts
  * 실패 시 비정상 종료한다. 배포 전 필수.
  */
+// 반드시 첫 import — src/demo.ts 의 __IS_DEMO__ 는 Vite 빌드 때만 치환돼 tsx 로 돌리면 ReferenceError 가 난다.
+import "./vite-define-shim.mts";
 import {
   normalizeKakaoTaxiOrders,
   aggregateByBranch,
@@ -133,14 +135,15 @@ console.log("[9] 점검 대상은 사유별로 묶이고 묶음 안에서는 최
   // 금액을 일부러 뒤섞어 둔다 — 예전 '금액 큰 순' 정렬이 남아 있으면 이 순서가 깨진다.
   // [시각 배치 주의] 이 픽스처는 "한 건에 사유가 하나씩만 붙는" 상태를 전제로 대표 사유·정렬을 본다.
   // 낮 시간대 창이 08~23시로 넓어졌으므로(2026-07-29), 고액 전용(n1·n2)·미매핑 전용(n5·n6) 건은
-  // 반드시 창 밖(23시~07시대) 시각이어야 daytime 사유가 덧붙지 않는다.
+  // 반드시 창 밖 시각이어야 daytime 사유가 덧붙지 않는다. 23:00~00:30 은 이상 점검(lateNight)
+  // 사유가 붙으므로(2026-10-11) 01~07시대를 쓴다.
   const rows = normalizeKakaoTaxiOrders([
-    order({ id: "n1", member_department: "사카바단단", service_fare: 31000, departure_time: "2026-07-01 23:30:00" }),
-    order({ id: "n2", member_department: "사카바단단", service_fare: 99000, departure_time: "2026-07-20 23:00:00" }),
+    order({ id: "n1", member_department: "사카바단단", service_fare: 31000, departure_time: "2026-07-01 02:30:00" }),
+    order({ id: "n2", member_department: "사카바단단", service_fare: 99000, departure_time: "2026-07-20 02:00:00" }),
     order({ id: "n3", member_department: "사카바단단", service_fare: 1000, departure_time: "2026-07-05 09:00:00" }),
     order({ id: "n4", member_department: "사카바단단", service_fare: 2000, departure_time: "2026-07-25 10:00:00" }),
-    order({ id: "n5", member_department: "", group_name: "기본그룹", member_id: "NOMAP1", service_fare: 500, departure_time: "2026-07-03 23:30:00" }),
-    order({ id: "n6", member_department: "", group_name: "기본그룹", member_id: "NOMAP2", service_fare: 500, departure_time: "2026-07-27 23:30:00" }),
+    order({ id: "n5", member_department: "", group_name: "기본그룹", member_id: "NOMAP1", service_fare: 500, departure_time: "2026-07-03 02:30:00" }),
+    order({ id: "n6", member_department: "", group_name: "기본그룹", member_id: "NOMAP2", service_fare: 500, departure_time: "2026-07-27 02:30:00" }),
   ], ERP_BRANCHES);
   const flagged = flagTaxiOrders(rows, DEFAULT_TAXI_THRESHOLDS);
   const seq = flagged.map((f) => f.row.order.id).join(",");
@@ -224,6 +227,40 @@ console.log("[12] 낮 시간대 경계 — 08:00 포함 / 07:59 제외 / 22:59 �
   check("22:59 는 낮 시간대", isDaytime("22:59"));
   check("23:00 은 아니다", !isDaytime("23:00"));
   check("기본 임계값이 08~23시", DEFAULT_TAXI_THRESHOLDS.dayStartHour === 8 && DEFAULT_TAXI_THRESHOLDS.dayEndHour === 23);
+}
+
+console.log("[12-2] 이상 점검(23:00~00:30) 경계 — 22:59 제외 / 23:00 포함 / 00:30 포함 / 00:31 제외");
+{
+  const reasonsAt = (time: string) => flagTaxiOrders(normalizeKakaoTaxiOrders([
+    order({ id: time, member_department: "대물섬 한남점", service_fare: 1000, departure_time: `2026-07-10 ${time}:00` }),
+  ], ERP_BRANCHES), DEFAULT_TAXI_THRESHOLDS)[0]?.reasons || [];
+  const isLate = (time: string) => reasonsAt(time).includes("lateNight");
+  check("22:59 는 아니다(낮 시간대)", !isLate("22:59") && reasonsAt("22:59").includes("daytime"));
+  check("23:00 은 이상 점검", isLate("23:00"));
+  check("23:59 는 이상 점검", isLate("23:59"));
+  check("00:00 은 이상 점검", isLate("00:00"));
+  check("00:30 은 이상 점검", isLate("00:30"));
+  check("00:31 은 아니다", !isLate("00:31"));
+  check("07:59 는 아니다", !isLate("07:59"));
+  check("23:00 건은 낮 시간대가 아니다", !reasonsAt("23:00").includes("daytime"));
+  // 깨진 시각은 이상 점검으로 잡지 않는다(Codex 지적) / departure_time 이 비면 call_time 으로 판정한다.
+  check("23:99 같은 깨진 시각은 아니다", !isLate("23:99"));
+  check("빈 시각은 아니다", !(flagTaxiOrders(normalizeKakaoTaxiOrders([
+    order({ id: "empty", member_department: "대물섬 한남점", service_fare: 1000, departure_time: "", call_time: "" }),
+  ], ERP_BRANCHES), DEFAULT_TAXI_THRESHOLDS)[0]?.reasons || []).includes("lateNight"));
+  check("departure_time 이 없으면 call_time 기준", (flagTaxiOrders(normalizeKakaoTaxiOrders([
+    order({ id: "call", member_department: "대물섬 한남점", service_fare: 1000, departure_time: "", call_time: "2026-07-10 00:15:00" }),
+  ], ERP_BRANCHES), DEFAULT_TAXI_THRESHOLDS)[0]?.reasons || []).includes("lateNight"));
+  // 사카바단단·8번대물집은 이상 점검 규칙만 빠지고, 고액 등 다른 규칙은 그대로 받는다(2026-10-11).
+  for (const branch of ["사카바단단", "8번대물집"]) {
+    const reasons = flagTaxiOrders(normalizeKakaoTaxiOrders([
+      order({ id: `ex-${branch}`, member_department: branch, service_fare: 40000, departure_time: "2026-07-10 23:30:00" }),
+    ], ERP_BRANCHES), DEFAULT_TAXI_THRESHOLDS)[0]?.reasons || [];
+    check(`${branch} 은 이상 점검 제외, 고액은 유지`, !reasons.includes("lateNight") && reasons.includes("highFare"), reasons.join(","));
+  }
+  check("이상 점검 카드로 분배된다", groupFlaggedByReason(flagTaxiOrders(normalizeKakaoTaxiOrders([
+    order({ id: "late1", member_department: "대물섬 한남점", service_fare: 40000, departure_time: "2026-07-10 23:10:00" }),
+  ], ERP_BRANCHES), DEFAULT_TAXI_THRESHOLDS)).lateNight.length === 1);
 }
 
 console.log("[13] 이용사유(use_code)·구분 라벨·일시 축약");
