@@ -28,6 +28,8 @@ import { getKakaoTaxiOrdersShared } from "./admin/helpers/kakaoTaxiOrdersCache";
 import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTaxiAnomaly";
 import { IS_DEMO, BRAND } from "../demo";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
+import { AdminOvertimeLogSection } from "./admin/AdminOvertimeLogSection";
+import { AdminTaxiWorkCheckSection } from "./admin/AdminTaxiWorkCheckSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { AdminReportPackTab } from "./admin/AdminReportPackTab";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, ADMIN_TAB_LABELS, type AdminPermKey } from "./admin/adminTabRegistry";
@@ -44,15 +46,28 @@ import { motion, AnimatePresence } from "motion/react";
 
 /** 대시보드 '새로 확인할 항목' 카운트. 항목마다 따로 도착하므로 부분 갱신(Partial)으로도 쓴다. */
 type DashboardAlerts = {
-  editLogs: number;
-  manualOvertimes: number;
-  newSignups: number;
-  /** null = 조회 실패(0건과 구분해 경고를 띄운다) */
+  /** null = 조회 실패(0건과 구분해 경고를 띄운다). 아래 세 개도 같다(2026-10-12, Codex 지적 —
+   *  예전엔 실패를 빈 목록으로 삼켜 '0건 = 확인할 것 없음'으로 보였다). */
+  editLogs: number | null;
+  manualOvertimes: number | null;
+  newSignups: number | null;
   taxiRequests: number | null;
   laborContractsPending: number | null;
   taxiAnomalies: number | null;
   latestEditLogAt: string;
   latestManualOvertimeAt: string;
+};
+
+/** '새로 확인할 항목'의 조회 단위 — 항목마다 따로 끝나고, 버튼도 자기 조회가 끝나면 바로 풀린다. */
+type DashboardAlertItem = "editLogs" | "manualOvertimes" | "newSignups" | "taxiRequests" | "laborContracts" | "taxiAnomalies";
+const DASHBOARD_ALERT_ITEMS: DashboardAlertItem[] = ["editLogs", "manualOvertimes", "newSignups", "taxiRequests", "laborContracts", "taxiAnomalies"];
+const DASHBOARD_ALERT_ITEM_LABEL: Record<DashboardAlertItem, string> = {
+  editLogs: "정산 변경",
+  manualOvertimes: "초과근무 수기작성",
+  newSignups: "계정 가입 승인",
+  taxiRequests: "법인택시 신청",
+  laborContracts: "근로계약서 발송 요청",
+  taxiAnomalies: "법인택시 점검 대상",
 };
 
 /** 분석 섹션의 하위탭. 사이드바·모바일 탭 줄·제목 매핑이 모두 아래 ANALYSIS_SUB_TABS 하나를 본다. */
@@ -174,7 +189,7 @@ export default function AdminPage() {
   // 마감 이상치 표의 분류. 예전엔 'dashboard' 탭이 하나 더 있었지만 필터가 'cash'와 완전히 같은 죽은 탭이라 없앴다
   // (대시보드 → 전일 정산현황으로 옮기면서 정리, 2026-07-22).
   const [closingView, setClosingView] = useState<"overtime" | "cash" | "remarks" | "otherMemo">("cash");
-  const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs">("status");
+  const [dailySettlementTab, setDailySettlementTab] = useState<"status" | "logs" | "overtime" | "workCheck">("status");
   // 마감 이력 점검 탭은 하위탭이 없어졌다. 대시보드 알림에서 넘어올 때 어느 섹션으로 스크롤할지만 가리킨다.
   // 기본값은 반드시 null이다 — 값이 있으면 사이드바로 그냥 들어와도 그 섹션까지 스크롤해 버려,
   // 맨 위 섹션(현금차이)을 건너뛰고 화면이 아래로 튄다.
@@ -189,6 +204,9 @@ export default function AdminPage() {
   // 항목마다 따로 도착해 따로 반영되므로(loadDashboardAlerts) 부분 갱신이 가능한 형태여야 한다.
   const [dashboardAlerts, setDashboardAlerts] = useState<DashboardAlerts>({ editLogs: 0, manualOvertimes: 0, newSignups: 0, taxiRequests: 0, laborContractsPending: 0, taxiAnomalies: 0, latestEditLogAt: "", latestManualOvertimeAt: "" });
   const [dashboardAlertsLoading, setDashboardAlertsLoading] = useState(false);
+  // 아직 조회가 안 끝난 항목. 버튼은 **자기 항목**이 끝나면 바로 풀린다(사용자 지적 2026-10-12) —
+  // 예전엔 가장 느린 법인택시 점검 대상(카카오 왕복 5~12초)이 끝날 때까지 모든 버튼이 잠겼다.
+  const [dashboardAlertsPending, setDashboardAlertsPending] = useState<DashboardAlertItem[]>([]);
   // 법인택시 '새 점검 대상' 확인 기록의 저장 상태. 저장 실패를 조용히 삼키면 이 노트북에서만
   // 알림이 사라져 다른 노트북과 어긋난다(P0-2).
   // [화면 이동 순서, Codex 2R] 배너와 재시도 버튼이 대시보드 안에 있으므로 **저장이 끝난 뒤에** 탭을 옮긴다.
@@ -369,46 +387,54 @@ export default function AdminPage() {
       const value = fields.map((field) => item?.[field]).find(Boolean) || "";
       return String(value) > max ? String(value) : max;
     }, "");
+    // 항목 하나가 끝나면(성공·실패 무관) 대기 목록에서 뺀다. 옛 요청이 늦게 끝나 지우지 않도록 세대를 확인한다.
+    const track = (item: DashboardAlertItem, work: Promise<unknown>) => work.finally(() => {
+      if (gen !== dashboardAlertsRequestRef.current) return;
+      setDashboardAlertsPending((cur) => cur.filter((k) => k !== item));
+    });
     try {
       setDashboardAlertsLoading(true);
+      setDashboardAlertsPending([...DASHBOARD_ALERT_ITEMS]);
       await Promise.allSettled([
         // admin_reviewed_* 는 '마감 이력 점검' 탭의 행별 확인 버튼이 쓰던 목록이다. 그 버튼은 제거했고
         // (강조가 최근 3일 기준으로 저절로 꺼지게 바뀜) 이제 아무도 이 목록에 쓰지 않는다. 다만 예전에 확인해 둔
         // 건이 알림에 다시 뜨지 않도록 읽기는 남겨 둔다 — 알림 자체는 어제분만 세고 localStorage로 닫힌다.
-        (async () => {
+        track("editLogs", (async () => {
           const [editLogs, reviewedEditLogs] = await Promise.all([
-            gasClient.getEditLogs().catch(() => []),
+            gasClient.getEditLogs().catch(() => null),
             gasClient.getSharedData<string[]>("admin_reviewed_edit_logs").catch(() => []),
           ]);
           const reviewedEditSet = new Set(Array.isArray(reviewedEditLogs) ? reviewedEditLogs : []);
           const getEditReviewId = (log: any) => String(log.id || `${log.branchName || ""}:${log.settleDate || ""}:${log.modifiedAt || log.createdAt || ""}`);
           const dismissed = localStorage.getItem("admin_dashboard_dismissed_edit_logs_date") === yesterday;
+          if (editLogs === null) { apply({ editLogs: null }); return; }
           const editNew = dismissed ? [] : (editLogs || []).filter((log: any) => log.settleDate === yesterday && !reviewedEditSet.has(getEditReviewId(log)));
           apply({ editLogs: editNew.length, latestEditLogAt: latest(editLogs || [], ["modifiedAt", "createdAt"]) });
-        })(),
-        (async () => {
+        })()),
+        track("manualOvertimes", (async () => {
           const [manualOvertimes, reviewedManualOvertimes] = await Promise.all([
-            gasClient.getAllManualOvertimes().catch(() => []),
+            gasClient.getAllManualOvertimes().catch(() => null),
             gasClient.getSharedData<string[]>("admin_reviewed_manual_overtimes").catch(() => []),
           ]);
           const reviewedManualSet = new Set(Array.isArray(reviewedManualOvertimes) ? reviewedManualOvertimes : []);
           const getManualReviewId = (record: any) => String(`${record.branchName || ""}:${record.id || ""}:${record.createdAt || record.updatedAt || record.settleDate || ""}`);
           const dismissed = localStorage.getItem("admin_dashboard_dismissed_manual_overtimes_date") === yesterday;
+          if (manualOvertimes === null) { apply({ manualOvertimes: null }); return; }
           const manualNew = dismissed ? [] : (manualOvertimes || []).filter((record: any) => record.settleDate === yesterday && !reviewedManualSet.has(getManualReviewId(record)));
           apply({ manualOvertimes: manualNew.length, latestManualOvertimeAt: latest(manualOvertimes || [], ["createdAt", "updatedAt", "settleDate"]) });
-        })(),
+        })()),
         // accounts 탭 권한이 없는 관리자는 화면 접근이 막혀 있으므로 신규가입 카운트를 아예 불러오지 않는다
         // (권한 있는 배지가 뜨는데 눌러도 안내만 나오면 혼란 — 사용자 지시 2026-07-25).
-        (async () => {
+        track("newSignups", (async () => {
           const userProfiles = user?.loginType === "personal" && isAdminTabAllowed(user.allowedAdminTabs, "accounts")
-            ? await listUserProfiles().catch(() => [])
+            ? await listUserProfiles().catch(() => null)
             : [];
-          apply({ newSignups: (userProfiles || []).filter((p: any) => !p.reviewedByAdmin).length });
-        })(),
+          apply({ newSignups: userProfiles === null ? null : userProfiles.filter((p: any) => !p.reviewedByAdmin).length });
+        })()),
         // 법인택시 대기 신청 수 — 신청 관리 탭과 같은 지점별 공유데이터를 센다(대기만; 처리중은 이미 다른 관리자가 선점).
         // 실패는 0이 아니라 null 로 돌려 화면에 '조회 실패'를 알린다 — 지점 한 곳이라도 못 읽으면 전체를 실패로 본다
         // (일부만 세면 실제보다 적은 수가 '정상'처럼 보인다).
-        (async () => {
+        track("taxiRequests", (async () => {
           const count = isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
             ? await (async () => {
                 const branches = (await getAdminBranchList()).filter((b: any) => b?.role === "branch" && b.branchName);
@@ -419,22 +445,22 @@ export default function AdminPage() {
               })().catch(() => null)
             : 0;
           apply({ taxiRequests: count });
-        })(),
+        })()),
         // 근로계약서 발송 대기 수 — 지점이 등록한 발송대상 중 아직 '발송 대기' 상태인 건. 실패는 null(조회 실패).
-        (async () => {
+        track("laborContracts", (async () => {
           const count = isAdminTabAllowed(allowedAdminTabs, "laborContracts")
             ? await gasClient.getAllLaborContracts()
                 .then((rows) => (rows || []).filter((row: any) => (row?.status || "발송 대기") === "발송 대기").length)
                 .catch(() => null)
             : 0;
           apply({ laborContractsPending: count });
-        })(),
+        })()),
         // 법인택시 이상 점검 대상 — '법인택시 > 이상 점검' 탭과 완전히 같은 계산(정규화 → 규칙 판정)을
         // 이번 달 데이터로 여기서 재현한다. 두 곳(여기·KakaoTaxiSection)이 규칙을 따로 들고 있으면 언젠가
         // 어긋나므로, 항상 helpers/kakaoTaxi·kakaoTaxiAnomaly 의 같은 순수 함수를 그대로 불러 쓴다.
         // 건수가 아니라 **건 키 목록**을 만든다 — 대시보드는 '아직 확인 안 한 건'만 세기 때문이다(아래 참고).
         // 이 항목이 가장 느리다(카카오 왕복) — 다른 항목을 붙잡지 않도록 따로 떼어 두었다.
-        (async () => {
+        track("taxiAnomalies", (async () => {
           const [taxiAnomalyKeys, taxiAnomalyAck] = await Promise.all([
             isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")
           ? (async () => {
@@ -506,10 +532,10 @@ export default function AdminPage() {
               ? null
               : taxiAnomalyKeys.filter((k) => !seenKeys.has(k)).length,
           });
-        })(),
+        })()),
       ]);
     } finally {
-      if (gen === dashboardAlertsRequestRef.current) setDashboardAlertsLoading(false);
+      if (gen === dashboardAlertsRequestRef.current) { setDashboardAlertsLoading(false); setDashboardAlertsPending([]); }
     }
   }, [user, isAdminSession, allowedAdminTabs]);
 
@@ -858,7 +884,7 @@ export default function AdminPage() {
   // 문자열은 사이드바 버튼과 같은 값을 쓴다 — 두 곳이 어긋나면 사용자가 다른 화면으로 오해한다.
   const currentTabLabel = (() => {
     if (adminSection === "dailySettlement") {
-      return dailySettlementTab === "logs" ? "마감 이력 점검" : "전일 정산현황";
+      return dailySettlementTab === "logs" ? "마감 이력 점검" : dailySettlementTab === "overtime" ? "초과근무일지" : dailySettlementTab === "workCheck" ? "이상점검" : "전일 정산현황";
     }
     if (adminSection === "monthlyClosing") {
       return monthlyClosingTab === "cashManagement" ? "현금관리"
@@ -926,12 +952,12 @@ export default function AdminPage() {
           </button>
 
           <p className="ugd-nav-group">일일업무</p>
-          {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "마감 이력 점검" }].map((sub) => {
+          {[{ id: "status", label: "전일 정산현황" }, { id: "logs", label: "마감 이력 점검" }, { id: "overtime", label: "초과근무일지" }, { id: "workCheck", label: "이상점검" }].map((sub) => {
             const subActive = adminSection === "dailySettlement" && dailySettlementTab === sub.id;
             return (
               <button
                 key={sub.id}
-                onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs"); setDailyLogsFocus(null); }}
+                onClick={() => { setAdminSection("dailySettlement"); setDailySettlementTab(sub.id as "status" | "logs" | "overtime" | "workCheck"); setDailyLogsFocus(null); }}
                 aria-current={subActive ? "page" : undefined}
                 className={`ugd-nav-item${subActive ? " is-active" : ""}${!isAdminTabAllowed(allowedAdminTabs, "dailySettlement") ? " opacity-50" : ""}`}
               >
@@ -1110,6 +1136,7 @@ export default function AdminPage() {
                   pendingDailyCount={stats.pending}
                   alerts={dashboardAlerts}
                   loading={dashboardAlertsLoading}
+                  pendingItems={dashboardAlertsPending}
                   taxiAnomalyAck={taxiAnomalyAck}
                   onRefresh={() => void loadDashboardAlerts()}
                   onOpen={handleDashboardAlertClick}
@@ -1173,6 +1200,8 @@ export default function AdminPage() {
               <div className="flex gap-2 border-b border-gray-200 lg:hidden">
                 <button onClick={() => setDailySettlementTab("status")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "status" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>전일 정산현황</button>
                 <button onClick={() => { setDailySettlementTab("logs"); setDailyLogsFocus(null); }} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "logs" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>마감 이력 점검</button>
+                <button onClick={() => setDailySettlementTab("overtime")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "overtime" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>초과근무일지</button>
+                <button onClick={() => setDailySettlementTab("workCheck")} className={`px-3 py-1.5 text-[11px] font-black border-b-2 ${dailySettlementTab === "workCheck" ? "border-[#2E6DB4] text-[#2E6DB4]" : "border-transparent text-gray-400"}`}>이상점검</button>
               </div>
               {dailySettlementTab === "status" ? (
                 <AdminDailySettlementStatusSection
@@ -1194,7 +1223,9 @@ export default function AdminPage() {
                   setClosingView={setClosingView}
                   reloadAnomalies={() => { anomalyCacheRef.current.clear(); void loadClosingAnomalies(); }}
                 />
-              ) : <AdminModificationLogsSection focusSection={dailyLogsFocus} />}
+              ) : dailySettlementTab === "overtime" ? <AdminOvertimeLogSection />
+                : dailySettlementTab === "workCheck" ? <AdminTaxiWorkCheckSection taxiAllowed={isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")} />
+                : <AdminModificationLogsSection focusSection={dailyLogsFocus} />}
             </section>
           )}
 
@@ -1728,13 +1759,16 @@ function AdminDashboardAlertHub({
   pendingDailyCount,
   alerts,
   loading,
+  pendingItems,
   taxiAnomalyAck,
   onRefresh,
   onOpen
 }: {
   pendingDailyCount: number;
-  alerts: { editLogs: number; manualOvertimes: number; newSignups: number; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null };
+  alerts: { editLogs: number | null; manualOvertimes: number | null; newSignups: number | null; taxiRequests: number | null; laborContractsPending: number | null; taxiAnomalies: number | null };
   loading: boolean;
+  /** 아직 조회가 안 끝난 항목 — 그 항목의 버튼만 잠근다 */
+  pendingItems: DashboardAlertItem[];
   /** 법인택시 '확인 처리'의 저장 상태 — 실패를 조용히 삼키지 않고 이 화면에서 재시도하게 한다(P0-2) */
   taxiAnomalyAck: { saving: boolean; error: string };
   onRefresh: () => void;
@@ -1742,13 +1776,19 @@ function AdminDashboardAlertHub({
 }) {
   // null = 조회 실패 — 합계에선 빼되 아래에서 별도 경고를 띄운다(0건 '이상 없음'으로 오도 금지).
   const failedCounts = [
+    ...(alerts.editLogs === null ? ["정산 변경"] : []),
+    ...(alerts.manualOvertimes === null ? ["초과근무 수기작성"] : []),
+    ...(alerts.newSignups === null ? ["계정 가입 승인"] : []),
     ...(alerts.taxiRequests === null ? ["법인택시 신청"] : []),
     ...(alerts.laborContractsPending === null ? ["근로계약서 발송 요청"] : []),
     ...(alerts.taxiAnomalies === null ? ["법인택시 점검 대상"] : []),
   ];
-  const totalAlerts = pendingDailyCount + alerts.editLogs + alerts.manualOvertimes + alerts.newSignups + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0) + (alerts.taxiAnomalies ?? 0);
-  // 조회 중에는 알림 버튼을 잠근다 — 이유는 아래 목록 주석 참고(옛 숫자로 '확인함'이 기록되는 것 방지).
-  const busyClass = loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-95";
+  const totalAlerts = pendingDailyCount + (alerts.editLogs ?? 0) + (alerts.manualOvertimes ?? 0) + (alerts.newSignups ?? 0) + (alerts.taxiRequests ?? 0) + (alerts.laborContractsPending ?? 0) + (alerts.taxiAnomalies ?? 0);
+  // 조회 중인 항목의 버튼만 잠근다 — 이유는 아래 목록 주석 참고(옛 숫자로 '확인함'이 기록되는 것 방지).
+  // 예전엔 전체 조회가 끝날 때까지 모든 버튼을 잠가, 카카오 왕복 하나 때문에 다 기다렸다(2026-10-12).
+  const isPending = (item: DashboardAlertItem) => pendingItems.includes(item);
+  const busyClassFor = (busy: boolean) => busy ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-95";
+  const pendingLabels = pendingItems.map((item) => DASHBOARD_ALERT_ITEM_LABEL[item]);
 
   return (
     <section className="admin-dashboard-alert-hub bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
@@ -1768,7 +1808,7 @@ function AdminDashboardAlertHub({
           법인택시 점검 대상(카카오 왕복 5~12초)을 기다리느라 나머지가 묶여 있던 문제를 없앤다(2026-07-30). */}
       {loading && totalAlerts === 0 ? (
         <div className="rounded-xl bg-gray-50 border border-gray-100 p-4 text-[11px] font-black text-[#212121]/60">
-          확인할 항목을 불러오는 중입니다…
+          확인할 항목을 불러오는 중입니다…{pendingLabels.length > 0 ? ` (남은 항목: ${pendingLabels.join(", ")})` : ""}
         </div>
       ) : !loading && totalAlerts === 0 && failedCounts.length === 0 ? (
         <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-[11px] font-black text-emerald-700">
@@ -1781,31 +1821,31 @@ function AdminDashboardAlertHub({
               새로고침 중에는 지난 조회의 옛 숫자가 남아 있는데, 그 상태로 누르면 '확인함' 기록이
               옛 숫자로 남아 아직 도착하지 않은 새 항목까지 덮어 버린다(Codex stop-time 2026-07-30).
               조회가 끝나면(수 초) 바로 눌러 볼 수 있다. */}
-          {loading && (
-            <p className="text-[11px] font-bold text-[#212121]/50">나머지 항목을 확인하는 중입니다… (확인이 끝나면 누를 수 있습니다)</p>
+          {pendingLabels.length > 0 && (
+            <p className="text-[11px] font-bold text-[#212121]/50">확인 중: {pendingLabels.join(", ")} — 끝나면 이 항목도 나타납니다</p>
           )}
           {pendingDailyCount > 0 && (
-            <button onClick={() => onOpen("dailyPending")} disabled={loading} className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClass}`}>
+            <button onClick={() => onOpen("dailyPending")} className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClassFor(false)}`}>
               일일정산 미제출: {pendingDailyCount}건
             </button>
           )}
-          {alerts.editLogs > 0 && (
-            <button onClick={() => onOpen("editLogs")} disabled={loading} className={`px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-black ${busyClass}`}>
+          {(alerts.editLogs ?? 0) > 0 && (
+            <button onClick={() => onOpen("editLogs")} disabled={isPending("editLogs")} className={`px-4 py-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 text-[11px] font-black ${busyClassFor(isPending("editLogs"))}`}>
               정산 변경: {alerts.editLogs}건
             </button>
           )}
-          {alerts.manualOvertimes > 0 && (
-            <button onClick={() => onOpen("manualOvertimes")} disabled={loading} className={`px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-black ${busyClass}`}>
+          {(alerts.manualOvertimes ?? 0) > 0 && (
+            <button onClick={() => onOpen("manualOvertimes")} disabled={isPending("manualOvertimes")} className={`px-4 py-2 rounded-xl bg-violet-50 text-violet-700 border border-violet-100 text-[11px] font-black ${busyClassFor(isPending("manualOvertimes"))}`}>
               초과근무 수기작성: {alerts.manualOvertimes}건
             </button>
           )}
-          {alerts.newSignups > 0 && (
-            <button onClick={() => onOpen("accounts")} disabled={loading} className={`px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-black ${busyClass}`}>
+          {(alerts.newSignups ?? 0) > 0 && (
+            <button onClick={() => onOpen("accounts")} disabled={isPending("newSignups")} className={`px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11px] font-black ${busyClassFor(isPending("newSignups"))}`}>
               계정 가입 승인 대기: {alerts.newSignups}건
             </button>
           )}
           {(alerts.taxiRequests ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiRequests")} disabled={loading} className={`px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black ${busyClass}`}>
+            <button onClick={() => onOpen("taxiRequests")} disabled={isPending("taxiRequests")} className={`px-4 py-2 rounded-xl bg-sky-50 text-sky-700 border border-sky-100 text-[11px] font-black ${busyClassFor(isPending("taxiRequests"))}`}>
               법인택시 신청 대기: {alerts.taxiRequests}건
             </button>
           )}
@@ -1814,14 +1854,14 @@ function AdminDashboardAlertHub({
               빨강으로 남고, 아래 '조회 실패' 오류 배너(#FDE2E2/#B91C1C)와 헷갈린다. 빨강은 이 허브에서
               오류 전용이다. 버튼은 색으로 의미를 나누지 않으므로(DESIGN.md §10) 형제와 같은 계열을 쓴다. */}
           {(alerts.taxiAnomalies ?? 0) > 0 && (
-            <button onClick={() => onOpen("taxiAnomalies")} disabled={loading || taxiAnomalyAck.saving}
-              className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${loading || taxiAnomalyAck.saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-95"}`}>
+            <button onClick={() => onOpen("taxiAnomalies")} disabled={isPending("taxiAnomalies") || taxiAnomalyAck.saving}
+              className={`px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-[11px] font-black ${busyClassFor(isPending("taxiAnomalies") || taxiAnomalyAck.saving)}`}>
               {/* 확인 기록이 클라우드에 저장된 뒤에야 탭으로 넘어간다 — 그동안은 눌린 상태를 보여준다 */}
               법인택시 새 점검 대상: {alerts.taxiAnomalies}건{taxiAnomalyAck.saving ? " — 확인 기록 저장 중…" : ""}
             </button>
           )}
           {(alerts.laborContractsPending ?? 0) > 0 && (
-            <button onClick={() => onOpen("laborContracts")} disabled={loading} className={`px-4 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-100 text-[11px] font-black ${busyClass}`}>
+            <button onClick={() => onOpen("laborContracts")} disabled={isPending("laborContracts")} className={`px-4 py-2 rounded-xl bg-orange-50 text-orange-700 border border-orange-100 text-[11px] font-black ${busyClassFor(isPending("laborContracts"))}`}>
               근로계약서 발송 요청: {alerts.laborContractsPending}건
             </button>
           )}
@@ -3112,10 +3152,21 @@ const modlogIsRecent = (value: unknown, cutoff: number): boolean => {
   return Number.isNaN(t) ? false : t >= cutoff;
 };
 
+// '최근 1일'(어제·오늘)의 시작 — 어제 로컬 자정.
+const modlogRecentDayCutoff = (): number => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - 1);
+  return d.getTime();
+};
+
 // [2026-08-03 사용자 지시] 최근 건은 **행 배경을 칠하지 않고 알약을 붙여** 표시한다.
 // 배경을 칠하면 최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌다.
 // 알약은 법인택시 이상 점검(KakaoTaxiSection)의 '최근 3일' 배지와 같은 문법으로 맞춘다.
-const modlogRowClass = () => "hover:bg-slate-50/50";
+// [2026-10-12 사용자 지시] 예외 — 알약이 붙는 건 중 **최근 1일(어제·오늘)** 행만 바닐라로 칠한다
+// (관리자 화면에서 '최근 3일' 알약이 붙는 모든 표에 같은 규칙. 이상점검 탭에서 먼저 도입).
+const modlogRowClass = (value?: unknown) =>
+  `hover:bg-slate-50/50${modlogIsRecent(value, modlogRecentDayCutoff()) ? " admin-row-highlight" : ""}`;
 
 /** 최근 3일 안에 올라온 건에 붙이는 배지. 날짜 칸 옆에 놓아 "언제 것인지" 옆에서 바로 읽히게 한다. */
 function ModlogRecentBadge({ recent }: { recent: boolean }) {
@@ -3356,7 +3407,7 @@ function AdminEditLogsSection() {
               <tr><td colSpan={6} className={MODLOG_EMPTY}>기록된 마감 수정 이력이 없습니다.</td></tr>
             ) : (
               filteredLogs.map((log) => (
-                  <tr key={log.id} className={modlogRowClass()}>
+                  <tr key={log.id} className={modlogRowClass(log.modifiedAt)}>
                     <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {formatShortDate(log.modifiedAt)}
                       <ModlogRecentBadge recent={modlogIsRecent(log.modifiedAt, recentCutoff)} />
@@ -3491,7 +3542,7 @@ function AdminCashDiffHistorySection() {
             ) : (
               visibleRows.map((r, i) => (
                 // 이 표에는 '등록 시각'이 없다(지점 마감 기록에서 그때그때 계산해 만든 행이라) → 마감일자로 최근 여부를 본다.
-                <tr key={`${r.branchName}-${r.date}-${i}`} className={modlogRowClass()}>
+                <tr key={`${r.branchName}-${r.date}-${i}`} className={modlogRowClass(r.date)}>
                   <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                     {r.date}
                     <ModlogRecentBadge recent={modlogIsRecent(r.date, recentCutoff)} />
@@ -4351,7 +4402,7 @@ function AdminManualOvertimesSection() {
               <tr><td colSpan={7} className={MODLOG_EMPTY}>수기로 등록된 초과근무 내역이 없습니다.</td></tr>
             ) : (
               filteredRecords.map((r, idx) => (
-                  <tr key={r.id || idx} className={modlogRowClass()}>
+                  <tr key={r.id || idx} className={modlogRowClass(r.createdAt)}>
                     <td className={`${MODLOG_TD} font-mono text-[11px] text-gray-500 whitespace-nowrap`}>
                       {formatShortDate(r.createdAt)}
                       <ModlogRecentBadge recent={modlogIsRecent(r.createdAt, recentCutoff)} />
