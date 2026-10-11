@@ -3,7 +3,8 @@
 // 규칙 설계 근거: 외식업 특성상 마감 후 심야 퇴근 택시가 '정상' 패턴이므로, 흔한 심야 감시 대신
 // **영업시간대 이용**을 점검 대상으로 잡는다. 시간창은 08:00~22:59(2026-07-29 사용자 지시로 06~17시에서 확대) —
 // 06~17시 창은 새벽 00~05시대·저녁 18~22시대 이용이 통째로 빠져 정작 봐야 할 건이 안 잡혔다(정윤기 3건 실측).
-// 남은 '정상' 구간은 23시~익일 07시대뿐이며, 이는 마감 후 퇴근 택시라 의도적으로 점검하지 않는다.
+// 남은 23시~익일 07시대는 마감 후 퇴근 택시라 기본은 정상으로 보되, 그중 **23:00~00:30**은
+// '이상 점검' 사유로 따로 짚는다(2026-10-11 사용자 지시). 낮 시간대 창(08~22시대)은 그대로다.
 import type { NormalizedTaxiOrder } from "./kakaoTaxi";
 
 export interface TaxiAnomalyThresholds {
@@ -17,6 +18,10 @@ export interface TaxiAnomalyThresholds {
   dayStartHour: number;
   /** R3: 이 시각(미만)까지를 '낮 시간대'로 본다 */
   dayEndHour: number;
+  /** R5: 출발 시각(자정 기준 분)이 이 값 이상이거나 */
+  lateNightStartMinute: number;
+  /** R5: 이 값 이하(포함)이면 '이상 점검' 시간대 — 자정을 넘는 창이라 두 조건을 OR 로 본다 */
+  lateNightEndMinute: number;
 }
 
 export const DEFAULT_TAXI_THRESHOLDS: TaxiAnomalyThresholds = {
@@ -27,7 +32,31 @@ export const DEFAULT_TAXI_THRESHOLDS: TaxiAnomalyThresholds = {
   // `hour >= dayStartHour && hour < dayEndHour` 라 dayEndHour 는 '미만' 경계다 — 23시 건은 제외.
   dayStartHour: 8,
   dayEndHour: 23,
+  // 23:00~00:30 출발 건(2026-10-11 사용자 지시). 분 단위라 00:30:59 까지 포함, 00:31 부터 제외.
+  lateNightStartMinute: 23 * 60,
+  lateNightEndMinute: 30,
 };
+
+/**
+ * '이상 점검'(23:00~00:30) 규칙에서만 빼는 지점(사용자 지시 2026-10-11). 고액·낮 시간대·미매핑 규칙은
+ * 그대로 적용된다. row.branchName(지점 변경 이력·별칭까지 반영된 ERP 지점명)으로 판정한다.
+ * 화면 카드 오른쪽 안내 문구도 이 목록을 그대로 쓴다 — 목록만 고치면 문구도 같이 바뀐다.
+ */
+export const TAXI_LATE_NIGHT_EXEMPT_BRANCHES: readonly string[] = ["사카바단단", "8번대물집"];
+
+/**
+ * timeText("YYYY-MM-DD HH:mm:ss")의 자정 기준 분. row.hour 와 같은 정규식이라 departure_time 이 없으면
+ * call_time 으로 폴백한 시각도 똑같이 쓴다(낮 시간대 규칙과 같은 기준).
+ * 파싱 불가·범위 밖(예: 23:99)이면 null — 깨진 값이 '이상 점검'으로 둔갑하지 않게 한다(Codex 지적).
+ */
+function minuteOfDay(timeText: string): number | null {
+  const m = /\b(\d{2}):(\d{2})/.exec(String(timeText || ""));
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
 
 /**
  * 퀵·택배(logistics)는 점검 규칙 전부에서 제외한다(2026-07-29).
@@ -69,9 +98,10 @@ export function isAnomalyExempt(accountKey: string, memberId: string | null | un
   return TAXI_ANOMALY_EXEMPT_MEMBERS.has(`${String(accountKey || "").trim()}|${String(memberId || "").trim()}`);
 }
 
-export type TaxiAnomalyReason = "highFare" | "daytime" | "unmapped";
+export type TaxiAnomalyReason = "lateNight" | "highFare" | "daytime" | "unmapped";
 
 export const TAXI_ANOMALY_LABEL: Record<TaxiAnomalyReason, string> = {
+  lateNight: "이상 점검",
   highFare: "고액",
   daytime: "낮 시간대",
   unmapped: "지점 미매핑",
@@ -79,7 +109,7 @@ export const TAXI_ANOMALY_LABEL: Record<TaxiAnomalyReason, string> = {
 
 // 점검 대상 표의 사유 묶음 순서. flagTaxiOrders 가 규칙을 평가하는 순서와 같게 유지할 것 —
 // 한 건에 사유가 여럿이면 이 순서상 첫 사유를 대표 사유로 보고 그 묶음에 넣는다.
-const TAXI_ANOMALY_REASON_ORDER: TaxiAnomalyReason[] = ["highFare", "daytime", "unmapped"];
+const TAXI_ANOMALY_REASON_ORDER: TaxiAnomalyReason[] = ["lateNight", "highFare", "daytime", "unmapped"];
 
 export interface FlaggedTaxiOrder {
   row: NormalizedTaxiOrder;
@@ -95,13 +125,18 @@ export interface MemberSurge {
   increase: number;
 }
 
-/** 건 단위 규칙(R1 고액 · R3 낮 시간대 · R4 미매핑). 모든 건이 모든 규칙에 대해 평가된다. */
+/** 건 단위 규칙(R5 이상 점검 · R1 고액 · R3 낮 시간대 · R4 미매핑). 모든 건이 모든 규칙에 대해 평가된다. */
 export function flagTaxiOrders(rows: NormalizedTaxiOrder[], thresholds: TaxiAnomalyThresholds): FlaggedTaxiOrder[] {
   const flagged: FlaggedTaxiOrder[] = [];
   for (const row of rows) {
     if (isAnomalyExempt(row.accountKey, row.order.member_id)) continue; // 본사 운영진 제외
     if (isLogisticsOrder(row)) continue; // 퀵·택배 제외 — 이용내역 탭 전용 섹션에서 본다
     const reasons: TaxiAnomalyReason[] = [];
+    // 23:00~00:30 — 자정을 넘는 창이라 OR. 시각 파싱 실패 건은 낮 시간대 규칙과 같은 이유로 제외한다.
+    // 제외 지점(TAXI_LATE_NIGHT_EXEMPT_BRANCHES)은 이 규칙만 건너뛴다.
+    const minute = minuteOfDay(row.timeText);
+    if (minute !== null && (minute >= thresholds.lateNightStartMinute || minute <= thresholds.lateNightEndMinute)
+      && !TAXI_LATE_NIGHT_EXEMPT_BRANCHES.includes(row.branchName)) reasons.push("lateNight");
     if (row.amount >= thresholds.highFare) reasons.push("highFare");
     // hour 파싱 실패 건은 시간대 규칙에서 제외 — 억지로 플래그하면 오탐이 늘어 표식 신뢰가 떨어진다
     if (row.hour !== null && row.hour >= thresholds.dayStartHour && row.hour < thresholds.dayEndHour) reasons.push("daytime");
@@ -154,7 +189,7 @@ function compareRecentFirst(a: FlaggedTaxiOrder, b: FlaggedTaxiOrder): number {
  * 카드 안에서 '겹친 건이 먼저, 단독 건이 나중'처럼 시간과 무관한 순서가 된다.
  */
 export function groupFlaggedByReason(flagged: FlaggedTaxiOrder[]): Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> {
-  const groups: Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> = { highFare: [], daytime: [], unmapped: [] };
+  const groups: Record<TaxiAnomalyReason, FlaggedTaxiOrder[]> = { lateNight: [], highFare: [], daytime: [], unmapped: [] };
   for (const f of flagged) {
     for (const reason of f.reasons) {
       if (groups[reason]) groups[reason].push(f);

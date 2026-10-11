@@ -16,7 +16,7 @@ import {
   type NormalizedTaxiOrder,
 } from "./helpers/kakaoTaxi";
 import {
-  DEFAULT_TAXI_THRESHOLDS, detectMemberSurges, excludeLogisticsOrders, flagTaxiOrders, groupFlaggedByReason,
+  DEFAULT_TAXI_THRESHOLDS, TAXI_LATE_NIGHT_EXEMPT_BRANCHES, detectMemberSurges, excludeLogisticsOrders, flagTaxiOrders, groupFlaggedByReason,
   type FlaggedTaxiOrder,
 } from "./helpers/kakaoTaxiAnomaly";
 import {
@@ -30,6 +30,7 @@ import {
 import { getKakaoTaxiOrdersShared, invalidateKakaoTaxiOrdersShared } from "./helpers/kakaoTaxiOrdersCache";
 // 휴업 지점은 관리자 화면에서 감춘다 — 목록·이유는 helpers/closedBranches.ts
 import { getAdminBranchList, isClosedBranch } from "./helpers/closedBranches";
+import { isDateWithin, recentWindow, useNowMinute } from "./helpers/recentDays";
 
 export type KakaoTaxiView = "orders" | "anomaly" | "members" | "requests";
 
@@ -378,7 +379,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   );
   const thresholds = useMemo(() => ({ ...DEFAULT_TAXI_THRESHOLDS, highFare }), [highFare]);
   const flagged = useMemo(() => flagTaxiOrders(rows, thresholds), [rows, thresholds]);
-  // [사유별 분리] 단일 '점검 대상 건' 표를 사유 3개(고액·낮 시간대·지점 미매핑) 카드로 나눈다
+  // [사유별 분리] 단일 '점검 대상 건' 표를 사유별(이상 점검·고액·낮 시간대·지점 미매핑) 카드로 나눈다
   // (사용자 지시 2026-07-29) — 고액·낮 시간대는 '지출 행태 점검'이고 지점 미매핑은 '데이터 정비'라
   // 봐야 할 목적이 다르다. 한 표에 섞여 있으면 매번 눈으로 걸러내야 했다.
   // 겹친 사유는 카드마다 다시 나온다(사용자 지시 2026-08-09) — 분배·정렬 규칙은 전부
@@ -387,13 +388,13 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
   // 이상 점검에서 최근 3일(오늘 포함) 이용 건을 짚어 준다.
   // [2026-08-03] 행 배경 칠하기는 걷어냈다 — 최근 표시는 **알약만** 쓴다(DESIGN_ADMIN §4-4).
   // 최근 건이 많은 날 표의 절반이 물들어 오히려 어디를 봐야 할지 흐려졌다.
-  // 로컬(KST) 기준 날짜 비교 — timeText 는 "YYYY-MM-DD HH:mm:ss" 형태라 앞 10자리 문자열 비교로 충분.
-  const recentSinceDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 2);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }, [ordersData?.month]);   // 조회를 다시 하면 기준일도 갱신
-  const isRecentOrder = (timeText: string) => String(timeText || "").slice(0, 10) >= recentSinceDate;
+  // KST 날짜 비교 — 기준은 helpers/recentDays 한 곳(이상점검 탭과 같은 기준). 1분마다 갱신해 자정을 넘겨도
+  // 따라가고, 미래 날짜는 빼낸다(Codex 지적 2026-10-12).
+  const nowMinute = useNowMinute();
+  const recent = recentWindow(nowMinute);
+  const isRecentOrder = (timeText: string) => isDateWithin(timeText, recent.since3, recent.today);
+  // 최근 1일(어제·오늘) 행은 바닐라로 칠한다(사용자 지시 2026-10-12 — 최근 3일 알약이 붙는 모든 관리자 표 공통).
+  const isRecentDayOrder = (timeText: string) => isDateWithin(timeText, recent.since1, recent.today);
   // 사유별 카드 3개가 컬럼·스타일을 어긋남 없이 공유하도록 표 한 벌만 두고 사유마다 호출한다.
   // '겹친 사유' 칸은 삭제했다(사용자 지시 2026-07-29) — 카드 제목이 이미 그 카드의 사유라 뱃지 칸이
   // 자리만 차지했다. 겹친 사유는 해당 사유의 카드에 같은 건이 다시 나오므로 칸 없이도 드러난다
@@ -403,11 +404,14 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
     list: FlaggedTaxiOrder[],
     emptyText: string,
     note?: string,
+    rightNote?: string,
   ) => (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="admin-band">
         <h2 className="admin-band-title">{title} — {formatNumber(list.length)}건</h2>
         {note && <p className="mt-1 text-[11px] font-bold text-[#212121]/60">{note}</p>}
+        {/* 밴드 오른쪽 끝 안내 — 밴드는 왼쪽 정렬이라 margin-left:auto 로 민다(.admin-band-actions 와 같은 방식) */}
+        {rightNote && <p className="admin-band-meta ml-auto">{rightNote}</p>}
       </div>
       <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
         <table className="w-full text-xs whitespace-nowrap">
@@ -425,7 +429,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
                 id 만 쓰면 서로 다른 두 건이 같은 key 가 돼 React 가 행을 잘못 재사용한다 */}
             {list.map(({ row }) => (
               <tr key={taxiOrderKey(row)}
-                className="border-t border-gray-100">
+                className={`border-t border-gray-100${isRecentDayOrder(row.timeText) ? " admin-row-highlight" : ""}`}>
                 {/* 표시만 축약(MM-DD HH:mm) — '최근 3일' 판정(isRecentOrder)과 정렬은 원본 timeText 그대로다 */}
                 <td className="px-2 py-2" title={row.timeText}>
                   {shortTimeText(row.timeText)}
@@ -2147,10 +2151,24 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               />원 이상
             </label>
             <span className="text-[#212121]/60">급증 기준: 전월 대비 {DEFAULT_TAXI_THRESHOLDS.surgeRatio}배 이상이면서 +{formatNumber(DEFAULT_TAXI_THRESHOLDS.surgeMinIncrease)}원 이상</span>
-            <span className="text-[#212121]/60">낮 시간대: {String(DEFAULT_TAXI_THRESHOLDS.dayStartHour).padStart(2, "0")}시~{DEFAULT_TAXI_THRESHOLDS.dayEndHour}시 (심야 퇴근 택시는 정상 패턴으로 봄)</span>
+            <span className="text-[#212121]/60">이상 점검: 23:00~00:30 출발</span>
+            <span className="text-[#212121]/60">낮 시간대: {String(DEFAULT_TAXI_THRESHOLDS.dayStartHour).padStart(2, "0")}시~{DEFAULT_TAXI_THRESHOLDS.dayEndHour}시 (00:31 이후 심야 퇴근 택시는 정상 패턴으로 봄)</span>
             {/* 겹친 사유를 카드마다 노출하므로(2026-08-09) 카드 건수의 합이 총 건수보다 클 수 있다 — 오해 방지 */}
             <span className="text-[#212121]/60">사유가 겹치는 건은 해당 카드에 모두 나옵니다 (카드 건수의 합 ≠ 점검 대상 총 건수)</span>
           </div>
+
+          {/* 점검 대상 건을 사유별 카드로 나눠 세로로 쌓는다(사용자 지시 2026-07-29).
+              맨 위는 23:00~00:30 '이상 점검', 직원별 급증은 맨 아래로 내렸다(사용자 지시 2026-10-11). */}
+          {renderAnomalyCard(
+            "이상 점검 (23:00~00:30 이용)", flaggedByReason.lateNight, "23:00~00:30 이용 건이 없습니다.",
+            undefined, `제외 지점: ${TAXI_LATE_NIGHT_EXEMPT_BRANCHES.join(", ")}`,
+          )}
+          {renderAnomalyCard("고액", flaggedByReason.highFare, "고액 건이 없습니다.")}
+          {renderAnomalyCard("낮 시간대 이용", flaggedByReason.daytime, "낮 시간대 이용 건이 없습니다.")}
+          {renderAnomalyCard(
+            "지점 미매핑", flaggedByReason.unmapped, "지점 미매핑 건이 없습니다.",
+            "부서(지점) 미기입·미인식 건 — 직원 관리에서 부서를 채우면 목록에서 사라집니다",
+          )}
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="admin-band">
@@ -2187,14 +2205,6 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
               <p className="px-4 py-6 text-xs font-bold text-[#212121]/50">급증한 직원이 없습니다.</p>
             )}
           </div>
-
-          {/* 점검 대상 건을 대표 사유별 3개 카드로 나눠 세로로 쌓는다(사용자 지시 2026-07-29) */}
-          {renderAnomalyCard("고액", flaggedByReason.highFare, "고액 건이 없습니다.")}
-          {renderAnomalyCard("낮 시간대 이용", flaggedByReason.daytime, "낮 시간대 이용 건이 없습니다.")}
-          {renderAnomalyCard(
-            "지점 미매핑", flaggedByReason.unmapped, "지점 미매핑 건이 없습니다.",
-            "부서(지점) 미기입·미인식 건 — 직원 관리에서 부서를 채우면 목록에서 사라집니다",
-          )}
         </>
       )}
 
