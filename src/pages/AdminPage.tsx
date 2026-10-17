@@ -2300,7 +2300,8 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
             theoreticalCash,
             actualCash,
             diff: actualCash - theoreticalCash,
-            transfer: Number(meta.transferSales ?? record.transferSales ?? 0) || 0,
+            // 현금매출과 같은 순서(레코드 우선) — 관리자 수정은 레코드 쪽만 고치므로 메타를 먼저 보면 옛 값이 뜬다.
+            transfer: Number(record.transferSales ?? meta.transferSales ?? 0) || 0,
             reason: meta.cashDiffReason || ""
           });
           cashExpenses.forEach((expense: any, index: number) => {
@@ -2334,7 +2335,8 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
 
   const summary = useMemo(() => ({
     cashExpenseTotal: expenseRows.reduce((sum, row) => sum + row.amount, 0),
-    diffTotal: cashRows.reduce((sum, row) => sum + row.diff, 0)
+    diffTotal: cashRows.reduce((sum, row) => sum + row.diff, 0),
+    transferTotal: cashRows.reduce((sum, row) => sum + row.transfer, 0)
   }), [cashRows, expenseRows]);
 
   return (
@@ -2359,6 +2361,7 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
           <p className="admin-band-meta">
             {formatNumber(cashRows.length)}건 · 현금지출 {formatNumber(summary.cashExpenseTotal)}원 · 차이{" "}
             <b className={summary.diffTotal !== 0 ? "text-[#B3261E]" : undefined}>{formatNumber(summary.diffTotal)}원</b>
+            {activeTab === "cashManagement" && <> · 계좌이체 {formatNumber(summary.transferTotal)}원</>}
           </p>
           <div className="admin-band-actions">
             {!fixedTab && (
@@ -2374,11 +2377,14 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
           {activeTab === "cashManagement" ? (
             /* 엑셀형 표 = .admin-sheet (헤더 엘리스·1px 격자·선 겹침 방지는 클래스가 처리).
                '차이' 색은 관리자 치환에 죽지 않게 hex로 못 박는다(§4-2 증감색 값). */
-            <table className="admin-sheet min-w-[980px]">
-              <thead><tr><th>마감일자</th><th>지점</th><th className="text-right">전일현금</th><th className="text-right">현금매출</th><th className="text-right">현금지출</th><th className="text-right">현금잔액</th><th className="text-right">실사현금</th><th className="text-right">차이</th><th>비고</th></tr></thead>
+            /* 계좌이체는 금고 시재 계산(전일+현금매출−현금지출)에 들어가지 않는 돈이라, 시재 칸들(전일현금~차이) 뒤에
+               굵은 왼쪽선으로 떼어 두고 머리글에 '시재 제외'를 박아 현금매출과 섞어 읽지 않게 한다.
+               머리글은 sticky라 border가 스크롤 중 빠지므로 box-shadow로 긋고, 통째로 갈리니 격자선도 다시 적는다(index.css .admin-sheet thead th). */
+            <table className="admin-sheet min-w-[1080px]">
+              <thead><tr><th>마감일자</th><th>지점</th><th className="text-right">전일현금</th><th className="text-right">현금매출</th><th className="text-right">현금지출</th><th className="text-right">현금잔액</th><th className="text-right">실사현금</th><th className="text-right">차이</th><th className="text-right" style={{ boxShadow: "inset 2px 0 0 0 #6B7280, inset -1px 0 0 0 var(--admin-black), inset 0 -1px 0 0 var(--admin-black)" }} title="계좌로 받은 매출 — 금고에 들어오지 않으므로 현금잔액·차이 계산에 포함되지 않습니다.">계좌이체 <span className="text-[10px] font-bold text-gray-500">(시재 제외)</span></th><th>비고</th></tr></thead>
               <tbody>
-                {loading ? <tr><td colSpan={9} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : cashRows.length === 0 ? <tr><td colSpan={9} className="p-12 text-center text-gray-400 font-bold">현금관리 내역이 없습니다.</td></tr> : cashRows.map((row) => (
-                  <tr key={`${row.branchName}-${row.date}`}><td className="font-mono">{row.date}</td><td className="font-black">{row.branchName}</td><td className="text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="text-right font-mono">{formatNumber(row.cashSales)}</td><td className="text-right font-mono">{formatNumber(row.cashExpenseTotal)}</td><td className="text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`text-right font-mono font-black ${row.diff ? "text-[#B3261E]" : "text-[#1F7A4D]"}`}>{formatNumber(row.diff)}</td><td className="text-gray-500">{row.reason || "-"}</td></tr>
+                {loading ? <tr><td colSpan={10} className="p-12 text-center"><LoadingSpinner size="sm" /></td></tr> : cashRows.length === 0 ? <tr><td colSpan={10} className="p-12 text-center text-gray-400 font-bold">현금관리 내역이 없습니다.</td></tr> : cashRows.map((row) => (
+                  <tr key={`${row.branchName}-${row.date}`}><td className="font-mono">{row.date}</td><td className="font-black">{row.branchName}</td><td className="text-right font-mono">{formatNumber(row.prevDayCash)}</td><td className="text-right font-mono">{formatNumber(row.cashSales)}</td><td className="text-right font-mono">{formatNumber(row.cashExpenseTotal)}</td><td className="text-right font-mono">{formatNumber(row.theoreticalCash)}</td><td className="text-right font-mono">{formatNumber(row.actualCash)}</td><td className={`text-right font-mono font-black ${row.diff ? "text-[#B3261E]" : "text-[#1F7A4D]"}`}>{formatNumber(row.diff)}</td><td className="text-right font-mono" style={{ borderLeft: "2px solid #6B7280" }}>{formatNumber(row.transfer)}</td><td className="text-gray-500">{row.reason || "-"}</td></tr>
                 ))}
               </tbody>
             </table>
