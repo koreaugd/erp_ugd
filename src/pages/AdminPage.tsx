@@ -4799,7 +4799,13 @@ function AdminLaborContractsSection() {
                       줄바꿈 금지 — 번호가 두 줄로 꺾이면 읽다 틀린다. */}
                   <td className={`${LABOR_SHEET_TD} font-mono font-black whitespace-nowrap`}>{formatContractPhoneDisplay(contract.phone)}</td>
                   <td className={`${LABOR_SHEET_TD} font-mono text-gray-500`}>
-                    {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
+                    {/* 지점이동 + 입사일이 있으면 "입사 / 이동" 두 줄(지점 입력 순서와 같다, 2026-10-18). 없으면 날짜 하나 */}
+                    {contract.contractType === "지점이동" && contract.hireDate ? (
+                      <>
+                        <div className="whitespace-nowrap">입사 {laborContractPeriodText(contract.hireDate)}</div>
+                        <div className="whitespace-nowrap">이동 {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}</div>
+                      </>
+                    ) : laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
                   </td>
                   <td className={`${LABOR_SHEET_TD} text-right font-mono font-black text-zinc-700`}>{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
                   <td className={`${LABOR_SHEET_TD} text-center`}>

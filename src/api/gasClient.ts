@@ -106,6 +106,8 @@ export interface LaborContract {
   /** periodType === "기간작성" 일 때의 종료일(YYYY-MM-DD). 시작일은 effectiveDate 다. */
   periodEndDate?: string;
   previousBranch?: string;
+  /** 지점이동일 때 최초 입사일(YYYY-MM-DD, 2026-10-18). effectiveDate 는 이동일이라 입사일을 따로 받는다. 옛 레코드엔 없다. */
+  hireDate?: string;
   status?: string;
   createdAt?: string;
   editRequestedAt?: string;
