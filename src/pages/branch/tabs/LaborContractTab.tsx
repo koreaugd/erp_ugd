@@ -80,6 +80,8 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
   /** 기간작성일 때의 종료일. 시작일은 effectiveDate(입사·이동일)를 그대로 쓴다. */
   const [periodEndDate, setPeriodEndDate] = useState("");
   const [previousBranch, setPreviousBranch] = useState("");
+  /** 지점이동일 때의 최초 입사일. effectiveDate 는 이동일이다. */
+  const [hireDate, setHireDate] = useState("");
   const [name, setName] = useState("");
   const [phoneDigits, setPhoneDigits] = useState("");
   const [salary, setSalary] = useState("");
@@ -224,6 +226,17 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       window.alert("지점이동인 경우 이전 지점을 선택해 주세요.");
       return;
     }
+    // 지점이동은 이동일만으로는 계약서를 못 쓴다 — 최초 입사일이 있어야 한다(2026-10-18).
+    if (contractType === "지점이동") {
+      if (!hireDate) {
+        window.alert("지점이동인 경우 입사일을 선택해 주세요.");
+        return;
+      }
+      if (hireDate > effectiveDate) {
+        window.alert("입사일이 지점이동일보다 늦을 수 없습니다.");
+        return;
+      }
+    }
     const numericSalary = parseSalaryInput(salary);
     if (!numericSalary) {
       window.alert("급여를 올바르게 입력해 주세요.");
@@ -252,7 +265,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
         // 기간작성일 때만 종료일을 싣는다. 값이 없으면 아예 넣지 않는다 —
         // 빈 문자열을 저장하면 "종료일이 있는데 비어 있다"로 읽힌다.
         ...(periodType === "기간작성" && periodEndDate ? { periodEndDate } : {}),
-        ...(contractType === "지점이동" ? { previousBranch } : {}),
+        ...(contractType === "지점이동" ? { previousBranch, hireDate } : {}),
         status: "발송 대기",
         createdAt: new Date().toISOString()
       };
@@ -269,6 +282,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
       setEffectiveDate("");
       setPeriodEndDate("");
       setPreviousBranch("");
+      setHireDate("");
       setName("");
       setPhoneDigits("");
       setSalary("");
@@ -400,7 +414,7 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
               onChange={(e) => {
                 const v = e.target.value as "" | "신규입사" | "지점이동";
                 setContractType(v);
-                if (v !== "지점이동") setPreviousBranch("");
+                if (v !== "지점이동") { setPreviousBranch(""); setHireDate(""); }
               }}
               aria-label="신규입사/지점이동 구분"
               className="h-8 w-[92px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
@@ -426,6 +440,23 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
               <option value="기간작성">{LABOR_CONTRACT_PERIOD_LABEL["기간작성"]}</option>
               <option value="정규">{LABOR_CONTRACT_PERIOD_LABEL["정규"]}</option>
             </select>
+            {/* 지점이동이면 날짜 칸이 둘이라 앞에 이름표를 붙여 구분한다. 순서는 입사일 → 이동일(사용자 지시 2026-10-18).
+                입사일은 이동일보다 늦은 날을 못 고르게 max 를 묶는다. */}
+            {contractType === "지점이동" && (
+              <span className="flex items-center gap-1">
+                <span className="text-[11px] font-black text-slate-500">입사일</span>
+                <input
+                  type="date"
+                  value={hireDate}
+                  max={effectiveDate || undefined}
+                  onChange={(e) => setHireDate(e.target.value)}
+                  aria-label="입사일"
+                  title="최초 입사일"
+                  className="h-8 w-[146px] rounded-lg border border-gray-200 bg-white px-2 text-[11px] font-bold text-slate-700"
+                />
+              </span>
+            )}
+            {contractType === "지점이동" && <span className="text-[11px] font-black text-slate-500">이동일</span>}
             <input
               type="date"
               value={effectiveDate}
@@ -546,7 +577,15 @@ export function LaborContractTab({ branchName }: { branchName: string; isAdmin?:
                       </div>
                     ) : c.phone}
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">{laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)}</td>
+                  <td className="px-3 py-2.5 font-mono text-slate-500 whitespace-nowrap">
+                    {/* 지점이동 + 입사일이 있으면 입력 순서대로 "입사 / 이동" 두 줄. 없으면(신규입사·옛 기록) 날짜 하나 */}
+                    {c.contractType === "지점이동" && c.hireDate ? (
+                      <>
+                        <div>입사 {laborContractPeriodText(c.hireDate)}</div>
+                        <div>이동 {laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)}</div>
+                      </>
+                    ) : laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)}
+                  </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <span className={`rounded-full px-2 py-0.5 font-black ${statusChipClass(normalizeStatus(c.status))}`}>
                       {normalizeStatus(c.status)}
