@@ -214,5 +214,42 @@ console.log("[14] 퇴근 전 탑승 — 사카바단단·8번대물집 택시는
   check("다른 지점은 그대로 퇴근 전 탑승", reasonsOf(other) === "beforeClockOut", reasonsOf(other));
 }
 
+console.log("[15] 전날 근무 후 다음 날 09시 전 탑승은 퇴근 후 6시간이 넘어도 정상(전날 근무로 귀속)");
+{
+  const settles: SettleDay[] = [
+    { branchName: "남산광어", settleDate: "2026-10-18", staffRows: [staff("김가", "15:00", "00:30")] },
+    { branchName: "남산광어", settleDate: "2026-10-19", staffRows: [staff("김가", "", "", { workHours: 0, officeWorkType: "휴무" })] },
+  ];
+  const [late] = run([ride("김가", "남산광어", "2026-10-19 06:57:00")], settles);
+  check("06:57 탑승 — 표식 없음", reasonsOf(late) === "" && late.workDate === "2026-10-18", `${reasonsOf(late)} ${late.workDate}`);
+  const [edge] = run([ride("김가", "남산광어", "2026-10-19 08:59:00")], settles);
+  check("08:59 탑승 — 표식 없음", reasonsOf(edge) === "", reasonsOf(edge));
+  const [after] = run([ride("김가", "남산광어", "2026-10-19 09:00:00")], settles);
+  check("09:00 탑승은 휴무일 이용", reasonsOf(after) === "noWork", reasonsOf(after));
+  const [noPrev] = run([ride("이나", "남산광어", "2026-10-19 07:00:00")], [
+    { branchName: "남산광어", settleDate: "2026-10-19", staffRows: [staff("이나", "", "", { workHours: 0, officeWorkType: "휴무" })] },
+  ]);
+  check("전날 근무 없으면 그대로 근무 없음", reasonsOf(noPrev) === "noWork", reasonsOf(noPrev));
+  const [commute] = run([ride("김가", "남산광어", "2026-10-19 08:40:00")], [
+    settles[0], { branchName: "남산광어", settleDate: "2026-10-19", staffRows: [staff("김가", "09:00", "18:00")] },
+  ]);
+  check("당일 이른 출근이 있으면 출근길로 봄", reasonsOf(commute) === "commute", reasonsOf(commute));
+  // 전날·당일 행의 주민번호 유무가 달라도 먼 전날 행 때문에 동명이인(확인 불가)으로 빠지지 않는다(Codex 지적).
+  for (const [prevId, todayId] of [["900101-1", undefined], [undefined, "900101-1"]] as const) {
+    const [mixed] = run([ride("김가", "남산광어", "2026-10-19 08:40:00")], [
+      { branchName: "남산광어", settleDate: "2026-10-18", staffRows: [staff("김가", "15:00", "00:30", prevId ? { residentNumber: prevId } : {})] },
+      { branchName: "남산광어", settleDate: "2026-10-19", staffRows: [staff("김가", "09:00", "18:00", todayId ? { residentNumber: todayId } : {})] },
+    ]);
+    check(`주민번호 ${prevId ? "전날만" : "당일만"} 있어도 출근길`, reasonsOf(mixed) === "commute", `${reasonsOf(mixed)} ${mixed.notes.unverifiable || ""}`);
+  }
+  // 다른 지점 동명 근무(당일 09:00 출근)가 택시 지점의 전날 근무 귀속을 가리지 않는다(Codex 지적).
+  const [cross] = run([ride("김가", "남산광어", "2026-10-19 08:40:00")], [
+    settles[0],
+    { branchName: "카라멘야", settleDate: "2026-10-19", staffRows: [staff("김가", "09:00", "18:00")] },
+  ]);
+  check("택시 지점 전날 근무가 우선", cross.shift?.branchName === "남산광어" && cross.workDate === "2026-10-18" && reasonsOf(cross) === "",
+    `${cross.shift?.branchName} ${cross.workDate} ${reasonsOf(cross)}`);
+}
+
 console.log(failed ? `\n실패 ${failed}건` : "\n전부 통과");
 process.exit(failed ? 1 : 0);

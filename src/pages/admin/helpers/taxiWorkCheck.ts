@@ -33,6 +33,11 @@ export const WORK_CHECK_THRESHOLDS = {
   commuteAfterStartMin: 30,
   /** 이 시각(시) 전의 새벽 택시는 전날 근무일로 본다 — 근무를 못 찾았을 때 어느 날 마감을 볼지 정한다 */
   overnightCutoffHour: 6,
+  /**
+   * 전날 근무가 있고 다음 날 이 시각(시) 전에 탄 건은, 퇴근 후 몇 시간이 지났든 전날 근무의 퇴근길로 본다
+   * (사용자 지시 2026-10-20 — 마감 후 남아 있다 아침에 귀가하는 경우를 '근무 없는 날'로 표식하지 않는다).
+   */
+  nextMorningCutoffHour: 9,
 };
 
 /**
@@ -169,13 +174,22 @@ const distanceToShift = (t: number, shift: WorkShift): number =>
 type ShiftMatch = { shift: WorkShift } | { ambiguous: true } | null;
 function findShift(t: number, name: string, branchName: string, shiftsByName: Map<string, WorkShift[]>, window: number): ShiftMatch {
   const day = Math.floor(t / 1440);
-  const candidates = (shiftsByName.get(name) || []).filter((s) => {
-    const d = dayIndex(s.settleDate);
-    return d !== null && (d === day || d === day - 1) && distanceToShift(t, s) <= window;
-  });
-  if (!candidates.length) return null;
-  const sameBranch = candidates.filter((s) => s.branchName === branchName);
-  const pool = sameBranch.length ? sameBranch : candidates;
+  const own = shiftsByName.get(name) || [];
+  const nextMorning = (t % 1440) < WORK_CHECK_THRESHOLDS.nextMorningCutoffHour * 60;
+  // 가까운 근무 → (없으면) 전날 근무 퇴근 뒤 다음 날 아침 9시 전 탑승은 간격과 무관하게 그 근무의 퇴근길.
+  // 9시 예외를 가까운 근무와 한 번에 모으면 먼 전날 행이 당일 출근 근무와 섞여 동명이인 오판을 만들고,
+  // 지점 구분 없이 모으면 다른 지점 동명 근무가 택시 지점의 예외를 가린다 — 지점별로 이 순서를 밟는다(Codex 지적).
+  const pick = (list: WorkShift[]): WorkShift[] => {
+    const near = list.filter((s) => {
+      const d = dayIndex(s.settleDate);
+      return d !== null && (d === day || d === day - 1) && distanceToShift(t, s) <= window;
+    });
+    if (near.length || !nextMorning) return near;
+    return list.filter((s) => dayIndex(s.settleDate) === day - 1 && t > s.end);
+  };
+  const sameBranch = pick(own.filter((s) => s.branchName === branchName));
+  const pool = sameBranch.length ? sameBranch : pick(own);
+  if (!pool.length) return null;
   const people = new Set(pool.map((s) => `${s.branchName}|${s.personId}`));
   if (people.size > 1) return { ambiguous: true };
   return { shift: pool.reduce((best, s) => (distanceToShift(t, s) < distanceToShift(t, best) ? s : best)) };
