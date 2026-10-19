@@ -2336,6 +2336,7 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
   const summary = useMemo(() => ({
     cashExpenseTotal: expenseRows.reduce((sum, row) => sum + row.amount, 0),
     diffTotal: cashRows.reduce((sum, row) => sum + row.diff, 0),
+    cashSalesTotal: cashRows.reduce((sum, row) => sum + row.cashSales, 0),
     transferTotal: cashRows.reduce((sum, row) => sum + row.transfer, 0)
   }), [cashRows, expenseRows]);
 
@@ -2359,7 +2360,9 @@ function AdminCashManagementSection({ fixedTab }: { fixedTab?: "cashManagement" 
             </select>
           </div>
           <p className="admin-band-meta">
-            {formatNumber(cashRows.length)}건 · 현금지출 {formatNumber(summary.cashExpenseTotal)}원 · 차이{" "}
+            {formatNumber(cashRows.length)}건
+            {activeTab === "cashManagement" && <> · 현금매출 {formatNumber(summary.cashSalesTotal)}원</>}
+            {" "}· 현금지출 {formatNumber(summary.cashExpenseTotal)}원 · 차이{" "}
             <b className={summary.diffTotal !== 0 ? "text-[#B3261E]" : undefined}>{formatNumber(summary.diffTotal)}원</b>
             {activeTab === "cashManagement" && <> · 계좌이체 {formatNumber(summary.transferTotal)}원</>}
           </p>
