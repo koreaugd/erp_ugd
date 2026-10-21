@@ -199,7 +199,8 @@ export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolea
   const renderCard = (reason: WorkCheckReason, note?: string, scrollClass = "max-h-[28rem]") => {
     const list = groups[reason];
     // 퇴근 전 탑승은 '왜 일찍 탔는지'가 핵심이라 택시 이용사유(카카오T 앱 자유 입력) 칸을 내용 오른쪽에 둔다(사용자 지시 2026-10-12).
-    const showUseCode = reason === "beforeClockOut";
+    // 근무 없는 날·하루 2회 이상도 사유를 봐야 판단되므로 같은 칸을 붙인다(사용자 지시 2026-10-21).
+    const showUseCode = reason === "beforeClockOut" || reason === "noWork" || reason === "multiple";
     const colCount = showUseCode ? 8 : 7;
     return (
       <div key={reason} className="admin-sheet-card">
