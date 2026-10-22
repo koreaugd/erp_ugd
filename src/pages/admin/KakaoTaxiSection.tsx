@@ -1099,7 +1099,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
    * 카카오는 인증을 마친 직원만 목록으로 돌려준다(`/external/v2/members/connected`, Code.gs).
    * 그래서 승인 직후에는 관리자 직원 관리 탭에도, 카카오T 홈페이지에도 그 사람이 보이지 않는다.
    * 아무 표시가 없으면 "정상 승인했는데 어디에도 없다"로 읽혀 중복 등록을 시도하게 된다
-   * (실제 문의 2026-07-31 — 대물섬 한남점 [이름] 건).
+   * (실제 문의 2026-07-31).
    *
    * 판단은 전화번호로 한다. 이름은 동명이인이 있고 예금주명처럼 다르게 적히기도 한다.
    * 직원 목록을 아직 못 불러왔으면(로딩 중·조회 실패) 표시하지 않는다 — 없는 것을 "인증 안 됨"으로
@@ -1274,7 +1274,7 @@ export function KakaoTaxiSection({ view }: { view: KakaoTaxiView }) {
         : { label: "확인 중…", className: `${pill} border border-gray-200 bg-[var(--admin-ghost)] text-[#212121]/45` };
     }
     // **지금 이용중지된 사람이면 그것이 결론이다.** 신청 기록상 반려로 남아 있어도, 그 뒤 다른 경로로
-    // 이용중지가 된 경우가 있다([이름]·[이름]). 그때 '반려'라고만 적으면 아직 처리가 안 된 것으로
+    // 이용중지가 된 경우가 있다. 그때 '반려'라고만 적으면 아직 처리가 안 된 것으로
     // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
     if (r.memberId && isMemberBlockedNow(r)) {
       return { label: "이용중지", className: `${pill} bg-[#18181B] text-white` };

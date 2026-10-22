@@ -2645,7 +2645,7 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
             <textarea
               value={staffMemo}
               onChange={(e) => setStaffMemo(e.target.value)}
-              placeholder="예: [이름] 파트타이머 30분 지각 응대 지침 교육함"
+              placeholder="예: 파트타이머 30분 지각 응대 지침 교육함"
               rows={3}
               className="w-full p-3 border border-gray-200 rounded-xl text-xs focus:outline-hidden focus:border-zinc-800 transition-all bg-gray-50/20"
             />

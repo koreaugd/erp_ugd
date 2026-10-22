@@ -50,8 +50,8 @@ const ERP_BRANCHES = ["사카바단단", "8번대물집", "대물섬 한남점"]
 console.log("[1] 계정별 동명이인이 합산되지 않는다");
 {
   const rows = normalizeKakaoTaxiOrders([
-    order({ id: "a", account_key: "acct1", member_name: "[이름]", member_identifier: "[이름]", member_department: "대물섬 한남점", service_fare: 10000 }),
-    order({ id: "b", account_key: "acct2", member_name: "[이름]", member_identifier: "[이름]", member_department: "8번대물집", service_fare: 20000 }),
+    order({ id: "a", account_key: "acct1", member_name: "테스트갑", member_identifier: "테스트갑", member_department: "대물섬 한남점", service_fare: 10000 }),
+    order({ id: "b", account_key: "acct2", member_name: "테스트갑", member_identifier: "테스트갑", member_department: "8번대물집", service_fare: 20000 }),
   ], ERP_BRANCHES);
   const keys = new Set(rows.map((r) => r.memberKey));
   check("동명이인 memberKey 2개", keys.size === 2, [...keys].join(" / "));
@@ -62,7 +62,7 @@ console.log("[1] 계정별 동명이인이 합산되지 않는다");
 console.log("[2] 퇴사자 보정표가 삭제된 회원의 과거 건을 지점에 귀속시킨다");
 {
   const rows = normalizeKakaoTaxiOrders([
-    order({ id: "c", account_key: "acct2", member_id: "ZB2L167I", member_name: "[이름]", member_identifier: "[이름]", member_department: "", service_fare: 9070 }),
+    order({ id: "c", account_key: "acct2", member_id: "ZB2L167I", member_name: "테스트을", member_identifier: "테스트을", member_department: "", service_fare: 9070 }),
   ], ERP_BRANCHES);
   check("보정으로 사카바단단 귀속", rows[0].branchName === "사카바단단", rows[0].branchName);
   check("보정된 건은 미매핑 아님", rows[0].unmapped === false);
@@ -95,7 +95,7 @@ check("미등록 키는 원문", accountLabel("acct9") === "acct9");
 
 console.log("[6] 이상 점검 면제는 계정+id 쌍으로만 적용된다");
 {
-  check("계정1 [이름] 면제", isAnomalyExempt("acct1", "JE1T6UC2") === true);
+  check("계정1 운영진 면제", isAnomalyExempt("acct1", "JE1T6UC2") === true);
   check("계정2의 같은 id 는 면제 아님", isAnomalyExempt("acct2", "JE1T6UC2") === false);
   const rows = normalizeKakaoTaxiOrders([
     order({ id: "g", account_key: "acct1", member_id: "JE1T6UC2", member_department: "본사", service_fare: 90000 }),

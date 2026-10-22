@@ -2,7 +2,7 @@
 // 관리자 > 법인택시 > 이상 점검 — 규칙 기반 자동 표식. 차단이 아니라 "사람이 봐야 할 건"을 골라줄 뿐이다.
 // 규칙 설계 근거: 외식업 특성상 마감 후 심야 퇴근 택시가 '정상' 패턴이므로, 흔한 심야 감시 대신
 // **영업시간대 이용**을 점검 대상으로 잡는다. 시간창은 08:00~22:59(2026-07-29 사용자 지시로 06~17시에서 확대) —
-// 06~17시 창은 새벽 00~05시대·저녁 18~22시대 이용이 통째로 빠져 정작 봐야 할 건이 안 잡혔다([이름] 3건 실측).
+// 06~17시 창은 새벽 00~05시대·저녁 18~22시대 이용이 통째로 빠져 정작 봐야 할 건이 안 잡혔다(운영 실측).
 // 남은 23시~익일 07시대는 마감 후 퇴근 택시라 기본은 정상으로 보되, 그중 **23:00~00:30**은
 // '이상 점검' 사유로 따로 짚는다(2026-10-11 사용자 지시). 낮 시간대 창(08~22시대)은 그대로다.
 import type { NormalizedTaxiOrder } from "./kakaoTaxi";
@@ -89,9 +89,9 @@ export function excludeLogisticsOrders(rows: NormalizedTaxiOrder[]): NormalizedT
 // 카카오에서 삭제 후 재등록하면 id 가 바뀌어 제외가 풀리고 점검 표에 다시 나타난다(눈에 보이는
 // 실패라 안전한 방향 — 그때 이 목록의 id 만 갱신하면 된다).
 export const TAXI_ANOMALY_EXEMPT_MEMBERS = new Set([
-  "acct1|JE1T6UC2", // [이름]
-  "acct1|OGKR9ACV", // [이름]
-  "acct2|NLWTEFS2", // [이름] (사카바단단) — 사용자 지시 2026-07-28
+  "acct1|JE1T6UC2", // 본사 운영진
+  "acct1|OGKR9ACV", // 본사 운영진
+  "acct2|NLWTEFS2", // 지점 운영진 — 사용자 지시 2026-07-28
 ]);
 
 export function isAnomalyExempt(accountKey: string, memberId: string | null | undefined): boolean {

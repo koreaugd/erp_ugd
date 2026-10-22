@@ -596,7 +596,7 @@ export function BusinessTaxiTab({ branchName }: { branchName: string }) {
     // 등록 인원 목록을 봐야 정해지는 줄인데 아직 안 왔으면 판정을 미룬다(위 membersPending 주석).
     if (membersPending && needsMembers(r)) return { label: "확인 중", className: STATUS_CHIP.processing };
     // **지금 이용중지된 사람이면 그것이 결론이다.** 기록상 반려로 남아 있어도 그 뒤 다른 경로로
-    // 이용중지가 된 경우가 있다([이름]·[이름]). '반려'라고만 적으면 아직 처리가 안 된 것으로
+    // 이용중지가 된 경우가 있다. '반려'라고만 적으면 아직 처리가 안 된 것으로
     // 읽혀 같은 요청을 또 올리게 된다(사용자 지시 2026-07-31).
     if (isMemberBlockedNow(r)) return { label: "이용중지", className: STATUS_CHIP.unknown };
     if (r.status === "rejected") return { label: "반려", className: STATUS_CHIP.rejected };

@@ -49,7 +49,7 @@ BANK_WORDS = ["국민", "신한", "우리", "하나", "농협", "기업", "카�
 
 
 def split_bank_account(bank_cell, acct_cell):
-    """계좌 칸에 은행명이 섞여 오는 경우가 많다('농협[계좌삭제]'). 은행과 번호를 갈라 준다."""
+    """계좌 칸에 은행명이 섞여 오는 경우가 많다('농협000-000000-0000'). 은행과 번호를 갈라 준다."""
     bank = re.sub(r"은행$", "", str(bank_cell or "").strip()).strip()
     acct = str(acct_cell or "").strip()
     if numf(acct) is not None:                      # 엑셀이 숫자로 저장한 계좌 → 소수점 제거
