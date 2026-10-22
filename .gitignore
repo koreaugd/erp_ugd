@@ -29,3 +29,10 @@ firestore-backups/
 
 # firebase CLI 가 배포할 때 만드는 로컬 캐시(업로드한 파일 목록). 저장소에 둘 이유가 없다.
 .firebase/
+
+# 설계·계획 문서 — 실명·카카오 기업ID·내부 보안 설계가 담겨 공개 저장소에 두지 않는다(2026-10-22).
+# 로컬(OneDrive)에는 그대로 남는다.
+docs/
+blueprint-*.md
+# 실명이 들어가는 로컬 스크립트 규칙(scripts/parse-fulltime-salary-xlsx.py 가 읽는다)
+scripts/local/

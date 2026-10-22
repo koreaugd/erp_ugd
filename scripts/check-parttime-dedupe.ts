@@ -358,18 +358,18 @@ console.log("\n[5] 같은 행이 두 번 들어와도 한 줄로만 남는다");
   //   [근무기록으로 다시 만든 행] + [화면에 있던 행 중 살려 둘 행]
   // 을 이어 붙이는데, 근무기록에서 온 legacy 행은 **양쪽에 같은 id 로** 들어 있다.
   // 명부에 등록된 사람은 아래 흡수가 한 줄로 접어 주지만, 명부에 없는 사람은 접을 곳이 없어
-  // 두 줄이 그대로 남았다([이름]·[이름] …). 이어 붙이는 자리가 여러 곳이라 여기 한 곳에서 막는다.
+  // 두 줄이 그대로 남았다(테스트갑·테스트을 …). 이어 붙이는 자리가 여러 곳이라 여기 한 곳에서 막는다.
   const rebuilt = [
-    row({ employeeId: "emp-1", name: "[이름]", hourlyRate: "15000", accumulatedHours: "81" }),
+    row({ employeeId: "emp-1", name: "테스트병", hourlyRate: "15000", accumulatedHours: "81" }),
     // 방금 집계한 행 — 이번 달 근무 7시간이 반영돼 있다.
-    row({ employeeId: `legacy-${BRANCH}-[이름]`, name: "[이름]", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" })
+    row({ employeeId: `legacy-${BRANCH}-테스트갑`, name: "테스트갑", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" })
   ];
   const kept = [
     // 화면에 있던 옛 행 — 대장을 마지막으로 연 시점의 0시간에서 굳어 있다. 이 행이 남으면 급여가 사라진다.
-    row({ employeeId: `legacy-${BRANCH}-[이름]`, name: "[이름]", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" })
+    row({ employeeId: `legacy-${BRANCH}-테스트갑`, name: "테스트갑", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" })
   ];
-  const out = absorbLegacyPartTimeRows([...rebuilt, ...kept], { branchName: BRANCH, rosterNames: ["[이름]"], excludedIds: [] });
-  check("명부에 없는 사람도 한 줄만 남는다", out.map((r) => r.employeeId), ["emp-1", `legacy-${BRANCH}-[이름]`]);
+  const out = absorbLegacyPartTimeRows([...rebuilt, ...kept], { branchName: BRANCH, rosterNames: ["테스트병"], excludedIds: [] });
+  check("명부에 없는 사람도 한 줄만 남는다", out.map((r) => r.employeeId), ["emp-1", `legacy-${BRANCH}-테스트갑`]);
   check("남는 것은 앞의 행 — 방금 집계한 값이다", [out[1].accumulatedHours, out[1].calculatedSalary], ["7", "84000"]);
 }
 {
@@ -413,9 +413,9 @@ console.log("\n[6] 맵을 만들기 전에 접는다 (뒤의 옛 행이 이기�
   // 같은 id 가 두 번 들어 있으면 **JavaScript Map 은 뒤의 것을 남긴다.** 사본은
   // [방금 집계한 행, 화면에 있던 옛 행] 순서라, 접지 않고 맵을 만들면 옛 행이 이겨 그 사람 급여가
   // 옛 값으로 굳은 채 서버로 올라간다(Codex 지독한리뷰 2026-09-02).
-  const id = `legacy-${BRANCH}-[이름]`;
-  const fresh = row({ employeeId: id, name: "[이름]", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" });
-  const stale = row({ employeeId: id, name: "[이름]", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" });
+  const id = `legacy-${BRANCH}-테스트갑`;
+  const fresh = row({ employeeId: id, name: "테스트갑", hourlyRate: "12000", accumulatedHours: "7", calculatedSalary: "84000" });
+  const stale = row({ employeeId: id, name: "테스트갑", hourlyRate: "12000", accumulatedHours: "0", calculatedSalary: "0" });
 
   const naive = new Map([fresh, stale].map((r) => [r.employeeId, r]));
   check("접지 않고 맵을 만들면 옛 행이 이긴다 (그래서 접어야 한다)", naive.get(id)!.accumulatedHours, "0");

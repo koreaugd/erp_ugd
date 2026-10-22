@@ -30,7 +30,7 @@ export function accountLabel(key: string): string {
 
 // 퇴사자 과거 내역 귀속 보정표 — 키는 `${account_key}|${member_id}`.
 // 카카오에서 회원을 삭제하면 그 사람의 과거 주문에서 member_department 가 null 이 된다(실측).
-// 이름으로 매칭하면 동명이인을 가를 수 없어([이름] 사례) 반드시 member_id 로 지정한다.
+// 이름으로 매칭하면 동명이인을 가를 수 없어(실제 사례 있음) 반드시 member_id 로 지정한다.
 // 삭제 전에 부서를 채워두면 애초에 필요 없다 — 운영 지침은 "퇴사자 존치"다.
 /**
  * 카카오에 적힌 부서·그룹이 실제 소속과 달라 바로잡아야 하는 인원. 키는 `${account_key}|${member_id}`.
@@ -46,17 +46,17 @@ export function accountLabel(key: string): string {
 export const KAKAO_MEMBER_BRANCH_OVERRIDE: Record<string, string> = {
   // 종로점 직원인데 부서가 '대물섬'뿐이고 그룹은 한남점으로 등록돼 있던 세 사람(2026-07-31 사용자 확인).
   // 부서는 그 뒤 '대물섬 종로점'으로 고쳐졌지만, 그 전 이용내역은 옛 값이라 이 표로 바로잡는다.
-  "acct1|TCWAY6ZY": "대물섬 종로점", // [이름]
-  "acct1|A4L2RTKS": "대물섬 종로점", // [이름]
-  "acct1|8F3YIU1T": "대물섬 종로점", // [이름]
+  "acct1|TCWAY6ZY": "대물섬 종로점",
+  "acct1|A4L2RTKS": "대물섬 종로점",
+  "acct1|8F3YIU1T": "대물섬 종로점",
 };
 
 export const KAKAO_RETIRED_MEMBER_BRANCH: Record<string, string> = {
-  "acct2|ZB2L167I": "사카바단단", // [이름], 2026-05 10건 90,700원
+  "acct2|ZB2L167I": "사카바단단", // 퇴사자
 };
 
 // 지점 → 카카오T 계정. 미기재 지점은 계정 #1(기본값)이다.
-// 계정 #2(기업ID 25648071)는 사카바단단·8번대물집 두 지점 인원만 쓴다(2026-07-28 확인).
+// 계정 #2는 사카바단단·8번대물집 두 지점 인원만 쓴다(2026-07-28 확인).
 // [동기화] gas/Code.gs, server.ts 의 같은 이름 상수와 세 곳을 같게 유지할 것.
 // [주의] 계정 #1 에도 '사카바단단'·'8번대물집' 이름의 그룹이 껍데기로 남아 있다 —
 // 이 표가 없으면 지점 자동등록이 그 껍데기 그룹을 찾아 엉뚱한 계정에 등록한다.

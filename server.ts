@@ -89,21 +89,24 @@ function initLocalDB(): LocalDB {
     return crypto.createHash("sha256").update(pin.trim()).digest("hex");
   };
 
+  // 로컬 시뮬레이션 전용 PIN — 운영 PIN 과 무관하다. 바꾸려면 LOCAL_DEV_PIN 환경변수를 준다.
+  // (db_simulation.json 이 이미 있으면 이 시드는 쓰이지 않는다.)
+  const DEV_PIN = process.env.LOCAL_DEV_PIN || "000000";
   const initialBranches = [
-    ["대물섬 한남점", "1234", "branch", "TRUE", "대물섬"],
-    ["카라멘야 신촌점", "2345", "branch", "TRUE", "카라멘야"],
-    ["남산광어", "3456", "branch", "TRUE", "남산광어"],
-    ["사카바단단", "4567", "branch", "TRUE", "사카바단단"],
-    ["카츠스위스", "5678", "branch", "TRUE", "카츠스위스"],
-    ["금샤빠", "6789", "branch", "TRUE", "금샤빠"],
-    ["대학로고래", "7890", "branch", "TRUE", "대학로고래"],
-    ["마음죽", "8901", "branch", "TRUE", "마음죽"],
-    ["연하동", "9012", "branch", "TRUE", "연하동"],
-    ["헴프리스", "0123", "branch", "TRUE", "헴프리스"],
-    ["8번대물집", "1357", "branch", "TRUE", "대물섬"],
-    ["강남대골뼈국", "2468", "branch", "TRUE", "강남대골뼈국"],
-    ["대물섬 강남점", "3579", "branch", "TRUE", "대물섬"],
-    ["관리자", "[삭제]", "admin", "TRUE", "본사"]
+    ["대물섬 한남점", DEV_PIN, "branch", "TRUE", "대물섬"],
+    ["카라멘야 신촌점", DEV_PIN, "branch", "TRUE", "카라멘야"],
+    ["남산광어", DEV_PIN, "branch", "TRUE", "남산광어"],
+    ["사카바단단", DEV_PIN, "branch", "TRUE", "사카바단단"],
+    ["카츠스위스", DEV_PIN, "branch", "TRUE", "카츠스위스"],
+    ["금샤빠", DEV_PIN, "branch", "TRUE", "금샤빠"],
+    ["대학로고래", DEV_PIN, "branch", "TRUE", "대학로고래"],
+    ["마음죽", DEV_PIN, "branch", "TRUE", "마음죽"],
+    ["연하동", DEV_PIN, "branch", "TRUE", "연하동"],
+    ["헴프리스", DEV_PIN, "branch", "TRUE", "헴프리스"],
+    ["8번대물집", DEV_PIN, "branch", "TRUE", "대물섬"],
+    ["강남대골뼈국", DEV_PIN, "branch", "TRUE", "강남대골뼈국"],
+    ["대물섬 강남점", DEV_PIN, "branch", "TRUE", "대물섬"],
+    ["관리자", DEV_PIN, "admin", "TRUE", "본사"]
   ];
 
   const settings = initialBranches.map(b => ({
@@ -216,41 +219,29 @@ function writeDB(db: LocalDB) {
 const KAKAO_TAXI_BASE = "https://b2b-api.kakaomobility.com";
 
 // PIN 해시 → 지점_설정 행 조회. verifyPin 액션과 카카오 관리자 게이트가 같은 규칙을 쓰도록
-// 한 곳에 모았다(admin 해시 2종 호환 포함 — 복원 데이터가 구 해시를 들고 있어도 로그인과 어긋나지 않게).
+// 한 곳에 모았다.
 function findLocalSettingByPinHash(db: LocalDB, pinHash: unknown) {
   const cleanPinHash = String(pinHash || "").trim().toLowerCase();
   if (!cleanPinHash) return undefined;
   return db.settings.find(s => {
     if (!s.is_active) return false;
     if (s.pin_hash === cleanPinHash) return true;
-    // admin 호환성
-    if (s.role === "admin") {
-      const isDbAdminHash = (s.pin_hash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || s.pin_hash === "[해시삭제]");
-      const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "[해시삭제]");
-      if (isDbAdminHash && isInputAdminHash) return true;
-    }
     return false;
   });
 }
 
 // 한 행의 pin_hash 가 입력 해시와 맞는지 — gas/Code.gs pinRowMatches_ 와 같은 규칙
-// (완전일치 · admin 레거시 해시 · 시트에 평문 PIN 이 적혀 있던 하위 호환)으로 유지할 것.
-const ADMIN_LEGACY_HASHES = [
-  "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf",
-  "[해시삭제]"
-];
+// (완전일치 · 시트에 평문 PIN 이 적혀 있던 하위 호환)으로 유지할 것.
 function localPinRowMatches(hashInDb: string, cleanPinHash: string, role: unknown) {
   if (!cleanPinHash || !hashInDb) return false;
   if (hashInDb === cleanPinHash) return true;
-  if (role === "admin" && ADMIN_LEGACY_HASHES.includes(hashInDb) && ADMIN_LEGACY_HASHES.includes(cleanPinHash)) return true;
   if (hashInDb.length < 32 && crypto.createHash("sha256").update(hashInDb, "utf8").digest("hex") === cleanPinHash) return true;
   return false;
 }
 
 // 지점 화면 게이트 — "이 PIN 이 이 지점의 PIN 인가"를 그 지점 행에서 직접 확인한다.
-// findLocalSettingByPinHash(역방향: PIN → 행)를 쓰면 안 되는 이유 — 2026-07-28 운영 사고:
-// 여러 지점이 같은 공통 PIN 을 쓰면 먼저 나오는 한 행만 매칭돼 나머지 전 지점이 거부됐다.
-// 지점별 PIN 을 분리하면 이 코드 그대로 진짜 지점 격리가 된다.
+// findLocalSettingByPinHash(역방향: PIN → 행)를 쓰면 안 되는 이유 — 같은 PIN 을 가진 행이 여럿이면
+// 먼저 나오는 한 행만 매칭돼 나머지 지점이 거부된다(2026-07-28 운영 사고).
 // 관리자 PIN 은 어느 지점이든 통과. gas/Code.gs verifyBranchPinOrAdmin 과 동일 로직으로 유지할 것.
 function verifyLocalBranchPinOrAdmin(db: LocalDB, pinHash: unknown, branchName: string) {
   const target = String(branchName || "").trim();

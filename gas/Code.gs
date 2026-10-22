@@ -218,23 +218,25 @@ function initSheets() {
     settingSheet = ss.insertSheet(SHEETS.SETTING);
     settingSheet.appendRow(["branch_name", "pin_hash", "role", "is_active", "brand"]);
     
-    // 초기 지점 가제 데이터 삽입 (SHA-256 해시값 산출)
-    // 아래 해시 함수는 프론트와 일관성있게 계산된 고정값입니다.
+    // 초기 지점 가제 데이터 — 시트가 처음 만들어질 때만 들어간다(운영 시트에는 영향 없음).
+    // PIN 은 넣지 않는다: 아래 자리표시값은 32자 이상·비16진수라 어떤 입력 해시와도,
+    // 평문 호환 규칙(32자 미만)과도 맞지 않는다. 새로 만든 뒤 시트에서 직접 pin_hash 를 채울 것.
+    const PIN_NOT_SET = "PIN_NOT_SET__FILL_SHA256_IN_SHEET_BEFORE_USE";
     const initialBranches = [
-      ["대물섬 한남점", "[해시삭제]", "branch", "TRUE", "대물섬"], // [PIN]
-      ["카라멘야 신촌점", "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5", "branch", "TRUE", "카라멘야"], // [PIN]
-      ["남산광어", "bc40db6e64174c538415fc1dca370bfd7559e2170f2095f7ecfb4b375b4aa035", "branch", "TRUE", "남산광어"], // [PIN]
-      ["사카바단단", "37a77b8b2fcb4b1a45bb38ecbc6bfacdc7abf134bf3006aff0965d506ae2d3c1", "branch", "TRUE", "사카바단단"], // [PIN]
-      ["카츠스위스", "dbf76bfb1d8baf83ccd3856b3e34b9cfdfd5a27ae0e78c80fb688970e30f1465", "branch", "TRUE", "카츠스위스"], // [PIN]
-      ["금샤빠", "fc8e74720935541604df45e43a6d6fec6f3780f2bebf70fcb9e380b06b72a4f4", "branch", "TRUE", "금샤빠"], // [PIN]
-      ["대학로고래", "011bc9052026859346d04e33e9bfa24b7fa71ff6a7a5ea9f5b6196238b6d376c", "branch", "TRUE", "대학로고래"], // [PIN]
-      ["마음죽", "efdf04106361a4b4904de0f3b48f6ddbfdaf4363f82cb3f0e0ca59941a3962d3", "branch", "TRUE", "마음죽"], // [PIN]
-      ["연하동", "42728f32ac8db620fa9329fc9f62ebd231c5188bc8a9d023af7b819fbc4fb315", "branch", "TRUE", "연하동"], // [PIN]
-      ["헴프리스", "107dbf310d9af7d1c686e00cc2b4eb18c7bf9dfda2e0f2f3d6db8f90656a2bb5", "branch", "TRUE", "헴프리스"], // [PIN]
-      ["8번대물집", "4523626c92ece30386ab9959600a06c5598696bb43a6538bfe4381387d8df94b", "branch", "TRUE", "대물섬"], // [PIN]
-      ["강남대골뼈국", "e1451f151c881c002bd3ddfaff63c0cdbeee06883b27b9a5f700c2a514d2325a", "branch", "TRUE", "강남대골뼈국"], // [PIN]
-      ["대물섬 강남점", "d06fcc3e81792fd6aeaba18f2bb732386a34ba50ef12933ed10557464a974df7", "branch", "TRUE", "대물섬"], // [PIN]
-      ["관리자", "[해시삭제]", "admin", "TRUE", "본사"] // [삭제] (correct SHA-256)
+      ["대물섬 한남점", PIN_NOT_SET, "branch", "TRUE", "대물섬"],
+      ["카라멘야 신촌점", PIN_NOT_SET, "branch", "TRUE", "카라멘야"],
+      ["남산광어", PIN_NOT_SET, "branch", "TRUE", "남산광어"],
+      ["사카바단단", PIN_NOT_SET, "branch", "TRUE", "사카바단단"],
+      ["카츠스위스", PIN_NOT_SET, "branch", "TRUE", "카츠스위스"],
+      ["금샤빠", PIN_NOT_SET, "branch", "TRUE", "금샤빠"],
+      ["대학로고래", PIN_NOT_SET, "branch", "TRUE", "대학로고래"],
+      ["마음죽", PIN_NOT_SET, "branch", "TRUE", "마음죽"],
+      ["연하동", PIN_NOT_SET, "branch", "TRUE", "연하동"],
+      ["헴프리스", PIN_NOT_SET, "branch", "TRUE", "헴프리스"],
+      ["8번대물집", PIN_NOT_SET, "branch", "TRUE", "대물섬"],
+      ["강남대골뼈국", PIN_NOT_SET, "branch", "TRUE", "강남대골뼈국"],
+      ["대물섬 강남점", PIN_NOT_SET, "branch", "TRUE", "대물섬"],
+      ["관리자", PIN_NOT_SET, "admin", "TRUE", "본사"]
     ];
     
     // 일부 지점 공백 자르기
@@ -316,22 +318,7 @@ function verifyPin(pinHash) {
       };
     }
 
-    // B. 관리자(admin) 추가 호환성 체크
-    // [삭제] 해시: 406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf 또는 [해시삭제]
-    if (role === "admin") {
-      const isDbAdminHash = (hashInDb === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || hashInDb === "[해시삭제]");
-      const isInputAdminHash = (cleanPinHash === "406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf" || cleanPinHash === "[해시삭제]");
-      if (isDbAdminHash && isInputAdminHash) {
-        return {
-          branchName: branchName,
-          role: role,
-          brand: brand,
-          branches: activeBranches
-        };
-      }
-    }
-
-    // C. 사용자가 구글 시트에 "1234", "[삭제]" 등 평문을 그대로 적어둔 하위 호환성 케이스 대응
+    // B. 시트에 해시 대신 평문 PIN 을 그대로 적어둔 하위 호환성 케이스 대응
     if (hashInDb.length < 32) {
       const dbPlainHash = getSha256(hashInDb);
       if (dbPlainHash === cleanPinHash) {
@@ -347,14 +334,10 @@ function verifyPin(pinHash) {
   throw new Error("PIN 번호가 올바르지 않거나 비활성화된 계정입니다.");
 }
 
-// 한 행의 pin_hash 가 입력 해시와 맞는지 — verifyPin 의 매칭 규칙(완전일치·admin 레거시 해시·평문 폴백)과 동일.
+// 한 행의 pin_hash 가 입력 해시와 맞는지 — verifyPin 의 매칭 규칙(완전일치·평문 폴백)과 동일.
 function pinRowMatches_(hashInDb, cleanPinHash, role) {
   if (!cleanPinHash || !hashInDb) return false;
   if (hashInDb === cleanPinHash) return true;
-  if (role === "admin") {
-    var LEGACY = ["406c138b3014c46fbe87b322a4660fe99b51efda7d52a8a89b708b73059882bf", "[해시삭제]"];
-    if (LEGACY.indexOf(hashInDb) >= 0 && LEGACY.indexOf(cleanPinHash) >= 0) return true;
-  }
   // 시트에 평문 PIN 이 적혀 있던 하위 호환 케이스
   if (hashInDb.length < 32 && getSha256(hashInDb) === cleanPinHash) return true;
   return false;
@@ -364,11 +347,9 @@ function pinRowMatches_(hashInDb, cleanPinHash, role) {
  * 지점 화면 게이트 — "이 PIN 이 이 지점의 PIN 인가"를 그 지점 행에서 직접 확인한다.
  * 통과하면 {branchName, role, brand}, 아니면 null.
  *
- * verifyPin(역방향: PIN → 지점)을 쓰면 안 되는 이유 — 2026-07-28 운영 사고:
- * 여러 지점이 같은 공통 PIN 을 쓰면 verifyPin 은 시트에서 먼저 나오는 한 행(대물섬 한남점)만
- * 돌려줘서, 그 지점을 뺀 전 지점이 "지점 인증에 실패했습니다"로 거부됐다. 지점을 먼저 특정하고
- * 그 행의 해시와 대조하면 공통 PIN 에서도 동작하며, 나중에 지점별 PIN 을 분리하면 코드 변경
- * 없이 그대로 진짜 지점 격리가 된다(공통 PIN 인 동안은 어차피 PIN 만으로 지점을 구분할 수 없다).
+ * verifyPin(역방향: PIN → 지점)을 쓰면 안 되는 이유 — 같은 PIN 을 가진 행이 여럿이면
+ * verifyPin 은 시트에서 먼저 나오는 한 행만 돌려줘 나머지 지점이 거부된다(2026-07-28 운영 사고).
+ * 지점을 먼저 특정하고 그 행의 해시와 대조한다.
  *
  * 관리자 PIN 은 어느 지점이든 통과한다(관리자가 지점 화면을 볼 때). server.ts 와 동일 로직으로 유지할 것.
  */
@@ -1900,7 +1881,7 @@ function kakaoTaxiAccountForBranch(branchName) {
 function getKakaoTaxiBranchMembers(pinHash, branchName, forceRefresh) {
   const denied = new Error("지점 인증에 실패했습니다. 다시 로그인해주세요.");
   if (!pinHash || !branchName) throw denied;
-  // 요청한 지점 행에서 직접 대조한다 — verifyPin(역방향)은 공통 PIN 에서 첫 행만 통과시킨다.
+  // 요청한 지점 행에서 직접 대조한다 — verifyPin(역방향)은 같은 PIN 이 여러 행이면 첫 행만 통과시킨다.
   let setting;
   try {
     setting = verifyBranchPinOrAdmin(pinHash, branchName);

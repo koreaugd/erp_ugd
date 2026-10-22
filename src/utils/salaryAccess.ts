@@ -28,7 +28,7 @@ const sameBranch = (a: unknown, b: string) => String(a ?? "").trim() === b;
  */
 export function canReadSalaryBranch(user: SalaryAccessUser, branchName: string): boolean {
   if (!user) return false;
-  // PIN 로그인 차단(2026-07-28 사용자 지시). 지점 공용 PIN만 알면 누구나 급여대장을 열 수 있던 구멍을 막는다.
+  // PIN 로그인 차단(2026-07-28 사용자 지시). 급여대장은 승인된 개인계정만 연다.
   // firestore.rules canReadSalary의 isPinAccount 예외 삭제와 짝 — 한쪽만 고치면 개발자도구로 뚫린다.
   if (user.loginType === "pin") return false;
   // 총괄은 항상 전 지점 — 첫 총괄이 스스로 권한을 줄 수 없는 부트스트랩 데드락을 막는다.

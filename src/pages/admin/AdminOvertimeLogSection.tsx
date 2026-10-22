@@ -137,7 +137,7 @@ function OvertimeLogView({ owner }: { owner: string }) {
   const [branchFilter, setBranchFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   // 집계에서 직원 이름을 누르면 왼쪽 내역을 그 사람(지점+이름이 정확히 같은 행)으로 좁힌다(사용자 지시 2026-10-12).
-  // 이름 검색은 '포함' 검색이라 [이름]를 고르면 [이름]2 까지 섞인다 — 그래서 따로 정확히 일치로 거른다.
+  // 이름 검색은 '포함' 검색이라 홍길동을 고르면 홍길동2 까지 섞인다 — 그래서 따로 정확히 일치로 거른다.
   const [staffFocus, setStaffFocus] = useState<{ branchName: string; name: string } | null>(null);
   const detailCardRef = useRef<HTMLDivElement | null>(null);
   const detailScrollRef = useRef<HTMLDivElement | null>(null);

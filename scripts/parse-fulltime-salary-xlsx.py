@@ -44,21 +44,22 @@ FILES = [
 ]
 
 # ── 사용자 확정 규칙(2026-07-21) ──
-# 이름 교정: 엑셀 표기 → ERP 직원명부 표기. "ERP 기준으로" 라고 지시받은 건만 넣는다.
-NAME_FIX = {
-    "대학로고래":    {"유 현": "[이름]"},
-    "대물섬 종로점": {"[이름]": "[이름]"},
-}
-# 소속이 다른 지점 파일에 섞여 들어온 행은 제외한다([이름]·[이름]는 카츠스위스 소속으로 확정).
-EXCLUDE = {
-    "오키스테이크하우스": {"[이름]"},
-}
-# 엑셀 이름 그대로 새 행으로 넣을 사람(직원명부의 비슷한 이름과 합치지 않는다).
-#   카라멘야 Piao junwei ↔ 명부 [이름] = 다른 사람 / 8번대물집 [이름] ↔ 명부 [이름] = 다른 사람
-FORCE_NEW_ROW = {
-    "카라멘야":   {"Piao junwei"},
-    "8번대물집":  {"[이름]"},
-}
+# 실명이 들어가는 규칙이라 저장소에 두지 않는다 — scripts/local/fulltime-salary-rules.json(.gitignore)에서 읽는다.
+#   NAME_FIX      : 지점 → {엑셀 표기: ERP 직원명부 표기}  ("ERP 기준으로" 라고 지시받은 건만)
+#   EXCLUDE       : 지점 → [다른 지점 파일에 섞여 들어와 제외할 이름]
+#   FORCE_NEW_ROW : 지점 → [직원명부의 비슷한 이름과 합치지 않고 새 행으로 넣을 이름]
+# 파일이 없으면 멈춘다 — 규칙 없이 돌면 다른 지점 직원이 섞이고 이름이 합쳐진 JSON 이 조용히 나온다.
+_RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local", "fulltime-salary-rules.json")
+if not os.path.exists(_RULES_PATH):
+    sys.exit(f"[중단] {_RULES_PATH} 가 없습니다. 이름 교정·제외 규칙 없이는 실행하지 않습니다.")
+with open(_RULES_PATH, encoding="utf-8") as _f:
+    _rules = json.load(_f)
+for _key in ("NAME_FIX", "EXCLUDE", "FORCE_NEW_ROW"):
+    if _key not in _rules:
+        sys.exit(f"[중단] {_RULES_PATH} 에 {_key} 항목이 없습니다.")
+NAME_FIX = _rules.get("NAME_FIX", {})
+EXCLUDE = {k: set(v) for k, v in _rules.get("EXCLUDE", {}).items()}
+FORCE_NEW_ROW = {k: set(v) for k, v in _rules.get("FORCE_NEW_ROW", {}).items()}
 
 # ── 헤더 텍스트 → ERP 필드 ──
 HEADER_MAP = {
@@ -322,7 +323,7 @@ def parse_sheet(path, sheet_name, branch, warns, sources=None):
         for col, v in raw.items():
             key = col_of.get(col)
             if key is None:
-                # 헤더 없는 칸에 적힌 메모(카츠스위스 [이름] '총 연차3일 사용' 등)는 비고에 붙인다.
+                # 헤더 없는 칸에 적힌 메모('총 연차3일 사용' 등)는 비고에 붙인다.
                 t = text(v)
                 if t and col > name_col:
                     extra_text.append(t)
