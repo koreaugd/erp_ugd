@@ -29,7 +29,7 @@ import { DEFAULT_TAXI_THRESHOLDS, flagTaxiOrders } from "./admin/helpers/kakaoTa
 import { IS_DEMO, BRAND } from "../demo";
 import { AdminSalesOverviewSection } from "./admin/AdminSalesOverviewSection";
 import { AdminOvertimeLogSection } from "./admin/AdminOvertimeLogSection";
-import { AdminTaxiWorkCheckSection } from "./admin/AdminTaxiWorkCheckSection";
+import { AdminTaxiWorkCheckSection, prefetchTaxiWorkCheck } from "./admin/AdminTaxiWorkCheckSection";
 import { AdminAnalysisSection } from "./admin/AdminAnalysisSection";
 import { AdminReportPackTab } from "./admin/AdminReportPackTab";
 import { isAdminTabAllowed, firstAllowedAdminKey, effectivePermKey, ADMIN_TAB_LABELS, type AdminPermKey } from "./admin/adminTabRegistry";
@@ -368,6 +368,14 @@ export default function AdminPage() {
     // 언마운트·탭 이동 뒤 도착한 응답이 상태를 건드리지 않게 요청 표식을 무효화한다(매출 대시보드와 같은 방식).
     return () => { anomalyRequestRef.current++; };
   }, [adminSection, dailySettlementTab, allowedAdminTabs, isAdminSession]);
+
+  // 이상점검(근무시간 ↔ 법인택시)은 첫 조회가 느리다(카카오 왕복 + 전 지점 마감). 일일업무에 들어오는 순간 뒤에서 미리 받아
+  // 두면, 전일 정산현황을 보다가 이상점검을 눌렀을 때 바로 뜬다(사용자 요청 2026-10-21). 이미 새것이 있거나 받는 중이면 무동작.
+  useEffect(() => {
+    if (!isAdminSession || adminSection !== "dailySettlement") return;
+    if (!isAdminTabAllowed(allowedAdminTabs, effectivePermKey(adminSection)) || !isAdminTabAllowed(allowedAdminTabs, "kakaoTaxi")) return;
+    prefetchTaxiWorkCheck(user);
+  }, [adminSection, allowedAdminTabs, isAdminSession, user]);
 
   const loadDashboardAlerts = useCallback(async () => {
     if (!isAdminSession) return;

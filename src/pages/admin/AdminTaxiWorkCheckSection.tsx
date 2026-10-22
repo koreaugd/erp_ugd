@@ -41,9 +41,21 @@ const CARD_ORDER: { reason: WorkCheckReason; note?: string; scrollClass?: string
 // [재진입 즉시 표시] 결과를 이 창이 살아 있는 동안 계정·월별로 기억한다(초과근무일지와 같은 규칙).
 // 택시(카카오 왕복 5~12초)와 전 지점 마감을 둘 다 받아야 비교할 수 있어 첫 조회는 기다려야 하지만,
 // 다시 열면 바로 보인다. 5분이 지났으면 기억값을 먼저 보여주고 뒤에서 새로 읽는다.
-// uid 없는 PIN 세션은 계정을 가를 수 없어 기억하지 않는다.
+// 계정 키는 개인 계정 uid, PIN 세션은 pinHash(ownerOf). 둘 다 없으면 기억하지 않는다.
+// 브라우저 저장소(localStorage)에는 두지 않는다 — 택시 출발지·도착지(개인 이동 정보)가 PC에 남는다.
 const SESSION_FRESH_MS = 5 * 60 * 1000;
-const sessionResults = new Map<string, { results: WorkCheckResult[]; branchNames: string[]; errors: string[]; at: number }>();
+type WorkCheckData = { results: WorkCheckResult[]; branchNames: string[]; errors: string[] };
+const sessionResults = new Map<string, WorkCheckData & { at: number }>();
+
+// [미리 받기] 첫 진입 대기를 줄이려고 일일업무에 들어오는 순간 조회를 시작해 둔다(사용자 요청 2026-10-21,
+// prefetchTaxiWorkCheck). 진행 중 조회는 계정·월별로 하나만 두고 화면이 거기 합류한다 — 같은 조회를 두 번 보내지 않는다.
+type WorkCheckProgress = { done: number; total: number; branchNames: string[] };
+interface InflightWorkCheck {
+  promise: Promise<WorkCheckData>;
+  progress: WorkCheckProgress;
+  listeners: Set<(p: WorkCheckProgress) => void>;
+}
+const inflightWorkChecks = new Map<string, InflightWorkCheck>();
 
 async function runWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
@@ -78,9 +90,114 @@ function staffRowsOf(memo: unknown): SettleDay["staffRows"] {
   }
 }
 
+const sortKo = (names: string[]) => [...names].sort((a, b) => a.localeCompare(b, "ko"));
+
+/**
+ * 한 달치 조회 — 지점 목록·전 지점 마감·택시 이용내역을 모아 대조한다. 던지지 않는다:
+ * 치명 실패(지점 목록·택시 조회 실패)는 결과를 비우고 errors 로 알린다(옛 결과가 최신처럼 남지 않게).
+ */
+async function fetchWorkCheck(month: string, pinHash: string, forceRefresh: boolean, onProgress: (p: WorkCheckProgress) => void): Promise<WorkCheckData> {
+  const problems: string[] = [];
+  let branchNames: string[] = [];
+  // 택시·지점 변경 이력은 지점 목록과 무관하다 — 지점 목록을 기다리지 않고 가장 먼저 출발시킨다(택시가 가장 느리다).
+  const taxiPromise = getKakaoTaxiOrdersShared(month, pinHash, forceRefresh);
+  taxiPromise.catch(() => {});   // 지점 목록에서 먼저 실패해 끝까지 안 기다릴 때 처리 안 된 거부로 남지 않게
+  const historyPromise = gasClient.getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY)
+    .catch(() => { problems.push("법인택시 지점 변경 이력(현재 부서 기준으로 대신 판정)"); return null; });
+  try {
+    const branches = await getAdminBranchList();
+    const targets: string[] = (Array.isArray(branches) ? branches : [])
+      .filter((b: any) => b?.role === "branch" && b.branchName).map((b: any) => String(b.branchName));
+    branchNames = sortKo(targets);
+
+    const dates = settleDatesForMonth(month);
+    const settles: SettleDay[] = [];
+    const failedBranches = new Set<string>();
+    let done = 0;
+    onProgress({ done, total: targets.length, branchNames });
+    await runWithConcurrency(targets, BRANCH_CONCURRENCY, async (branchName) => {
+      try {
+        const masters = dates.length ? await gasClient.getDailyMastersByDates(branchName, dates) : [];
+        for (const master of masters) {
+          settles.push({ branchName, settleDate: String(master.settleDate || ""), staffRows: staffRowsOf(master.memo) });
+        }
+      } catch (error) {
+        console.error(`이상점검 마감 조회 실패(${branchName}):`, error);
+        failedBranches.add(branchName);
+      }
+      done += 1;
+      onProgress({ done, total: targets.length, branchNames });
+    });
+
+    const [taxi, history] = await Promise.all([taxiPromise, historyPromise]);
+    if ((taxi.accountErrors || []).length) {
+      problems.push(`카카오T 계정 조회 실패(${taxi.accountErrors.map((e) => e.label || e.key).join(", ")}) — 그 계정 이용 건이 빠져 있음`);
+    }
+    if (failedBranches.size) problems.push(`마감 조회 실패: ${Array.from(failedBranches).join(", ")} — 이 지점 건은 '확인 불가'로 분류`);
+    const rows = excludeLogisticsOrders(normalizeKakaoTaxiOrders(
+      taxi.orders,
+      Array.from(new Set([...targets, "본사"])),
+      buildBranchHistoryMap(Array.isArray(history) ? history : []),
+    )).filter((row) => !isAnomalyExempt(row.accountKey, row.order.member_id));
+    const results = checkTaxiAgainstWork({ rows, settles, failedBranches, loadedBranches: new Set(targets) });
+    return { results, branchNames, errors: problems };
+  } catch (error) {
+    console.error("이상점검 조회 실패:", error);
+    // 기억값을 띄워 둔 채 실패하면 옛 결과가 최신처럼 남는다 — 비우고 실패를 알린다.
+    return { results: [], branchNames, errors: [...problems, "택시 이용내역을 불러오지 못했습니다. '새로고침'을 눌러주세요."] };
+  }
+}
+
+/**
+ * 계정·월별 진행 중 조회를 시작하거나 이미 도는 것에 합류한다. forceRefresh 면 새로 시작해 자리를 넘겨받는다.
+ * 끝났을 때 **아직 자기 자리일 때만** 기억값을 갱신한다 — 늦게 끝난 옛 조회가 새 조회 결과를 덮지 않게.
+ * 실패가 섞인 결과는 기억하지 않는다 — 다음 진입 때 다시 읽어 스스로 낫게 한다(택시 공유 캐시와 같은 규약).
+ */
+function startWorkCheck(cacheKey: string, month: string, pinHash: string, forceRefresh: boolean): InflightWorkCheck {
+  const running = inflightWorkChecks.get(cacheKey);
+  if (running && !forceRefresh) return running;
+  const entry: InflightWorkCheck = {
+    promise: Promise.resolve({ results: [], branchNames: [], errors: [] }),
+    progress: { done: 0, total: 0, branchNames: [] },
+    listeners: new Set(),
+  };
+  entry.promise = fetchWorkCheck(month, pinHash, forceRefresh, (p) => {
+    entry.progress = p;
+    entry.listeners.forEach((fn) => fn(p));
+  }).then((data) => {
+    if (inflightWorkChecks.get(cacheKey) === entry) {
+      inflightWorkChecks.delete(cacheKey);
+      if (data.errors.length === 0) sessionResults.set(cacheKey, { ...data, at: Date.now() });
+      else sessionResults.delete(cacheKey);
+    }
+    return data;
+  });
+  inflightWorkChecks.set(cacheKey, entry);
+  return entry;
+}
+
+type WorkCheckUser = { loginType?: string; uid?: string; pinHash?: string } | null | undefined;
+// 개인 계정은 uid, PIN 세션은 pinHash 로 가른다(법인택시 공유 캐시와 같은 키 — 재로그인·PIN 변경 시 자연 격리, Codex 지적).
+const ownerOf = (user: WorkCheckUser) =>
+  user && user.loginType === "personal" && user.uid ? `uid:${user.uid}` : user?.pinHash ? `pin:${user.pinHash}` : "";
+
+/**
+ * 일일업무 진입 시 이번 달 이상점검을 뒤에서 미리 받아 둔다(AdminPage 가 호출). 법인택시 권한은 호출부가 확인한다.
+ * 이미 새것이 있거나 받는 중이면 아무것도 하지 않는다. 계정 키를 만들 수 없는 세션은 미리 받지 않는다.
+ */
+export function prefetchTaxiWorkCheck(user: WorkCheckUser): void {
+  const owner = ownerOf(user);
+  if (!owner) return;
+  const month = toLocalMonthInputValue();
+  const cacheKey = `${owner}|${month}`;
+  const cached = sessionResults.get(cacheKey);
+  if (cached && Date.now() - cached.at < SESSION_FRESH_MS) return;
+  startWorkCheck(cacheKey, month, user?.pinHash || "", false);
+}
+
 export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolean }) {
   const { user } = useAuthContext();
-  const owner = user && user.loginType === "personal" && user.uid ? `uid:${user.uid}` : "";
+  const owner = ownerOf(user);
   const [month, setMonth] = useState(() => toLocalMonthInputValue());
   const cacheKey = owner ? `${owner}|${month}` : "";
   const [branchFilter, setBranchFilter] = useState("");
@@ -95,74 +212,38 @@ export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolea
     if (!taxiAllowed) return;
     const requestId = ++requestRef.current;
     const isCurrent = () => requestRef.current === requestId;
-    setProgress({ done: 0, total: 0 });
     // 이 계정·이 달의 기억값이 있으면 그대로 둔 채 뒤에서 새로 읽는다. 없으면(다른 달로 바꿈 등) 비운다 —
     // 앞 달 결과가 새 달 결과처럼 보이면 안 된다.
     const cached = cacheKey ? sessionResults.get(cacheKey) : undefined;
     setResults(cached?.results || []);
     setErrors(cached?.errors || []);
     if (cached) setBranchNames(cached.branchNames);
-    const problems: string[] = [];
+    const onProgress = (p: WorkCheckProgress) => {
+      if (!isCurrent()) return;
+      setProgress({ done: p.done, total: p.total });
+      if (p.branchNames.length) setBranchNames(p.branchNames);
+    };
+    let promise: Promise<WorkCheckData>;
+    let unsubscribe = () => {};
+    if (cacheKey) {
+      // 미리 받기가 이미 돌고 있으면 거기 합류한다(진행 상황도 그 자리부터 이어 보인다).
+      const entry = startWorkCheck(cacheKey, month, user?.pinHash || "", forceRefresh);
+      entry.listeners.add(onProgress);
+      unsubscribe = () => { entry.listeners.delete(onProgress); };
+      onProgress(entry.progress);
+      promise = entry.promise;
+    } else {
+      setProgress({ done: 0, total: 0 });
+      promise = fetchWorkCheck(month, user?.pinHash || "", forceRefresh, onProgress);
+    }
     try {
-      const branches = await getAdminBranchList();
-      const targets: string[] = (Array.isArray(branches) ? branches : [])
-        .filter((b: any) => b?.role === "branch" && b.branchName).map((b: any) => String(b.branchName));
+      const data = await promise;
       if (!isCurrent()) return;
-      setBranchNames([...targets].sort((a, b) => a.localeCompare(b, "ko")));
-
-      // 택시와 지점 변경 이력을 마감 조회와 동시에 출발시킨다(택시가 가장 느리다 — 카카오 왕복).
-      const taxiPromise = getKakaoTaxiOrdersShared(month, user?.pinHash || "", forceRefresh);
-      const historyPromise = gasClient.getSharedDataFromServer<KakaoTaxiBranchHistoryEntry[]>(KAKAO_TAXI_BRANCH_HISTORY_KEY)
-        .catch(() => { problems.push("법인택시 지점 변경 이력(현재 부서 기준으로 대신 판정)"); return null; });
-
-      const dates = settleDatesForMonth(month);
-      const settles: SettleDay[] = [];
-      const failedBranches = new Set<string>();
-      let done = 0;
-      setProgress({ done, total: targets.length });
-      await runWithConcurrency(targets, BRANCH_CONCURRENCY, async (branchName) => {
-        try {
-          const masters = dates.length ? await gasClient.getDailyMastersByDates(branchName, dates) : [];
-          for (const master of masters) {
-            settles.push({ branchName, settleDate: String(master.settleDate || ""), staffRows: staffRowsOf(master.memo) });
-          }
-        } catch (error) {
-          console.error(`이상점검 마감 조회 실패(${branchName}):`, error);
-          failedBranches.add(branchName);
-        }
-        done += 1;
-        if (isCurrent()) setProgress({ done, total: targets.length });
-      });
-
-      const [taxi, history] = await Promise.all([taxiPromise, historyPromise]);
-      if (!isCurrent()) return;
-      if ((taxi.accountErrors || []).length) {
-        problems.push(`카카오T 계정 조회 실패(${taxi.accountErrors.map((e) => e.label || e.key).join(", ")}) — 그 계정 이용 건이 빠져 있음`);
-      }
-      if (failedBranches.size) problems.push(`마감 조회 실패: ${Array.from(failedBranches).join(", ")} — 이 지점 건은 '확인 불가'로 분류`);
-      const rows = excludeLogisticsOrders(normalizeKakaoTaxiOrders(
-        taxi.orders,
-        Array.from(new Set([...targets, "본사"])),
-        buildBranchHistoryMap(Array.isArray(history) ? history : []),
-      )).filter((row) => !isAnomalyExempt(row.accountKey, row.order.member_id));
-      const checked = checkTaxiAgainstWork({ rows, settles, failedBranches, loadedBranches: new Set(targets) });
-      setResults(checked);
-      setErrors(problems);
-      // 실패가 섞인 결과는 기억하지 않는다 — 다음 진입 때 다시 읽어 스스로 낫게 한다(택시 공유 캐시와 같은 규약).
-      if (cacheKey && problems.length === 0) {
-        sessionResults.set(cacheKey, { results: checked, branchNames: [...targets].sort((a, b) => a.localeCompare(b, "ko")), errors: [], at: Date.now() });
-      } else if (cacheKey) {
-        sessionResults.delete(cacheKey);
-      }
-    } catch (error) {
-      console.error("이상점검 조회 실패:", error);
-      if (isCurrent()) {
-        // 기억값을 띄워 둔 채 실패하면 옛 결과가 최신처럼 남는다 — 비우고 실패를 알린다.
-        setResults([]);
-        setErrors([...problems, "택시 이용내역을 불러오지 못했습니다. '새로고침'을 눌러주세요."]);
-        if (cacheKey) sessionResults.delete(cacheKey);
-      }
+      setResults(data.results);
+      setErrors(data.errors);
+      if (data.branchNames.length) setBranchNames(data.branchNames);
     } finally {
+      unsubscribe();
       if (isCurrent()) setProgress(null);
     }
   }, [month, taxiAllowed, user?.pinHash, cacheKey]);
@@ -202,6 +283,9 @@ export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolea
     // 근무 없는 날·하루 2회 이상도 사유를 봐야 판단되므로 같은 칸을 붙인다(사용자 지시 2026-10-21).
     const showUseCode = reason === "beforeClockOut" || reason === "noWork" || reason === "multiple";
     const colCount = showUseCode ? 8 : 7;
+    // 퇴근 전 탑승은 내용(퇴근 ○○ 보다 ○분 먼저 탑승)을 한 줄로, 이용사유 칸은 좁게(사용자 지시 2026-10-21).
+    // 표 칸의 max-width 는 자동 레이아웃에서 무시되므로 폭은 칸 안 div 로 묶는다.
+    const compact = reason === "beforeClockOut";
     return (
       <div key={reason} className="admin-sheet-card">
         <div className="admin-band">
@@ -221,8 +305,8 @@ export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolea
                 <th className="w-28">택시 지점</th>
                 {/* 폭은 내용만큼(w-px + 줄바꿈 금지 = 가장 긴 값에 맞춰 줄어든다, 사용자 지시 2026-10-12) */}
                 <th className="w-px whitespace-nowrap">마감 근무</th>
-                <th>내용</th>
-                {showUseCode && <th>택시 이용사유</th>}
+                <th className={compact ? "whitespace-nowrap" : undefined}>내용</th>
+                {showUseCode && <th className={compact ? "w-32" : undefined}>택시 이용사유</th>}
                 <th>출발지 → 도착지</th>
                 <th className="w-20 text-right">금액</th>
               </tr>
@@ -245,11 +329,13 @@ export function AdminTaxiWorkCheckSection({ taxiAllowed }: { taxiAllowed: boolea
                       ? <>{r.shift.settleDate.slice(5)} {r.shift.clockIn}~{r.shift.clockOut}{r.shift.branchName !== r.row.branchName ? ` (${r.shift.branchName})` : ""}</>
                       : <span className="text-gray-400">없음</span>}
                   </td>
-                  <td className="text-[11px] font-bold text-gray-800">{r.notes[reason] || ""}</td>
+                  <td className={`text-[11px] font-bold text-gray-800${compact ? " whitespace-nowrap" : ""}`}>{r.notes[reason] || ""}</td>
                   {/* 옛 캐시·미배포 GAS 에는 use_code 가 없어 `|| ""` 필수(법인택시 화면과 같은 규칙) */}
                   {showUseCode && (
-                    <td className="text-[11px] max-w-[12rem] truncate" title={r.row.order.use_code || ""}>
-                      {r.row.order.use_code || <span className="text-gray-400">-</span>}
+                    <td className="text-[11px]" title={r.row.order.use_code || ""}>
+                      <div className={`${compact ? "max-w-[8rem]" : "max-w-[12rem]"} truncate`}>
+                        {r.row.order.use_code || <span className="text-gray-400">-</span>}
+                      </div>
                     </td>
                   )}
                   <td className="text-[11px] max-w-[18rem] truncate" title={`${r.row.order.departure_point} → ${r.row.order.arrival_point}`}>
