@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthContext } from "../contexts/AuthContext";
-import { gasClient, DailyListRow, DailySettleDetail, LABOR_CONTRACT_PERIOD_LABEL, laborContractPeriodText } from "../api/gasClient";
+import { gasClient, DailyListRow, DailySettleDetail, LABOR_CONTRACT_PERIOD_LABEL, laborContractDateLines } from "../api/gasClient";
 import type { LaborContractTemplateMeta } from "../api/gasClient";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ToastMessage, { ToastType } from "../components/ToastMessage";
@@ -4485,7 +4485,7 @@ const LABOR_SHEET_HEADERS: { label: string; align: string }[] = [
   { label: "계약유형", align: "text-left" },
   { label: "이름", align: "text-left" },
   { label: "연락처", align: "text-left" },
-  { label: "입사·이동일", align: "text-left" },
+  { label: "입사·이동·적용일", align: "text-left" },
   { label: "급여", align: "text-right" },
   { label: "요청", align: "text-center" },
   { label: "진행 상태", align: "text-center" },
@@ -4810,13 +4810,10 @@ function AdminLaborContractsSection() {
                       줄바꿈 금지 — 번호가 두 줄로 꺾이면 읽다 틀린다. */}
                   <td className={`${LABOR_SHEET_TD} font-mono font-black whitespace-nowrap`}>{formatContractPhoneDisplay(contract.phone)}</td>
                   <td className={`${LABOR_SHEET_TD} font-mono text-gray-500`}>
-                    {/* 지점이동 + 입사일이 있으면 "입사 / 이동" 두 줄(지점 입력 순서와 같다, 2026-10-18). 없으면 날짜 하나 */}
-                    {contract.contractType === "지점이동" && contract.hireDate ? (
-                      <>
-                        <div className="whitespace-nowrap">입사 {laborContractPeriodText(contract.hireDate)}</div>
-                        <div className="whitespace-nowrap">이동 {laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}</div>
-                      </>
-                    ) : laborContractPeriodText(contract.effectiveDate, contract.periodType, contract.periodEndDate)}
+                    {/* 지점이동은 "입사 / 이동", 급여인상은 "입사 / 적용(그 달 1일)" 두 줄. 그 밖엔 날짜 하나 */}
+                    {laborContractDateLines(contract).map((line) => (
+                      <div key={line} className="whitespace-nowrap">{line}</div>
+                    ))}
                   </td>
                   <td className={`${LABOR_SHEET_TD} text-right font-mono font-black text-zinc-700`}>{Number(contract.salary || 0).toLocaleString("ko-KR")}원</td>
                   <td className={`${LABOR_SHEET_TD} text-center`}>

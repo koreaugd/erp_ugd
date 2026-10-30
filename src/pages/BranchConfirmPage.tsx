@@ -801,7 +801,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
 
           {contentAllowed && mainCategory === "annualLeave" && <AnnualLeaveTab branchName={activeBranchName} isAdmin={isAdmin} canWrite={userRole === "admin" || userRole === "branchAdmin"} moveTargets={userRole === "admin" ? "all" : allowedBranches} />}
 
-          {contentAllowed && mainCategory === "laborContract" && <LaborContractTab branchName={activeBranchName} isAdmin={isAdmin} />}
+          {contentAllowed && mainCategory === "laborContract" && <LaborContractTab key={activeBranchName} branchName={activeBranchName} isAdmin={isAdmin} />}
 
           {contentAllowed && mainCategory === "businessTaxi" && <BusinessTaxiTab branchName={activeBranchName} />}
           </Suspense>

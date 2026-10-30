@@ -101,12 +101,16 @@ export interface LaborContract {
   // "1주"·"2주"는 **옛 값**이다(2026-07-31에 신청 폼에서 뺐다). 기간이 그 둘로만 고정돼
   // 실제 계약과 맞지 않는 경우가 있어, 시작·종료일을 직접 고르는 "기간작성"으로 바꿨다.
   // 타입에 남겨 둬야 이미 등록된 기록을 그대로 읽고 보여줄 수 있다.
-  periodType?: "기간작성" | "정규" | "1주" | "2주";
+  //
+  // "급여인상"(2026-10-30): 기존 직원의 급여가 오른 경우. 구분(신규입사/지점이동)은 없고,
+  // hireDate=입사일, effectiveDate=인상 적용일(지점이 월만 고른다 → 그 달 1일 "YYYY-MM-01")로 저장한다.
+  // "기간작성"도 같은 날 신청 폼에서 뺐다 — 옛 기록 표시용으로만 남는다.
+  periodType?: "기간작성" | "정규" | "급여인상" | "1주" | "2주";
   effectiveDate?: string;
   /** periodType === "기간작성" 일 때의 종료일(YYYY-MM-DD). 시작일은 effectiveDate 다. */
   periodEndDate?: string;
   previousBranch?: string;
-  /** 지점이동일 때 최초 입사일(YYYY-MM-DD, 2026-10-18). effectiveDate 는 이동일이라 입사일을 따로 받는다. 옛 레코드엔 없다. */
+  /** 최초 입사일(YYYY-MM-DD). 지점이동(2026-10-18)·급여인상(2026-10-30)일 때 받는다 — 둘 다 effectiveDate 가 입사일이 아니라서. 옛 레코드엔 없다. */
   hireDate?: string;
   status?: string;
   createdAt?: string;
@@ -148,10 +152,30 @@ export const laborContractPeriodText = (effectiveDate?: string, periodType?: str
   return `${short(start)}~${short(end)}`;
 };
 
+/**
+ * 입사·이동·적용일 칸에 줄 단위로 적을 말 — 지점 표·관리자 표가 같이 쓴다.
+ *  · 급여인상 — "입사 / 적용" 두 줄 (적용일은 그 달 1일)
+ *  · 지점이동 + 입사일 — "입사 / 이동" 두 줄 (2026-10-18)
+ *  · 그 밖(신규입사·옛 기록) — 이름표 없이 날짜 하나
+ */
+export const laborContractDateLines = (c: Pick<LaborContract, "contractType" | "periodType" | "effectiveDate" | "periodEndDate" | "hireDate">): string[] => {
+  if (c.periodType === "급여인상") {
+    return [
+      ...(c.hireDate ? [`입사 ${laborContractPeriodText(c.hireDate)}`] : []),
+      `적용 ${laborContractPeriodText(c.effectiveDate)}`,
+    ];
+  }
+  if (c.contractType === "지점이동" && c.hireDate) {
+    return [`입사 ${laborContractPeriodText(c.hireDate)}`, `이동 ${laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)}`];
+  }
+  return [laborContractPeriodText(c.effectiveDate, c.periodType, c.periodEndDate)];
+};
+
 export const LABOR_CONTRACT_PERIOD_LABEL: Record<NonNullable<LaborContract["periodType"]>, string> = {
-  "기간작성": "기간작성(수습)",
   "정규": "정규(수습 후 계속)",
-  // 아래 둘은 옛 기록 표시용 — 신청 폼 선택지에는 더 이상 없다.
+  "급여인상": "급여인상",
+  // 아래는 옛 기록 표시용 — 신청 폼 선택지에는 더 이상 없다(기간작성은 2026-10-30에 뺐다).
+  "기간작성": "기간작성(수습)",
   "1주": "1주",
   "2주": "2주",
 };
