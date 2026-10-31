@@ -1025,22 +1025,58 @@ async function findPublicBranchDocId(branchName: string) {
   return String(nextId).padStart(2, "0");
 }
 
-async function ensureBranchAuthUser(loginEmail: string, rawPin?: string) {
-  if (!rawPin?.trim()) return;
+// 새로 만들었을 때만 그 계정의 idToken을 돌려준다(되돌리기용). 기존 계정 재사용은 null.
+async function ensureBranchAuthUser(loginEmail: string, rawPin?: string): Promise<string | null> {
+  if (!rawPin?.trim()) return null;
   const password = `ugd-${rawPin.trim()}`;
-  if (password.length < 6) return;
+  if (password.length < 6) return null;
 
   const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: loginEmail, password, returnSecureToken: false })
+    body: JSON.stringify({ email: loginEmail, password, returnSecureToken: true })
   });
-  if (response.ok) return;
+  if (response.ok) return String((await response.json().catch(() => ({})))?.idToken || "") || null;
 
   const body = await response.json().catch(() => ({}));
   const message = String(body?.error?.message || "");
-  if (message.includes("EMAIL_EXISTS")) return;
-  throw new Error(message || `Failed to create Firebase Auth user: ${loginEmail}`);
+  if (!message.includes("EMAIL_EXISTS")) {
+    throw new Error(message || `Failed to create Firebase Auth user: ${loginEmail}`);
+  }
+
+  // 다음 지점 번호를 외부인이 먼저 가입해 둔 계정일 수 있다(2026-10-31).
+  // 이 PIN으로 로그인되는 계정만 재사용하고, 아니면 등록을 멈춰 public_branches에 올리지 않는다.
+  const signIn = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: loginEmail, password, returnSecureToken: false })
+  });
+  if (!signIn.ok) {
+    throw new Error(`${loginEmail} 계정이 이미 다른 비밀번호로 있습니다. Firebase 콘솔에서 확인 후 삭제하고 다시 등록해 주세요.`);
+  }
+  return null;
+}
+
+/**
+ * 신규 지점 등록 전 점검: Auth 계정을 이 PIN으로 쓸 수 있는지 GAS 등록보다 먼저 확인한다.
+ * 뒤에서 실패하면 시트에만 지점이 생겨 시트와 Firestore가 어긋난다(Codex 지적 2026-10-31).
+ */
+export async function preflightBranchAuthDirect(branchName: string, rawPin?: string): Promise<() => Promise<void>> {
+  const noRollback = async () => {};
+  if (!isFirebaseConfigValid()) return noRollback;
+  const branchId = await findPublicBranchDocId(branchName);
+  const existing = await getDoc(doc(getDirectDb(), "public_branches", branchId));
+  if (existing.exists()) return noRollback;
+  const idToken = await ensureBranchAuthUser(`branch-${branchId}@ugd-erp.example`, rawPin);
+  if (!idToken) return noRollback;
+  // GAS 등록이 실패하면 방금 만든 계정을 지운다. 남겨 두면 다른 PIN으로 재시도할 수 없다.
+  return async () => {
+    await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${firebaseConfig.apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken })
+    }).catch(() => {});
+  };
 }
 
 async function upsertPublicBranchDirect(branchName: string, data: any, isAdminSession = false) {

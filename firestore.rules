@@ -23,10 +23,23 @@ service cloud.firestore {
 
     // PIN 로그인 계정을 이메일로 명시 판정한다(admin@ / branch-NN@ 패턴).
     // "users 문서 없음"으로 판정하지 않는다 — 온보딩 전·미승인·삭제된 개인계정을 PIN 계정으로 오인하지 않기 위함.
+    // branch-NN@은 메일 인증 없이 아무나 가입할 수 있는 주소라 형식만 보면 안 된다(2026-10-31).
+    // public_branches는 관리자만 쓰므로, 거기 등록된 번호·이메일과 일치할 때만 지점 계정으로 인정한다.
+    // 번호 추출은 형식 검사를 통과한 뒤에만 한다 — 개인 이메일에서 split 하면 오류가 난다.
+    function isRegisteredBranchEmail() {
+      return request.auth.token.email.matches('^branch-[0-9]+@ugd-erp[.]example$')
+        && branchDocMatchesEmail(request.auth.token.email.split('@')[0].split('-')[1]);
+    }
+
+    function branchDocMatchesEmail(branchId) {
+      return exists(/databases/$(database)/documents/public_branches/$(branchId))
+        && get(/databases/$(database)/documents/public_branches/$(branchId)).data.loginEmail == request.auth.token.email;
+    }
+
     function isPinAccount() {
       return signedIn() && (
         request.auth.token.email == 'admin@ugd-erp.example'
-        || request.auth.token.email.matches('^branch-[0-9]+@ugd-erp[.]example$')
+        || isRegisteredBranchEmail()
       );
     }
 

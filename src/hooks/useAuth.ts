@@ -41,6 +41,39 @@ const SESSION_KEY = "erp_ugd_session_v2";   // v2: loginType 필수. 구 세션�
 const LEGACY_SESSION_KEY = "erp_ugd_session";
 const ATTEMPTS_KEY = "erp_ugd_failed_attempts";
 const SELECTED_BRANCH_KEY = "erp_ugd_selected_branch";
+// PIN 연속 실패 잠금. 브라우저 안의 제한이라 화면을 거치는 시도만 막는다 —
+// Firebase로 직접 보내는 시도는 Firebase 자체 제한(auth/too-many-requests)에 맡긴다.
+const PIN_LOCK_KEY = "erp_ugd_pin_lock_until";
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MS = 10 * 60 * 1000;
+
+function pinLockMessage(): string | null {
+  const until = Number(localStorage.getItem(PIN_LOCK_KEY) || 0);
+  if (!until) return null;
+  const left = until - Date.now();
+  if (left <= 0) {
+    localStorage.removeItem(PIN_LOCK_KEY);
+    localStorage.setItem(ATTEMPTS_KEY, "0");
+    return null;
+  }
+  return `PIN을 ${PIN_MAX_ATTEMPTS}번 연속 틀려 잠겼습니다. ${Math.ceil(left / 60000)}분 후 다시 시도해 주세요.`;
+}
+
+// 네트워크 장애·권한 오류·시도 제한은 PIN을 틀린 것이 아니므로 세지 않는다.
+const PIN_MISMATCH_CODES = ["auth/invalid-credential", "auth/invalid-login-credentials", "auth/wrong-password", "auth/user-not-found"];
+function isPinMismatch(err: any): boolean {
+  return err?.name === "PinMismatchError"
+    || PIN_MISMATCH_CODES.includes(String(err?.code || ""))
+    // GAS verifyPin의 거절 문구(gas/Code.gs verifyPin). GAS 오류는 코드 없이 문구로만 온다.
+    || String(err?.message || "").includes("PIN 번호가 올바르지 않거나");
+}
+
+function recordPinFailure(): number {
+  const next = Number(localStorage.getItem(ATTEMPTS_KEY) || 0) + 1;
+  localStorage.setItem(ATTEMPTS_KEY, String(next));
+  if (next >= PIN_MAX_ATTEMPTS) localStorage.setItem(PIN_LOCK_KEY, String(Date.now() + PIN_LOCK_MS));
+  return next;
+}
 // 구글 계정 선택창 생략용 힌트(이메일만 저장 — 자격증명 아님). localStorage라 브라우저를 닫아도 유지.
 const LAST_GOOGLE_EMAIL_KEY = "erp_ugd_last_google_email";
 
@@ -281,6 +314,11 @@ export function useAuth() {
   }, []);
 
   const login = useCallback(async (branch: LoginBranch | null, pin: string): Promise<boolean> => {
+    const lockedMessage = pinLockMessage();
+    if (lockedMessage) {
+      setError(lockedMessage);
+      return false;
+    }
     setLoading(true);
     setError(null);
 
@@ -341,20 +379,19 @@ export function useAuth() {
       return true;
 
     } catch (err: any) {
-      const nextAttempts = failedAttempts + 1;
-      setFailedAttempts(nextAttempts);
-      localStorage.setItem(ATTEMPTS_KEY, String(nextAttempts));
+      if (isPinMismatch(err)) setFailedAttempts(recordPinFailure());
       // Firebase 오류(code 있음)는 영어 원문이라 한국어 안내로 바꾼다. 일반 Error는 메시지 유지.
       setError(
-        err?.code === "auth/too-many-requests" ? "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
+        pinLockMessage() ||
+        (err?.code === "auth/too-many-requests" ? "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
           : err?.code ? "PIN이 올바르지 않습니다. 다시 확인해 주세요."
-          : (err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요.")
+          : (err.message || "PIN 입력 오류입니다. 올바른 PIN 번호를 한 번 더 확인하세요."))
       );
       return false;
     } finally {
       setLoading(false);
     }
-  }, [failedAttempts]);
+  }, []);
 
   const startPersonalLogin = useCallback(async (
     mode: "google" | "email-in" | "email-up",
@@ -462,6 +499,11 @@ export function useAuth() {
 
   const completeGate = useCallback(async (target: GateTarget, pin: string): Promise<boolean> => {
     if (!pendingGate) return false;
+    const lockedMessage = pinLockMessage();
+    if (lockedMessage) {
+      setError(lockedMessage);
+      return false;
+    }
     setLoading(true);
     setError(null);
 
@@ -538,15 +580,13 @@ export function useAuth() {
       setUser(session);
       return true;
     } catch (err: any) {
-      const next = failedAttempts + 1;
-      setFailedAttempts(next);
-      localStorage.setItem(ATTEMPTS_KEY, String(next));
-      setError(err.message || "PIN이 올바르지 않습니다.");
+      if (isPinMismatch(err)) setFailedAttempts(recordPinFailure());
+      setError(pinLockMessage() || err.message || "PIN이 올바르지 않습니다.");
       return false;
     } finally {
       setLoading(false);
     }
-  }, [pendingGate, failedAttempts]);
+  }, [pendingGate]);
 
   // 온보딩 폼 제출 — 신규 개인계정의 이름·연락처·근무지점을 받아 프로필을 생성하고,
   // 이어서 회사 게이트(지점 선택·PIN)로 넘긴다. 실패 시 유령 세션을 남기지 않는다.

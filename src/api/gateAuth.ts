@@ -23,6 +23,13 @@ function getGateAuth(): Auth {
 
 export type GateTarget = { kind: "admin" } | { kind: "branch"; branch: LoginBranch };
 
+// PIN이 실제로 틀린 경우만 이 이름을 단다 — 연속 실패 잠금은 이것만 센다(useAuth).
+function pinMismatch(message: string) {
+  const error = new Error(message);
+  error.name = "PinMismatchError";
+  return error;
+}
+
 /**
  * PIN 게이트 검증. 통과 시 세션에 보관할 pinHash를 반환한다.
  * 오류 정책(설계서 §4 — 브루트포스 우회 차단):
@@ -44,12 +51,16 @@ export async function verifyGatePin(target: GateTarget, pin: string): Promise<st
     if (code === "auth/network-request-failed") {
       // 네트워크 장애만 GAS 폴백 — 현행 useAuth 폴백과 동일한 비교를 강제한다.
       const setting = await gasClient.verifyPin(pinHash);
-      if (target.kind === "admin" && setting.role !== "admin") throw new Error("관리자 PIN이 올바르지 않습니다.");
-      if (target.kind === "branch" && setting.branchName !== target.branch.branchName) throw new Error("PIN이 올바르지 않습니다.");
+      if (target.kind === "admin" && setting.role !== "admin") throw pinMismatch("관리자 PIN이 올바르지 않습니다.");
+      if (target.kind === "branch" && setting.branchName !== target.branch.branchName) throw pinMismatch("PIN이 올바르지 않습니다.");
       return pinHash;
     }
     // wrong-password / invalid-credential / user-not-found 등 자격증명 오류: 폴백 없이 실패.
-    throw new Error("PIN이 올바르지 않습니다. 다시 확인해 주세요.");
+    if (["auth/invalid-credential", "auth/invalid-login-credentials", "auth/wrong-password", "auth/user-not-found"].includes(code)) {
+      throw pinMismatch("PIN이 올바르지 않습니다. 다시 확인해 주세요.");
+    }
+    // 그 밖의 Firebase 오류는 PIN을 틀린 것이 아니다 — 폴백 없이 실패하되 잠금 횟수에 넣지 않는다.
+    throw new Error("PIN 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   } finally {
     // 반환 전에 gate 인스턴스의 인증 상태를 반드시 비운다(연속 호출 경합 방지).
     await signOut(gateAuth).catch(() => {});

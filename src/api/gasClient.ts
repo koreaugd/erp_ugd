@@ -813,7 +813,25 @@ export const gasClient = {
    * 관리자용: 신규 지점 등록
    */
   async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string, isAdminSession = false): Promise<{ success: boolean }> {
-    const result = await callApi("addBranch", { branchName, pinHash, brand, role });
+    const isServerEnv = typeof window !== "undefined" && (
+      window.location.hostname.includes("localhost") ||
+      window.location.hostname.includes("127.0.0.1") ||
+      window.location.hostname.includes("run.app")
+    );
+    // 로컬은 시뮬레이션이라 실제 Auth를 건드리지 않는다(tryDirectBackup과 같은 판정).
+    let rollbackAuth = async () => {};
+    if (!isServerEnv && (role || "branch") === "branch") {
+      const { preflightBranchAuthDirect } = await import("./firebaseDirect");
+      rollbackAuth = await preflightBranchAuthDirect(branchName, rawPin);
+    }
+    let result;
+    try {
+      result = await callApi("addBranch", { branchName, pinHash, brand, role });
+    } catch (error) {
+      await rollbackAuth();
+      throw error;
+    }
+    if (result && result.success === false) await rollbackAuth();
     if (result && result.success !== false) {
       await tryDirectBackup("setting", branchName, { branch_name: branchName, pin_hash: pinHash, brand, role, rawPin, is_active: true }, isAdminSession);
     }
