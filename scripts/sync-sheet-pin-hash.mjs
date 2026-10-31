@@ -65,6 +65,14 @@ if (!pairs.length) {
 
 const sha256Hex = (s) => createHash("sha256").update(String(s).trim(), "utf8").digest("hex");
 
+async function callGasPreflight(pinHash) {
+  try {
+    return await callGas("verifyPin", { pinHash });
+  } catch {
+    return { role: "" };
+  }
+}
+
 async function callGas(action, params) {
   const res = await fetch(GAS_URL, {
     method: "POST",
@@ -83,9 +91,15 @@ async function main() {
   const { getAuth, signInWithEmailAndPassword, signOut } = await import("firebase/auth");
   const { getFirestore, collection, getDocs, doc, setDoc } = await import("firebase/firestore");
   const { default: config } = await import("../firebase-applet-config.json", { with: { type: "json" } });
-  const { signInAsAdmin } = await import("./lib/admin-auth.mjs");
+  const { signInAsAdmin, readAdminPin } = await import("./lib/admin-auth.mjs");
+  // GAS 지점 관리 게이트(requireAdminPin)용. 시트의 관리자 해시와 항상 같게 따라간다.
+  let adminPinHash = sha256Hex(readAdminPin());
 
   GAS_URL = await resolveGasUrl();
+  // 게이트를 못 넘는 상태면 Firestore를 건드리기 전에 멈춘다. 시트의 관리자 해시가 틀린 경우는
+  // 이 도구로 고칠 수 없다 — 지점_설정 시트의 관리자 행 pin_hash를 직접 수정한 뒤 다시 실행한다.
+  const gate = dryRun ? null : await callGasPreflight(adminPinHash);
+  if (gate && gate.role !== "admin") throw new Error("시트의 관리자 pin_hash가 관리자 PIN과 다릅니다. 시트를 직접 수정한 뒤 다시 실행하세요.");
 
   const app = initializeApp(config);
   const auth = getAuth(app);
@@ -150,7 +164,8 @@ async function main() {
           _updatedAt: new Date().toISOString()
         }, { merge: true });
         mirrorDone = true;
-        await callGas("updateBranchPin", { branchName: v.branchName, pinHash });
+        await callGas("updateBranchPin", { branchName: v.branchName, pinHash, adminPinHash });
+        if (v.role === "admin") adminPinHash = pinHash;
         results.push({ label: v.branchName, ok: true, note: "시트+미러 기입 완료" });
       } catch (e) {
         results.push({

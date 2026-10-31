@@ -1307,7 +1307,7 @@ export async function syncDirectToFirebase() {
 /**
  * Netlify 등 정적 호스팅 환경용: Firestore 클라우드 원본 -> 브라우저 직접 구글시트 복원 전송 가동
  */
-export async function restoreDirectFromFirebase(isAdminSession = false) {
+export async function restoreDirectFromFirebase(isAdminSession = false, adminPinHash = "") {
   try {
     const db = getDirectDb();
 
@@ -1327,8 +1327,8 @@ export async function restoreDirectFromFirebase(isAdminSession = false) {
         // 한계: public_branches 문서가 통째로 사라진 상태에서 이 복원을 돌리면, 문서를 새로 만들면서
         // 목록 표시순서(sortOrder)는 되살아나지 않는다 — settings 에는 그 값이 없기 때문이다.
         // (문서가 남아 있으면 merge 라 보존된다.) 그런 복원 뒤에는 표시순서를 다시 넣어야 한다.
-        await gasClient.addBranch(branchName, pinHash, brand, role, undefined, isAdminSession);
-        await gasClient.toggleBranchActive(branchName, isActive, isAdminSession);
+        await gasClient.addBranch(branchName, pinHash, brand, role, undefined, isAdminSession, adminPinHash);
+        await gasClient.toggleBranchActive(branchName, isActive, isAdminSession, adminPinHash);
         settingsCount++;
       }
     }

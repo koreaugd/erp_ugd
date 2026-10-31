@@ -134,17 +134,23 @@ export async function changeFirebaseLoginPins(input: ChangeLoginPinsInput) {
       const prevHash = isAdminRow ? oldAdminHash : oldBranchHash;
       return nextHash && prevHash ? { row, nextHash, prevHash } : null;
     })
-    .filter((t): t is { row: (typeof allRows)[number]; nextHash: string; prevHash: string } => t !== null);
+    .filter((t): t is { row: (typeof allRows)[number]; nextHash: string; prevHash: string } => t !== null)
+    // 관리자 행을 맨 뒤로 — 시트의 관리자 해시가 바뀌는 순간부터 GAS 게이트는 새 해시만 받는다.
+    .sort((a, b) => Number(a.row.role === "admin") - Number(b.row.role === "admin"));
+  // GAS 지점 관리 게이트에 낼 관리자 해시. 시트의 관리자 행과 항상 같게 따라간다.
+  let gateHash = oldAdminHash;
 
   const sheetSynced: typeof targetRows = [];
   // skipNames: Firebase 쪽 롤백에 실패해 '새 PIN이 적용된 채 남은' 지점 — 그 지점의 시트는
   // 새 해시를 유지해야 지점 단위로나마 Firebase↔시트가 일치한다(split-brain 방지, Codex P0 2026-07-27).
   const rollbackSheet = async (skipNames?: Set<string>) => {
     const failed: string[] = [];
-    for (const t of sheetSynced) {
+    // 역순: 관리자 행을 먼저 되돌려야 나머지 행을 옛 해시 게이트로 되돌릴 수 있다.
+    for (const t of [...sheetSynced].reverse()) {
       if (skipNames?.has(t.row.branchName)) continue;
       try {
-        await gasClient.updateBranchPin(t.row.branchName, t.prevHash, true, rowMeta(t.row));
+        await gasClient.updateBranchPin(t.row.branchName, t.prevHash, true, rowMeta(t.row), gateHash);
+        if (t.row.role === "admin") gateHash = t.prevHash;
       } catch {
         failed.push(t.row.branchName);
       }
@@ -154,7 +160,8 @@ export async function changeFirebaseLoginPins(input: ChangeLoginPinsInput) {
 
   try {
     for (const t of targetRows) {
-      await gasClient.updateBranchPin(t.row.branchName, t.nextHash, true, rowMeta(t.row));
+      await gasClient.updateBranchPin(t.row.branchName, t.nextHash, true, rowMeta(t.row), gateHash);
+      if (t.row.role === "admin") gateHash = t.nextHash;
       sheetSynced.push(t);
     }
   } catch (sheetError: any) {

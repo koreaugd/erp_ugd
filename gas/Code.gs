@@ -37,58 +37,28 @@ function doPost(e) {
       case "verifyPin":
         result = verifyPin(requestData.pinHash);
         break;
-      case "checkDuplicate":
-        result = checkDuplicate(requestData.branchName, requestData.settleDate);
-        break;
-      case "getDailyFormBootstrap":
-        result = getDailyFormBootstrap(requestData.branchName, requestData.settleDate);
-        break;
-      case "submitDaily":
-        result = submitDaily(requestData.master || requestData.masterData, requestData.expenses || [], requestData.staff || []);
-        break;
-      case "updateDaily":
-        result = updateDaily(requestData.recordId, requestData.masterData || requestData.master, requestData.expenses, requestData.staff, requestData.modifiedBy);
-        break;
-      case "getDailyList":
-        result = getDailyList(requestData.settleDate, requestData.adminPinHash);
-        break;
-      case "getDailyDetail":
-        result = getDailyDetail(requestData.recordId);
-        break;
-      case "getBranchHistory":
-        result = getBranchHistory(requestData.branchName, requestData.month);
-        break;
-      case "getAttendanceLog":
-        result = getAttendanceLog(requestData.branchName, requestData.logType);
-        break;
       case "getBranchList":
         result = getBranchList();
         break;
       case "getBranchListAll":
         result = getBranchListAll();
         break;
-      case "getStaffRoster":
-        result = getStaffRoster(requestData.branchName);
-        break;
-      case "saveStaffRoster":
-        result = saveStaffRoster(requestData.branchName, requestData.employees || []);
-        break;
-      case "getSharedData":
-        result = getSharedData(requestData.dataKey);
-        break;
-      case "saveSharedData":
-        result = saveSharedData(requestData.dataKey, requestData.value);
-        break;
+      // 마감·명부·공유 데이터는 앱이 Firestore로 직접 처리한다 — 공개 URL로 열어 둘 이유가 없어 받지 않는다(2026-10-31).
+      // 지점 설정은 PIN 판정의 근거라 관리자 PIN 없이는 바꿀 수 없다.
       case "addBranch":
+        requireAdminPin(requestData.adminPinHash);
         result = addBranch(requestData.branchName, requestData.pinHash, requestData.brand, requestData.role);
         break;
       case "toggleBranchActive":
+        requireAdminPin(requestData.adminPinHash);
         result = toggleBranchActive(requestData.branchName, requestData.isActive);
         break;
       case "updateBranchPin":
+        requireAdminPin(requestData.adminPinHash);
         result = updateBranchPin(requestData.branchName, requestData.pinHash);
         break;
       case "deleteBranch":
+        requireAdminPin(requestData.adminPinHash);
         result = deleteBranch(requestData.branchName);
         break;
       // 카카오T 액션은 조회·쓰기 모두 관리자 PIN 검증을 강제한다 — GAS 웹앱 URL은 공개돼 있어
@@ -660,6 +630,7 @@ function toggleBranchActive(branchName, isActive) {
   const targetName = String(branchName || "").trim().toUpperCase();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim().toUpperCase() === targetName) {
+      if (!isActive) assertKeepsActiveAdmin_(data, i);
       sheet.getRange(i + 1, 4).setValue(isActive ? "TRUE" : "FALSE");
       return { success: true };
     }
@@ -701,6 +672,7 @@ function deleteBranch(branchName) {
   const targetName = String(branchName || "").trim().toUpperCase();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim().toUpperCase() === targetName) {
+      assertKeepsActiveAdmin_(data, i);
       sheet.deleteRow(i + 1);
       return { success: true };
     }
@@ -1281,6 +1253,28 @@ function requireKakaoTaxiAdmin(adminPinHash) {
     throw denied;
   }
   if (!setting || setting.role !== "admin") throw denied;
+}
+
+// 마지막 활성 관리자 행을 끄거나 지우면 requireAdminPin 을 아무도 못 넘어 지점 관리가 영구히 막힌다.
+function assertKeepsActiveAdmin_(data, targetIndex) {
+  if (data[targetIndex][2] !== "admin") return;
+  for (let i = 1; i < data.length; i++) {
+    if (i !== targetIndex && data[i][2] === "admin" && String(data[i][3]).toUpperCase() === "TRUE") return;
+  }
+  throw new Error("마지막 관리자 계정은 비활성화하거나 삭제할 수 없습니다.");
+}
+
+// 지점 관리 게이트 — 실패 유형과 무관하게 같은 문구로 답한다.
+// verifyPin(역방향)을 쓰지 않는다: 지점 행과 PIN이 같으면 그 행을 먼저 돌려줘 관리자도 거부된다.
+function requireAdminPin(adminPinHash) {
+  const cleanPinHash = String(adminPinHash || "").trim().toLowerCase();
+  const data = getSpreadsheet().getSheetByName(SHEETS.SETTING).getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (row[2] !== "admin" || String(row[3]).toUpperCase() !== "TRUE") continue;
+    if (pinRowMatches_(String(row[1] || "").trim().toLowerCase(), cleanPinHash, "admin")) return;
+  }
+  throw new Error("관리자 인증이 필요합니다. 관리자 PIN을 다시 확인해 주세요.");
 }
 
 // 쓰기 액션 전용 — 계정을 반드시 명시받는다. 기본값을 두면 엉뚱한 계정에 삭제·수정이 나간다.

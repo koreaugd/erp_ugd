@@ -812,7 +812,7 @@ export const gasClient = {
   /**
    * 관리자용: 신규 지점 등록
    */
-  async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string, isAdminSession = false): Promise<{ success: boolean }> {
+  async addBranch(branchName: string, pinHash: string, brand: string, role?: string, rawPin?: string, isAdminSession = false, adminPinHash = ""): Promise<{ success: boolean }> {
     const isServerEnv = typeof window !== "undefined" && (
       window.location.hostname.includes("localhost") ||
       window.location.hostname.includes("127.0.0.1") ||
@@ -826,7 +826,7 @@ export const gasClient = {
     }
     let result;
     try {
-      result = await callApi("addBranch", { branchName, pinHash, brand, role });
+      result = await callApi("addBranch", { branchName, pinHash, brand, role, adminPinHash });
     } catch (error) {
       await rollbackAuth();
       throw error;
@@ -841,8 +841,8 @@ export const gasClient = {
   /**
    * 관리자용: 지점 활성화/비활성화 상태 변경
    */
-  async toggleBranchActive(branchName: string, isActive: boolean, isAdminSession = false): Promise<{ success: boolean }> {
-    const result = await callApi("toggleBranchActive", { branchName, isActive });
+  async toggleBranchActive(branchName: string, isActive: boolean, isAdminSession = false, adminPinHash = ""): Promise<{ success: boolean }> {
+    const result = await callApi("toggleBranchActive", { branchName, isActive, adminPinHash });
     if (result && result.success !== false) {
       await tryDirectBackup("setting", branchName, { branch_name: branchName, is_active: isActive }, isAdminSession);
     }
@@ -855,8 +855,8 @@ export const gasClient = {
    * setDoc이라 메타가 빠지면 기본값(brand "기타", role "branch", is_active true)으로 문서를
    * 덮어써 관리자 행까지 오염시킨다(Codex P0 2026-07-27).
    */
-  async updateBranchPin(branchName: string, pinHash: string, isAdminSession = false, meta?: { brand?: string; role?: string; isActive?: boolean }): Promise<{ success: boolean }> {
-    const result = await callApi("updateBranchPin", { branchName, pinHash });
+  async updateBranchPin(branchName: string, pinHash: string, isAdminSession = false, meta?: { brand?: string; role?: string; isActive?: boolean }, adminPinHash = ""): Promise<{ success: boolean }> {
+    const result = await callApi("updateBranchPin", { branchName, pinHash, adminPinHash });
     if (result && result.success !== false) {
       await tryDirectBackup("setting", branchName, {
         branch_name: branchName,
@@ -870,8 +870,8 @@ export const gasClient = {
   /**
    * 관리자용: 지점 삭제 (데이터행 완전히 제거)
    */
-  async deleteBranch(branchName: string): Promise<{ success: boolean }> {
-    const result = await callApi("deleteBranch", { branchName });
+  async deleteBranch(branchName: string, adminPinHash = ""): Promise<{ success: boolean }> {
+    const result = await callApi("deleteBranch", { branchName, adminPinHash });
     if (result && result.success !== false) {
       await tryDirectBackup("delete_setting", branchName);
     }
@@ -933,7 +933,7 @@ export const gasClient = {
   /**
    * 관리자용: Firebase Firestore 클라우드 보존재를 기반으로 현업 및 로컬 데이터 강제 복조(Restore)
    */
-  async restoreFromFirebase(isAdminSession = false): Promise<{ success: boolean; message?: string; error?: string }> {
+  async restoreFromFirebase(isAdminSession = false, adminPinHash = ""): Promise<{ success: boolean; message?: string; error?: string }> {
     const isServerEnvironment = typeof window !== "undefined" && (
       window.location.hostname.includes("localhost") ||
       window.location.hostname.includes("127.0.0.1") ||
@@ -942,7 +942,7 @@ export const gasClient = {
 
     if (!isServerEnvironment) {
       const { restoreDirectFromFirebase } = await loadFirebaseDirect();
-      return await restoreDirectFromFirebase(isAdminSession);
+      return await restoreDirectFromFirebase(isAdminSession, adminPinHash);
     }
 
     try {
@@ -952,7 +952,7 @@ export const gasClient = {
     } catch (err) {
       console.warn("[Firebase API] Server restore route failed. Utilizing direct browser restorer.", err);
       const { restoreDirectFromFirebase } = await loadFirebaseDirect();
-      return await restoreDirectFromFirebase(isAdminSession);
+      return await restoreDirectFromFirebase(isAdminSession, adminPinHash);
     }
   },
 

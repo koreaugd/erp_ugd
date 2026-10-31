@@ -387,6 +387,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
   // 2. Admin Settings Editor Modal states
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isPasscodeVerified, setIsPasscodeVerified] = useState(false);
+  // 이 창에서 확인한 관리자 PIN의 해시 — 세션 pinHash는 지점 PIN일 수 있어 GAS 지점 관리에 못 쓴다.
+  const [adminGateHash, setAdminGateHash] = useState("");
   const [passcode, setPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
   // 2026-07-27 컴팩트화: 화면에 영향 없는 설정 탭(로고·색상·문구·엑셀 서식·Firebase 연동)을 없애고
@@ -486,6 +488,8 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
         const { loginWithAdminPin } = await import("../api/firebaseAuth");
         await loginWithAdminPin(passcode);
       }
+      const { hashPin } = await import("../utils/hashPin");
+      setAdminGateHash(await hashPin(passcode.trim()));
       setIsPasscodeVerified(true);
       setPasscodeError("");
     } catch (error: any) {
@@ -556,6 +560,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
         try {
           const { hashPin } = await import("../utils/hashPin");
           const newHash = await hashPin(newAdminLoginPin.trim());
+          setAdminGateHash(newHash);
           const raw = sessionStorage.getItem("erp_ugd_session_v2");
           if (raw) {
             const session = JSON.parse(raw);
@@ -1020,7 +1025,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                 try {
                                   setNewBranchSubmitting(true);
                                   const phash = await hashPin(trimPin);
-                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole, trimPin, isAdmin);
+                                  const res = await gasClient.addBranch(trimName, phash, trimBrand, newBranchRole, trimPin, isAdmin, adminGateHash);
                                   if (res && res.success !== false) {
                                     triggerToast("신규 점포가 데이터베이스에 원활히 등록되었습니다!", "success");
                                     setNewBranchName("");
@@ -1108,7 +1113,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                       <button
                                         onClick={async () => {
                                           try {
-                                            const res = await gasClient.toggleBranchActive(b.branchName, !b.isActive, isAdmin);
+                                            const res = await gasClient.toggleBranchActive(b.branchName, !b.isActive, isAdmin, adminGateHash);
                                             if (res && res.success !== false) {
                                               triggerToast(`${b.branchName} 지점의 영업 활성화 상태를 ${!b.isActive ? "가동 활성" : "폐점 / 비활성화"} 상태로 온전하게 제어 처리 완료하였습니다.`);
                                               fetchAdminBranches();
@@ -1134,7 +1139,7 @@ function ActiveWorkspace({ branch, logout, selectBranch, activeTab, setActiveTab
                                           <button
                                             onClick={async () => {
                                               try {
-                                                const res = await gasClient.deleteBranch(b.branchName);
+                                                const res = await gasClient.deleteBranch(b.branchName, adminGateHash);
                                                 if (res && res.success !== false) {
                                                   triggerToast("해당 지점이 완벽하게 영구 삭제되었습니다.", "success");
                                                   fetchAdminBranches();
