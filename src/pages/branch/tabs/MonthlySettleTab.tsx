@@ -6,6 +6,7 @@ import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch } from "../../../utils/salaryAccess";
 import LoadingSpinner from "../../../components/LoadingSpinner";
 import { GuideCallouts } from "../../../components/GuideCallouts";
+import { PurchaseExampleModal } from "../components/PurchaseExampleModal";
 import { fullTimeSalaryGuideSteps, purchaseSalesGuideSteps } from "../helpers/guideSteps";
 import { addMonthsToMonthInputValue } from "../helpers/formatters";
 import { MonthlyFullTimeSalarySubTab, flushFullTimeSalaryForClose } from "./MonthlyFullTimeSalarySubTab";
@@ -90,6 +91,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
   const [partTimeSubmitting, setPartTimeSubmitting] = useState(false);
   // 매입매출 탭 "작성방법 보기" 투어. 수동으로만 열린다(자동 노출 없음).
   const [guideOpen, setGuideOpen] = useState(false);
+  const [purchaseExampleOpen, setPurchaseExampleOpen] = useState(false);
   // '확정 후 수정'한 섹션을 다시 마감제출할 때 받는 수정 사유(섹션별 초안). 사유는 이제 편집 전이 아니라 '제출 시점'에 받는다.
   const [editReasonDrafts, setEditReasonDrafts] = useState<Record<CloseSection, string>>({ purchase: "", salary: "", salesSummary: "", partTimeSalary: "" });
   // 사유 미입력으로 제출을 막았을 때 사유칸을 붉게 강조하는 플래그(섹션별).
@@ -603,6 +605,11 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
     fetchHistory();
   }, [fetchHistory]);
 
+  // 탭을 옮기면 작성예시 창을 닫는다 — 안 그러면 매입매출로 돌아올 때 저절로 다시 열린다.
+  useEffect(() => {
+    setPurchaseExampleOpen(false);
+  }, [activeSubTab]);
+
   useEffect(() => {
     void fetchMonthlyCloseStatus();
   }, [fetchMonthlyCloseStatus]);
@@ -825,7 +832,7 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
         <>
           {/* 일일마감 탭과 같은 자리 — 탭 최상단 가운데. 매입매출·정직원급여 둘 다 여기서 연다(하위 컴포넌트가 아니라
               탭 레벨이어야 다른 탭들과 버튼 위치가 같다). */}
-          <div className="flex justify-center">
+          <div className="flex justify-center gap-2">
             <button
               onClick={() => setGuideOpen((prev) => !prev)}
               disabled={loading}
@@ -837,7 +844,19 @@ export function MonthlySettleTab({ branchName, activeSubTab, isAdmin = false }: 
             >
               <BookOpen className="w-3.5 h-3.5" /> {guideOpen ? "작성방법 닫기" : "작성방법 보기"}
             </button>
+            {activeSubTab === "purchaseSales" && (
+              <button
+                onClick={() => setPurchaseExampleOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-zinc-900 text-[12px] font-black leading-none transition cursor-pointer bg-[#F4F2CC] text-zinc-900 hover:brightness-95"
+              >
+                <BookOpen className="w-3.5 h-3.5" /> 작성예시
+              </button>
+            )}
           </div>
+          <PurchaseExampleModal
+            open={purchaseExampleOpen}
+            onClose={() => setPurchaseExampleOpen(false)}
+          />
           <GuideCallouts
             open={guideOpen}
             steps={activeSubTab === "purchaseSales" ? purchaseSalesGuideSteps : fullTimeSalaryGuideSteps}
