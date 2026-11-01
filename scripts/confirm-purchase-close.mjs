@@ -80,6 +80,12 @@ const missingTransfer = (r) => {
   if (r?.isPrepaid === true && String(r?.transferAmount || "").trim() === "" && num(r?.monthlyUsageAmount) > 0) return false;
   return num(r?.transferAmount) <= 0 && num(r?.monthlyUsageAmount) > 0;
 };
+// 이체금액은 있는데 사용액이 빈 행 — 지점 화면과 같은 차단(2026-11-01). monthlyCloseWorkbook.ts purchaseRowMissingUsageAmount와 같은 판정.
+const missingUsage = (r) => {
+  if (String(r?.vendorName || "").trim() === "") return false;
+  if (r?.transferNeeded === false) return false;
+  return num(r?.transferAmount) > 0 && String(r?.monthlyUsageAmount ?? "").trim() === "";
+};
 const sumT = (rows) => (Array.isArray(rows) ? rows.reduce((a, r) => a + transferExport(r), 0) : 0);
 
 // ---------------------------------------------------------------- 대상 추리기
@@ -105,6 +111,8 @@ for (const branchName of branches) {
   if (status === "confirmed") { skips.push({ branchName, why: "이미 확정됨" }); continue; }
   const missing = rows.filter(missingTransfer).map((r) => String(r.vendorName).trim());
   if (missing.length) { skips.push({ branchName, why: `이체필요인데 이체금액이 빈 업체 — 지점이 금액을 채워야 함: ${missing.join(", ")}` }); continue; }
+  const noUsage = rows.filter(missingUsage).map((r) => String(r.vendorName).trim());
+  if (noUsage.length) { skips.push({ branchName, why: `이체금액은 있는데 사용액이 빈 업체 — 지점이 금액을 채워야 함: ${noUsage.join(", ")}` }); continue; }
   // '수정중'은 지점이 확정본을 열어 고치는 중이다. 여기서 확정하면 지점이 입력해야 할 '수정 사유'를 건너뛰게 되고,
   // 앱의 재확정 게이트(serverReconfirm && !reason → 거부)와도 어긋난다. 사람이 판단하도록 남긴다.
   if (status === "editing" && !allowEditing) { skips.push({ branchName, why: "지점이 마감수정 중 — 지점이 사유와 함께 직접 제출해야 함 (강행하려면 --allow-editing)" }); continue; }
@@ -167,6 +175,9 @@ await runTransaction(db, async (tx) => {
     const branchName = t.branchName;
     // 계획을 세운 뒤 지점이 데이터를 비웠거나 이미 확정/수정중으로 바꿨을 수 있다 — 여기서 다시 판정한다.
     if (!hasMeaningful(liveRows.get(branchName))) { aborted.push({ branchName, why: "확정 직전 매입매출 데이터가 비어 있음" }); continue; }
+    const liveRowsOfBranch = liveRows.get(branchName);
+    if (liveRowsOfBranch.some(missingTransfer)) { aborted.push({ branchName, why: "확정 직전 이체금액이 빈 업체가 생김" }); continue; }
+    if (liveRowsOfBranch.some(missingUsage)) { aborted.push({ branchName, why: "확정 직전 사용액이 빈 업체가 생김" }); continue; }
     const liveStatus = sectionStatus(list, branchName, MONTH, SECTION);
     if (liveStatus === "confirmed") { aborted.push({ branchName, why: "그 사이 지점이 확정함" }); continue; }
     if (liveStatus === "editing" && !allowEditing) { aborted.push({ branchName, why: "그 사이 지점이 마감수정으로 열었음" }); continue; }

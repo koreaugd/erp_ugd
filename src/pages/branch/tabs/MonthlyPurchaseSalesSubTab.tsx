@@ -11,6 +11,7 @@ import {
   purchaseDisplayTotals,
   purchaseRowHasExportableAmount,
   purchaseRowMissingTransferAmount,
+  purchaseRowMissingUsageAmount,
   sortPurchaseRowsForDisplay
 } from "../helpers/monthlyCloseWorkbook";
 import { useSheetKeyboardNav } from "../helpers/useSheetKeyboardNav";
@@ -61,7 +62,7 @@ interface PurchaseSalesRow {
 export async function flushMonthlyPurchasesForClose(
   branchName: string,
   selectedMonth: string
-): Promise<{ blocked: boolean; missingTransferVendors?: string[] }> {
+): Promise<{ blocked: boolean; missingTransferVendors?: string[]; missingUsageVendors?: string[] }> {
   const storageKey = `erp_monthly_purchases_${branchName}_${selectedMonth}`;
   const sharedKey = `monthly_purchases:${branchName}:${selectedMonth}`;
   const pendingKey = pendingLocalSaveStorageKey(storageKey);
@@ -79,10 +80,18 @@ export async function flushMonthlyPurchasesForClose(
     (Array.isArray(rows) ? normalizePurchaseRowsShared(rows) : [])
       .filter(purchaseRowMissingTransferAmount)
       .map((r) => String(r.vendorName || "").trim());
+  // 이체금액은 있는데 사용액이 빈칸인 행도 확정하지 않는다(2026-11-01 사용자 지시). 명시적 0은 통과.
+  const missingUsage = (rows: PurchaseSalesRow[] | null): string[] =>
+    (Array.isArray(rows) ? normalizePurchaseRowsShared(rows) : [])
+      .filter(purchaseRowMissingUsageAmount)
+      .map((r) => String(r.vendorName || "").trim());
   const judge = (rows: PurchaseSalesRow[] | null) => {
     if (!hasMeaningful(rows)) return { blocked: true };
     const missing = missingTransfer(rows);
-    return missing.length > 0 ? { blocked: true, missingTransferVendors: missing } : { blocked: false };
+    const missingUsageVendors = missingUsage(rows);
+    return missing.length > 0 || missingUsageVendors.length > 0
+      ? { blocked: true, missingTransferVendors: missing, missingUsageVendors }
+      : { blocked: false };
   };
   const local = readLocal();
 
@@ -492,19 +501,25 @@ export function MonthlyPurchaseSalesSubTab({
                       className={`${cellInput} font-mono font-black text-right text-red-650`}
                     />
                   </td>
-                  <td className={cellTd(rowIndex, COL_MONTHLY_USAGE)}>
+                  {/* 이체금액은 있는데 사용액이 빈 칸도 빨간 테두리 — 이 상태면 마감 제출이 막힌다(2026-11-01). */}
+                  <td
+                    className={cellTd(rowIndex, COL_MONTHLY_USAGE)}
+                    style={purchaseRowMissingUsageAmount(row) ? { boxShadow: "inset 0 0 0 2px #C93A3A", background: "#FDE2E2" } : undefined}
+                  >
                     <input
                       {...cellProps(rowIndex, COL_MONTHLY_USAGE)}
                       aria-label={`${rowIndex + 1}번 행 실제 이달사용액`}
+                      aria-invalid={purchaseRowMissingUsageAmount(row) || undefined}
+                      title={purchaseRowMissingUsageAmount(row) ? "이달 사용액을 적어야 마감할 수 있습니다. 이체금액과 같으면 같은 금액을, 사용이 없으면 0을 적어주세요" : undefined}
                       type="text"
                       inputMode="numeric"
                       value={formatWithCommas(row.monthlyUsageAmount)}
                       // 이체필요 상태에서도 열어 둔다(2026-10-05 사용자 지시) — 선입금 업체가 선입금을 넘겨 써서
-                      // 추가이체하는 달엔 사용액에 '선입금+이체금액'을 따로 적어야 한다. 평소엔 이체금액을 그대로 따라간다.
+                      // 추가이체하는 달엔 사용액에 '선입금+이체금액'을 따로 적어야 한다. 사용액은 지점이 직접 적는다.
                       // 사용액이 이체금액과 다르면 엑셀에 사용액이 나가 01·03이 선입금조정으로 처리한다(purchaseUsageExportValue).
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "monthlyUsageAmount", e.target.value)}
-                      placeholder={row.isPrepaid === true ? "발주액 합계" : "이달 사용액"}
+                      placeholder={purchaseRowMissingUsageAmount(row) ? "금액 입력 필요" : (row.isPrepaid === true ? "발주액 합계" : "이달 사용액")}
                       className={`${cellInput} font-mono font-black text-right text-gray-800`}
                     />
                   </td>

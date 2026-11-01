@@ -51,8 +51,8 @@ const CHECKBOX_RULES: Array<{ situation: string; transferNeeded: ReactNode; usag
     transferNeeded: (
       <span className="inline-flex items-center gap-1"><Checked /><span className="text-[10px] text-zinc-500">기본</span></span>
     ),
-    usage: <span className="text-zinc-500">자동으로 따라 들어감</span>,
-    input: <b className="font-black">이체필요 금액</b>,
+    usage: "직접 입력 (같으면 같은 금액, 사용 없으면 0)",
+    input: <><b className="font-black">이체필요 금액</b>과 <b className="font-black">실제 이달사용액</b> 둘 다</>,
   },
   {
     situation: "이미 결제 완료",

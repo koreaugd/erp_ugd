@@ -121,6 +121,20 @@ export function purchaseRowMissingTransferAmount(r: any): boolean {
   return num(row?.transferAmount) <= 0 && num(row?.monthlyUsageAmount) > 0;
 }
 
+/**
+ * '이체필요'에 체크돼 있고 이체금액은 적었는데 사용액이 빈칸인 행 — 매입매출 마감 제출을 막는다(2026-11-01 사용자 지시).
+ * 자동저장은 막지 않는다 — 입력 도중에 저장이 끊기면 안 되므로 제출 때만 판정한다.
+ * 이달 사용이 없는 달(선입금만 충전·외상 상환 등)이 있으므로 명시적 "0"은 통과시킨다. 빈칸만 막는다.
+ * 판정 전 보정은 purchaseRowMissingTransferAmount와 같은 이유로 이 함수 안에서 거친다.
+ */
+export function purchaseRowMissingUsageAmount(r: any): boolean {
+  if (!r) return false;
+  const row = normalizePurchaseRows([r])[0];
+  if (String(row?.vendorName || "").trim() === "") return false;
+  if (row?.transferNeeded === false) return false;
+  return num(row?.transferAmount) > 0 && isBlank(row?.monthlyUsageAmount);
+}
+
 // ─────────────────────────────────────────────
 // 매입매출 '화면과 같은 모양' 규칙 — 지점 화면(MonthlyPurchaseSalesSubTab)과 관리자 엑셀이 함께 쓴다.
 // 2026-10-05 지시: 관리자가 내려받는 매입매출 시트를 지점 화면과 똑같은 모양으로 낸다.

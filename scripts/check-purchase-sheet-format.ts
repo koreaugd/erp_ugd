@@ -21,6 +21,7 @@ import {
   buildMonthlyCloseSheetSpecs,
   normalizePurchaseRows,
   purchaseRowMissingTransferAmount,
+  purchaseRowMissingUsageAmount,
   purchaseTransferExportValue,
   purchaseUsageExportValue,
   type MonthlyCloseData
@@ -115,6 +116,13 @@ check("이체금액 있음 → 통과", purchaseRowMissingTransferAmount({ vendo
 check("결제완료 → 통과", purchaseRowMissingTransferAmount({ vendorName: "가", transferNeeded: false, transferAmount: "", monthlyUsageAmount: "50000" }), false);
 check("업체명 없음 → 통과", purchaseRowMissingTransferAmount({ vendorName: " ", transferNeeded: true, transferAmount: "", monthlyUsageAmount: "50000" }), false);
 check("옛 선입금 사용액만(이체필요로 남아 있어도) → 보정돼 통과", purchaseRowMissingTransferAmount({ vendorName: "가", isPrepaid: true, transferNeeded: true, transferAmount: "", monthlyUsageAmount: "50000" }), false);
+check("이체금액 + 사용액 빈칸 → 차단", purchaseRowMissingUsageAmount({ vendorName: "가", transferNeeded: true, transferAmount: "1000", monthlyUsageAmount: "" }), true);
+check("transferNeeded 없음(옛 데이터) + 사용액 없음 → 차단", purchaseRowMissingUsageAmount({ vendorName: "가", transferAmount: "1,000" }), true);
+check("사용액 명시적 0 → 통과", purchaseRowMissingUsageAmount({ vendorName: "가", transferNeeded: true, transferAmount: "1000", monthlyUsageAmount: "0" }), false);
+check("사용액이 이체금액과 다름 → 통과", purchaseRowMissingUsageAmount({ vendorName: "가", transferNeeded: true, transferAmount: "1000", monthlyUsageAmount: "5000" }), false);
+check("둘 다 빈칸(이번 달 거래 없음) → 사용액 차단 안 함", purchaseRowMissingUsageAmount({ vendorName: "가", transferNeeded: true, transferAmount: "", monthlyUsageAmount: "" }), false);
+check("결제완료 → 사용액 차단 안 함", purchaseRowMissingUsageAmount({ vendorName: "가", transferNeeded: false, transferAmount: "1000", monthlyUsageAmount: "" }), false);
+check("업체명 없음 → 사용액 차단 안 함", purchaseRowMissingUsageAmount({ vendorName: " ", transferNeeded: true, transferAmount: "1000", monthlyUsageAmount: "" }), false);
 check("픽스처 원본 그대로 넣어도 해당 없음", purchases.filter(purchaseRowMissingTransferAmount).length, 0);
 check("합성 픽스처 전체(보정 후)엔 해당 없음", normalizePurchaseRows(purchases).filter(purchaseRowMissingTransferAmount).length, 0);
 
