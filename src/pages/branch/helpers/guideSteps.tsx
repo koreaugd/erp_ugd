@@ -152,6 +152,9 @@ export const purchaseSalesGuideSteps: GuideStep[] = [
           <p className="mt-2.5 text-[11.5px] text-zinc-600">
             다음 달로 넘어가면 거래처명·은행·계좌는 그대로 이월되고 <b className="font-black">금액만 비워집니다.</b>
           </p>
+          <p className="mt-1.5 text-[11.5px] text-zinc-600">
+            <b className="font-black text-rose-700">선입금 업체</b>는 <b className="font-black">비고/전월잔액 / 이달선입금 / 이달잔액</b> 칸에 전월 선입금 잔액, 이달 선입금액, 이달 선입금 잔액 등 <b className="font-black">선입금 내용을 적어주세요.</b>
+          </p>
         </div>
 
         {/* 가운데 구분선 — 넓은 화면은 세로선, 좁은 화면은 오른쪽 블록 위쪽 가로선 */}

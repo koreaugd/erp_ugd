@@ -416,7 +416,7 @@ export function MonthlyPurchaseSalesSubTab({
               <th className="w-24">실제 이달사용액 (원)</th>
               <th className="w-20">은행</th>
               <th className="min-w-[160px]">계좌번호</th>
-              <th className="min-w-[150px]">거래 비고 고지</th>
+              <th className="min-w-[150px]">비고/전월잔액 / 이달선입금 / 이달잔액</th>
               <th className="text-center w-12">Action</th>
             </tr>
           </thead>
@@ -535,12 +535,12 @@ export function MonthlyPurchaseSalesSubTab({
                   <td className={cellTd(rowIndex, COL_MEMO)}>
                     <input
                       {...cellProps(rowIndex, COL_MEMO)}
-                      aria-label={`${rowIndex + 1}번 행 거래 비고`}
+                      aria-label={`${rowIndex + 1}번 행 비고/전월잔액 / 이달선입금 / 이달잔액`}
                       type="text"
                       value={row.memo}
                       disabled={isLocked}
                       onChange={(e) => handleUpdateRow(row.id, "memo", e.target.value)}
-                      placeholder="예시: 매월 자동 이체"
+                      placeholder="예시: 전월잔액 / 이달선입금 / 이달잔액"
                       className={`${cellInput} font-semibold placeholder-gray-350`}
                     />
                   </td>
