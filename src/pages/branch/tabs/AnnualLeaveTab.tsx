@@ -19,11 +19,14 @@ import { gasClient } from "../../../api/gasClient";
 import { useAuthContext } from "../../../contexts/AuthContext";
 import { canReadSalaryBranch, salaryAccessDenialMessage } from "../../../utils/salaryAccess";
 import { toLocalDateInputValue } from "../helpers/formatters";
-import { calcAutoGrantDays, mergeLegacyGrantOverrides, ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX, ANNUAL_LEAVE_USED_ADJUST_PREFIX, LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX } from "../../../utils/annualLeavePolicy";
-import { loadAnnualLeaveRoster, toAnnualLeaveMembers, fullTimeSalaryKey, findStrandedLeaveOwners, describeStrandedOwners, type AnnualLeaveMember } from "../helpers/annualLeaveRoster";
+import { calcAutoGrantDays, mergeLegacyGrantOverrides, parseEntryDate, toEntryDateInputValue, ANNUAL_LEAVE_HIRE_DATE_PREFIX, ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX, ANNUAL_LEAVE_USED_ADJUST_PREFIX, LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX } from "../../../utils/annualLeavePolicy";
+import { loadAnnualLeaveRoster, isHireDateRecord, isValidHireDateValue, applyHireDateOverrides, toAnnualLeaveMembers, fullTimeSalaryKey, findStrandedLeaveOwners, describeStrandedOwners, type AnnualLeaveMember } from "../helpers/annualLeaveRoster";
 // 월말 확인 컨트롤 — '직원별 연차 현황' 밴드 우측에 붙는다(월말마감의 선행조건).
 import { MonthlyCheckAction } from "../components/MonthlyCheckAction";
 import { currentMonthValue } from "../helpers/monthlyCheckSections";
+
+// 입사일 표시용 축약 "2024-03-15" → "24.03.15".
+const shortDate = (value: unknown) => value ? String(value).replace(/\./g, "-").slice(2).replace(/-/g, ".") : "-";
 
 // isAdmin·moveTargets 는 더 이상 쓰지 않는다(지점변경 기능 제거, 2026-08-11).
 // 호출부(BranchConfirmPage) 호환을 위해 타입에는 남기되 구조분해하지 않는다.
@@ -46,13 +49,16 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
   // 월말 확인 컨트롤이 고른 달. 인원(급여대장)을 **그 달 기준**으로 뽑아야, 지점이 화면에서 본 달과
   // 확정하는 달이 같아진다(MonthlyCheckAction 의 onMonthChange 주석).
   const [checkMonth, setCheckMonth] = useState(() => currentMonthValue());
+  // 입사일 수정 중인 행(한 번에 한 명). 지점·월이 바뀌면 아래 렌더-단계 리셋이 닫는다.
+  const [hireEdit, setHireEdit] = useState<{ employeeId: string; value: string } | null>(null);
+  const [hireSaving, setHireSaving] = useState(false);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   // 지점이나 확인 월이 바뀌면 렌더 단계에서 즉시 무효화한다 — async load 안에서 리셋하면
   // 전환~이펙트 실행 사이 한 프레임의 창이 남아 옛 데이터 위에 저장이 통과할 수 있다.
   const dataKey = `${branchName}:${checkMonth}`;
   const [trackedKey, setTrackedKey] = useState(dataKey);
-  if (trackedKey !== dataKey) { setTrackedKey(dataKey); setLoadedKey(null); setLoadFailed(false); }
+  if (trackedKey !== dataKey) { setTrackedKey(dataKey); setLoadedKey(null); setLoadFailed(false); setHireEdit(null); }
   const isLoaded = loadedKey === dataKey;
   const [employeeId, setEmployeeId] = useState(""); const [startDate, setStartDate] = useState(toLocalDateInputValue()); const [endDate, setEndDate] = useState(toLocalDateInputValue()); const [reason, setReason] = useState("");
   // 부여일수 수동값·사용일수 보정값 — 관리자 연차관리와 같은 키를 읽어 어느 화면에서 보든 숫자가 같아야 한다.
@@ -99,6 +105,9 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
     }
   }, [branchName, canRead, checkMonth, dataKey]);
   useEffect(() => { void load(); }, [load]);
+  // 항상 **지금 화면**(현재 지점·월)의 load. 저장이 끝났을 때 화면이 이미 바뀌었으면 이걸로 다시 불러온다.
+  const latestLoadRef = useRef(load);
+  latestLoadRef.current = load;
 
   // 이 지점에 남아 있지만 지금 급여대장 인원에는 없는 사람의 연차 기록.
   // 급여대장에서 빠졌거나 다른 지점으로 옮겨 간 경우다 — 옮겨 간 지점에서는 사용 0일로 보이므로,
@@ -139,6 +148,60 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
     } catch (err) {
       console.error("연차 저장 실패", err);
       window.alert("연차 저장에 실패했습니다. 로그인 상태를 확인한 뒤 다시 시도해 주세요.");
+    }
+  };
+
+  // 실제 입사일 저장 — 연차 전용 키(annual_leave_hire_dates:{지점})에만 쓴다. 급여대장은 건드리지 않는다
+  // (사용자 선택 2026-11-05). 급여대장 값과 같게 고치거나 칸을 비우면 수동값을 지워 급여대장 값으로 돌아간다.
+  // 맵 통째 저장이 아니라 트랜잭션으로 **이 직원 칸만** 바꾼다 — 다른 기기가 방금 고친 다른 직원 값이 지워지지 않게.
+  const saveHireDate = async (member: AnnualLeaveMember, rawValue: string) => {
+    if (!isLoaded) { window.alert("연차 데이터를 아직 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요."); return; }
+    const value = rawValue.trim();
+    const clears = !value || value === toEntryDateInputValue(member.salaryEntryDate);
+    if (!clears) {
+      const parsed = parseEntryDate(value);
+      if (!parsed || !isValidHireDateValue(value)) { window.alert("입사일 형식이 올바르지 않습니다."); return; }
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (parsed.getTime() > today.getTime()) { window.alert("입사일은 오늘보다 뒤일 수 없습니다."); return; }
+    }
+    const id = member.employeeId;
+    const seq = loadSeqRef.current;
+    setHireSaving(true);
+    try {
+      const result = await gasClient.mutateSharedData<Record<string, string>>(`${ANNUAL_LEAVE_HIRE_DATE_PREFIX}${branchName}`, (current) => {
+        // 문서가 없으면(null) 새로 만든다. 있는데 객체가 아니면(배열·문자열 등 손상) **덮어쓰지 않고 멈춘다** —
+        // 빈 맵으로 시작하면 다른 직원의 입사일까지 조용히 지워진다(Codex 정지게이트 지적).
+        if (!isHireDateRecord(current)) {
+          throw new Error("annual_leave_hire_dates 문서 형식이 올바르지 않습니다");
+        }
+        const map = current || {};
+        if (clears) {
+          if (!(id in map)) return null;
+          const next = { ...map };
+          delete next[id];
+          return next;
+        }
+        if (map[id] === value) return null;
+        return { ...map, [id]: value };
+      });
+      // 저장 사이 지점·월이 바뀌어 새 조회가 시작됐으면, 그 조회가 커밋 **전** 값을 읽었을 수 있다
+      // (입사일 문서는 월 공통). 결과를 버리지 말고 지금 화면을 서버에서 다시 불러온다(Codex 지적).
+      if (seq !== loadSeqRef.current) {
+        void latestLoadRef.current();
+      } else {
+        // 화면은 **트랜잭션이 커밋한 값**으로 갱신한다 — 내가 넣으려던 값이 아니라. 다른 기기가 같은 직원을
+        // 동시에 고쳤으면 서버 값이 다를 수 있다(mutateSharedData 주석, Codex 지적). 화면 목록과 같은 함수로 적용한다.
+        const committed = isHireDateRecord(result.value) ? result.value : null;
+        setMembers((prev) => prev.map((m) => m.employeeId === id
+          ? applyHireDateOverrides([{ ...m, entryDate: m.salaryEntryDate || "" }], committed)[0]
+          : m));
+        setHireEdit(null);
+      }
+    } catch (err) {
+      console.error("입사일 저장 실패", err);
+      window.alert("입사일 저장에 실패했습니다. 네트워크 상태 확인 후 다시 시도해 주세요.");
+    } finally {
+      setHireSaving(false);
     }
   };
 
@@ -209,7 +272,29 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
                     {/* 지점은 글자만 — 지점 이동은 급여대장에서 한다(2026-08-11 기능 제거). */}
                     <td><span className="text-[11px] font-bold text-gray-600">{branchName}</span></td>
                     <td><span className="truncate font-bold">{member.name}</span></td>
-                    <td>{member.entryDate ? String(member.entryDate).replace(/\./g,"-").slice(2).replace(/-/g,".") : "-"}</td>
+                    <td>
+                      {hireEdit?.employeeId === member.employeeId ? (
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <input type="date" min="1990-01-01" max={toLocalDateInputValue()} value={hireEdit.value} disabled={hireSaving}
+                            onChange={(e) => setHireEdit({ employeeId: member.employeeId, value: e.target.value })}
+                            title="칸을 비우고 저장하면 급여대장 입사일로 돌아갑니다"
+                            className="border rounded px-1 py-0.5 text-[11px] font-mono" />
+                          <button onClick={() => void saveHireDate(member, hireEdit.value)} disabled={hireSaving} className="rounded-full bg-[#2E6DB4] text-white px-2.5 py-0.5 text-[10px] font-black disabled:opacity-40">저장</button>
+                          <button onClick={() => setHireEdit(null)} disabled={hireSaving} className="rounded-full border px-2.5 py-0.5 text-[10px] font-black text-gray-500">취소</button>
+                        </div>
+                      ) : (
+                        <div className="whitespace-nowrap">
+                          {shortDate(member.entryDate)}
+                          {canEdit && isLoaded && (
+                            <button onClick={() => setHireEdit({ employeeId: member.employeeId, value: toEntryDateInputValue(member.entryDate) })} className="ml-1.5 text-[10px] font-black text-[#2E6DB4] underline">수정</button>
+                          )}
+                          {/* 연차 화면에서 고친 경우 원래 급여대장 값을 함께 보여 준다 — 급여대장 쪽은 그대로라는 걸 알 수 있게. */}
+                          {member.salaryEntryDate !== undefined && member.entryDate !== member.salaryEntryDate && (
+                            <div className="text-[10px] text-gray-400">급여대장 {member.salaryEntryDate ? shortDate(member.salaryEntryDate) : "빈칸"}</div>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td>{grant}일</td>
                     <td>{used}일</td>
                     <td className="font-bold text-[#2E6DB4]">{grant - used}일</td>

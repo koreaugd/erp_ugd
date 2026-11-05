@@ -138,7 +138,10 @@ service cloud.firestore {
       return dataKey.matches('^monthly_fulltime_salary(:|%3A).*')
         || dataKey.matches('^part_time_salaries(:|%3A).*')
         || dataKey.matches('^part_time_salary_exclusions(:|%3A).*')
-        || dataKey.matches('^part_time_profiles(:|%3A).*');
+        || dataKey.matches('^part_time_profiles(:|%3A).*')
+        // 연차용 실제 입사일(2026-11-05). 이 값을 쓰는 화면은 전부 급여대장 권한이 있어야 열리므로 같은 등급으로 막는다 —
+        // 일반 shared_data 로 두면 다른 지점 계정이 입사일을 바꿔 부여일수를 조작할 수 있다(Codex 지적).
+        || dataKey.matches('^annual_leave_hire_dates(:|%3A).*');
     }
 
     // 통합보고서(분석 > 통합보고서) 문서인지 판별 — 03 에이전트의 손익계산서 통합 엑셀을 통째로 담는다.

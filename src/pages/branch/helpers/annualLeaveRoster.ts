@@ -21,6 +21,7 @@
 // 실패는 실패라고 말하고 화면이 저장·확인을 잠그게 두는 편이 안전하다.
 import { gasClient } from "../../../api/gasClient";
 import { addMonthsToMonthInputValue, toLocalMonthInputValue } from "./formatters";
+import { ANNUAL_LEAVE_HIRE_DATE_PREFIX, parseEntryDate } from "../../../utils/annualLeavePolicy";
 
 /** 연차 대상자 1명 — 급여대장 행에서 뽑아낸 값. */
 export interface AnnualLeaveMember {
@@ -30,8 +31,16 @@ export interface AnnualLeaveMember {
    */
   employeeId: string;
   name: string;
-  /** 부여일수 자동계산용 원본 문자열. 표시용 축약은 화면에서 한다. */
+  /**
+   * 부여일수 자동계산에 쓰는 입사일. 연차 화면에서 고친 실제 입사일이 있으면 그 값,
+   * 없으면 급여대장 입사일 칸 값이다(applyHireDateOverrides). 표시용 축약은 화면에서 한다.
+   */
   entryDate: string;
+  /**
+   * 급여대장 입사일 칸의 원래 값. entryDate 와 다르면 연차 화면에서 고친 것이다.
+   * 선택값인 이유: 관리자 화면이 남겨진 기록 계산용으로 이 타입을 손으로 만든다(그쪽은 안 쓴다).
+   */
+  salaryEntryDate?: string;
   /** 급여대장 행 id — React key 전용. **달마다 바뀌므로 저장 열쇠로 쓰지 말 것.** */
   rowId: string;
 }
@@ -135,10 +144,49 @@ export function toAnnualLeaveMembers(rows: unknown, roster: unknown): AnnualLeav
       employeeId,
       name,
       entryDate: trimmed(row.entryDate),
+      salaryEntryDate: trimmed(row.entryDate),
       rowId: trimmed(row.id) || `row-${index}`,
     });
   });
   return members;
+}
+
+/**
+ * 입사일 수동값 한 칸이 정상인가 — 정확히 "YYYY-MM-DD" 이면서 실제 있는 날짜.
+ * 공용 parseEntryDate 는 옛 명부의 여러 형식(ISO 등)을 받으려고 느슨하다("2024-03-15broken" 도 통과).
+ * 수동값은 이 화면의 date 입력칸만 쓰므로 형식을 고정해, 깨진 칸이 날짜로 둔갑하지 않게 한다(Codex 지적).
+ */
+export function isValidHireDateValue(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && parseEntryDate(value) !== null;
+}
+
+/** 입사일 수동값 문서가 정상 형태인가 — 없음(null) 또는 순수 객체(맵). 그 외는 손상으로 본다. */
+export function isHireDateRecord(value: unknown): value is Record<string, unknown> | null | undefined {
+  if (value == null) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  // 순수 객체만 — Firestore Timestamp·GeoPoint·DocumentReference 같은 특수 객체도 손상으로 본다(Codex 지적).
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * 연차 화면에서 고친 실제 입사일을 인원 목록에 덮어쓴다. 해석할 수 없는 값은 무시한다
+ * (손상된 값 하나 때문에 부여일수가 0일로 떨어지느니 급여대장 값을 쓰는 편이 낫다).
+ * 지점 화면·관리자 화면이 같은 loadAnnualLeaveRoster 를 거치므로 두 화면의 입사일이 같다.
+ */
+export function applyHireDateOverrides(
+  members: AnnualLeaveMember[],
+  overrides: Record<string, unknown> | null | undefined
+): AnnualLeaveMember[] {
+  const map = isHireDateRecord(overrides) ? overrides || {} : {};
+  return members.map((member) => {
+    const raw = map[member.employeeId];
+    if (raw == null || raw === "") return member;
+    if (isValidHireDateValue(raw)) return { ...member, entryDate: raw };
+    // 깨진 칸 — 급여대장 값으로 계산하되 흔적을 남긴다. [수정]으로 다시 저장하면 덮어써져 풀린다.
+    console.warn(`[연차관리] 입사일 수동값을 해석할 수 없어 급여대장 값을 씁니다: ${member.name}`, map[member.employeeId]);
+    return member;
+  });
 }
 
 /**
@@ -160,6 +208,7 @@ export async function loadAnnualLeaveRoster(
   let sourceMonth: string | null = null;
 
   let roster: any[] = [];
+  let hireDates: Record<string, unknown> | null = null;
   try {
     for (let step = 0; step < ANNUAL_LEAVE_ROSTER_LOOKBACK_MONTHS; step += 1) {
       // 서버 전용 — 캐시 폴백 금지(위 주석). 실패는 throw 되어 아래 catch 가 failed 로 바꾼다.
@@ -174,6 +223,14 @@ export async function loadAnnualLeaveRoster(
     // 이름 대조용 명부도 서버 전용으로 읽는다. 여기서 실패를 삼키면 2번(이름 대조)이 통째로 건너뛰어져
     // 기존 기록이 있는 사람까지 3번(파생 열쇠)으로 떨어진다 — 화면은 멀쩡한데 **사용일수가 0으로 보인다.**
     roster = (await gasClient.getBranchOwnRosterFromServer(branchName)) || [];
+    // 실제 입사일 수동값도 서버 전용. 실패를 삼키면 매장 등록일로 계산된 부여일수가 정상처럼 뜬다.
+    const fetchedHireDates = await gasClient.getSharedDataFromServer<unknown>(`${ANNUAL_LEAVE_HIRE_DATE_PREFIX}${branchName}`);
+    // 문서 **전체가** 손상(배열·문자열 등)이면 조회 실패로 돌린다 — 실패면 화면이 저장·월말확인을 잠근다.
+    // 직원 **한 칸만** 깨진 경우는 잠그지 않는다(applyHireDateOverrides 가 그 칸만 무시하고 경고를 남긴다).
+    // 한 칸 때문에 지점 연차 화면 전체를 잠그면 표가 안 보여 화면에서 고칠 길이 없는 교착이 된다.
+    // 앱은 검증된 날짜 문자열만 쓰고 쓰기는 급여권한 계정뿐이라, 칸 단위 손상은 DB 직접 조작에서만 생긴다.
+    if (!isHireDateRecord(fetchedHireDates)) throw new Error("annual_leave_hire_dates 문서 형식이 올바르지 않습니다");
+    hireDates = fetchedHireDates ?? null;
   } catch (err) {
     console.warn(`[연차관리] ${branchName} 인원을 불러오지 못했습니다(서버 조회 실패).`, err);
     return { sourceMonth: null, members: [], failed: true };
@@ -181,7 +238,7 @@ export async function loadAnnualLeaveRoster(
 
   if (!sourceMonth) return { sourceMonth: null, members: [], failed: false };
 
-  return { sourceMonth, members: toAnnualLeaveMembers(rows, roster), failed: false };
+  return { sourceMonth, members: applyHireDateOverrides(toAnnualLeaveMembers(rows, roster), hireDates), failed: false };
 }
 
 /**

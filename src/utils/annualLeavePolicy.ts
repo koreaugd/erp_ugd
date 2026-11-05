@@ -17,6 +17,13 @@
 // 그걸 수동값으로 읽으면 자동계산(1년 미만 0일 등)이 영영 덮인다.
 export const ANNUAL_LEAVE_GRANT_OVERRIDES_PREFIX = "annual_leave_grant_overrides:";
 export const ANNUAL_LEAVE_USED_ADJUST_PREFIX = "annual_leave_used_adjust:";
+/**
+ * 연차용 **실제 입사일** 수동값 `{ employeeId: "YYYY-MM-DD" }`(사용자 지시 2026-11-05).
+ * 급여대장 입사일 칸이 직원현황 **매장 등록일**로 채워진 경우가 많아(대물섬 강남점 8명이 오픈일 08-27 등)
+ * 연차 부여일수가 틀어진다. 연차관리 화면에서 고친 값은 여기에만 저장하고 **급여대장은 건드리지 않는다**
+ * (마감된 달 잠금과 충돌하지 않게 — 사용자 선택 2026-11-05). 적용은 loadAnnualLeaveRoster 한 곳에서 한다.
+ */
+export const ANNUAL_LEAVE_HIRE_DATE_PREFIX = "annual_leave_hire_dates:";
 /** 옛 부여일수 키(읽기 전용 승계용). 새로 쓰지 않는다. */
 export const LEGACY_ANNUAL_LEAVE_GRANTS_PREFIX = "annual_leave_grants:";
 
