@@ -50,6 +50,32 @@ export interface SheetSpec {
   boldRows?: number[];
   /** 흐리게(회색 글자) 표시할 칸 "행:열". 화면에서 잠겨 회색으로 보이는 칸에 쓴다. */
   mutedCells?: string[];
+  /**
+   * 두 번째 머리글 줄(파트타이머급여 시트의 "1일~31일"). 있으면 머리글이 2줄이 된다.
+   * 빈 문자열인 칸은 위 머리글과 세로로 병합하고, 위 머리글 뒤에 빈 문자열이 이어지는 구간은 가로로 병합한다
+   * (본사 일용직 급여자료 서식과 같은 모양, 2026-11-05).
+   */
+  subHeaders?: string[];
+  /** 가운데 정렬할 데이터 칸(출근 표시 1). */
+  centerColumns?: number[];
+}
+
+/** 파트타이머급여 시트의 출근일 칸 수 — 1일~31일. */
+export const PART_TIME_DAY_COLUMNS = 31;
+
+/**
+ * 출근일 문자열("3,5,12") → 날짜별 칸 31개(일한 날 1, 아니면 빈칸)와 해석 못 한 조각.
+ * 해석 못 한 조각(직접 적은 "10~14" 등)은 버리지 않고 돌려준다 — 호출부가 기타내용에 붙여 사람이 보게 한다.
+ */
+export function attendanceDayCells(dates: string): { cells: (number | "")[]; unparsed: string[] } {
+  const cells: (number | "")[] = Array.from({ length: PART_TIME_DAY_COLUMNS }, () => "");
+  const unparsed: string[] = [];
+  String(dates || "").split(",").map((t) => t.trim()).filter(Boolean).forEach((token) => {
+    const day = /^\d{1,2}$/.test(token) ? Number(token) : NaN;
+    if (day >= 1 && day <= PART_TIME_DAY_COLUMNS) cells[day - 1] = 1;
+    else unparsed.push(token);
+  });
+  return { cells, unparsed };
 }
 
 const num = (v: unknown) => Number(String(v ?? "").replace(/[^0-9.-]/g, "")) || 0;
@@ -504,7 +530,11 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     knownPartTimerIds.add(legacyId);
   });
 
-  const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "팁/기타", "급여", "출근날짜", "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
+  // 본사 일용직 급여자료 서식(2026-11-05): 출근날짜를 1일~31일 31칸으로 펼치고 머리글 2줄.
+  const partTimeHeaders = ["성명(입사일)", "주민등록번호", "입사일", "근로계약", "은행", "입금계좌", "시급", "누적시간", "팁/기타", "급여",
+    "출근날짜", ...Array.from({ length: PART_TIME_DAY_COLUMNS - 1 }, () => ""),
+    "실수령액(송금액)", "실제 송금지점", "기타내용(퇴사일 및 퇴직금등)"];
+  const partTimeSubHeaders = [...Array.from({ length: 10 }, () => ""), ...Array.from({ length: PART_TIME_DAY_COLUMNS }, (_, i) => `${i + 1}일`), "", "", ""];
   const partTimeRows: (string | number)[][] = rosterPartTimers
     .filter((pt) => !excludedSetForExcel.has(pt.id))
     .map((pt) => {
@@ -540,7 +570,12 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
       // 화면에는 5시간이 보이는데 엑셀에는 0시간이 찍히는 상태였다 — 돈이 나가는 표라 그 어긋남을 없앤다.
       const accumulatedHours = resolvePartTimeAccumulatedHours(saved, String(tel.hours));
       const calcSalary = computePartTimeSalary(hourlyRate, accumulatedHours, tipsEtcAmount);
+      // 출근일은 화면과 같은 규칙(최대 7일, 직접 적은 값 우선)으로 고른 뒤 날짜별 칸에 1로 찍는다(2026-11-05).
       const attendanceDates = resolvePartTimeAttendanceDates(saved, tel.dates);
+      const { cells: dayCells, unparsed } = attendanceDayCells(attendanceDates);
+      // 직접 적은 출근일 중 날짜로 못 읽는 조각("10~14" 등)은 조용히 버리지 않고 기타내용에 남긴다.
+      const memo = String(saved.memo || "");
+      const memoWithUnparsed = unparsed.length ? `${memo}${memo ? " / " : ""}출근일 확인: ${unparsed.join(",")}` : memo;
 
       return [
         payoutName,
@@ -553,14 +588,14 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
         Number(accumulatedHours) || 0,
         Number(tipsEtcAmount) || 0,
         Number(calcSalary) || 0,
-        attendanceDates,
+        ...dayCells,
         // 실수령액(송금액)은 항상 빈칸으로 내보낸다 — 본사가 직접 채우는 칸이기 때문이다(2026-08-31 지시).
         // 정직원 급여대장(fullTimeSalaryWorkbook)과 같은 규칙. 지점이 저장한 값을 미리 찍어 두면
         // 본사가 그 숫자를 그대로 이체하기 쉬워서, 애초에 비운 채로 받도록 한다.
         // (화면·저장본의 actualPaidAmount는 그대로 둔다 — 엑셀 출력만 비운다.)
         "",
         saved.payoutBranch || branchName,
-        saved.memo || "",
+        memoWithUnparsed,
       ];
     });
 
@@ -713,10 +748,12 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
     {
       name: "파트타이머급여",
       headers: partTimeHeaders,
+      subHeaders: partTimeSubHeaders,
       rows: partTimeRows,
-      widths: [11.57, 15.86, 9.2, 8.21, 5.14, 19.64, 10.71, 7.2, 9.29, 9.29, 24.14, 10.21, 10.21, 41.43],
-      numericColumns: [6, 7, 8, 9, 11],
+      widths: [10.88, 14.62, 8.75, 7.88, 5.25, 17.88, 10.12, 7, 8.88, 9.29, ...Array.from({ length: PART_TIME_DAY_COLUMNS }, () => 4), 9.62, 10.21, 37],
+      numericColumns: [6, 7, 8, 9, 10 + PART_TIME_DAY_COLUMNS],
       textColumns: [1, 5],
+      centerColumns: Array.from({ length: PART_TIME_DAY_COLUMNS }, (_, i) => 10 + i),
       includeTitle: true,
     },
     {
@@ -754,7 +791,8 @@ export function buildMonthlyCloseSheetSpecs(data: MonthlyCloseData): SheetSpec[]
  * XLSX는 동적 import한 xlsx-js-style 모듈을 그대로 받는다.
  */
 function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spec: SheetSpec) {
-  const { headers, rows, widths, numericColumns, textColumns, includeTitle, rowFills, boldRows, mutedCells } = spec;
+  const { headers, subHeaders, rows, widths, numericColumns, textColumns, includeTitle, rowFills, boldRows, mutedCells, centerColumns } = spec;
+  const centerSet = new Set(centerColumns ?? []);
   const mutedSet = new Set(mutedCells ?? []);
   const boldSet = new Set(boldRows ?? []);
 
@@ -767,16 +805,37 @@ function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spe
   const titleStyle = { font: { bold: true, sz: 10, color: { rgb: "17365D" } }, alignment: { vertical: "center" } };
   const bodyBorder = { top: { style: "thin", color: { rgb: "D9E2F3" } }, bottom: { style: "thin", color: { rgb: "D9E2F3" } }, left: { style: "thin", color: { rgb: "D9E2F3" } }, right: { style: "thin", color: { rgb: "D9E2F3" } } };
 
+  const headerRowsData = subHeaders ? [headers, subHeaders] : [headers];
   const source: any[][] = includeTitle
-    ? [[branchName, "", "", monthNumber, "월"], headers, ...rows]
-    : [headers, ...rows];
+    ? [[branchName, "", "", monthNumber, "월"], ...headerRowsData, ...rows]
+    : [...headerRowsData, ...rows];
   const sheet = XLSX.utils.aoa_to_sheet(source);
   const headerRow = includeTitle ? 1 : 0;
+  // 마지막 머리글 줄. 데이터는 그다음 줄부터다.
+  const lastHeaderRow = headerRow + headerRowsData.length - 1;
   sheet["!cols"] = widths.map((wch) => ({ wch }));
-  sheet["!rows"] = source.map((_, index) => ({ hpt: includeTitle && index === 0 ? 24 : index === headerRow ? 20 : 17 }));
-  for (let col = 0; col < headers.length; col++) {
-    const cell = sheet[XLSX.utils.encode_cell({ r: headerRow, c: col })];
-    if (cell) cell.s = headerStyle;
+  sheet["!rows"] = source.map((_, index) => ({ hpt: includeTitle && index === 0 ? 24 : index >= headerRow && index <= lastHeaderRow ? 20 : 17 }));
+  for (let r = headerRow; r <= lastHeaderRow; r++) {
+    for (let col = 0; col < headers.length; col++) {
+      const address = XLSX.utils.encode_cell({ r, c: col });
+      // 병합으로 가려지는 빈 칸에도 테두리·채우기를 줘야 병합 칸 전체가 같은 색으로 보인다.
+      if (!sheet[address]) sheet[address] = { t: "s", v: "" };
+      sheet[address].s = headerStyle;
+    }
+  }
+  if (subHeaders) {
+    const merges: any[] = [];
+    for (let col = 0; col < headers.length; col++) {
+      // 아래 줄이 빈 칸 = 위아래 병합(성명·주민번호 …).
+      if (!subHeaders[col] && headers[col]) merges.push({ s: { r: headerRow, c: col }, e: { r: lastHeaderRow, c: col } });
+      // 위 머리글 다음이 빈 칸으로 이어지면 = 가로 병합(출근날짜 → 1일~31일 위).
+      if (headers[col] && subHeaders[col]) {
+        let end = col;
+        while (end + 1 < headers.length && !headers[end + 1] && subHeaders[end + 1]) end += 1;
+        if (end > col) merges.push({ s: { r: headerRow, c: col }, e: { r: headerRow, c: end } });
+      }
+    }
+    sheet["!merges"] = merges;
   }
   if (includeTitle) {
     [0, 3, 4].forEach((col) => {
@@ -784,12 +843,12 @@ function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spe
       if (cell) cell.s = titleStyle;
     });
   }
-  for (let row = headerRow + 1; row < source.length; row++) {
+  for (let row = lastHeaderRow + 1; row < source.length; row++) {
     for (let col = 0; col < headers.length; col++) {
       const address = XLSX.utils.encode_cell({ r: row, c: col });
       const cell = sheet[address];
       if (!cell) continue;
-      const dataIndex = row - headerRow - 1;
+      const dataIndex = row - lastHeaderRow - 1;
       const fillRgb = rowFills?.[dataIndex];
       const font: any = { sz: 10 };
       if (boldSet.has(dataIndex)) font.bold = true;
@@ -797,7 +856,7 @@ function makeStyledSheet(XLSX: any, branchName: string, monthNumber: number, spe
       cell.s = {
         font,
         border: bodyBorder,
-        alignment: { vertical: "center", wrapText: col === headers.length - 1 },
+        alignment: { vertical: "center", wrapText: col === headers.length - 1, ...(centerSet.has(col) ? { horizontal: "center" } : {}) },
         ...(fillRgb ? { fill: { patternType: "solid", fgColor: { rgb: fillRgb } } } : {}),
       };
       // 소수가 있는 숫자(0.5시간 등)는 소수까지 보여 준다. 정수 서식(#,##0)을 그대로 걸면 167.5시간이 168로 보여

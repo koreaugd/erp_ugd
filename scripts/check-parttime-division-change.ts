@@ -15,7 +15,7 @@
 import XLSX from "xlsx-js-style";
 import XLSXCore from "xlsx"; // 표시 문자열 확인용 서식기(SSF)
 import { partTimeRosterForMonth } from "../src/pages/branch/helpers/partTimeSalaryRules";
-import { assembleMonthlyCloseWorkbook, buildMonthlyCloseSheetSpecs, type MonthlyCloseData } from "../src/pages/branch/helpers/monthlyCloseWorkbook";
+import { assembleMonthlyCloseWorkbook, buildMonthlyCloseSheetSpecs, PART_TIME_DAY_COLUMNS, type MonthlyCloseData } from "../src/pages/branch/helpers/monthlyCloseWorkbook";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -86,7 +86,10 @@ console.log("\n[2] 달 중간에 정직원이 된 사람 — 파트 근무분은
   });
   const rows = partTimeSheet(data).rows.filter((r) => String(r[0]) === "홍길동");
   check("한 줄만 나간다(legacy 중복 없음)", rows.length, 1);
-  check("[누적시간, 급여, 출근일] = 파트 근무분", [rows[0]?.[7], rows[0]?.[9], rows[0]?.[10]], [19.5, 292500, "10,14"]);
+  check("[누적시간, 급여] = 파트 근무분", [rows[0]?.[7], rows[0]?.[9]], [19.5, 292500]);
+  // 출근일은 날짜별 31칸(10번 칸부터)에 1로 찍힌다 — 10일·14일 칸만 1, 나머지 빈칸(2026-11-05 서식 변경).
+  const dayCells = rows[0]?.slice(10, 10 + PART_TIME_DAY_COLUMNS) ?? [];
+  check("출근일 = 10일·14일 칸만 1", dayCells.map((v, i) => (v === 1 ? i + 1 : null)).filter(Boolean), [10, 14]);
 }
 {
   // 직접 적은 시간은 예전처럼 그대로 지킨다.
@@ -204,10 +207,10 @@ console.log("\n[3] 0.5시간은 엑셀에서도 0.5로 보인다");
   });
   const wb = assembleMonthlyCloseWorkbook(XLSX, data);
   const ws = wb.Sheets["파트타이머급여"];
-  // 제목행(0)·헤더(1) 다음부터 사람. 누적시간은 H열(7).
-  const hours1 = ws[XLSX.utils.encode_cell({ r: 2, c: 7 })];
-  const hours2 = ws[XLSX.utils.encode_cell({ r: 3, c: 7 })];
-  const salary1 = ws[XLSX.utils.encode_cell({ r: 2, c: 9 })];
+  // 제목행(0)·헤더 2줄(1~2, 출근날짜 아래 1일~31일) 다음부터 사람. 누적시간은 H열(7).
+  const hours1 = ws[XLSX.utils.encode_cell({ r: 3, c: 7 })];
+  const hours2 = ws[XLSX.utils.encode_cell({ r: 4, c: 7 })];
+  const salary1 = ws[XLSX.utils.encode_cell({ r: 3, c: 9 })];
   check("셀 값은 167.5", hours1?.v, 167.5);
   check("167.5 표시 = 167.5", XLSXCore.SSF.format(hours1?.z, hours1?.v), "167.5");
   check("정수 시간은 그대로 12", XLSXCore.SSF.format(hours2?.z, hours2?.v), "12");

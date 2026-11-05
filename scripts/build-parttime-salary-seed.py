@@ -63,47 +63,93 @@ def split_bank_account(bank_cell, acct_cell):
     return bank, acct
 
 
+# ── 칸 찾기: 번호가 아니라 머리글 글자로 ─────────────────────────────────────
+# 입력 파일의 칸 순서는 하나가 아니다.
+#   · ERP 월말마감 내보내기(옛 14칸): … 시급(6) 누적시간(7) 팁/기타(8) 급여(9) 출근날짜(10) … 기타내용(13)
+#   · 본사가 손본 파일: … 급여(8) 출근날짜(9) 상여금(팁)(10) …  ← 예전 고정 번호(급여 8·팁 10)는 이 순서였다
+#   · ERP 내보내기 2026-11-05~: 출근날짜가 1일~31일 31칸으로 펼쳐지고 머리글이 2줄 → 급여 뒤 칸이 전부 밀린다
+# 고정 번호로 읽으면 어느 한 파일에서는 팁/기타를 급여로 읽는 식으로 **조용히** 틀어진다(Codex 지적 2026-11-05).
+# 그래서 머리글 글자로 칸을 찾고, 머리글이 아예 없는 옛 파일만 예전 고정 번호로 읽는다(경고 출력).
+HEADER_KEYS = {
+    "name": ["성명(입사일)", "성명"],
+    "residentNumber": ["주민등록번호", "주민번호"],
+    "entryDate": ["입사일"],
+    "contractType": ["근로계약"],
+    "bank": ["은행"],
+    "accountNumber": ["입금계좌", "계좌번호", "계좌"],
+    "hourlyRate": ["시급"],
+    "hours": ["누적시간"],
+    "payRaw": ["급여"],
+    "tips": ["팁/기타", "상여금(팁)", "상여금", "팁"],
+    "memo": ["기타내용(퇴사일및퇴직금등)", "기타내용", "비고"],
+}
+REQUIRED_KEYS = ("name", "hourlyRate", "hours", "payRaw")
+LEGACY_INDEX = {"name": 0, "residentNumber": 1, "entryDate": 2, "contractType": 3, "bank": 4, "accountNumber": 5,
+                "hourlyRate": 6, "hours": 7, "payRaw": 8, "tips": 10, "memo": 13}
+
+
+def locate_columns(grid):
+    """머리글 줄을 찾아 (필드→칸 번호, 데이터 시작 줄)을 돌려준다. 못 찾으면 None."""
+    for i, row in enumerate(grid[:6]):
+        cells = [norm(c) for c in row]
+        if not any(c in ("성명(입사일)", "성명") for c in cells): continue
+        col = {}
+        for key, names in HEADER_KEYS.items():
+            for want in names:
+                hit = [j for j, c in enumerate(cells) if c == norm(want)]
+                if hit: col[key] = hit[0]; break
+        missing = [k for k in REQUIRED_KEYS if k not in col]
+        if missing:
+            raise SystemExit(f"파트타이머급여 시트 머리글에서 {missing} 칸을 못 찾았습니다. 머리글: {[c for c in cells if c]}")
+        # 다음 줄이 '1일 2일 …'이면 머리글 2줄(2026-11-05 ERP 서식) — 사람은 그다음 줄부터.
+        nxt = [norm(c) for c in (grid[i + 1] if i + 1 < len(grid) else [])]
+        start = i + 2 if any(re.fullmatch(r"\d{1,2}일", c) for c in nxt) else i + 1
+        return col, start
+    return None
+
+
+def rows_from_grid(grid, label=""):
+    found = locate_columns(grid)
+    if found:
+        col, start = found
+    else:
+        print(f"[경고] {label}: 파트타이머급여 시트에 머리글이 없어 옛 고정 칸(급여 8·팁 10·기타내용 13)으로 읽습니다.", file=sys.stderr)
+        col, start = LEGACY_INDEX, 2
+    width = max(col.values()) + 1
+    get = lambda r, key: (r[col[key]] if key in col and col[key] < len(r) else None)
+    out = []
+    for r in grid[start:]:
+        r = list(r) + [None] * (width - len(r))
+        name = str(get(r, "name")).strip() if get(r, "name") else ""
+        if not name or name == "합계": continue
+        bank, acct = split_bank_account(get(r, "bank"), get(r, "accountNumber"))
+        out.append({
+            "name": name,
+            "residentNumber": re.sub(r"\s+", "", str(get(r, "residentNumber") or "").strip()),
+            "entryDate": as_date(get(r, "entryDate")),
+            "contractType": str(get(r, "contractType") or "").strip(),
+            "bank": bank, "accountNumber": acct,
+            "hourlyRate": as_int_str(get(r, "hourlyRate")),
+            "hours": numf(get(r, "hours")),
+            "payRaw": get(r, "payRaw"),
+            "tips": as_int_str(get(r, "tips")),
+            "memo": re.sub(r"\s+", " ", str(get(r, "memo") or "").strip()),
+        })
+    return out
+
+
 def read_excel(path):
     wb = openpyxl.load_workbook(path, data_only=True)
     if "파트타이머급여" not in wb.sheetnames: return []
-    grid = [list(r) for r in wb["파트타이머급여"].iter_rows(min_row=1, max_col=14, values_only=True)]
-    out = []
-    for r in grid[2:]:
-        r = list(r) + [None] * (14 - len(r))
-        name = str(r[0]).strip() if r[0] else ""
-        if not name or name == "합계": continue
-        bank, acct = split_bank_account(r[4], r[5])
-        out.append({
-            "name": name,
-            "residentNumber": re.sub(r"\s+", "", str(r[1] or "").strip()),
-            "entryDate": as_date(r[2]),
-            "contractType": str(r[3] or "").strip(),
-            "bank": bank, "accountNumber": acct,
-            "hourlyRate": as_int_str(r[6]),
-            "hours": numf(r[7]),
-            "payRaw": r[8],
-            "tips": as_int_str(r[10]),
-            "memo": re.sub(r"\s+", " ", str(r[13] or "").strip()),
-        })
-    return out
+    grid = [list(r) for r in wb["파트타이머급여"].iter_rows(min_row=1, values_only=True)]
+    return rows_from_grid(grid, os.path.basename(path))
 
 
 def read_ods(path):
     import pandas as pd
     df = pd.read_excel(path, sheet_name="파트타이머급여", engine="odf", header=None)
-    grid = [[None if pd.isna(v) else v for v in df.iloc[i, :14]] for i in range(len(df))]
-    out = []
-    for r in grid[2:]:
-        r = list(r) + [None] * (14 - len(r))
-        name = str(r[0]).strip() if r[0] else ""
-        if not name or name == "합계": continue
-        bank, acct = split_bank_account(r[4], r[5])
-        out.append({"name": name, "residentNumber": re.sub(r"\s+", "", str(r[1] or "").strip()),
-                    "entryDate": as_date(r[2]), "contractType": str(r[3] or "").strip(),
-                    "bank": bank, "accountNumber": acct, "hourlyRate": as_int_str(r[6]),
-                    "hours": numf(r[7]), "payRaw": r[8], "tips": as_int_str(r[10]),
-                    "memo": re.sub(r"\s+", " ", str(r[13] or "").strip())})
-    return out
+    grid = [[None if pd.isna(v) else v for v in df.iloc[i, :]] for i in range(len(df))]
+    return rows_from_grid(grid, os.path.basename(path))
 
 
 def salary_of(rate, hours, tips):
@@ -289,4 +335,5 @@ def main():
         sys.exit(2)
 
 
-main()
+if __name__ == "__main__":
+    main()

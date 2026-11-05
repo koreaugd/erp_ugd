@@ -35,7 +35,7 @@ const formatConfirmedAt = (iso: string) => {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-export function MonthlyCheckAction({ branchName, section, blockedReason, onMonthChange }: {
+export function MonthlyCheckAction({ branchName, section, blockedReason, staleReason, onMonthChange }: {
   branchName: string;
   section: CheckSection;
   /**
@@ -49,6 +49,15 @@ export function MonthlyCheckAction({ branchName, section, blockedReason, onMonth
    * 마감취소는 막지 않는다 — 확인을 **거두는** 방향이라 게이트를 조이기만 한다(fail-closed).
    */
   blockedReason?: string;
+  /**
+   * **이미 확정된 뒤** 표가 바뀌어 지금 기준으로는 확인할 수 없는 이유(짧게). 확정 상태에서만 쓴다.
+   *
+   * 확정을 자동으로 거두지 않는다 — 화면이 옛 목록을 들고 있거나 조회가 잠깐 실패한 순간에
+   * 다른 기기의 확정을 지우면 안 된다. 대신 알약으로 알려 지점이 [마감취소] 뒤 다시 확인하게 한다
+   * (Codex 지적 2026-11-05: 확정 뒤 입사일 빈 직원이 생겨도 확정이 남는다).
+   * 호출부는 표를 **다 불러온 상태**의 이유만 넘길 것 — '불러오는 중'·'조회 실패'를 넘기면 탭을 열 때마다 깜빡인다.
+   */
+  staleReason?: string;
   /**
    * 확인할 월이 정해질 때마다(첫 렌더 포함) 호출부에 알린다.
    *
@@ -159,13 +168,21 @@ export function MonthlyCheckAction({ branchName, section, blockedReason, onMonth
       </span>
       {/* 마감취소는 확인을 거두는 방향이라 표 상태와 무관하게 열어 둔다(게이트를 조이기만 한다). */}
       {confirmed ? (
-        <button
-          type="button" onClick={() => void submit("pending")} disabled={saving || !loaded}
-          title={`${month} ${label} 마감을 취소합니다`}
-          className="h-8 rounded-full bg-slate-600 hover:bg-slate-700 px-3.5 text-[11px] font-black text-white disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {saving ? "처리 중…" : "마감취소"}
-        </button>
+        <>
+          {/* 확정 뒤 표가 바뀐 경우(입사일 빈 직원 추가 등) — 확정을 자동으로 거두지 않고 알려만 준다(staleReason 주석). */}
+          {staleReason && (
+            <span className={PILL_PENDING} title={`${staleReason} — 확정한 뒤 표가 바뀌었습니다. 마감취소 후 다시 확인해 주세요.`}>
+              확정 후 바뀜 — 재확인 필요
+            </span>
+          )}
+          <button
+            type="button" onClick={() => void submit("pending")} disabled={saving || !loaded}
+            title={`${month} ${label} 마감을 취소합니다`}
+            className="h-8 rounded-full bg-slate-600 hover:bg-slate-700 px-3.5 text-[11px] font-black text-white disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {saving ? "처리 중…" : "마감취소"}
+          </button>
+        </>
       ) : blockedReason ? (
         // 표를 못 본 상태다 — 버튼 글자에 이유를 그대로 적는다. 잠긴 채 '마감제출'만 떠 있으면
         // 지점은 왜 안 눌리는지 모르고 본사에 전화한다.

@@ -114,6 +114,11 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
   // 기록이 사라진 게 아니라는 사실을 여기서 알려 준다(지우거나 자동으로 옮기지 않는다).
   const stranded = isLoaded && sourceMonth ? findStrandedLeaveOwners(entries, members) : [];
 
+  // 입사일이 없는 직원 — 2026-11-05부터 급여대장 입사일(매장 등록일)을 쓰지 않으므로, 연차 화면에서 넣기 전까지는
+  // 빈칸이고 부여일수가 자동 계산되지 않는다. 한 명이라도 있으면 **월말확인을 막는다**(사용자 지시 2026-11-05,
+  // checkBlockedReason). 이름은 표 위 배너에 전부 띄운다 — 누구를 넣어야 풀리는지 바로 보이게.
+  const missingHireDates = isLoaded && sourceMonth ? members.filter((member) => !member.entryDate) : [];
+
   // 등록은 트랜잭션 prepend — 읽어둔 목록 위에 통째 저장하면 다른 기기(관리자페이지 포함)가 방금 등록한 기록이 지워진다.
   const save = async () => {
     if (!isLoaded) { window.alert("연차 데이터를 아직 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요. (그대로 저장하면 기존 연차 기록이 지워질 수 있습니다.)"); return; }
@@ -152,12 +157,12 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
   };
 
   // 실제 입사일 저장 — 연차 전용 키(annual_leave_hire_dates:{지점})에만 쓴다. 급여대장은 건드리지 않는다
-  // (사용자 선택 2026-11-05). 급여대장 값과 같게 고치거나 칸을 비우면 수동값을 지워 급여대장 값으로 돌아간다.
+  // (사용자 선택 2026-11-05). 칸을 비우고 저장하면 수동값을 지운다 → 입사일 빈칸(부여 0일). 급여대장 값으로 돌아가지 않는다.
   // 맵 통째 저장이 아니라 트랜잭션으로 **이 직원 칸만** 바꾼다 — 다른 기기가 방금 고친 다른 직원 값이 지워지지 않게.
   const saveHireDate = async (member: AnnualLeaveMember, rawValue: string) => {
     if (!isLoaded) { window.alert("연차 데이터를 아직 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요."); return; }
     const value = rawValue.trim();
-    const clears = !value || value === toEntryDateInputValue(member.salaryEntryDate);
+    const clears = !value;
     if (!clears) {
       const parsed = parseEntryDate(value);
       if (!parsed || !isValidHireDateValue(value)) { window.alert("입사일 형식이 올바르지 않습니다."); return; }
@@ -193,7 +198,7 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
         // 동시에 고쳤으면 서버 값이 다를 수 있다(mutateSharedData 주석, Codex 지적). 화면 목록과 같은 함수로 적용한다.
         const committed = isHireDateRecord(result.value) ? result.value : null;
         setMembers((prev) => prev.map((m) => m.employeeId === id
-          ? applyHireDateOverrides([{ ...m, entryDate: m.salaryEntryDate || "" }], committed)[0]
+          ? applyHireDateOverrides([{ ...m, entryDate: "" }], committed)[0]
           : m));
         setHireEdit(null);
       }
@@ -209,18 +214,16 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
   // "저장이 잠겼다"는 경고가 평범한 안내로 보인다(DESIGN.md §11·§12). 파트타이머 급여대장의 실패 배너와 같은 조합.
   const failBanner = loadFailed && <div className="bg-[#FDE2E2] border border-[#C93A3A] text-[#B91C1C] text-xs font-bold rounded-xl p-3 flex items-center justify-between gap-3"><span>연차 데이터를 불러오지 못했습니다. 저장이 잠겼습니다(기존 기록 덮어쓰기 방지).</span><button onClick={()=>void load()} className="shrink-0 rounded-full bg-[#212121] text-[#F6F5FA] px-4 py-1.5 text-[11px] font-black">다시 시도</button></div>;
 
-  // 표 위 안내 한 줄 — 어느 달 급여대장을 보고 있는지. 지점마다 기준월이 다를 수 있다.
-  const sourceNote = (
-    <div className="px-4 pt-3 text-[11px] font-bold text-gray-500">
-      {!canRead
-        ? "인원·연차 상세는 급여대장 열람 권한이 있는 계정만 볼 수 있습니다."
-        : loadFailed ? "조회 실패"
-        : !isLoaded ? "불러오는 중…"
-        : !sourceMonth ? `${checkMonth}부터 3개월을 거슬러 봐도 작성된 정직원 급여대장이 없습니다. 월말마감 > 정직원 급여대장에 인원을 등록해 주세요.`
-        : sourceMonth !== checkMonth ? `${checkMonth} 급여대장이 없어 ${sourceMonth} 기준으로 표시 중 · ${members.length}명`
-        : `${sourceMonth} 정직원 급여대장 기준 · ${members.length}명`}
-    </div>
-  );
+  // 표 위 안내 한 줄 — **문제가 있을 때만** 띄운다(권한 없음·조회 실패·급여대장 없음·기준월 다름).
+  // 정상일 때 나오던 "YYYY-MM 정직원 급여대장 기준 · N명"은 뺐다(사용자 지시 2026-11-05).
+  const sourceNoteText = !canRead
+    ? "인원·연차 상세는 급여대장 열람 권한이 있는 계정만 볼 수 있습니다."
+    : loadFailed ? "조회 실패"
+    : !isLoaded ? "불러오는 중…"
+    : !sourceMonth ? `${checkMonth}부터 3개월을 거슬러 봐도 작성된 정직원 급여대장이 없습니다. 월말마감 > 정직원 급여대장에 인원을 등록해 주세요.`
+    : sourceMonth !== checkMonth ? `${checkMonth} 급여대장이 없어 ${sourceMonth} 인원으로 표시 중`
+    : "";
+  const sourceNote = sourceNoteText ? <div className="px-4 pt-3 text-[11px] font-bold text-gray-500">{sourceNoteText}</div> : null;
 
   // 확인 대상 표를 믿을 수 없으면 마감제출을 막는다.
   //
@@ -238,6 +241,10 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
     : !isLoaded ? "연차 현황 불러오는 중"
     : !sourceMonth ? `${checkMonth} 정직원 급여대장이 없습니다 — 먼저 작성해 주세요`
     : sourceMonth !== checkMonth ? `${checkMonth}이 아닌 ${sourceMonth} 인원이 표시 중 — ${checkMonth} 정직원 급여대장을 작성해 주세요`
+    // [입사일이 비면 막는다 — 사용자 지시 2026-11-05] 급여대장 입사일(매장 등록일)을 더는 쓰지 않으므로 연차 화면에서
+    // 넣기 전까지 빈칸이고 부여일수가 자동 계산되지 않는다. 그 표로 확인하면 잔여가 틀린 채 월말마감이 열린다.
+    // 전원 입사일이 들어가야 확인할 수 있다. 이름은 표 위 배너(#annual-leave-missing-hire-dates)에 전부 나온다.
+    : missingHireDates.length > 0 ? `입사일 없는 직원 ${missingHireDates.length}명 — 입사일을 모두 넣어야 확인할 수 있습니다`
     : undefined;
 
   // 직원별 연차 현황 — 급여권한 계정만 표를 본다. 저장소가 관리자페이지와 같아 양쪽에 똑같이 반영된다.
@@ -247,7 +254,10 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
         <h3 className="branch-band-title">직원별 연차 현황</h3>
         {/* 제목 옆 부연은 뺀다(사용자 지시 2026-08-11) — 우측은 월말 확인 컨트롤 자리. */}
         <div className="branch-band-actions">
-          <MonthlyCheckAction branchName={branchName} section="annualLeave" blockedReason={checkBlockedReason} onMonthChange={setCheckMonth} />
+          {/* staleReason = 표를 다 불러온 뒤의 차단 사유만(기준월 불일치·입사일 빈 직원). 확정된 달이 지금은
+              확인 불가 상태면 알약으로 알린다 — 확정을 자동으로 거두지는 않는다(MonthlyCheckAction.staleReason 주석). */}
+          <MonthlyCheckAction branchName={branchName} section="annualLeave" blockedReason={checkBlockedReason}
+            staleReason={isLoaded && sourceMonth ? checkBlockedReason : undefined} onMonthChange={setCheckMonth} />
         </div>
       </div>
       {sourceNote}
@@ -255,6 +265,12 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
       {canRead && stranded.length > 0 && (
         <div className="mx-4 mt-2 rounded-xl border border-[#E0B33A] bg-[#FDF3C7] px-3 py-2 text-[11px] font-bold text-[#8A6100]">
           급여대장에 없는 직원의 연차 기록이 남아 있습니다 — {describeStrandedOwners(stranded)}. 급여대장에서 빠졌거나 다른 지점으로 옮긴 경우입니다. 기록은 지워지지 않았고, 급여대장에 다시 오르면 이어집니다.
+        </div>
+      )}
+      {canRead && missingHireDates.length > 0 && (
+        <div id="annual-leave-missing-hire-dates" className="mx-4 mt-2 rounded-xl border border-[#E0B33A] bg-[#FDF3C7] px-3 py-2 text-[11px] font-bold text-[#8A6100]">
+          {/* 관리자가 부여일수를 직접 넣어 둔 사람은 입사일이 비어도 그 값이 적용된다 — "0일"이라고 단정하지 않는다(Codex 지적). */}
+          입사일이 없는 직원 {missingHireDates.length}명 — {missingHireDates.map((member) => grantOverrides[member.employeeId] != null ? `${member.name}(수동 부여 ${grantOverrides[member.employeeId]}일 적용 중)` : member.name).join(", ")}. 입사일 옆 [수정]으로 실제 입사일을 넣어 주세요. 전원 입사일이 들어가야 월말 확인을 할 수 있고, 넣기 전까지 부여일수가 자동으로 계산되지 않습니다 — 수동 부여값이 없으면 0일입니다.
         </div>
       )}
       {canRead && (
@@ -277,7 +293,7 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
                         <div className="flex items-center gap-1 whitespace-nowrap">
                           <input type="date" min="1990-01-01" max={toLocalDateInputValue()} value={hireEdit.value} disabled={hireSaving}
                             onChange={(e) => setHireEdit({ employeeId: member.employeeId, value: e.target.value })}
-                            title="칸을 비우고 저장하면 급여대장 입사일로 돌아갑니다"
+                            title="칸을 비우고 저장하면 입사일이 지워집니다"
                             className="border rounded px-1 py-0.5 text-[11px] font-mono" />
                           <button onClick={() => void saveHireDate(member, hireEdit.value)} disabled={hireSaving} className="rounded-full bg-[#2E6DB4] text-white px-2.5 py-0.5 text-[10px] font-black disabled:opacity-40">저장</button>
                           <button onClick={() => setHireEdit(null)} disabled={hireSaving} className="rounded-full border px-2.5 py-0.5 text-[10px] font-black text-gray-500">취소</button>
@@ -288,10 +304,7 @@ export function AnnualLeaveTab({ branchName, canWrite = false }: { branchName: s
                           {canEdit && isLoaded && (
                             <button onClick={() => setHireEdit({ employeeId: member.employeeId, value: toEntryDateInputValue(member.entryDate) })} className="ml-1.5 text-[10px] font-black text-[#2E6DB4] underline">수정</button>
                           )}
-                          {/* 연차 화면에서 고친 경우 원래 급여대장 값을 함께 보여 준다 — 급여대장 쪽은 그대로라는 걸 알 수 있게. */}
-                          {member.salaryEntryDate !== undefined && member.entryDate !== member.salaryEntryDate && (
-                            <div className="text-[10px] text-gray-400">급여대장 {member.salaryEntryDate ? shortDate(member.salaryEntryDate) : "빈칸"}</div>
-                          )}
+                          {/* 급여대장 입사일은 보여 주지 않는다 — 매장 등록일이라 입사일로 오해하게 한다(사용자 지시 2026-11-05). */}
                         </div>
                       )}
                     </td>
