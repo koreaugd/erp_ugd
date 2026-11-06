@@ -1633,12 +1633,30 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
       const cardText = summarizeExpenses(cardExpenses, cardExpensesSum);
       const cashText = summarizeExpenses(cashExpenses, cashExpensesSum);
 
-      const workersText = Array.from(new Set(
-        staffRows
-          .filter((s) => s.officeWorkType !== "휴무" && Number(s.workHours || 0) > 0)
-          .map((s) => s.name)
-          .filter(Boolean)
+      // 근무자는 [정직원]은 이름만, [파트타이머]는 이름 + 출퇴근 시각(예: 13:00~18:00)으로 나눠 보고한다.
+      // 같은 사람이 하루 두 번 근무하면 시각을 이어 붙이고 이름은 한 번만 쓴다.
+      const workingStaff = staffRows.filter(
+        (s) => s.officeWorkType !== "휴무" && Number(s.workHours || 0) > 0 && (s.name || "").trim()
+      );
+      const fullTimeWorkersText = Array.from(new Set(
+        workingStaff.filter((s) => s.division === "정직원").map((s) => s.name.trim())
       )).join(", ") || "없음";
+      const partTimeShifts = new Map<string, string[]>();
+      workingStaff
+        .filter((s) => s.division !== "정직원")
+        .forEach((s) => {
+          const name = s.name.trim();
+          const clockIn = (s.clockIn || "").trim();
+          const clockOut = (s.clockOut || "").trim();
+          const hasClock = clockIn && clockOut && !(clockIn === "00:00" && clockOut === "00:00");
+          const shift = hasClock
+            ? `${clockIn}~${clockOut}`
+            : `${Number(Number(s.workHours || 0).toFixed(2))}시간`;
+          partTimeShifts.set(name, [...(partTimeShifts.get(name) || []), shift]);
+        });
+      const partTimeWorkersText = Array.from(partTimeShifts.entries())
+        .map(([name, shifts]) => `${name} ${shifts.join(", ")}`)
+        .join(", ") || "없음";
 
       const prevDayCashNum = Number(prevDayCash) || 0;
       const cashSalesNum = Number(cashSales) || 0;
@@ -1663,7 +1681,8 @@ export function DailySettleTab({ branchName }: { branchName: string }) {
 - 현금지출 : ${cashText || "없음"}
 
 3. 근무자
-- ${workersText}
+[정직원] ${fullTimeWorkersText}
+[파트타이머] ${partTimeWorkersText}
 
 4. 특이사항
 - 직원 특이사항: ${staffMemo.trim() || "없음"}
